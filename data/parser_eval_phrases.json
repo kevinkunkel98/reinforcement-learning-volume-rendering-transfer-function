@@ -1,0 +1,22 @@
+[
+  {"text": "I can't see the bones very well", "expected_target": "bone", "expected_direction": "increase"},
+  {"text": "the soft tissue is hiding everything", "expected_target": "soft", "expected_direction": "decrease"},
+  {"text": "make the skeleton pop", "expected_target": "bone", "expected_direction": "increase"},
+  {"text": "the fat layer is way too visible", "expected_target": "fat", "expected_direction": "decrease"},
+  {"text": "let me see through the muscle", "expected_target": "soft", "expected_direction": "decrease"},
+  {"text": "bring the cortical shell forward", "expected_target": "bone", "expected_direction": "increase"},
+  {"text": "the spongy core is barely there", "expected_target": "spongy", "expected_direction": "increase"},
+  {"text": "tone down the fatty layer a bit", "expected_target": "fat", "expected_direction": "decrease"},
+  {"text": "hide the soft tissue completely", "expected_target": "soft", "expected_direction": "decrease"},
+  {"text": "the trabecular bone is invisible", "expected_target": "spongy", "expected_direction": "increase"},
+  {"text": "punch up the bone density", "expected_target": "bone", "expected_direction": "increase"},
+  {"text": "everything is washed out by the fat", "expected_target": "fat", "expected_direction": "decrease"},
+  {"text": "I want the skeleton to stand out more", "expected_target": "bone", "expected_direction": "increase"},
+  {"text": "fade the muscle layer", "expected_target": "soft", "expected_direction": "decrease"},
+  {"text": "the cancellous bone needs more presence", "expected_target": "spongy", "expected_direction": "increase"},
+  {"text": "cut back on the adipose tissue", "expected_target": "fat", "expected_direction": "decrease"},
+  {"text": "let the cortical bone dominate the view", "expected_target": "bone", "expected_direction": "increase"},
+  {"text": "the tissue layer is drowning out the bone", "expected_target": "soft", "expected_direction": "decrease"},
+  {"text": "give the spongy bone a boost", "expected_target": "spongy", "expected_direction": "increase"},
+  {"text": "the fat is completely obscuring the structure", "expected_target": "fat", "expected_direction": "decrease"}
+]

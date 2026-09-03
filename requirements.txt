@@ -1,0 +1,9 @@
+numpy
+vtk
+faster-whisper
+sounddevice
+Pillow
+pytest
+fastapi
+uvicorn
+python-multipart
