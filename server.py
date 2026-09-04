@@ -28,6 +28,7 @@ from asr import _transcribe_path as asr_transcribe_path
 from commands import STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from datasets import list_datasets, load_dataset
 from evaluate import jsonl_append, objective
+import render as render_module
 from render import features, grab, render
 from search import propose_step, resize_step
 from transfer import TISSUE_BANDS, default_params, opacity_mass
@@ -162,12 +163,20 @@ class Session:
             json.dump({"history": self.history, "cursor": self.cursor, "session_id": self.session_id}, f)
 
     def state(self):
+        volume, spacing = get_volume()
         return {
             "cursor": self.cursor,
             "total": len(self.history),
             "current": self.history[self.cursor],
             "pending": _pending_public(self.pending),
             "dataset": _dataset_name,
+            "render_info": {
+                "width": render_module.WIDTH,
+                "height": render_module.HEIGHT,
+                "mapper": render_module.MAPPER_NAME,
+                "volume_shape": list(volume.shape),
+                "spacing": list(spacing),
+            },
         }
 
     def switch_dataset(self, name: str):

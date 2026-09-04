@@ -6,10 +6,11 @@ from transfer import vector_to_vtk
 
 WIDTH, HEIGHT = 1024, 800
 _MAPPER_ANNOUNCED = False
+MAPPER_NAME = None  # set on first render(); real value, not a guess -- read by server.py for the UI
 
 
 def _make_mapper(vtk_image):
-    global _MAPPER_ANNOUNCED
+    global _MAPPER_ANNOUNCED, MAPPER_NAME
     mapper = vtk.vtkGPUVolumeRayCastMapper()
     mapper.SetInputData(vtk_image)
     try:
@@ -20,8 +21,10 @@ def _make_mapper(vtk_image):
         mapper = vtk.vtkFixedPointVolumeRayCastMapper()
         mapper.SetInputData(vtk_image)
         name = "vtkFixedPointVolumeRayCastMapper (CPU fallback)"
+        MAPPER_NAME = "CPU"
     else:
         name = "vtkGPUVolumeRayCastMapper"
+        MAPPER_NAME = "GPU"
     if not _MAPPER_ANNOUNCED:
         print(f"[render] using {name}")
         _MAPPER_ANNOUNCED = True

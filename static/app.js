@@ -39,6 +39,23 @@ async function refresh(data) {
     judgeView.hidden = true;
     el("current-image").src = `data:image/png;base64,${state.current.image_b64}`;
   }
+
+  if (data.render_info) updateOverlay(data.render_info);
+  updateTelemetry(state.current.masses);
+}
+
+function updateOverlay(info) {
+  const [dx, dy, dz] = info.volume_shape;
+  el("overlay-tl").textContent = `${state.dataset.toUpperCase()} · ${dx}×${dy}×${dz}`;
+  el("overlay-br").textContent = `${info.width}×${info.height} · ${info.mapper} RAYCAST`;
+}
+
+function updateTelemetry(masses) {
+  if (!masses) return;
+  for (const tissue of ["air", "fat", "soft", "spongy", "bone"]) {
+    const v = masses[tissue];
+    el(`telem-${tissue}`).textContent = v === undefined ? "—" : v.toFixed(1);
+  }
 }
 
 function rebuildMessages(history) {
