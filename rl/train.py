@@ -4,6 +4,7 @@ import os
 
 from stable_baselines3 import SAC
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.logger import configure as configure_logger
 
 from rl.env import TFEnv
 
@@ -13,9 +14,11 @@ LOG_DIR = "out/rl_logs"
 
 def train(total_timesteps: int, n_envs: int = 4, seed: int = 0, model_path: str = MODEL_PATH) -> SAC:
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    os.makedirs(LOG_DIR, exist_ok=True)
+    run_dir = os.path.join(LOG_DIR, f"run_seed{seed}")
+    os.makedirs(run_dir, exist_ok=True)
     vec_env = make_vec_env(TFEnv, n_envs=n_envs, seed=seed)
     model = SAC("MlpPolicy", vec_env, verbose=1, tensorboard_log=LOG_DIR, seed=seed)
+    model.set_logger(configure_logger(run_dir, ["stdout", "csv", "tensorboard"]))
     model.learn(total_timesteps=total_timesteps)
     model.save(model_path)
     return model
