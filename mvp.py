@@ -177,7 +177,7 @@ def main():
         raise SystemExit(1)
     print("parsed command:", cmd)
 
-    if args.learn and cmd.get("direction") in ("increase", "decrease"):
+    if args.learn and cmd.get("attribute") == "opacity" and cmd.get("direction") in ("increase", "decrease"):
         new_params = hill_climb(cmd_text, cmd, params, args.steps, args.human, session_id)
     else:
         before = params

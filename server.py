@@ -263,7 +263,7 @@ class Session:
 
         current_params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
 
-        if search and cmd.get("direction") in ("increase", "decrease"):
+        if search and cmd.get("attribute") == "opacity" and cmd.get("direction") in ("increase", "decrease"):
             if evaluator == "human":
                 self.pending = self._start_human_search(text, cmd, current_params, steps)
                 return self.state()

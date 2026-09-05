@@ -1,4 +1,4 @@
-"""+1/-1 verdicts: objective (opacity_mass) and human (console)."""
+"""+1/-1 verdicts: objective (opacity_mass for opacity commands, always-accept for width/brightness/center) and human (console)."""
 import json
 
 from transfer import TISSUE_BANDS, opacity_mass

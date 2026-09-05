@@ -1,4 +1,8 @@
-"""Pure hill-climbing search-step math, shared by mvp.py and server.py."""
+"""Pure hill-climbing search-step math, shared by mvp.py and server.py.
+
+Opacity-only: propose_step always mutates the height parameter; callers
+must gate entry to this module on attribute == "opacity".
+"""
 import numpy as np
 
 from transfer import PARAMS_PER_PEAK

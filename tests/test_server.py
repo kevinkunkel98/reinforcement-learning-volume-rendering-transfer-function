@@ -104,6 +104,18 @@ def test_human_search_converges_and_appends_final_step():
     assert state["current"]["search"] is True
 
 
+def test_search_requested_for_non_opacity_attribute_falls_back_to_direct_apply():
+    # "sharpen bone" parses to attribute="width", direction="decrease". search.propose_step
+    # is hardcoded to mutate the height/opacity parameter, so search must not run for width
+    # (or brightness/center) commands even when search=True is requested -- the command
+    # should still be applied directly, just without the hill-climbing loop.
+    s = _fresh_session()
+    state = s.command("sharpen bone", parser="rule", search=True, evaluator="objective", steps=5)
+    assert state["current"]["cmd_dict"]["attribute"] == "width"
+    assert state["current"]["search"] is False
+    assert state["pending"] is None
+
+
 def test_judge_without_pending_raises():
     s = _fresh_session()
     with pytest.raises(ValueError):
