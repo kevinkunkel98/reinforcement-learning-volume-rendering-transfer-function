@@ -403,6 +403,9 @@ async function openCommandsModal() {
 
 el("commands-help-btn").addEventListener("click", openCommandsModal);
 el("commands-modal-close").addEventListener("click", () => el("commands-modal").close());
+el("commands-modal").addEventListener("click", (e) => {
+  if (e.target === el("commands-modal")) el("commands-modal").close();
+});
 
 updateSendState();
 loadDatasets();
