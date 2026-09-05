@@ -177,6 +177,8 @@ def apply_command(cmd: dict, params: np.ndarray) -> np.ndarray:
         indices = (indices,)
 
     if cmd["direction"] == "set":
+        if cmd["attribute"] == "center":
+            raise ValueError("center has no absolute 'set' -- only increase/decrease")
         new_ext = _from_unit(LEVEL_WORDS[cmd["level"]])
         for offset in indices:
             params[base + offset] = new_ext

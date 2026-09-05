@@ -330,3 +330,10 @@ def test_apply_command_set_level_width():
     # LEVEL_WORDS["high"] = 0.85 of the way through WIDTH_RANGE
     expected = WIDTH_RANGE[0] + 0.85 * (WIDTH_RANGE[1] - WIDTH_RANGE[0])
     assert abs(after_w - expected) < 1.0
+
+
+def test_apply_command_rejects_center_with_set_direction():
+    params = default_params()
+    cmd = {"target": "fat", "attribute": "center", "direction": "set", "level": "high"}
+    with pytest.raises(ValueError):
+        apply_command(cmd, params)
