@@ -255,7 +255,7 @@ speech calls both of them "bone" -- spongy/cancellous/trabecular bone is its own
 target, distinct from cortical bone/skeleton.
 
 Output schema -- the usual case is a single command:
-{{"target": "<tissue>|[<tissue>, ...]|null", "attribute": "opacity"|null,
+{{"target": "<tissue>|[<tissue>, ...]|null", "attribute": "opacity"|"width"|"brightness"|"center"|null,
  "direction": "increase"|"decrease"|"show_only"|"reset",
  "strength": "slightly"|"moderately"|"strongly"|null}}
 
