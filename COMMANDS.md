@@ -1,6 +1,6 @@
 # Supported Commands
 
-Generated from `commands.COMMAND_REFERENCE` -- run `python -m tools.gen_commands_doc` after changing it.
+> **Auto-generated -- do not edit by hand.** Source of truth is `commands.COMMAND_REFERENCE`; run `python -m tools.gen_commands_doc` after changing it and commit the result.
 
 ## Opacity (relative)
 
