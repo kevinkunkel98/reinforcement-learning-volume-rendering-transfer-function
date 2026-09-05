@@ -1,10 +1,13 @@
 """Compare the trained SAC policy against the hill-climbing baseline over
 the same held-out (tissue, direction, start-params) episodes."""
+import argparse
 import json
+import os
 
 import numpy as np
 from stable_baselines3 import SAC
 
+from evaluate import objective
 from rl.env import MAX_DELTA, MAX_STEPS, TFEnv
 from search import propose_step, resize_step
 from transfer import mass_fraction
@@ -49,14 +52,14 @@ def _run_hill_climb(episode: dict) -> list:
     params = episode["params"].copy()
     peak_idx = episode["peak_idx"]
     tissue = episode["target_tissue"]
-    sign = 1.0 if episode["direction"] == "increase" else -1.0
+    direction = episode["direction"]
+    sign = 1.0 if direction == "increase" else -1.0
     step = MAX_DELTA
+    cmd = {"target": tissue, "direction": direction}
     fractions = [mass_fraction(params, tissue)]
     for _ in range(MAX_STEPS):
         proposed = propose_step(params, peak_idx, sign=sign, step=step)
-        before = fractions[-1]
-        after = mass_fraction(proposed, tissue)
-        accepted = sign * (after - before) > 0.0
+        accepted = objective(params, proposed, cmd) == 1
         if accepted:
             params = proposed
         step = resize_step(step, accepted)
@@ -72,7 +75,12 @@ def _steps_to_90pct(fractions: list, start: float, best: float) -> int:
     return len(fractions) - 1
 
 
-def evaluate(model_path: str = MODEL_PATH, n_episodes: int = N_EPISODES, seed: int = EVAL_SEED) -> dict:
+def evaluate(model_path: str = MODEL_PATH, n_episodes: int = N_EPISODES,
+             seed: int = EVAL_SEED, results_path: str = RESULTS_PATH) -> dict:
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(
+            f"No trained model found at {model_path!r} -- run `python -m rl.train` first."
+        )
     model = SAC.load(model_path)
     episodes = _build_episodes(n_episodes, seed)
 
@@ -99,10 +107,24 @@ def evaluate(model_path: str = MODEL_PATH, n_episodes: int = N_EPISODES, seed: i
             "mean_steps_to_90pct": float(np.mean(hillclimb_steps)),
         },
     }
-    with open(RESULTS_PATH, "w") as f:
+    results_dir = os.path.dirname(results_path)
+    if results_dir:
+        os.makedirs(results_dir, exist_ok=True)
+    with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     return results
 
 
+def main():
+    parser = argparse.ArgumentParser(description="Evaluate the trained SAC policy against hill-climbing.")
+    parser.add_argument("--model", type=str, default=MODEL_PATH)
+    parser.add_argument("--episodes", type=int, default=N_EPISODES)
+    parser.add_argument("--seed", type=int, default=EVAL_SEED)
+    parser.add_argument("--out", type=str, default=RESULTS_PATH)
+    args = parser.parse_args()
+    results = evaluate(model_path=args.model, n_episodes=args.episodes, seed=args.seed, results_path=args.out)
+    print(json.dumps(results, indent=2))
+
+
 if __name__ == "__main__":
-    print(json.dumps(evaluate(), indent=2))
+    main()
