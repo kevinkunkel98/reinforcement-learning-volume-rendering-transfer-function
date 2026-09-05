@@ -66,3 +66,30 @@ def test_episode_truncates_at_max_steps_and_never_terminates():
         if i < MAX_STEPS - 1:
             assert truncated is False
     assert truncated is True
+
+
+def test_negative_action_decreases_height():
+    env = TFEnv(seed=7)
+    env.reset()
+    base = env.peak_idx * PARAMS_PER_PEAK
+    height_before = env.params[base + 2]
+    env.step(np.array([-1.0], dtype=np.float32))
+    height_after = env.params[base + 2]
+    assert height_after < height_before or height_before <= -1.0 + 1e-6
+
+
+def test_peak_idx_stays_fixed_across_steps():
+    env = TFEnv(seed=8)
+    env.reset()
+    peak_idx_at_reset = env.peak_idx
+    for _ in range(5):
+        env.step(np.array([0.3], dtype=np.float32))
+        assert env.peak_idx == peak_idx_at_reset
+
+
+def test_info_contains_mass_fraction_after():
+    env = TFEnv(seed=9)
+    env.reset()
+    _, _, _, _, info = env.step(np.array([0.5], dtype=np.float32))
+    assert "mass_fraction_after" in info
+    assert 0.0 <= info["mass_fraction_after"] <= 1.0
