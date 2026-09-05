@@ -10,3 +10,4 @@ python-multipart
 torch
 stable-baselines3
 gymnasium
+tensorboard
