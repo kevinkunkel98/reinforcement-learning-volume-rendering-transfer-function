@@ -93,3 +93,12 @@ def test_info_contains_mass_fraction_after():
     _, _, _, _, info = env.step(np.array([0.5], dtype=np.float32))
     assert "mass_fraction_after" in info
     assert 0.0 <= info["mass_fraction_after"] <= 1.0
+
+
+@pytest.mark.slow
+def test_sac_smoke_training_runs_without_error():
+    from stable_baselines3 import SAC
+
+    env = TFEnv(seed=6)
+    model = SAC("MlpPolicy", env, verbose=0)
+    model.learn(total_timesteps=200)
