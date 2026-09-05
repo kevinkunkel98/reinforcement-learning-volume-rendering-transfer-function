@@ -25,7 +25,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from asr import _transcribe_path as asr_transcribe_path
-from commands import STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
+from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from datasets import list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import render as render_module
@@ -358,6 +358,11 @@ async def forward():
 @app.get("/api/datasets")
 async def datasets_list():
     return {"available": list_datasets(), "current": _dataset_name}
+
+
+@app.get("/api/commands")
+async def commands_reference():
+    return {"commands": COMMAND_REFERENCE}
 
 
 class DatasetRequest(BaseModel):
