@@ -7,3 +7,6 @@ pytest
 fastapi
 uvicorn
 python-multipart
+torch
+stable-baselines3
+gymnasium

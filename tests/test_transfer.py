@@ -1,7 +1,7 @@
 import math
 import numpy as np
 from transfer import (
-    default_params, opacity_mass, vector_to_vtk,
+    default_params, opacity_mass, mass_fraction, vector_to_vtk,
     TISSUE_BANDS, PARAMS_PER_PEAK, N_PEAKS,
 )
 
@@ -35,3 +35,17 @@ def test_vector_to_vtk_returns_expected_types():
     ctf, otf = vector_to_vtk(default_params())
     assert isinstance(ctf, vtk.vtkColorTransferFunction)
     assert isinstance(otf, vtk.vtkPiecewiseFunction)
+
+
+def test_mass_fraction_is_opacity_mass_normalized_by_band_width():
+    params = np.full(N_PEAKS * PARAMS_PER_PEAK, -1.0)
+    lo, hi = TISSUE_BANDS["bone"]
+    params[N_PEAKS * PARAMS_PER_PEAK - PARAMS_PER_PEAK + 2] = 2.0 * 0.5 - 1.0  # bone peak height = 0.5
+    frac = mass_fraction(params, "bone")
+    assert 0.0 <= frac <= 1.0
+    assert abs(frac - opacity_mass(params, lo, hi) / (hi - lo)) < 1e-9
+
+
+def test_mass_fraction_zero_for_all_zero_height():
+    params = np.full(N_PEAKS * PARAMS_PER_PEAK, -1.0)
+    assert mass_fraction(params, "spongy") < 1e-6

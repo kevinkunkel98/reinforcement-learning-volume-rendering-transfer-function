@@ -93,6 +93,14 @@ def opacity_mass(params: np.ndarray, hu_lo: float, hu_hi: float, n: int = 256) -
     return float(np.trapezoid(opacity, hu))
 
 
+def mass_fraction(params: np.ndarray, tissue: str) -> float:
+    """opacity_mass normalized by band width -- an average-opacity-in-band
+    fraction in [0, 1], used as the RL observation/reward signal since raw
+    opacity_mass scales with band width (bone's band alone is 1400 HU wide)."""
+    lo, hi = TISSUE_BANDS[tissue]
+    return opacity_mass(params, lo, hi) / (hi - lo)
+
+
 def vector_to_vtk(params: np.ndarray, n: int = 256):
     hu = np.linspace(*CENTER_RANGE, n)
     opacity, rgb = _opacity_and_color_at(params, hu)
