@@ -22,6 +22,11 @@ def objective(params_before, params_after, cmd: dict) -> int:
         # the same as reset.
         return 1
 
+    if cmd.get("attribute") in ("width", "brightness", "center"):
+        # No established exact metric for these attributes (opacity_mass is
+        # opacity-specific) -- treat as always accepted, same as compound/reset.
+        return 1
+
     if cmd["direction"] == "show_only":
         # "isolate X" is about X's share of the image, not its raw mass —
         # crushing every other peak can lower X's own mass while still

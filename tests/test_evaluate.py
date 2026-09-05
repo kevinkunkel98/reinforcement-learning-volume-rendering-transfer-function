@@ -49,6 +49,14 @@ def test_objective_show_only_negative_when_already_isolated():
     assert objective(isolated, after, cmd) == -1
 
 
+def test_objective_always_accepts_width_brightness_center():
+    from transfer import default_params
+    params = default_params()
+    for attribute in ("width", "brightness", "center"):
+        cmd = {"target": "bone", "attribute": attribute, "direction": "increase"}
+        assert objective(params, params, cmd) == 1  # even a no-op change is accepted
+
+
 def test_jsonl_append_writes_one_line(tmp_path):
     path = tmp_path / "log.jsonl"
     jsonl_append(str(path), {"a": 1})
