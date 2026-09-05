@@ -8,8 +8,9 @@ def load_progress(csv_path: str) -> dict:
     with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
+        fieldnames = reader.fieldnames or []
     columns = {}
-    for key in reader.fieldnames or []:
+    for key in fieldnames:
         values = []
         for row in rows:
             raw = row.get(key, "")

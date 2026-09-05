@@ -49,3 +49,10 @@ def test_load_progress_handles_header_only_csv(tmp_path):
     assert list(cols.keys()) == ["time/total_timesteps", "rollout/ep_rew_mean"]
     assert len(cols["time/total_timesteps"]) == 0
     assert len(cols["rollout/ep_rew_mean"]) == 0
+
+
+def test_load_progress_handles_zero_byte_csv(tmp_path):
+    csv_path = tmp_path / "progress.csv"
+    csv_path.write_text("")
+    cols = load_progress(str(csv_path))
+    assert cols == {}
