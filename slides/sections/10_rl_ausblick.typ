@@ -1,29 +1,30 @@
 #import "../helpers.typ": *
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SLIDE — Von der Baseline zum RL-Agenten
+// SLIDE — Vom Hill-Climbing zum SAC-Agenten
 // ══════════════════════════════════════════════════════════════════════════════
-== Von der Baseline zum RL-Agenten
+== Vom Hill-Climbing zum SAC-Agenten
 
 #v(0.05em)
-Das Hill-Climbing ist die *Baseline*, die ein gelernter Agent schlagen muss — die Logs sind bereits die Trainingsdaten dafür @scurto2021designing.
+Der SAC-Agent (`stable-baselines3`) ist implementiert, trainiert und gegen die Baseline evaluiert — online gegen `opacity_mass`, ganz ohne menschliche Trainingsdaten.
 
-#v(0.35em)
+#v(0.3em)
 #table(
   columns: (auto, 1fr),
   stroke: none,
   row-gutter: 0.5em,
   column-gutter: 0.8em,
   inset: (x: 0pt, y: 2pt),
-  [*Zustand*], [TF-Vektor (24 Werte) + Bildmerkmale (mean, std, coverage, Entropie)],
-  [*Aktion*], [kontinuierliche Deltas pro Peak-Dimension (statt diskretem Regelparser)],
-  [*Reward*], [`opacity_mass` im Ziel-HU-Bereich — exakt, kostenlos, kein MLLM nötig],
-  [*Daten*], [`log.jsonl` · `preferences.jsonl` (paarweise) · `feedback.jsonl` (Daumen)],
+  [*Zustand*], [TF-Vektor (24) + Ziel-Gewebe + Richtung + `mass_fraction` (31-dim)],
+  [*Aktion*], [kontinuierliches Delta auf die Höhe des aufgelösten Ziel-Peaks],
+  [*Reward*], [Δ`mass_fraction` im Ziel-Band, pro Schritt — exakt, kostenlos, kein MLLM],
+  [*Ergebnis*], [*0.344* vs. *0.347* (Baseline) `mass_fraction`, 20 Test-Episoden],
 )
 
 #v(0.35em)
 #remark[
-  Analoge RL-Formulierung bereits für sprachgesteuerte Viewpoint-Wahl gezeigt
-  @zhao2025natural — hier auf die Transferfunktion angewendet, mit einer harten
-  Metrik statt eines MLLM-Urteils @ai2025evaluation.
+  Nahezu gleichauf mit dem Hill-Climber, aber langsamer konvergent (3.3 vs. 2.7
+  Schritte bis 90 %) — ein optimierter Hand-Regler ist auf diesem niedrigdimensionalen
+  Problem ein starker Gegner @zhao2025natural. Noch nicht in die Live-Loop verdrahtet;
+  nächste Schritte: volle Peak-Kontrolle, Vergleich mit `preferences.jsonl` @scurto2021designing.
 ]

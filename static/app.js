@@ -40,14 +40,7 @@ async function refresh(data) {
     el("current-image").src = `data:image/png;base64,${state.current.image_b64}`;
   }
 
-  if (data.render_info) updateOverlay(data.render_info);
   updateTelemetry(state.current.masses);
-}
-
-function updateOverlay(info) {
-  const [dx, dy, dz] = info.volume_shape;
-  el("overlay-tl").textContent = `${state.dataset.toUpperCase()} · ${dx}×${dy}×${dz}`;
-  el("overlay-br").textContent = `${info.width}×${info.height} · ${info.mapper} RAYCAST`;
 }
 
 function updateTelemetry(masses) {

@@ -154,36 +154,6 @@ select:focus-visible {
   display: block;
 }
 
-.corner {
-  position: absolute;
-  width: 22px;
-  height: 22px;
-  pointer-events: none;
-  stroke: var(--accent);
-  stroke-width: 1.6;
-  fill: none;
-  opacity: 0.8;
-}
-
-.corner-tl { top: 8px; left: 8px; }
-.corner-tr { top: 8px; right: 8px; }
-.corner-br { bottom: 8px; right: 8px; }
-.corner-bl { bottom: 8px; left: 8px; }
-
-.overlay-readout {
-  position: absolute;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.5px;
-  color: var(--accent);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
-  line-height: 1.5;
-  pointer-events: none;
-}
-
-#overlay-tl { top: 14px; left: 38px; }
-#overlay-br { bottom: 14px; right: 38px; text-align: right; }
-
 #before-image,
 #after-image {
   max-width: 100%;
