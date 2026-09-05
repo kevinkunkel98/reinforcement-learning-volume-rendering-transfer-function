@@ -25,6 +25,49 @@ _SYNONYM_LOOKUP = sorted(
     key=lambda t: -len(t[0]),
 )
 
+COMMAND_REFERENCE = [
+    {
+        "category": "Opacity (relative)",
+        "examples": ["increase opacity for bone strongly", "decrease opacity for fat slightly"],
+        "description": "Nudge a tissue's visibility up or down by a relative amount.",
+    },
+    {
+        "category": "Opacity (absolute)",
+        "examples": ["high opacity spongy", "low opacity for bone"],
+        "description": "Set a tissue's visibility to a fixed low/medium/high level.",
+    },
+    {
+        "category": "Show only",
+        "examples": ["show only bone", "show only bone and spongy"],
+        "description": "Isolate one or more tissues, crushing every other peak to zero.",
+    },
+    {
+        "category": "Compound",
+        "examples": ["high opacity spongy, low opacity bones"],
+        "description": "Set several tissues' absolute levels in one command.",
+    },
+    {
+        "category": "Width / sharpness",
+        "examples": ["sharpen the bone peak", "soften soft tissue", "increase width for fat"],
+        "description": "Adjust how spread out (blended) or narrow (selective) a tissue's peak is.",
+    },
+    {
+        "category": "Brightness",
+        "examples": ["brighten bone", "darken fat", "low brightness for spongy"],
+        "description": "Adjust a tissue's color brightness.",
+    },
+    {
+        "category": "Center position",
+        "examples": ["shift bone's center up", "move fat down", "shift fat's position down"],
+        "description": "Nudge where in Hounsfield space a tissue's peak sits, clamped to that tissue's own band.",
+    },
+    {
+        "category": "Reset",
+        "examples": ["reset"],
+        "description": "Return the transfer function to its default state.",
+    },
+]
+
 STRENGTH_WORDS = {"slightly": 0.15, "moderately": 0.35, "strongly": 0.6}
 NEAR_THRESHOLD_HU = 300.0
 
