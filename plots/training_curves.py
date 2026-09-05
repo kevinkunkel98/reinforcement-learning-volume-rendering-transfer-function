@@ -17,12 +17,12 @@ OUTPUT_DIR = "plots/output"
 
 
 def _find_latest_run(log_dir: str) -> str:
-    candidates = sorted(glob.glob(os.path.join(log_dir, "run_seed*")))
+    candidates = glob.glob(os.path.join(log_dir, "run_seed*"))
     if not candidates:
         raise FileNotFoundError(
             f"No run_seed* directories found under {log_dir!r} -- run `python -m rl.train` first."
         )
-    return candidates[-1]
+    return max(candidates, key=os.path.getmtime)
 
 
 def plot_training_curves(run_dir: str, output_dir: str = OUTPUT_DIR) -> str:

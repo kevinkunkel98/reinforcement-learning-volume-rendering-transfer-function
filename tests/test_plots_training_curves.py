@@ -2,6 +2,7 @@
 inspecting pixel content (a bad column name or bad matplotlib call raises;
 this test only needs to catch that)."""
 import os
+import time
 
 from plots.training_curves import plot_training_curves
 
@@ -30,3 +31,27 @@ def test_plot_training_curves_writes_pdf_and_png(tmp_path):
     assert os.path.getsize(pdf_path) > 0
     assert os.path.exists(png_path)
     assert os.path.getsize(png_path) > 0
+
+
+def test_find_latest_run_uses_modification_time_not_lexicographic_order(tmp_path):
+    from plots.training_curves import _find_latest_run
+
+    log_dir = tmp_path / "rl_logs"
+    log_dir.mkdir()
+    older = log_dir / "run_seed10"
+    older.mkdir()
+    newer = log_dir / "run_seed2"
+    newer.mkdir()
+
+    # Note: as strings, "run_seed10" < "run_seed2" (since "1" < "2" at the
+    # first differing character), so a lexicographic sort happens to place
+    # "run_seed2" last here too -- this particular pair doesn't demonstrate
+    # the old bug on its own. The point of this test is simply that
+    # _find_latest_run must pick by actual mtime, not by name, so we set
+    # the mtimes explicitly and assert the newer one wins regardless of
+    # what the names look like.
+    os.utime(older, (time.time() - 100, time.time() - 100))
+    os.utime(newer, (time.time(), time.time()))
+
+    result = _find_latest_run(str(log_dir))
+    assert result == str(newer)
