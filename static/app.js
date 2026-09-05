@@ -365,6 +365,45 @@ datasetSelect.addEventListener("change", async () => {
   await refresh(data);
 });
 
+// ---------- command reference modal ----------
+
+let commandsCache = null;
+
+async function openCommandsModal() {
+  const modal = el("commands-modal");
+  if (!commandsCache) {
+    const res = await fetch("/api/commands");
+    const data = await res.json();
+    commandsCache = data.commands;
+    const list = el("commands-list");
+    list.innerHTML = "";
+    for (const entry of commandsCache) {
+      const section = document.createElement("div");
+      section.className = "cmd-category";
+      const title = document.createElement("h3");
+      title.textContent = entry.category;
+      const desc = document.createElement("p");
+      desc.textContent = entry.description;
+      const examples = document.createElement("div");
+      examples.className = "cmd-examples";
+      for (const example of entry.examples) {
+        const chip = document.createElement("code");
+        chip.className = "cmd-example-chip";
+        chip.textContent = example;
+        examples.appendChild(chip);
+      }
+      section.appendChild(title);
+      section.appendChild(desc);
+      section.appendChild(examples);
+      list.appendChild(section);
+    }
+  }
+  modal.showModal();
+}
+
+el("commands-help-btn").addEventListener("click", openCommandsModal);
+el("commands-modal-close").addEventListener("click", () => el("commands-modal").close());
+
 updateSendState();
 loadDatasets();
 loadState();

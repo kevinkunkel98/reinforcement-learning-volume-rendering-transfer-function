@@ -16,6 +16,7 @@
         <span id="app-title">TF<span class="thin">/RL</span> CONSOLE</span>
       </div>
       <div id="app-bar-right">
+        <button id="commands-help-btn" class="icon-btn" aria-label="Command reference" title="Command reference">?</button>
         <span id="session-indicator"><span class="dot"></span>LOKALE SITZUNG</span>
       </div>
     </header>
@@ -108,6 +109,14 @@
         </div>
       </section>
     </div>
+
+    <dialog id="commands-modal">
+      <div id="commands-modal-header">
+        <h2>Command Reference</h2>
+        <button id="commands-modal-close" class="icon-btn" aria-label="Close">×</button>
+      </div>
+      <div id="commands-list"></div>
+    </dialog>
   </div>
   <script src="/static/app.js"></script>
 </body>
