@@ -9,10 +9,14 @@ def load_progress(csv_path: str) -> dict:
         reader = csv.DictReader(f)
         rows = list(reader)
     columns = {}
-    for key in rows[0].keys():
+    for key in reader.fieldnames or []:
         values = []
         for row in rows:
             raw = row.get(key, "")
-            values.append(float(raw) if raw not in ("", None) else np.nan)
+            if raw in ("", None):
+                values.append(np.nan)
+            else:
+                v = float(raw)
+                values.append(np.nan if np.isinf(v) else v)
         columns[key] = np.array(values, dtype=np.float64)
     return columns

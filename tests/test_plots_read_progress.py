@@ -26,3 +26,26 @@ def test_load_progress_all_columns_same_length(tmp_path):
     cols = load_progress(str(csv_path))
     assert len(cols["a"]) == 3
     assert len(cols["b"]) == 3
+
+
+def test_load_progress_maps_infinite_values_to_nan(tmp_path):
+    csv_path = tmp_path / "progress.csv"
+    csv_path.write_text(
+        "train/critic_loss\n"
+        "inf\n"
+        "-inf\n"
+        "0.5\n"
+    )
+    cols = load_progress(str(csv_path))
+    assert np.isnan(cols["train/critic_loss"][0])
+    assert np.isnan(cols["train/critic_loss"][1])
+    assert cols["train/critic_loss"][2] == 0.5
+
+
+def test_load_progress_handles_header_only_csv(tmp_path):
+    csv_path = tmp_path / "progress.csv"
+    csv_path.write_text("time/total_timesteps,rollout/ep_rew_mean\n")
+    cols = load_progress(str(csv_path))
+    assert list(cols.keys()) == ["time/total_timesteps", "rollout/ep_rew_mean"]
+    assert len(cols["time/total_timesteps"]) == 0
+    assert len(cols["rollout/ep_rew_mean"]) == 0
