@@ -337,3 +337,70 @@ def test_apply_command_rejects_center_with_set_direction():
     cmd = {"target": "fat", "attribute": "center", "direction": "set", "level": "high"}
     with pytest.raises(ValueError):
         apply_command(cmd, params)
+
+
+def test_parse_sharpen_verb():
+    cmd = parse_command_rule("sharpen the bone peak")
+    assert cmd["target"] == "bone"
+    assert cmd["attribute"] == "width"
+    assert cmd["direction"] == "decrease"
+
+
+def test_parse_soften_verb():
+    cmd = parse_command_rule("soften soft tissue")
+    assert cmd["target"] == "soft"
+    assert cmd["attribute"] == "width"
+    assert cmd["direction"] == "increase"
+
+
+def test_parse_brighten_verb():
+    cmd = parse_command_rule("brighten bone strongly")
+    assert cmd["target"] == "bone"
+    assert cmd["attribute"] == "brightness"
+    assert cmd["direction"] == "increase"
+    assert cmd["strength"] == "strongly"
+
+
+def test_parse_darken_verb():
+    cmd = parse_command_rule("darken fat")
+    assert cmd["target"] == "fat"
+    assert cmd["attribute"] == "brightness"
+    assert cmd["direction"] == "decrease"
+
+
+def test_parse_shift_center_up_with_apostrophe():
+    cmd = parse_command_rule("shift bone's center up")
+    assert cmd["target"] == "bone"
+    assert cmd["attribute"] == "center"
+    assert cmd["direction"] == "increase"
+
+
+def test_parse_move_down_without_center_word():
+    cmd = parse_command_rule("move fat down")
+    assert cmd["target"] == "fat"
+    assert cmd["attribute"] == "center"
+    assert cmd["direction"] == "decrease"
+
+
+def test_parse_increase_width_generalized():
+    cmd = parse_command_rule("increase width for fat")
+    assert cmd["target"] == "fat"
+    assert cmd["attribute"] == "width"
+    assert cmd["direction"] == "increase"
+
+
+def test_parse_increase_sharpness_maps_to_width():
+    cmd = parse_command_rule("increase sharpness for spongy strongly")
+    assert cmd["target"] == "spongy"
+    assert cmd["attribute"] == "width"
+
+
+def test_parse_low_brightness_absolute():
+    cmd = parse_command_rule("low brightness for spongy")
+    assert cmd == {"target": "spongy", "attribute": "brightness", "direction": "set", "level": "low"}
+
+
+def test_parse_high_sharpness_absolute_maps_to_width():
+    cmd = parse_command_rule("high sharpness bone")
+    assert cmd["attribute"] == "width"
+    assert cmd["level"] == "high"

@@ -28,6 +28,15 @@ _SYNONYM_LOOKUP = sorted(
 STRENGTH_WORDS = {"slightly": 0.15, "moderately": 0.35, "strongly": 0.6}
 NEAR_THRESHOLD_HU = 300.0
 
+DIRECT_VERBS = {
+    "sharpen": ("width", "decrease"),
+    "soften": ("width", "increase"),
+    "brighten": ("brightness", "increase"),
+    "darken": ("brightness", "decrease"),
+}
+
+ATTRIBUTE_WORD_ALIASES = {"sharpness": "width"}
+
 
 def _find_tissue(text: str):
     for phrase, tissue in _SYNONYM_LOOKUP:
@@ -60,25 +69,10 @@ def parse_command_rule(text: str) -> dict:
             return {"target": tissues[0] if len(tissues) == 1 else tissues,
                      "attribute": "opacity", "direction": "show_only", "strength": None}
 
-    # "high opacity spongy", "low opacity for bone" -- an absolute level per
-    # tissue, not a relative delta. One or more may appear in the same
-    # sentence ("high opacity spongy, low opacity bone"); each becomes its
-    # own sub-command, folded together into one compound command.
-    level_matches = list(re.finditer(r"(low|medium|high)\s+opacity\s+(?:for\s+)?(\w+)", t))
-    if level_matches:
-        subcommands = []
-        for lm in level_matches:
-            level, tissue_text = lm.group(1), lm.group(2)
-            tissue = _find_tissue(tissue_text)
-            if tissue:
-                subcommands.append({"target": tissue, "attribute": "opacity",
-                                      "direction": "set", "level": level})
-        if subcommands:
-            return subcommands[0] if len(subcommands) == 1 else {"compound": subcommands}
-
-    m = re.search(r"(increase|decrease)\s+opacity\s+for\s+([\w ]+)", t)
+    m = re.search(r"\b(sharpen|soften|brighten|darken)\b\s+([\w ]+)", t)
     if m:
-        direction, target_text = m.group(1), m.group(2)
+        verb, target_text = m.group(1), m.group(2)
+        attribute, direction = DIRECT_VERBS[verb]
         strength = "moderately"
         for word in STRENGTH_WORDS:
             if word in target_text:
@@ -86,7 +80,48 @@ def parse_command_rule(text: str) -> dict:
                 target_text = target_text.replace(word, "")
         tissue = _find_tissue(target_text)
         if tissue:
-            return {"target": tissue, "attribute": "opacity",
+            return {"target": tissue, "attribute": attribute,
+                     "direction": direction, "strength": strength}
+
+    m = re.search(r"\b(?:shift|move)\s+([\w ]+?)(?:'s)?\s+(?:center|position)?\s*(up|down|higher|lower)\b", t)
+    if m:
+        target_text, word = m.group(1), m.group(2)
+        tissue = _find_tissue(target_text)
+        if tissue:
+            direction = "increase" if word in ("up", "higher") else "decrease"
+            return {"target": tissue, "attribute": "center",
+                     "direction": direction, "strength": "moderately"}
+
+    # "high opacity spongy", "low opacity for bone", "high sharpness bone" --
+    # an absolute level per tissue+attribute, not a relative delta. One or
+    # more may appear in the same sentence, each becomes its own
+    # sub-command, folded together into one compound command.
+    level_matches = list(re.finditer(
+        r"(low|medium|high)\s+(opacity|width|sharpness|brightness)\s+(?:for\s+)?(\w+)", t))
+    if level_matches:
+        subcommands = []
+        for lm in level_matches:
+            level, attr_word, tissue_text = lm.group(1), lm.group(2), lm.group(3)
+            attribute = ATTRIBUTE_WORD_ALIASES.get(attr_word, attr_word)
+            tissue = _find_tissue(tissue_text)
+            if tissue:
+                subcommands.append({"target": tissue, "attribute": attribute,
+                                      "direction": "set", "level": level})
+        if subcommands:
+            return subcommands[0] if len(subcommands) == 1 else {"compound": subcommands}
+
+    m = re.search(r"(increase|decrease)\s+(opacity|width|sharpness|brightness)\s+for\s+([\w ]+)", t)
+    if m:
+        direction, attr_word, target_text = m.group(1), m.group(2), m.group(3)
+        attribute = ATTRIBUTE_WORD_ALIASES.get(attr_word, attr_word)
+        strength = "moderately"
+        for word in STRENGTH_WORDS:
+            if word in target_text:
+                strength = word
+                target_text = target_text.replace(word, "")
+        tissue = _find_tissue(target_text)
+        if tissue:
+            return {"target": tissue, "attribute": attribute,
                      "direction": direction, "strength": strength}
 
     raise ValueError(f"rule parser cannot parse: {text!r}")
