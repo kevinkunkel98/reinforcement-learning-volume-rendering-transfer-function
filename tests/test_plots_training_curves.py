@@ -38,18 +38,21 @@ def test_find_latest_run_uses_modification_time_not_lexicographic_order(tmp_path
 
     log_dir = tmp_path / "rl_logs"
     log_dir.mkdir()
-    older = log_dir / "run_seed10"
+    older = log_dir / "run_seed9"
     older.mkdir()
-    newer = log_dir / "run_seed2"
+    newer = log_dir / "run_seed10"
     newer.mkdir()
 
-    # Note: as strings, "run_seed10" < "run_seed2" (since "1" < "2" at the
-    # first differing character), so a lexicographic sort happens to place
-    # "run_seed2" last here too -- this particular pair doesn't demonstrate
-    # the old bug on its own. The point of this test is simply that
-    # _find_latest_run must pick by actual mtime, not by name, so we set
-    # the mtimes explicitly and assert the newer one wins regardless of
-    # what the names look like.
+    # Verified: sorted(["run_seed9", "run_seed10"]) == ["run_seed10", "run_seed9"]
+    # (string comparison hits the differing character "1" vs "9" right after
+    # the shared "run_seed" prefix, and "1" < "9"), so "run_seed9" sorts LAST
+    # lexicographically. We give the lexicographically-last directory
+    # ("run_seed9") the OLDER mtime and the other one ("run_seed10") the
+    # NEWER mtime. That means the old buggy implementation
+    # (`sorted(candidates)[-1]`) would return "run_seed9", while the correct
+    # mtime-based implementation (`max(candidates, key=os.path.getmtime)`)
+    # returns "run_seed10" -- the two implementations disagree on this input,
+    # so this test actually catches a regression to lexicographic sorting.
     os.utime(older, (time.time() - 100, time.time() - 100))
     os.utime(newer, (time.time(), time.time()))
 
