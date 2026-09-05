@@ -404,3 +404,19 @@ def test_parse_high_sharpness_absolute_maps_to_width():
     cmd = parse_command_rule("high sharpness bone")
     assert cmd["attribute"] == "width"
     assert cmd["level"] == "high"
+
+
+def test_validate_rejects_center_with_set_direction():
+    from commands import _validate_cmd
+    bad = {"compound": [
+        {"target": "bone", "attribute": "center", "direction": "set", "level": "high"},
+    ]}
+    assert _validate_cmd(bad) is False
+
+
+def test_validate_accepts_width_set():
+    from commands import _validate_cmd
+    good = {"compound": [
+        {"target": "bone", "attribute": "width", "direction": "set", "level": "high"},
+    ]}
+    assert _validate_cmd(good) is True

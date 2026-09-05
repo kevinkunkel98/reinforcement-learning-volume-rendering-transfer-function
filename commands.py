@@ -259,6 +259,13 @@ Output schema -- the usual case is a single command:
  "direction": "increase"|"decrease"|"show_only"|"reset",
  "strength": "slightly"|"moderately"|"strongly"|null}}
 
+"attribute" is usually "opacity", but can also be "width" (how spread out /
+sharp a tissue's peak is -- "sharpen"/"soften" mean decrease/increase width),
+"brightness" (how light/dark a tissue's color is -- "brighten"/"darken" mean
+increase/decrease), or "center" (where in Hounsfield space the peak sits --
+"shift up"/"shift down" mean increase/decrease). These follow the same
+increase/decrease/strength shape as opacity.
+
 "target" is a list only for "show_only" when the user names more than one
 tissue ("show bone and spongy" -> target: ["bone", "spongy"]).
 
@@ -281,6 +288,7 @@ compound command instead: a list of single-tissue "set" commands, each with a
 ]}}
 "level" is "low"|"medium"|"high" -- an absolute target, not a relative change.
 Use "set"/"level" only inside a compound command, never "strength" there.
+"center" never takes an absolute "set"/"level" -- only increase/decrease.
 
 Respond with JSON only, no prose."""
 
@@ -291,6 +299,8 @@ def _validate_set_cmd(obj) -> bool:
     if set(obj.keys()) != {"target", "attribute", "direction", "level"}:
         return False
     if obj["direction"] != "set":
+        return False
+    if obj["attribute"] == "center":
         return False
     if not isinstance(obj["target"], str) or obj["target"] not in TISSUE_HU:
         return False
