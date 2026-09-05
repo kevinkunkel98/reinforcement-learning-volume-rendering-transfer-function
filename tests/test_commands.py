@@ -258,3 +258,75 @@ def test_parse_command_llm_compound_normalizes_alias_targets(capsys):
         cmd = parse_command_llm("low opacity for the bones")
     assert cmd["compound"][0]["target"] == "bone"
     assert "falling back to rule parser" not in capsys.readouterr().out
+
+
+# ---------- width / brightness / center attributes ----------
+
+def test_apply_command_width_increase_widens_peak():
+    params = default_params()
+    before_w = peak_internal(params, 3)["width"]  # bone is peak index 3
+    cmd = {"target": "bone", "attribute": "width", "direction": "increase", "strength": "strongly"}
+    after = apply_command(cmd, params)
+    after_w = peak_internal(after, 3)["width"]
+    assert after_w > before_w
+
+
+def test_apply_command_width_decrease_narrows_peak():
+    params = default_params()
+    before_w = peak_internal(params, 3)["width"]
+    cmd = {"target": "bone", "attribute": "width", "direction": "decrease", "strength": "strongly"}
+    after = apply_command(cmd, params)
+    after_w = peak_internal(after, 3)["width"]
+    assert after_w < before_w
+
+
+def test_apply_command_brightness_increase_raises_all_channels():
+    params = default_params()
+    before_rgb = peak_internal(params, 3)["rgb"]
+    cmd = {"target": "bone", "attribute": "brightness", "direction": "increase", "strength": "strongly"}
+    after = apply_command(cmd, params)
+    after_rgb = peak_internal(after, 3)["rgb"]
+    for before_c, after_c in zip(before_rgb, after_rgb):
+        assert after_c >= before_c
+
+
+def test_apply_command_brightness_decrease_lowers_all_channels():
+    params = default_params()
+    before_rgb = peak_internal(params, 3)["rgb"]
+    cmd = {"target": "bone", "attribute": "brightness", "direction": "decrease", "strength": "strongly"}
+    after = apply_command(cmd, params)
+    after_rgb = peak_internal(after, 3)["rgb"]
+    for before_c, after_c in zip(before_rgb, after_rgb):
+        assert after_c <= before_c
+
+
+def test_apply_command_center_increase_shifts_center_up():
+    params = default_params()
+    before_c = peak_internal(params, 3)["center"]  # bone, defaults near 900 HU
+    cmd = {"target": "bone", "attribute": "center", "direction": "increase", "strength": "slightly"}
+    after = apply_command(cmd, params)
+    after_c = peak_internal(after, 3)["center"]
+    assert after_c > before_c
+
+
+def test_apply_command_center_clamps_to_own_tissue_band():
+    from transfer import TISSUE_BANDS
+    params = default_params()
+    cmd = {"target": "bone", "attribute": "center", "direction": "increase", "strength": "strongly"}
+    for _ in range(50):
+        params = apply_command(cmd, params)
+    final_c = peak_internal(params, 3)["center"]
+    lo, hi = TISSUE_BANDS["bone"]
+    assert final_c <= hi + 1e-6
+    assert final_c >= lo - 1e-6
+
+
+def test_apply_command_set_level_width():
+    params = default_params()
+    cmd = {"target": "bone", "attribute": "width", "direction": "set", "level": "high"}
+    after = apply_command(cmd, params)
+    from transfer import WIDTH_RANGE
+    after_w = peak_internal(after, 3)["width"]
+    # LEVEL_WORDS["high"] = 0.85 of the way through WIDTH_RANGE
+    expected = WIDTH_RANGE[0] + 0.85 * (WIDTH_RANGE[1] - WIDTH_RANGE[0])
+    assert abs(after_w - expected) < 1.0

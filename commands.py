@@ -8,8 +8,8 @@ from urllib.request import Request, urlopen
 import numpy as np
 
 from transfer import (
-    CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, TISSUE_HU, WIDTH_RANGE,
-    _from_range, _from_unit, _unit, default_params, peak_internal,
+    CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, TISSUE_BANDS, TISSUE_HU,
+    WIDTH_RANGE, _from_range, _from_unit, _unit, default_params, peak_internal,
 )
 
 TISSUE_SYNONYMS = {
@@ -121,6 +121,28 @@ def _find_or_create_peak(params: np.ndarray, tissue: str):
 
 LEVEL_WORDS = {"low": 0.15, "medium": 0.5, "high": 0.85}
 
+ATTRIBUTE_PARAM_INDEX = {"opacity": 2, "width": 1, "brightness": (3, 4, 5), "center": 0}
+
+
+def _asymptotic_step(current_ext: float, direction: str, delta: float) -> float:
+    # Move a fraction of the remaining headroom to the +1/-1 bound, not a
+    # fixed absolute amount -- generalizes the height-only fix (a fixed step
+    # saturated almost any starting value in one command) to any attribute
+    # stored in the same normalized external [-1, 1] encoding.
+    if direction == "increase":
+        return current_ext + delta * (1.0 - current_ext)
+    return current_ext - delta * (current_ext + 1.0)
+
+
+def _center_band_clip(ext_value: float, tissue: str) -> float:
+    # A center shift must stay within the target tissue's own HU band --
+    # otherwise repeated shifts could walk a peak out of its own tissue
+    # entirely and into a neighboring one's territory, silently.
+    lo_hu, hi_hu = TISSUE_BANDS[tissue]
+    lo_ext = _from_range(lo_hu, *CENTER_RANGE)
+    hi_ext = _from_range(hi_hu, *CENTER_RANGE)
+    return float(np.clip(ext_value, lo_ext, hi_ext))
+
 
 def apply_command(cmd: dict, params: np.ndarray) -> np.ndarray:
     if "compound" in cmd:
@@ -150,24 +172,22 @@ def apply_command(cmd: dict, params: np.ndarray) -> np.ndarray:
 
     params, idx = _find_or_create_peak(params, cmd["target"])
     base = idx * PARAMS_PER_PEAK
+    indices = ATTRIBUTE_PARAM_INDEX[cmd["attribute"]]
+    if isinstance(indices, int):
+        indices = (indices,)
 
     if cmd["direction"] == "set":
-        new_h = LEVEL_WORDS[cmd["level"]]
-        params[base + 2] = _from_unit(new_h)
+        new_ext = _from_unit(LEVEL_WORDS[cmd["level"]])
+        for offset in indices:
+            params[base + offset] = new_ext
         return params
 
     delta = STRENGTH_WORDS[cmd["strength"] or "moderately"]
-    current_h = _unit(params[base + 2])
-    # Move a fraction of the remaining headroom to the bound, not a fixed
-    # absolute amount -- an additive step this large (e.g. "strongly" = 0.6)
-    # saturated almost any starting height to 0/1 in a single command, after
-    # which every repeated increase/decrease was a silent no-op.
-    if cmd["direction"] == "increase":
-        new_h = current_h + delta * (1.0 - current_h)
-    else:
-        new_h = current_h - delta * current_h
-    new_h = float(np.clip(new_h, 0.0, 1.0))
-    params[base + 2] = _from_unit(new_h)
+    for offset in indices:
+        new_ext = _asymptotic_step(float(params[base + offset]), cmd["direction"], delta)
+        if cmd["attribute"] == "center":
+            new_ext = _center_band_clip(new_ext, cmd["target"])
+        params[base + offset] = float(np.clip(new_ext, -1.0, 1.0))
     return params
 
 
