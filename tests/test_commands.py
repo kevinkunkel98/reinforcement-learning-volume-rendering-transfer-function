@@ -450,3 +450,21 @@ def test_parse_zoom_in():
 def test_parse_zoom_out():
     cmd = parse_command_rule("zoom out")
     assert cmd == {"camera": {"action": "zoom", "direction": "out", "strength": "moderately"}}
+
+
+def test_validate_accepts_well_formed_camera_command():
+    from commands import _validate_cmd
+    good = {"camera": {"action": "rotate", "direction": "left", "strength": "moderately"}}
+    assert _validate_cmd(good) is True
+
+
+def test_validate_rejects_camera_command_with_mismatched_direction():
+    from commands import _validate_cmd
+    bad = {"camera": {"action": "rotate", "direction": "up", "strength": "moderately"}}
+    assert _validate_cmd(bad) is False
+
+
+def test_validate_rejects_camera_command_with_unknown_action():
+    from commands import _validate_cmd
+    bad = {"camera": {"action": "pan", "direction": "left", "strength": "moderately"}}
+    assert _validate_cmd(bad) is False

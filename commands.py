@@ -299,6 +299,27 @@ OLLAMA_HOST = "http://localhost:11434"
 VALID_DIRECTIONS = {"increase", "decrease", "show_only", "reset"}
 VALID_STRENGTHS = set(STRENGTH_WORDS) | {None}
 VALID_LEVELS = set(LEVEL_WORDS)
+VALID_CAMERA_ACTIONS = {
+    "rotate": {"left", "right"},
+    "tilt": {"up", "down"},
+    "zoom": {"in", "out"},
+}
+
+
+def _validate_camera_cmd(obj) -> bool:
+    if not isinstance(obj, dict) or set(obj.keys()) != {"camera"}:
+        return False
+    cam = obj["camera"]
+    if not isinstance(cam, dict) or set(cam.keys()) != {"action", "direction", "strength"}:
+        return False
+    if cam["action"] not in VALID_CAMERA_ACTIONS:
+        return False
+    if cam["direction"] not in VALID_CAMERA_ACTIONS[cam["action"]]:
+        return False
+    if cam["strength"] not in VALID_STRENGTHS:
+        return False
+    return True
+
 
 def _tissue_synonym_lines() -> str:
     # Generated from TISSUE_SYNONYMS so the LLM and the rule parser can never
@@ -357,6 +378,14 @@ compound command instead: a list of single-tissue "set" commands, each with a
 Use "set"/"level" only inside a compound command, never "strength" there.
 "center" never takes an absolute "set"/"level" -- only increase/decrease.
 
+Camera movement is a completely separate command shape, not a variant of
+the schema above -- it has no tissue target at all:
+{{"camera": {{"action": "rotate"|"tilt"|"zoom",
+ "direction": "left"|"right" (rotate) | "up"|"down" (tilt) | "in"|"out" (zoom),
+ "strength": "slightly"|"moderately"|"strongly"}}}}
+Use this whenever the user wants to change the viewing angle or zoom level,
+not the transfer function itself (e.g. "look from the other side", "zoom in").
+
 Respond with JSON only, no prose."""
 
 
@@ -404,6 +433,8 @@ def _validate_cmd(obj) -> bool:
         if not isinstance(subs, list) or not subs:
             return False
         return all(_validate_set_cmd(sub) for sub in subs)
+    if isinstance(obj, dict) and set(obj.keys()) == {"camera"}:
+        return _validate_camera_cmd(obj)
     return _validate_single_cmd(obj)
 
 
