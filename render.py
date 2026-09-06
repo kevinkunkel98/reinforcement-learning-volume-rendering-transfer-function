@@ -31,7 +31,7 @@ def _make_mapper(vtk_image):
     return mapper
 
 
-def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0)) -> vtk.vtkRenderWindow:
+def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), camera: dict | None = None) -> vtk.vtkRenderWindow:
     dx, dy, dz = volume.shape
     flat = np.ascontiguousarray(volume.ravel(order="F"))
     vtk_arr = numpy_to_vtk(flat, deep=True, array_type=vtk.VTK_FLOAT)
@@ -64,8 +64,10 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0)) -> v
 
     renderer.ResetCamera()
     cam = renderer.GetActiveCamera()
-    cam.Azimuth(30)
-    cam.Elevation(20)
+    cam_state = camera or {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}
+    cam.Azimuth(cam_state["azimuth"])
+    cam.Elevation(cam_state["elevation"])
+    cam.Zoom(cam_state["zoom"])
     renderer.ResetCameraClippingRange()
 
     win.Render()

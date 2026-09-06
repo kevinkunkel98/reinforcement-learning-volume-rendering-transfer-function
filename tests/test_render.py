@@ -28,3 +28,15 @@ def test_features_keys_and_ranges():
     assert set(f.keys()) == {"mean", "std", "coverage", "entropy"}
     assert 0.0 <= f["coverage"] <= 1.0
     assert f["entropy"] >= 0.0
+
+
+def test_render_accepts_custom_camera_and_defaults_match_old_behavior():
+    volume = build_phantom(size=48)
+    params = default_params()
+
+    win_default = render(volume, params)
+    win_custom = render(volume, params, camera={"azimuth": 90.0, "elevation": 0.0, "zoom": 1.0})
+
+    img_default = grab(win_default)
+    img_custom = grab(win_custom)
+    assert not np.array_equal(img_default, img_custom)
