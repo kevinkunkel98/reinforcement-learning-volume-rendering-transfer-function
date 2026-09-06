@@ -57,6 +57,13 @@ def test_objective_always_accepts_width_brightness_center():
         assert objective(params, params, cmd) == 1  # even a no-op change is accepted
 
 
+def test_objective_always_accepts_camera_commands():
+    from transfer import default_params
+    params = default_params()
+    cmd = {"camera": {"action": "rotate", "direction": "left", "strength": "moderately"}}
+    assert objective(params, params, cmd) == 1
+
+
 def test_jsonl_append_writes_one_line(tmp_path):
     path = tmp_path / "log.jsonl"
     jsonl_append(str(path), {"a": 1})

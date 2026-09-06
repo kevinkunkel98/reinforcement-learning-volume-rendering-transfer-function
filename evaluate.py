@@ -15,6 +15,11 @@ def _dominance(params, target) -> float:
 
 
 def objective(params_before, params_after, cmd: dict) -> int:
+    if "camera" in cmd:
+        # Camera moves don't change transfer-function params, so there's
+        # nothing for opacity_mass to measure -- treat as always accepted.
+        return 1
+
     if "compound" in cmd or cmd["direction"] == "reset":
         # A compound (multi-tissue absolute-level) command directly sets what
         # it says -- there's no "wrong direction" to detect the way there is
