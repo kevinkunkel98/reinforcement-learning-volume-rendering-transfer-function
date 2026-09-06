@@ -304,6 +304,7 @@ VALID_CAMERA_ACTIONS = {
     "tilt": {"up", "down"},
     "zoom": {"in", "out"},
 }
+VALID_CAMERA_STRENGTHS = set(STRENGTH_WORDS)  # camera strength has no null case, unlike top-level strength (reset/show_only)
 
 
 def _validate_camera_cmd(obj) -> bool:
@@ -316,7 +317,7 @@ def _validate_camera_cmd(obj) -> bool:
         return False
     if cam["direction"] not in VALID_CAMERA_ACTIONS[cam["action"]]:
         return False
-    if cam["strength"] not in VALID_STRENGTHS:
+    if cam["strength"] not in VALID_CAMERA_STRENGTHS:
         return False
     return True
 

@@ -468,3 +468,15 @@ def test_validate_rejects_camera_command_with_unknown_action():
     from commands import _validate_cmd
     bad = {"camera": {"action": "pan", "direction": "left", "strength": "moderately"}}
     assert _validate_cmd(bad) is False
+
+
+def test_validate_rejects_camera_command_with_invalid_strength():
+    from commands import _validate_cmd
+    bad = {"camera": {"action": "rotate", "direction": "left", "strength": "very much"}}
+    assert _validate_cmd(bad) is False
+
+
+def test_validate_rejects_camera_command_with_null_strength():
+    from commands import _validate_cmd
+    bad = {"camera": {"action": "rotate", "direction": "left", "strength": None}}
+    assert _validate_cmd(bad) is False
