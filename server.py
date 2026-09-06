@@ -326,9 +326,8 @@ class Session:
         iteration = p["iteration"] + 1
 
         if iteration >= p["max_steps"] or step_size < 0.01:
-            camera = self.history[self.cursor].get("camera", dict(DEFAULT_CAMERA))
             step = _render_step(current, p["cmd_text"], p["cmd"], human_verdict, True,
-                                 self.history[-1]["id"] + 1, self.session_id, camera)
+                                 self.history[-1]["id"] + 1, self.session_id, p["camera"])
             self.history = self.history[:self.cursor + 1] + [step]
             self.cursor = len(self.history) - 1
             self.pending = None

@@ -257,3 +257,32 @@ def test_new_session_starts_with_default_camera():
     from camera import DEFAULT_CAMERA
     session = _fresh_session()
     assert session.history[0]["camera"] == DEFAULT_CAMERA
+
+
+def test_camera_persists_through_human_search_convergence():
+    session = _fresh_session()
+    session.command("rotate right")
+    rotated_camera = session.history[session.cursor]["camera"]
+    session.command("increase opacity for bone strongly", parser="rule",
+                     search=True, evaluator="human", steps=2)
+    assert session.pending["camera"] == rotated_camera
+    session.judge("better")
+    state = session.judge("worse")
+    assert state["current"]["camera"] == rotated_camera
+
+
+def test_camera_change_during_pending_judgment_does_not_corrupt_final_camera():
+    session = _fresh_session()
+    session.command("rotate right")
+    rotated_camera = session.history[session.cursor]["camera"]
+    session.command("increase opacity for bone strongly", parser="rule",
+                     search=True, evaluator="human", steps=2)
+    # Nothing locks out further camera commands while a judgment is pending --
+    # rotating again here must not corrupt the camera the human actually judged
+    # against (rotated_camera), even though it becomes the new cursor's camera.
+    session.command("rotate left")
+    second_camera = session.history[session.cursor]["camera"]
+    assert second_camera != rotated_camera
+    session.judge("better")
+    state = session.judge("worse")
+    assert state["current"]["camera"] == rotated_camera
