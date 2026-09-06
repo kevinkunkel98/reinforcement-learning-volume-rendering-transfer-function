@@ -54,3 +54,10 @@ def test_apply_camera_command_does_not_mutate_input():
     original = dict(camera)
     apply_camera_command({"action": "rotate", "direction": "right", "strength": "moderately"}, camera)
     assert camera == original
+
+
+def test_rotate_right_wraps_above_360():
+    camera = {"azimuth": 350.0, "elevation": 0.0, "zoom": 1.0}
+    cmd = {"action": "rotate", "direction": "right", "strength": "strongly"}
+    after = apply_camera_command(cmd, camera)
+    assert after["azimuth"] == 50.0  # 350 + 60 = 410 -> wraps to 50
