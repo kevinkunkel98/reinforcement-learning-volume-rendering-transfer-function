@@ -135,6 +135,30 @@ def parse_command_rule(text: str) -> dict:
             return {"target": tissue, "attribute": "center",
                      "direction": direction, "strength": "moderately"}
 
+    m = re.search(r"\b(rotate|turn)\s+(left|right)\b", t)
+    if m:
+        strength = "moderately"
+        for word in STRENGTH_WORDS:
+            if word in t:
+                strength = word
+        return {"camera": {"action": "rotate", "direction": m.group(2), "strength": strength}}
+
+    m = re.search(r"\btilt\s+(up|down)\b", t)
+    if m:
+        strength = "moderately"
+        for word in STRENGTH_WORDS:
+            if word in t:
+                strength = word
+        return {"camera": {"action": "tilt", "direction": m.group(1), "strength": strength}}
+
+    m = re.search(r"\bzoom\s+(in|out)\b", t)
+    if m:
+        strength = "moderately"
+        for word in STRENGTH_WORDS:
+            if word in t:
+                strength = word
+        return {"camera": {"action": "zoom", "direction": m.group(1), "strength": strength}}
+
     # "high opacity spongy", "low opacity for bone", "high sharpness bone" --
     # an absolute level per tissue+attribute, not a relative delta. One or
     # more may appear in the same sentence, each becomes its own

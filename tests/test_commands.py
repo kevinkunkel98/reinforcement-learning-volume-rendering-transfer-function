@@ -420,3 +420,33 @@ def test_validate_accepts_width_set():
         {"target": "bone", "attribute": "width", "direction": "set", "level": "high"},
     ]}
     assert _validate_cmd(good) is True
+
+
+def test_parse_rotate_right():
+    cmd = parse_command_rule("rotate right")
+    assert cmd == {"camera": {"action": "rotate", "direction": "right", "strength": "moderately"}}
+
+
+def test_parse_turn_left_with_strength():
+    cmd = parse_command_rule("turn left strongly")
+    assert cmd == {"camera": {"action": "rotate", "direction": "left", "strength": "strongly"}}
+
+
+def test_parse_tilt_up():
+    cmd = parse_command_rule("tilt up")
+    assert cmd == {"camera": {"action": "tilt", "direction": "up", "strength": "moderately"}}
+
+
+def test_parse_tilt_down_slightly():
+    cmd = parse_command_rule("tilt down slightly")
+    assert cmd == {"camera": {"action": "tilt", "direction": "down", "strength": "slightly"}}
+
+
+def test_parse_zoom_in():
+    cmd = parse_command_rule("zoom in")
+    assert cmd == {"camera": {"action": "zoom", "direction": "in", "strength": "moderately"}}
+
+
+def test_parse_zoom_out():
+    cmd = parse_command_rule("zoom out")
+    assert cmd == {"camera": {"action": "zoom", "direction": "out", "strength": "moderately"}}
