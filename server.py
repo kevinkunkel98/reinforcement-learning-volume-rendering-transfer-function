@@ -25,6 +25,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from asr import _transcribe_path as asr_transcribe_path
+from camera import DEFAULT_CAMERA, apply_camera_command
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from datasets import list_datasets, load_dataset
 from evaluate import jsonl_append, objective
@@ -74,9 +75,9 @@ def _masses(params):
     return {t: opacity_mass(params, lo, hi) for t, (lo, hi) in TISSUE_BANDS.items()}
 
 
-def _render_image_b64(params):
+def _render_image_b64(params, camera):
     volume, spacing = get_volume()
-    img = grab(render(volume, params, spacing=spacing))
+    img = grab(render(volume, params, spacing=spacing, camera=camera))
     buf = io.BytesIO()
     Image.fromarray(img).save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode(), img, buf.getvalue()
@@ -97,8 +98,8 @@ def _save_image_file(session_id, name, png_bytes):
     return path
 
 
-def _render_step(params, cmd_text, cmd_dict, verdict, search, step_id, session_id):
-    image_b64, img, png_bytes = _render_image_b64(params)
+def _render_step(params, cmd_text, cmd_dict, verdict, search, step_id, session_id, camera):
+    image_b64, img, png_bytes = _render_image_b64(params, camera)
     image_path = _save_image_file(session_id, f"step_{step_id}", png_bytes)
     return {
         "id": step_id,
@@ -106,6 +107,7 @@ def _render_step(params, cmd_text, cmd_dict, verdict, search, step_id, session_i
         "cmd_text": cmd_text,
         "cmd_dict": cmd_dict,
         "params": params.tolist(),
+        "camera": camera,
         "image_b64": image_b64,
         "image_path": image_path,
         "masses": _masses(params),
@@ -148,7 +150,7 @@ class Session:
             self.session_id = data.get("session_id") or self._new_session_id()
             return
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, None, False, 0, self.session_id)
+        step = _render_step(default_params(), None, None, None, False, 0, self.session_id, dict(DEFAULT_CAMERA))
         self.history = [step]
         self.cursor = 0
         self.save()
@@ -182,7 +184,7 @@ class Session:
     def switch_dataset(self, name: str):
         set_dataset(name)  # raises ValueError for an unknown name
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, None, False, 0, self.session_id)
+        step = _render_step(default_params(), None, None, None, False, 0, self.session_id, dict(DEFAULT_CAMERA))
         self.history = [step]
         self.cursor = 0
         self.pending = None
@@ -218,25 +220,25 @@ class Session:
         self.save()
         return self.state()
 
-    def _next_pending_pair(self, cmd_text, cmd, current, idx, sign, step_size, iteration, max_steps, session_id):
+    def _next_pending_pair(self, cmd_text, cmd, current, idx, sign, step_size, iteration, max_steps, session_id, camera):
         proposed = propose_step(current, idx, sign, step_size)
-        before_b64, _, before_bytes = _render_image_b64(current)
-        after_b64, _, after_bytes = _render_image_b64(proposed)
+        before_b64, _, before_bytes = _render_image_b64(current, camera)
+        after_b64, _, after_bytes = _render_image_b64(proposed, camera)
         before_png = _save_image_file(session_id, f"judge{iteration}_before", before_bytes)
         after_png = _save_image_file(session_id, f"judge{iteration}_after", after_bytes)
         return {
             "cmd_text": cmd_text, "cmd": cmd, "current": current, "proposed": proposed,
             "idx": idx, "sign": sign, "step_size": step_size, "iteration": iteration,
-            "max_steps": max_steps, "session_id": session_id,
+            "max_steps": max_steps, "session_id": session_id, "camera": camera,
             "before_image_b64": before_b64, "after_image_b64": after_b64,
             "before_png": before_png, "after_png": after_png,
         }
 
-    def _start_human_search(self, cmd_text, cmd, params, steps):
+    def _start_human_search(self, cmd_text, cmd, params, steps, camera):
         sign = 1.0 if cmd["direction"] == "increase" else -1.0
         step_size = STRENGTH_WORDS[cmd["strength"] or "moderately"]
         _, idx = _find_or_create_peak(params, cmd["target"])
-        return self._next_pending_pair(cmd_text, cmd, params, idx, sign, step_size, 0, steps, self.session_id)
+        return self._next_pending_pair(cmd_text, cmd, params, idx, sign, step_size, 0, steps, self.session_id, camera)
 
     def _run_objective_search(self, cmd, params, steps):
         sign = 1.0 if cmd["direction"] == "increase" else -1.0
@@ -262,18 +264,28 @@ class Session:
         cmd = parse_command(text, parser=parser, model=model)  # raises ValueError on failure
 
         current_params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
+        current_camera = dict(self.history[self.cursor].get("camera", DEFAULT_CAMERA))
+
+        if "camera" in cmd:
+            new_camera = apply_camera_command(cmd["camera"], current_camera)
+            step = _render_step(current_params, text, cmd, None, False,
+                                 self.history[-1]["id"] + 1, self.session_id, new_camera)
+            self.history = self.history[:self.cursor + 1] + [step]
+            self.cursor = len(self.history) - 1
+            self.save()
+            return self.state()
 
         if search and cmd.get("attribute") == "opacity" and cmd.get("direction") in ("increase", "decrease"):
             if evaluator == "human":
-                self.pending = self._start_human_search(text, cmd, current_params, steps)
+                self.pending = self._start_human_search(text, cmd, current_params, steps, current_camera)
                 return self.state()
             new_params = self._run_objective_search(cmd, current_params, steps)
             step = _render_step(new_params, text, cmd, None, True,
-                                 self.history[-1]["id"] + 1, self.session_id)
+                                 self.history[-1]["id"] + 1, self.session_id, current_camera)
         else:
             new_params = apply_command(cmd, current_params)
             step = _render_step(new_params, text, cmd, None, False,
-                                 self.history[-1]["id"] + 1, self.session_id)
+                                 self.history[-1]["id"] + 1, self.session_id, current_camera)
             jsonl_append(LOG_PATH, {
                 "timestamp": step["timestamp"], "command": cmd,
                 "params_before": current_params.tolist(), "params_after": new_params.tolist(),
@@ -314,8 +326,9 @@ class Session:
         iteration = p["iteration"] + 1
 
         if iteration >= p["max_steps"] or step_size < 0.01:
+            camera = self.history[self.cursor].get("camera", dict(DEFAULT_CAMERA))
             step = _render_step(current, p["cmd_text"], p["cmd"], human_verdict, True,
-                                 self.history[-1]["id"] + 1, self.session_id)
+                                 self.history[-1]["id"] + 1, self.session_id, camera)
             self.history = self.history[:self.cursor + 1] + [step]
             self.cursor = len(self.history) - 1
             self.pending = None
@@ -323,7 +336,7 @@ class Session:
             return self.state()
 
         self.pending = self._next_pending_pair(p["cmd_text"], p["cmd"], current, p["idx"], p["sign"],
-                                                step_size, iteration, p["max_steps"], p["session_id"])
+                                                step_size, iteration, p["max_steps"], p["session_id"], p["camera"])
         return self.state()
 
 

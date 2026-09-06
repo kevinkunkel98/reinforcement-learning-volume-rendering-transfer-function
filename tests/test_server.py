@@ -224,3 +224,36 @@ def test_human_search_pair_images_saved_and_referenced_in_preferences(tmp_path, 
     entry = json.loads(lines[0])
     assert os.path.exists(entry["before_png"])
     assert os.path.exists(entry["after_png"])
+
+
+def test_camera_command_does_not_change_params():
+    session = _fresh_session()
+    before_params = session.history[session.cursor]["params"]
+    session.command("rotate right")
+    after_params = session.history[session.cursor]["params"]
+    assert before_params == after_params
+
+
+def test_camera_command_changes_camera_state():
+    session = _fresh_session()
+    before_camera = session.history[session.cursor]["camera"]
+    session.command("rotate right")
+    after_camera = session.history[session.cursor]["camera"]
+    assert after_camera["azimuth"] != before_camera["azimuth"]
+
+
+def test_camera_state_is_per_step_and_restored_by_back():
+    session = _fresh_session()
+    session.command("rotate right")
+    rotated_camera = session.history[session.cursor]["camera"]
+    session.back()
+    original_camera = session.history[session.cursor]["camera"]
+    assert original_camera != rotated_camera
+    session.forward()
+    assert session.history[session.cursor]["camera"] == rotated_camera
+
+
+def test_new_session_starts_with_default_camera():
+    from camera import DEFAULT_CAMERA
+    session = _fresh_session()
+    assert session.history[0]["camera"] == DEFAULT_CAMERA
