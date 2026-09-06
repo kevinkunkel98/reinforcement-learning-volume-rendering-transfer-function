@@ -33,7 +33,8 @@ def main():
     parser.add_argument("--dataset", type=str, default="ct_skull")
     parser.add_argument("--n-envs", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--out", type=str, default=MODEL_PATH)
+    parser.add_argument("--out", type=str, default=MODEL_PATH,
+                         help="Path to save the trained model (default: %(default)s)")
     args = parser.parse_args()
     train(args.timesteps, dataset=args.dataset, n_envs=args.n_envs, seed=args.seed, model_path=args.out)
 
