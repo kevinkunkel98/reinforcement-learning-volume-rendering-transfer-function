@@ -62,6 +62,11 @@ COMMAND_REFERENCE = [
         "description": "Nudge where in Hounsfield space a tissue's peak sits, clamped to that tissue's own band.",
     },
     {
+        "category": "Camera",
+        "examples": ["rotate left", "tilt down", "zoom in"],
+        "description": "Adjust the viewing angle or zoom level. Doesn't change the transfer function.",
+    },
+    {
         "category": "Reset",
         "examples": ["reset"],
         "description": "Return the transfer function to its default state.",

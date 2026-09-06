@@ -53,6 +53,14 @@ Nudge where in Hounsfield space a tissue's peak sits, clamped to that tissue's o
 - `move fat down`
 - `shift fat's position down`
 
+## Camera
+
+Adjust the viewing angle or zoom level. Doesn't change the transfer function.
+
+- `rotate left`
+- `tilt down`
+- `zoom in`
+
 ## Reset
 
 Return the transfer function to its default state.
