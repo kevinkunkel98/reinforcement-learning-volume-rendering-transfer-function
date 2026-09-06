@@ -14,10 +14,12 @@ from render import render, grab, features
 from commands import parse_command, apply_command, STRENGTH_WORDS, _find_or_create_peak
 from evaluate import objective, human, jsonl_append
 from search import propose_step, resize_step
+from camera import DEFAULT_CAMERA, apply_camera_command
 
 STATE_PATH = "out/state.json"
 LOG_PATH = "out/log.jsonl"
 PREF_PATH = "out/preferences.jsonl"
+CAMERA_STATE_PATH = "out/camera_state.json"
 
 _VOLUME = None
 _SPACING = None
@@ -44,9 +46,22 @@ def save_state(params: np.ndarray) -> None:
         json.dump(params.tolist(), f)
 
 
-def save_png(params: np.ndarray, path: str) -> np.ndarray:
+def load_camera() -> dict:
+    if os.path.exists(CAMERA_STATE_PATH):
+        with open(CAMERA_STATE_PATH) as f:
+            return json.load(f)
+    return dict(DEFAULT_CAMERA)
+
+
+def save_camera(camera: dict) -> None:
+    os.makedirs("out", exist_ok=True)
+    with open(CAMERA_STATE_PATH, "w") as f:
+        json.dump(camera, f)
+
+
+def save_png(params: np.ndarray, path: str, camera: dict | None = None) -> np.ndarray:
     volume, spacing = get_volume()
-    img = grab(render(volume, params, spacing=spacing))
+    img = grab(render(volume, params, spacing=spacing, camera=camera))
     Image.fromarray(img).save(path)
     return img
 
@@ -155,6 +170,7 @@ def main():
 
     os.makedirs("out", exist_ok=True)
     params = load_state()
+    camera = load_camera()
     session_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
 
     cmd_text = args.cmd
@@ -176,6 +192,13 @@ def main():
         print(f"[mvp] could not parse command: {exc}")
         raise SystemExit(1)
     print("parsed command:", cmd)
+
+    if "camera" in cmd:
+        new_camera = apply_camera_command(cmd["camera"], camera)
+        save_camera(new_camera)
+        save_png(params, "out/camera.png", camera=new_camera)
+        print("new camera state:", new_camera)
+        return
 
     if args.learn and cmd.get("attribute") == "opacity" and cmd.get("direction") in ("increase", "decrease"):
         new_params = hill_climb(cmd_text, cmd, params, args.steps, args.human, session_id)
