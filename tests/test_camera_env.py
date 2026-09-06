@@ -136,3 +136,20 @@ def test_reward_equals_the_actual_alignment_delta():
     _, reward, _, _, _ = env.step(np.array([1.0, 1.0], dtype=np.float32))
     after_alignment = float(np.dot(_view_direction(env.azimuth, env.elevation), env.target_direction))
     assert abs(reward - (after_alignment - before_alignment)) < 1e-6
+
+
+def test_resolve_target_raises_clear_error_when_no_tissue_has_a_direction():
+    from transfer import TISSUE_HU
+    # An all-air volume: no tissue other than air has any voxels in its HU
+    # band at all, and air's own centroid -- being the mean of every voxel
+    # index in a uniform cube -- sits exactly half a voxel off the volume's
+    # physical center in each axis, a fixed offset that becomes negligible
+    # relative to the volume's size once the cube is large enough (below
+    # MIN_RELATIVE_CENTROID_OFFSET; see rl/camera_env.py). A 32-cube is
+    # comfortably past that point, so every tissue's direction -- including
+    # the bone fallback -- is None here.
+    volume = np.full((32, 32, 32), TISSUE_HU["air"], dtype=np.float32)
+    spacing = (1.0, 1.0, 1.0)
+    env = CameraViewpointEnv(volume, spacing, seed=0)
+    with pytest.raises(ValueError, match="no tissue"):
+        env.reset()

@@ -83,7 +83,14 @@ class CameraViewpointEnv(gym.Env):
             direction = _tissue_centroid_direction(self.volume, self.spacing, tissue)
             if direction is not None:
                 return tissue, direction
-        return "bone", _tissue_centroid_direction(self.volume, self.spacing, "bone")
+        direction = _tissue_centroid_direction(self.volume, self.spacing, "bone")
+        if direction is None:
+            raise ValueError(
+                "no tissue in this volume has a meaningful centroid direction "
+                "(including the 'bone' fallback) -- volume may be empty, "
+                "out of HU range, or degenerately centered"
+            )
+        return "bone", direction
 
     def _alignment(self) -> float:
         cam_dir = _view_direction(self.azimuth, self.elevation)
