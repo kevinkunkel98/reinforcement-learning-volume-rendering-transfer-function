@@ -27,8 +27,8 @@ def test_synthetic_phantom_air_and_fat_have_no_centroid_direction():
     # the time you're that far out, the off-center bone/spongy structure
     # near the middle has negligible effect on where the band sits, so
     # their centroid direction is undefined. (Measured directly: relative
-    # centroid offset for air/fat is ~1-2% of the volume size, versus
-    # ~8.5-9% for soft/spongy/bone -- see below.)
+    # centroid offset for air/fat is ~0.6-1.3% of the volume size, versus
+    # ~4.9-5.2% for soft/spongy/bone -- see below.)
     volume = build_phantom(size=48)
     spacing = (1.0, 1.0, 1.0)
     for tissue in ("air", "fat"):
