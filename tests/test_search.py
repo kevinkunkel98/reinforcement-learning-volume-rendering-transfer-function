@@ -25,3 +25,9 @@ def test_resize_step_grows_on_accept_and_shrinks_on_reject():
     assert resize_step(0.35, accepted=True) == 0.35 * 1.2
     assert resize_step(0.35, accepted=False) == 0.35 * 0.5
     assert resize_step(0.9, accepted=True) == 1.0
+
+
+def test_resize_step_respects_custom_max_step():
+    assert resize_step(0.35, accepted=True) == 0.35 * 1.2  # default max_step=1.0 unaffected
+    assert resize_step(25.0, accepted=True, max_step=30.0) == 25.0 * 1.2
+    assert resize_step(28.0, accepted=True, max_step=30.0) == 30.0

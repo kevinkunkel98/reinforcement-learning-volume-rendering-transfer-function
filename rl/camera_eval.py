@@ -66,7 +66,7 @@ def _run_hill_climb(episode):
         accepted = best > current
         if accepted:
             azimuth, elevation = best_az, best_el
-        step = resize_step(step, accepted)
+        step = resize_step(step, accepted, max_step=MAX_DELTA_DEGREES)
         alignments.append(alignment(azimuth, elevation))
     return alignments
 
