@@ -25,7 +25,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from asr import _transcribe_path as asr_transcribe_path
-from camera import DEFAULT_CAMERA, apply_camera_command
+from camera import DEFAULT_CAMERA, apply_camera_command, apply_camera_delta
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from datasets import list_datasets, load_dataset
 from evaluate import jsonl_append, objective
@@ -338,6 +338,24 @@ class Session:
                                                 step_size, iteration, p["max_steps"], p["session_id"], p["camera"])
         return self.state()
 
+    def camera_delta(self, d_azimuth: float, d_elevation: float, d_zoom_factor: float, commit: bool) -> dict:
+        current_step = self.history[self.cursor]
+        candidate = apply_camera_delta(current_step["camera"], d_azimuth, d_elevation, d_zoom_factor)
+
+        if not commit:
+            params = np.array(current_step["params"], dtype=np.float64)
+            image_b64, _, _ = _render_image_b64(params, candidate)
+            return {"image_b64": image_b64, "camera": candidate}
+
+        current_params = np.array(current_step["params"], dtype=np.float64)
+        cmd_dict = {"camera": {"d_azimuth": d_azimuth, "d_elevation": d_elevation, "d_zoom_factor": d_zoom_factor}}
+        step = _render_step(current_params, "manual rotation", cmd_dict, None, False,
+                             self.history[-1]["id"] + 1, self.session_id, candidate)
+        self.history = self.history[:self.cursor + 1] + [step]
+        self.cursor = len(self.history) - 1
+        self.save()
+        return self.state()
+
 
 UI_SESSION_PATH = os.environ.get("UI_SESSION_PATH", "out/ui_session.json")
 session = Session(UI_SESSION_PATH)
@@ -429,6 +447,18 @@ async def judge(req: JudgeRequest):
         return session.judge(req.verdict)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+class CameraDeltaRequest(BaseModel):
+    d_azimuth: float = 0.0
+    d_elevation: float = 0.0
+    d_zoom_factor: float = 1.0
+    commit: bool = False
+
+
+@app.post("/api/camera_delta")
+async def camera_delta(req: CameraDeltaRequest):
+    return session.camera_delta(req.d_azimuth, req.d_elevation, req.d_zoom_factor, req.commit)
 
 
 @app.post("/api/transcribe")

@@ -286,3 +286,52 @@ def test_camera_change_during_pending_judgment_does_not_corrupt_final_camera():
     session.judge("better")
     state = session.judge("worse")
     assert state["current"]["camera"] == rotated_camera
+
+
+def test_camera_delta_preview_does_not_change_history():
+    session = _fresh_session()
+    before_total = session.state()["total"]
+    before_cursor = session.cursor
+    result = session.camera_delta(30.0, 10.0, 1.2, commit=False)
+    assert session.state()["total"] == before_total
+    assert session.cursor == before_cursor
+    assert "image_b64" in result
+    assert result["camera"]["azimuth"] == pytest.approx(60.0)  # DEFAULT_CAMERA azimuth (30.0) + 30.0
+
+
+def test_camera_delta_preview_does_not_write_image_file():
+    session = _fresh_session()
+    session_dir = os.path.join("out", "ui_images", session.session_id)
+    before_files = set(os.listdir(session_dir)) if os.path.exists(session_dir) else set()
+    session.camera_delta(30.0, 10.0, 1.2, commit=False)
+    after_files = set(os.listdir(session_dir)) if os.path.exists(session_dir) else set()
+    assert after_files == before_files
+
+
+def test_camera_delta_commit_appends_one_history_step():
+    session = _fresh_session()
+    before_total = session.state()["total"]
+    state = session.camera_delta(30.0, 0.0, 1.0, commit=True)
+    assert state["total"] == before_total + 1
+    assert state["current"]["camera"]["azimuth"] == pytest.approx(60.0)
+    assert state["current"]["cmd_text"] == "manual rotation"
+
+
+def test_camera_delta_wraps_and_clamps_large_values():
+    session = _fresh_session()
+    from camera import ELEVATION_RANGE, ZOOM_RANGE
+    state = session.camera_delta(730.0, 500.0, 100.0, commit=True)
+    camera = state["current"]["camera"]
+    assert 0.0 <= camera["azimuth"] < 360.0
+    assert ELEVATION_RANGE[0] <= camera["elevation"] <= ELEVATION_RANGE[1]
+    assert ZOOM_RANGE[0] <= camera["zoom"] <= ZOOM_RANGE[1]
+
+
+def test_camera_delta_commit_works_while_judgment_pending():
+    session = _fresh_session()
+    session.command("increase opacity for bone strongly", parser="rule",
+                     search=True, evaluator="human", steps=2)
+    assert session.pending is not None
+    state = session.camera_delta(30.0, 0.0, 1.0, commit=True)
+    assert session.pending is not None  # pending judgment untouched
+    assert state["current"]["cmd_text"] == "manual rotation"
