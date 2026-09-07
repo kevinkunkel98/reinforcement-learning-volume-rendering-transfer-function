@@ -152,6 +152,12 @@ select:focus-visible {
   border: 1px solid var(--border);
   background: #000;
   display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+#current-image.dragging {
+  cursor: grabbing;
 }
 
 #before-image,

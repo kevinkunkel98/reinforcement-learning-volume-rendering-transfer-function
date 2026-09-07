@@ -400,6 +400,82 @@ el("commands-modal").addEventListener("click", (e) => {
   if (e.target === el("commands-modal")) el("commands-modal").close();
 });
 
+// ---------- manual camera rotation (drag) + zoom (scroll) ----------
+
+const DRAG_DEGREES_PER_PIXEL = 0.4;
+const DRAG_THROTTLE_MS = 110;
+const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+const WHEEL_COMMIT_DEBOUNCE_MS = 300;
+
+const currentImage = el("current-image");
+
+async function sendCameraDelta(dAzimuth, dElevation, dZoomFactor, commit) {
+  const r = await fetch("/api/camera_delta", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ d_azimuth: dAzimuth, d_elevation: dElevation, d_zoom_factor: dZoomFactor, commit }),
+  });
+  return r.json();
+}
+
+let dragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let lastDragSendAt = 0;
+
+currentImage.addEventListener("pointerdown", (e) => {
+  if (state.pending) return;
+  dragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  lastDragSendAt = 0;
+  currentImage.setPointerCapture(e.pointerId);
+  currentImage.classList.add("dragging");
+});
+
+currentImage.addEventListener("pointermove", async (e) => {
+  if (!dragging) return;
+  const now = performance.now();
+  if (now - lastDragSendAt < DRAG_THROTTLE_MS) return;
+  lastDragSendAt = now;
+  const dAzimuth = (e.clientX - dragStartX) * DRAG_DEGREES_PER_PIXEL;
+  const dElevation = -(e.clientY - dragStartY) * DRAG_DEGREES_PER_PIXEL;
+  const data = await sendCameraDelta(dAzimuth, dElevation, 1.0, false);
+  currentImage.src = `data:image/png;base64,${data.image_b64}`;
+});
+
+currentImage.addEventListener("pointerup", async (e) => {
+  if (!dragging) return;
+  dragging = false;
+  currentImage.classList.remove("dragging");
+  const dAzimuth = (e.clientX - dragStartX) * DRAG_DEGREES_PER_PIXEL;
+  const dElevation = -(e.clientY - dragStartY) * DRAG_DEGREES_PER_PIXEL;
+  const data = await sendCameraDelta(dAzimuth, dElevation, 1.0, true);
+  await refresh(data);
+  appendMessage(data.current);
+});
+
+let wheelZoomAccum = 1.0;
+let wheelCommitTimer = null;
+
+currentImage.addEventListener("wheel", async (e) => {
+  if (state.pending) return;
+  e.preventDefault();
+  const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY);
+  wheelZoomAccum *= factor;
+  const data = await sendCameraDelta(0.0, 0.0, wheelZoomAccum, false);
+  currentImage.src = `data:image/png;base64,${data.image_b64}`;
+
+  if (wheelCommitTimer) clearTimeout(wheelCommitTimer);
+  wheelCommitTimer = setTimeout(async () => {
+    const finalZoom = wheelZoomAccum;
+    wheelZoomAccum = 1.0;
+    const finalData = await sendCameraDelta(0.0, 0.0, finalZoom, true);
+    await refresh(finalData);
+    appendMessage(finalData.current);
+  }, WHEEL_COMMIT_DEBOUNCE_MS);
+}, { passive: false });
+
 updateSendState();
 loadDatasets();
 loadState();
