@@ -339,6 +339,11 @@ class Session:
         return self.state()
 
     def camera_delta(self, d_azimuth: float, d_elevation: float, d_zoom_factor: float, commit: bool) -> dict:
+        # Stateless by design: always recomputed from the cursor's committed
+        # camera, never from a prior preview -- a fast drag can call this
+        # (commit=False) many times per second with no history/disk growth,
+        # while commit=True returns a full state() payload like every other
+        # Session method (a lighter preview-only shape otherwise).
         current_step = self.history[self.cursor]
         candidate = apply_camera_delta(current_step["camera"], d_azimuth, d_elevation, d_zoom_factor)
 

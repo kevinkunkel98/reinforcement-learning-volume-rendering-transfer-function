@@ -335,3 +335,10 @@ def test_camera_delta_commit_works_while_judgment_pending():
     state = session.camera_delta(30.0, 0.0, 1.0, commit=True)
     assert session.pending is not None  # pending judgment untouched
     assert state["current"]["cmd_text"] == "manual rotation"
+
+
+def test_camera_delta_preview_then_different_commit_uses_original_camera():
+    session = _fresh_session()
+    session.camera_delta(90.0, 5.0, 2.0, commit=False)  # preview, discarded
+    state = session.camera_delta(30.0, 0.0, 1.0, commit=True)  # different delta
+    assert state["current"]["camera"]["azimuth"] == pytest.approx(60.0)  # 30 (default) + 30, not +90
