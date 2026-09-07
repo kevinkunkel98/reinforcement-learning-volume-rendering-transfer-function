@@ -406,8 +406,16 @@ const DRAG_DEGREES_PER_PIXEL = 0.4;
 const DRAG_THROTTLE_MS = 110;
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 const WHEEL_COMMIT_DEBOUNCE_MS = 300;
+const WHEEL_THROTTLE_MS = 110;
 
 const currentImage = el("current-image");
+
+// Every preview/commit request gets the next sequence number; a response is
+// only applied to the DOM if it's still the most recent request sent. This
+// discards stale out-of-order responses -- e.g. a slow preview frame that
+// resolves after the drag's own commit already landed, which would otherwise
+// silently overwrite the just-committed image with an uncommitted one.
+let requestSeq = 0;
 
 async function sendCameraDelta(dAzimuth, dElevation, dZoomFactor, commit) {
   const r = await fetch("/api/camera_delta", {
@@ -423,8 +431,13 @@ let dragStartX = 0;
 let dragStartY = 0;
 let lastDragSendAt = 0;
 
+function endDrag() {
+  dragging = false;
+  currentImage.classList.remove("dragging");
+}
+
 currentImage.addEventListener("pointerdown", (e) => {
-  if (state.pending) return;
+  if (state.pending || e.button !== 0) return;
   dragging = true;
   dragStartX = e.clientX;
   dragStartY = e.clientY;
@@ -440,40 +453,62 @@ currentImage.addEventListener("pointermove", async (e) => {
   lastDragSendAt = now;
   const dAzimuth = (e.clientX - dragStartX) * DRAG_DEGREES_PER_PIXEL;
   const dElevation = -(e.clientY - dragStartY) * DRAG_DEGREES_PER_PIXEL;
+  const seq = ++requestSeq;
   const data = await sendCameraDelta(dAzimuth, dElevation, 1.0, false);
+  if (seq !== requestSeq) return;
   currentImage.src = `data:image/png;base64,${data.image_b64}`;
 });
 
 currentImage.addEventListener("pointerup", async (e) => {
   if (!dragging) return;
-  dragging = false;
-  currentImage.classList.remove("dragging");
+  endDrag();
   const dAzimuth = (e.clientX - dragStartX) * DRAG_DEGREES_PER_PIXEL;
   const dElevation = -(e.clientY - dragStartY) * DRAG_DEGREES_PER_PIXEL;
+  const seq = ++requestSeq;
   const data = await sendCameraDelta(dAzimuth, dElevation, 1.0, true);
+  if (seq !== requestSeq) return;
   await refresh(data);
   appendMessage(data.current);
 });
 
+// Pointer capture keeps delivering move/up events to this element even once
+// the pointer leaves it, but the spec allows pointercancel to fire *instead
+// of* pointerup (lost window focus, an OS gesture, etc.) -- without this
+// handler, `dragging` would get stuck true forever, and every future mouse
+// movement over the image (no button held at all) would be misread as a drag.
+currentImage.addEventListener("pointercancel", () => {
+  if (!dragging) return;
+  endDrag();
+});
+
 let wheelZoomAccum = 1.0;
 let wheelCommitTimer = null;
+let lastWheelSendAt = 0;
 
 currentImage.addEventListener("wheel", async (e) => {
   if (state.pending) return;
   e.preventDefault();
   const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY);
   wheelZoomAccum *= factor;
-  const data = await sendCameraDelta(0.0, 0.0, wheelZoomAccum, false);
-  currentImage.src = `data:image/png;base64,${data.image_b64}`;
 
   if (wheelCommitTimer) clearTimeout(wheelCommitTimer);
   wheelCommitTimer = setTimeout(async () => {
     const finalZoom = wheelZoomAccum;
     wheelZoomAccum = 1.0;
+    const seq = ++requestSeq;
     const finalData = await sendCameraDelta(0.0, 0.0, finalZoom, true);
+    if (seq !== requestSeq) return;
     await refresh(finalData);
     appendMessage(finalData.current);
   }, WHEEL_COMMIT_DEBOUNCE_MS);
+
+  const now = performance.now();
+  if (now - lastWheelSendAt < WHEEL_THROTTLE_MS) return;
+  lastWheelSendAt = now;
+  const seq = ++requestSeq;
+  const data = await sendCameraDelta(0.0, 0.0, wheelZoomAccum, false);
+  if (seq !== requestSeq) return;
+  currentImage.src = `data:image/png;base64,${data.image_b64}`;
 }, { passive: false });
 
 updateSendState();
