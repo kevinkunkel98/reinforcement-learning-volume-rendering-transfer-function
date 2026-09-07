@@ -75,10 +75,28 @@ def test_apply_camera_delta_wraps_azimuth():
     assert after["azimuth"] == 10.0  # 350 + 20 = 370 -> wraps to 10
 
 
-def test_apply_camera_delta_clamps_elevation():
+def test_apply_camera_delta_wraps_below_zero():
+    camera = {"azimuth": 10.0, "elevation": 0.0, "zoom": 1.0}
+    after = apply_camera_delta(camera, d_azimuth=-20.0, d_elevation=0.0, d_zoom_factor=1.0)
+    assert after["azimuth"] == 350.0
+
+
+def test_apply_camera_delta_clamps_elevation_upper():
     camera = dict(DEFAULT_CAMERA)
     after = apply_camera_delta(camera, d_azimuth=0.0, d_elevation=500.0, d_zoom_factor=1.0)
     assert after["elevation"] == ELEVATION_RANGE[1]
+
+
+def test_apply_camera_delta_clamps_elevation_lower():
+    camera = dict(DEFAULT_CAMERA)
+    after = apply_camera_delta(camera, d_azimuth=0.0, d_elevation=-500.0, d_zoom_factor=1.0)
+    assert after["elevation"] == ELEVATION_RANGE[0]
+
+
+def test_apply_camera_delta_zoom_is_multiplicative():
+    camera = {"azimuth": 0.0, "elevation": 0.0, "zoom": 2.0}
+    after = apply_camera_delta(camera, d_azimuth=0.0, d_elevation=0.0, d_zoom_factor=1.5)
+    assert after["zoom"] == 3.0  # multiplicative: 2.0 * 1.5, not additive 2.0 + 1.5 = 3.5
 
 
 def test_apply_camera_delta_clamps_zoom():
