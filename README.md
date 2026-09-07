@@ -3,6 +3,13 @@
 Local prototype: synthetic CT phantom (HU) -> 4-Gaussian-peak transfer function ->
 offscreen VTK render, driven by rule-based or local-LLM-parsed text/voice commands,
 searched by hill-climbing against an exact opacity-mass metric or a human judge.
+Camera viewing angle is a second, independent piece of controllable state, adjusted
+by the same command layer. Two offline reinforcement-learning sub-projects (see
+below) each train a policy to match or beat the hand-coded hill-climbing baseline.
+
+For a full technical writeup of the current architecture (rendering pipeline,
+command layer, search/evaluation, camera control, both RL sub-projects, server
+session model), see `docs/architecture.typ` (compiled: `docs/architecture.pdf`).
 
 ## Setup
 
@@ -40,6 +47,10 @@ etc. — see `TISSUE_SYNONYMS` in `commands.py`).
 increase|decrease opacity for <tissue> [slightly|moderately|strongly]
 show only <tissue> [and <tissue> ...]              # multi-target isolates all named tissues
 <low|medium|high> opacity for <tissue> [, <low|medium|high> opacity for <tissue> ...]
+sharpen|soften <tissue>                            # width
+brighten|darken <tissue>                           # brightness
+shift <tissue>'s center up|down                    # center position, clamped to its own HU band
+rotate left|right | tilt up|down | zoom in|out [slightly|moderately|strongly]
 reset
 ```
 
@@ -47,6 +58,10 @@ The third form is an *absolute* level (distinct from increase/decrease's relativ
 delta) — "high opacity spongy, low opacity bone" sets both in one command. Two or
 more in one sentence become a compound command; it's a one-shot assignment, not a
 hill-climb search target (there's no single peak, or "wrong direction", to search).
+
+Camera commands (`rotate`/`tilt`/`zoom`) are a fully separate shape from every
+other command above — they adjust viewing angle/zoom only and never touch the
+transfer function. See `camera.py`.
 
 `--parser llm` understands considerably more free phrasing than this rigid grammar
 (e.g. "make the skeleton pop") — see `eval_parsers.py` for a measured comparison.
@@ -72,14 +87,52 @@ afterward. See `datasets.py` for the registry.
 Chat-driven version of the CLI: type or speak (🎤, via the browser mic + the same
 Whisper wrapper) a command, watch it render, step back/forward through the
 session's history, and judge hill-climb steps as Better/Worse when search is
-toggled on with the human evaluator. Session state persists in
+toggled on with the human evaluator. Camera state (azimuth/elevation/zoom)
+travels alongside the transfer function in each history step, so back/forward
+navigation restores both together. Session state persists in
 `out/ui_session.json`.
+
+## Reinforcement learning
+
+Two Gymnasium environments, trained offline with `stable-baselines3` SAC against
+exact metrics computed directly on the data (no rendering, no human labels), each
+compared against the hand-coded hill-climbing baseline they're meant to replace.
+**Neither is wired into the live chat/voice loop yet** — this is offline
+training + evaluation only.
+
+- **`rl/env.py` + `rl/train.py` + `rl/eval.py`** — transfer-function opacity.
+  One episode = one (target tissue, direction) goal; the agent moves the
+  resolved peak's height; reward = Δ`mass_fraction`. Result (200k timesteps,
+  20 held-out episodes): policy `0.344` vs. hill-climb `0.347` mean final mass
+  fraction, `3.3` vs `2.7` steps to 90% of best — near-parity, a well-tuned
+  hand controller is a strong baseline on this low-dimensional problem.
+
+      python -m rl.train --timesteps 200000
+      python -m rl.eval
+
+- **`rl/camera_env.py` + `rl/camera_train.py` + `rl/camera_eval.py`** — camera
+  viewpoint. One episode = one target tissue on a real CT volume (`ct_skull`);
+  the agent moves azimuth/elevation to maximize alignment with that tissue's
+  centroid direction from the volume center (a directional proxy — no
+  occlusion model). Result: policy `0.997` vs. hill-climb `1.000` mean final
+  alignment, `3.05` vs `4.05` steps to 90% — both reach near-perfect alignment,
+  the policy converges faster.
+
+      python -m rl.camera_train --timesteps 200000
+      python -m rl.camera_eval
+
+See `docs/architecture.typ` §6-7 for full detail on both, including two real
+bugs found and fixed during development (a `_resolve_target` fallback that
+could silently return no direction, and a shared step-resizing utility whose
+opacity-domain-tuned growth cap crippled the camera hill-climb baseline until
+it was made domain-aware).
 
 ## Files
 
 - `phantom.py` — synthetic CT volume in Hounsfield units
 - `transfer.py` — 24-float vector <-> VTK transfer functions, `opacity_mass` metric
 - `render.py` — offscreen VTK render, pixel grab, image features
+- `camera.py` — camera state (azimuth/elevation/zoom), relative camera commands
 - `commands.py` — rule-based parser, Ollama LLM parser, `apply_command`
 - `evaluate.py` — objective (`opacity_mass`) and human console evaluators, preference logging
 - `asr.py` — faster-whisper push-to-talk mic capture and file transcription
@@ -87,12 +140,19 @@ toggled on with the human evaluator. Session state persists in
 - `eval_parsers.py` — rule vs LLM parser accuracy comparison
 - `stats.py` — `out/preferences.jsonl` agreement analysis
 - `datasets.py` — real CT dataset registry, checksum-verified download + NRRD loading
-- `search.py` — hill-climb search-step math, shared by `mvp.py` and `server.py`
-- `server.py` + `static/` — FastAPI chat UI (text/voice commands, history navigation, human judging)
+- `search.py` — hill-climb search-step math, shared by `mvp.py`, `server.py`, and both RL evaluators
+- `server.py` + `static/` — FastAPI chat UI (text/voice commands, history navigation, human judging, camera)
+- `rl/env.py`, `rl/train.py`, `rl/eval.py` — offline SAC RL for transfer-function opacity
+- `rl/camera_env.py`, `rl/camera_train.py`, `rl/camera_eval.py` — offline SAC RL for camera viewpoint
+- `docs/architecture.typ` — full architecture reference (compiled: `docs/architecture.pdf`)
 
-No MLLM judge, no neural reward model, no torch, no RL — hill-climbing on a binary
-verdict is the baseline. `out/log.jsonl` and `out/preferences.jsonl` are the data
-this baseline leaves behind for a later learned agent to beat.
+The hand-coded hill-climbing baseline (`search.py` + `evaluate.py`) remains the
+live loop's optimizer — both RL agents above are trained and evaluated
+offline against this baseline, not yet wired into `mvp.py`/`server.py`.
+`out/log.jsonl` and `out/preferences.jsonl` are the data this baseline leaves
+behind, originally intended for a later learned agent to train on directly;
+both RL sub-projects instead trained against exact metrics computed straight
+from the data, so that data remains unused by them so far.
 
 ## Tests
 
