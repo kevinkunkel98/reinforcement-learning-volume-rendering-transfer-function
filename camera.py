@@ -42,15 +42,3 @@ def apply_camera_command(cam_cmd: dict, camera: dict) -> dict:
         else:
             camera["zoom"] = float(np.clip(camera["zoom"] / factor, *ZOOM_RANGE))
     return camera
-
-
-def apply_camera_delta(camera: dict, d_azimuth: float, d_elevation: float, d_zoom_factor: float) -> dict:
-    """Continuous analogue of apply_camera_command -- same wrap/clamp rules,
-    raw deltas instead of discrete strength buckets. d_zoom_factor is
-    multiplicative (1.0 = no change), matching ZOOM_STEP_FACTOR's convention.
-    Does not mutate the input `camera` dict."""
-    camera = dict(camera)
-    camera["azimuth"] = (camera["azimuth"] + d_azimuth) % 360.0
-    camera["elevation"] = float(np.clip(camera["elevation"] + d_elevation, *ELEVATION_RANGE))
-    camera["zoom"] = float(np.clip(camera["zoom"] * d_zoom_factor, *ZOOM_RANGE))
-    return camera

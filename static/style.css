@@ -1,25 +1,53 @@
+/* ==========================================================================
+   Design tokens — shadcn/ui's stock dark-theme token set, unmodified
+   (zinc base, the default you get before picking a color theme). The only
+   addition is --success/--success-foreground, which shadcn doesn't ship by
+   default but which this UI needs for "better"/good-feedback states
+   alongside the stock --destructive. All colors are HSL triples so
+   component rules can modulate alpha via hsl(var(--x) / <alpha>), exactly
+   like shadcn's own components do.
+   ========================================================================== */
+
 :root {
   color-scheme: dark;
-  --bg: #0b0f14;
-  --panel: #10161d;
-  --raised: #182029;
-  --raised-hover: #202a35;
-  --border: #23303c;
-  --border-strong: #384856;
-  --text: #e6edf3;
-  --text-muted: #8b98a8;
-  --text-faint: #56636f;
-  --accent: #3fb6ac;
-  --accent-hover: #55c9bf;
-  --accent-text: #04211e;
-  --accent-dim: color-mix(in srgb, var(--accent) 16%, transparent);
-  --good: #4caf7d;
-  --bad: #e0685f;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-pill: 999px;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+
+  --primary: 0 0% 98%;
+  --primary-foreground: 240 5.9% 10%;
+
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+
+  --success: 142 71% 40%;
+  --success-foreground: 144 61% 92%;
+
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 240 4.9% 83.9%;
+
+  --radius: 0.5rem;
+
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
 }
 
 * { box-sizing: border-box; }
@@ -27,10 +55,11 @@
 body {
   margin: 0;
   font-family: var(--font);
-  background: var(--bg);
-  color: var(--text);
-  font-size: 15px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 14px;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 button {
@@ -44,8 +73,8 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 1px hsl(var(--background)), 0 0 0 3px hsl(var(--ring) / 0.5);
 }
 
 #app {
@@ -61,35 +90,34 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 40px;
+  height: 44px;
   padding: 0 16px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  background: hsl(var(--background));
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 #app-bar-left {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--accent);
+  color: hsl(var(--primary));
 }
 
 #app-mark { width: 16px; height: 16px; }
 
 #app-title {
-  font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 1.5px;
-  color: var(--text);
+  letter-spacing: -0.01em;
+  color: hsl(var(--foreground));
 }
 
-#app-title .thin { color: var(--accent); font-weight: 500; }
+#app-title .thin { color: hsl(var(--primary)); font-weight: 500; }
 
 #app-bar-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 #session-indicator {
@@ -97,17 +125,16 @@ select:focus-visible {
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 1px;
-  color: var(--text-faint);
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
 }
 
 #session-indicator .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--good);
-  box-shadow: 0 0 4px var(--good);
+  background: hsl(var(--success));
+  box-shadow: 0 0 0 3px hsl(var(--success) / 0.18);
 }
 
 #main {
@@ -115,6 +142,79 @@ select:focus-visible {
   display: flex;
   min-height: 0;
 }
+
+/* ==========================================================================
+   Buttons — shadcn Button: base shape/typography, then variant + size
+   modifier classes composed onto it, matching shadcn's own API
+   (<Button variant="outline" size="icon">).
+   ========================================================================== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: transparent;
+  color: hsl(var(--foreground));
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+.btn:disabled { opacity: 0.5; cursor: default; pointer-events: none; }
+
+.btn-default {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.btn-default:hover:not(:disabled) { background: hsl(var(--primary) / 0.9); }
+
+.btn-secondary {
+  background: hsl(var(--secondary));
+  color: hsl(var(--secondary-foreground));
+}
+.btn-secondary:hover:not(:disabled) { background: hsl(var(--secondary) / 0.8); }
+
+.btn-outline {
+  background: transparent;
+  border-color: hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+.btn-outline:hover:not(:disabled) { background: hsl(var(--accent)); border-color: hsl(var(--border)); }
+
+.btn-ghost {
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+}
+.btn-ghost:hover:not(:disabled) { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+
+.btn-destructive {
+  background: transparent;
+  border-color: hsl(var(--destructive) / 0.4);
+  color: hsl(var(--destructive));
+}
+.btn-destructive:hover:not(:disabled) { background: hsl(var(--destructive) / 0.12); }
+
+.btn-success {
+  background: transparent;
+  border-color: hsl(var(--success) / 0.4);
+  color: hsl(var(--success));
+}
+.btn-success:hover:not(:disabled) { background: hsl(var(--success) / 0.12); }
+
+.btn-sm { height: 30px; padding: 0 12px; font-size: 12.5px; }
+
+.btn-icon { width: 32px; height: 32px; padding: 0; border-radius: var(--radius); }
+.btn-icon svg { width: 15px; height: 15px; }
+
+.btn-icon-round { width: 34px; height: 34px; padding: 0; border-radius: 999px; }
 
 /* ---------- image panel ---------- */
 
@@ -124,9 +224,9 @@ select:focus-visible {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
+  background: hsl(var(--background));
   padding: 18px;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
 }
 
@@ -148,24 +248,20 @@ select:focus-visible {
 #current-image {
   max-width: 100%;
   max-height: 78vh;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
   background: #000;
   display: block;
   cursor: grab;
   touch-action: none;
 }
 
-#current-image.dragging {
-  cursor: grabbing;
-}
-
 #before-image,
 #after-image {
   max-width: 100%;
   max-height: 60vh;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
   background: #000;
 }
 
@@ -177,64 +273,79 @@ select:focus-visible {
 }
 
 #dataset-row label {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 1px;
-  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
 }
 
-#dataset-select {
-  font-family: var(--mono);
+/* shadcn Select: a trigger button that opens a listbox popover -- a plain
+   <select> can't be restyled into this look (its open dropdown is always
+   OS-native), so this is a small hand-built listbox instead. */
+.select-root {
+  position: relative;
+}
+
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
   font-size: 12.5px;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 5px 10px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius);
+  transition: border-color 0.15s ease;
 }
 
-#dataset-select:hover { border-color: var(--border-strong); }
+.select-trigger:hover { border-color: hsl(var(--muted-foreground) / 0.4); }
+
+.select-chevron { width: 14px; height: 14px; color: hsl(var(--muted-foreground)); }
+
+.select-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  z-index: 30;
+  padding: 4px;
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.select-option {
+  padding: 6px 10px;
+  font-size: 12.5px;
+  border-radius: calc(var(--radius) - 2px);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.select-option.highlighted { background: hsl(var(--accent)); }
+
+.select-option[aria-selected="true"] {
+  color: hsl(var(--primary));
+  font-weight: 600;
+}
 
 #nav {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
 }
-
-#reset-btn {
-  margin-left: 8px;
-  padding: 6px 14px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-#reset-btn:hover { color: var(--text); }
-#reset-btn:disabled { opacity: 0.3; cursor: default; }
 
 #step-counter {
   font-family: var(--mono);
-  color: var(--text-muted);
-  font-size: 12.5px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   min-width: 3.5em;
   text-align: center;
 }
-
-.icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--panel);
-}
-
-.icon-btn svg { width: 15px; height: 15px; }
-
-.icon-btn:hover:not(:disabled) { background: var(--raised-hover); border-color: var(--border-strong); }
-.icon-btn:disabled { opacity: 0.3; cursor: default; }
 
 .pair {
   display: flex;
@@ -244,36 +355,23 @@ select:focus-visible {
 .pair p {
   text-align: center;
   margin: 0 0 6px;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
 }
 
 #judge-progress {
   font-family: var(--mono);
   font-size: 12px;
-  color: var(--text-muted);
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 
 #judge-buttons {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   margin-top: 4px;
 }
-
-.pill-btn {
-  padding: 9px 22px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: var(--raised);
-  font-weight: 500;
-}
-
-.pill-btn:hover { background: var(--raised-hover); }
-.pill-btn.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
-.pill-btn.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--border)); }
 
 /* ---------- telemetry strip ---------- */
 
@@ -281,9 +379,10 @@ select:focus-visible {
   display: flex;
   width: 100%;
   max-width: 720px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   overflow: hidden;
 }
 
@@ -293,24 +392,24 @@ select:focus-visible {
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  padding: 8px 4px;
-  border-right: 1px solid var(--border);
+  padding: 10px 4px;
+  border-right: 1px solid hsl(var(--border));
 }
 
 .telem-item:last-child { border-right: none; }
 
 .telem-label {
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 1px;
-  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
 }
 
 .telem-value {
   font-family: var(--mono);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  color: var(--accent);
+  color: hsl(var(--primary));
 }
 
 /* ---------- chat panel ---------- */
@@ -321,8 +420,8 @@ select:focus-visible {
   max-width: 440px;
   display: flex;
   flex-direction: column;
-  background: var(--panel);
-  border-left: 1px solid var(--border);
+  background: hsl(var(--card));
+  border-left: 1px solid hsl(var(--border));
 }
 
 #messages {
@@ -337,25 +436,27 @@ select:focus-visible {
 #empty-state {
   margin: auto;
   text-align: center;
-  color: var(--text-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 #empty-state p { margin: 4px 0; }
-#empty-state .hint { font-family: var(--mono); font-size: 12.5px; color: var(--text-faint); }
+#empty-state .hint { font-family: var(--mono); font-size: 12px; color: hsl(var(--muted-foreground) / 0.7); }
 
+/* Chat bubble, styled like a shadcn Card (border + bg-card + shadow-sm) */
 .msg {
   align-self: flex-end;
   max-width: 90%;
-  background: var(--raised);
-  border-left: 2px solid var(--accent);
-  border-radius: 3px;
-  padding: 9px 12px;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 7px;
 }
 
-.msg-text { font-size: 14px; }
+.msg-text { font-size: 13.5px; }
 
 .msg-tags {
   display: flex;
@@ -363,24 +464,22 @@ select:focus-visible {
   flex-wrap: wrap;
 }
 
+/* shadcn Badge */
 .tag {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.5px;
-  padding: 2px 7px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: hsl(var(--secondary));
+  color: hsl(var(--secondary-foreground));
 }
 
-.tag.good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
-.tag.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
-
-.msg img {
-  max-width: 220px;
-  border-radius: var(--radius-sm);
-  display: block;
-}
+.tag.good { background: transparent; border-color: hsl(var(--success) / 0.4); color: hsl(var(--success)); }
+.tag.bad { background: transparent; border-color: hsl(var(--destructive) / 0.4); color: hsl(var(--destructive)); }
 
 .msg-feedback {
   display: flex;
@@ -394,23 +493,24 @@ select:focus-visible {
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   border: none;
   background: transparent;
-  color: var(--text-faint);
+  color: hsl(var(--muted-foreground) / 0.7);
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .feedback-btn svg { width: 13px; height: 13px; }
 
-.feedback-btn:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.feedback-btn:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
 
-.feedback-btn.active.up { color: var(--good); }
-.feedback-btn.active.down { color: var(--bad); }
+.feedback-btn.active.up { color: hsl(var(--success)); }
+.feedback-btn.active.down { color: hsl(var(--destructive)); }
 
 /* ---------- composer ---------- */
 
 #composer {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid hsl(var(--border));
   padding: 12px 16px 16px;
   display: flex;
   flex-direction: column;
@@ -434,38 +534,80 @@ select:focus-visible {
   display: none;
 }
 
-.chip {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.3px;
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+/* shadcn Toggle: single two-state pressed/unpressed control (used for the
+   binary "search" switch), matching Button's ghost variant when off and a
+   tinted "on" state when active -- mirrors Radix Toggle's data-state="on"
+   pattern via data-active, since this one isn't part of a group. */
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
   background: transparent;
-  color: var(--text-muted);
+  color: hsl(var(--muted-foreground));
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.chip:hover { background: var(--raised); color: var(--text); }
+.toggle:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
 
-.chip[data-active="true"] {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-  color: var(--accent);
+.toggle[data-active="true"] {
+  background: hsl(var(--primary) / 0.15);
+  border-color: hsl(var(--primary) / 0.4);
+  color: hsl(var(--primary));
 }
 
-.chip-quiet {
-  font-size: 11px;
-  padding: 5px 10px;
-  color: var(--text-faint);
+/* shadcn ToggleGroup: a segmented, single-select set of toggle items sharing
+   one border, exactly one of which carries data-state="on" at a time. */
+.toggle-group {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.toggle-item {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-right: 1px solid hsl(var(--border));
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.toggle-item:last-child { border-right: none; }
+
+.toggle-item:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+
+.toggle-item[data-state="on"] {
+  background: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+}
+
+.toggle-group-sm .toggle-item,
+.toggle-item-sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11.5px;
 }
 
 #steps-input {
-  width: 52px;
-  padding: 5px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--raised);
-  color: var(--text);
+  width: 56px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--input));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
   font-family: var(--mono);
   font-size: 12px;
 }
@@ -474,15 +616,16 @@ select:focus-visible {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  padding: 6px 6px 6px 8px;
-  transition: border-color 0.15s ease;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--input));
+  border-radius: calc(var(--radius) + 12px);
+  padding: 6px 6px 6px 10px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 #input-row:focus-within {
-  border-color: var(--accent);
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.25);
 }
 
 #text-input {
@@ -490,9 +633,9 @@ select:focus-visible {
   resize: none;
   border: none;
   background: transparent;
-  color: var(--text);
+  color: hsl(var(--foreground));
   font-family: inherit;
-  font-size: 14.5px;
+  font-size: 14px;
   line-height: 1.4;
   padding: 8px 4px;
   max-height: 8.5em;
@@ -500,7 +643,7 @@ select:focus-visible {
 }
 
 #text-input:focus { outline: none; }
-#text-input::placeholder { color: var(--text-faint); }
+#text-input::placeholder { color: hsl(var(--muted-foreground) / 0.7); }
 
 #mic-btn,
 #send-btn {
@@ -510,34 +653,35 @@ select:focus-visible {
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: var(--radius-pill);
+  border-radius: 999px;
   border: none;
   background: transparent;
-  color: var(--text-muted);
+  color: hsl(var(--muted-foreground));
   position: relative;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 #mic-btn svg,
-#send-btn svg { width: 18px; height: 18px; }
+#send-btn svg { width: 17px; height: 17px; }
 
-#mic-btn:hover { background: var(--raised-hover); color: var(--text); }
+#mic-btn:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
 
 #send-btn {
-  background: var(--border-strong);
-  color: var(--text-faint);
+  background: hsl(var(--secondary));
+  color: hsl(var(--muted-foreground) / 0.6);
 }
 
 #send-btn:not(:disabled) {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 
-#send-btn:not(:disabled):hover { background: var(--accent-hover); }
+#send-btn:not(:disabled):hover { background: hsl(var(--primary) / 0.9); }
 #send-btn:disabled { cursor: default; }
 
 #mic-btn.recording {
-  background: color-mix(in srgb, var(--bad) 20%, transparent);
-  color: var(--bad);
+  background: hsl(var(--destructive) / 0.15);
+  color: hsl(var(--destructive));
 }
 
 #mic-btn.recording #mic-icon { display: none; }
@@ -550,10 +694,14 @@ select:focus-visible {
   height: 16px;
 }
 
+#mic-waveform[hidden] {
+  display: none;
+}
+
 #mic-waveform span {
   width: 2.5px;
   border-radius: 2px;
-  background: var(--bad);
+  background: hsl(var(--destructive));
   height: 4px;
   transition: height 0.08s ease;
 }
@@ -562,22 +710,39 @@ select:focus-visible {
   #mic-waveform span { transition: none; }
 }
 
-/* ---------- command reference modal ---------- */
+/* ==========================================================================
+   Command reference dialog — shadcn Dialog: bg-popover, border, shadow-lg,
+   rounded-lg, semi-opaque ::backdrop.
+   ========================================================================== */
 
 #commands-modal {
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) + 2px);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
   padding: 0;
   max-width: 560px;
   width: 90vw;
   max-height: 80vh;
   overflow-y: auto;
+  opacity: 0;
+  transform: scale(0.96) translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+#commands-modal.dialog-open {
+  opacity: 1;
+  transform: scale(1) translateY(0);
 }
 
 #commands-modal::backdrop {
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0);
+  transition: background-color 0.15s ease;
+}
+
+#commands-modal.dialog-open::backdrop {
+  background: rgba(0, 0, 0, 0.6);
 }
 
 #commands-modal-header {
@@ -585,18 +750,17 @@ select:focus-visible {
   justify-content: space-between;
   align-items: center;
   padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid hsl(var(--border));
   position: sticky;
   top: 0;
-  background: var(--panel);
+  background: hsl(var(--popover));
 }
 
 #commands-modal-header h2 {
   margin: 0;
   font-size: 14px;
-  font-family: var(--mono);
-  letter-spacing: 0.5px;
-  color: var(--text);
+  font-weight: 600;
+  color: hsl(var(--foreground));
 }
 
 #commands-list {
@@ -613,16 +777,15 @@ select:focus-visible {
 
 .cmd-category h3 {
   margin: 0 0 4px;
-  color: var(--accent);
+  color: hsl(var(--primary));
   font-size: 13px;
-  font-family: var(--mono);
-  letter-spacing: 0.5px;
+  font-weight: 600;
 }
 
 .cmd-category p {
   margin: 0;
-  font-size: 13px;
-  color: var(--text-muted);
+  font-size: 12.5px;
+  color: hsl(var(--muted-foreground));
 }
 
 .cmd-examples {
@@ -634,17 +797,135 @@ select:focus-visible {
 
 .cmd-example-chip {
   font-family: var(--mono);
-  font-size: 12.5px;
-  background: var(--raised);
-  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: hsl(var(--secondary));
+  border-radius: var(--radius);
   padding: 5px 9px;
   width: fit-content;
-  color: var(--text);
+  color: hsl(var(--secondary-foreground));
+}
+
+/* ==========================================================================
+   Tooltip — shadcn Tooltip: small dark popover, fades/slides in above its
+   trigger. One shared element, repositioned per-trigger by app.js.
+   ========================================================================== */
+
+#tooltip {
+  position: fixed;
+  z-index: 50;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Toast — shadcn Toast/Sonner: stacked, dismissable, auto-expiring
+   notifications in a fixed corner viewport.
+   ========================================================================== */
+
+#toast-viewport {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, calc(100vw - 40px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.toast-visible { opacity: 1; transform: translateY(0); }
+.toast-leaving { opacity: 0; transform: translateY(8px); }
+
+.toast-destructive {
+  border-color: hsl(var(--destructive) / 0.4);
+}
+
+.toast-destructive .toast-text {
+  color: hsl(var(--destructive));
+}
+
+.toast-text {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.toast-close {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px;
+  border-radius: calc(var(--radius) - 2px);
+}
+
+.toast-close:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+
+@media (prefers-reduced-motion: reduce) {
+  #commands-modal,
+  .toast { transition: none; }
+}
+
+/* ==========================================================================
+   ScrollArea — shadcn ScrollArea's visible effect (a slim, unobtrusive
+   scrollbar) applied via native scrollbar styling rather than reimplementing
+   Radix's JS-driven fake scrollbar, which buys little here for real cost.
+   ========================================================================== */
+
+#messages,
+#commands-modal {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+#messages::-webkit-scrollbar,
+#commands-modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+#messages::-webkit-scrollbar-track,
+#commands-modal::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#messages::-webkit-scrollbar-thumb,
+#commands-modal::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 999px;
+}
+
+#messages::-webkit-scrollbar-thumb:hover,
+#commands-modal::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
 }
 
 /* ---------- responsive ---------- */
 
 @media (max-width: 860px) {
   #main { flex-direction: column; }
-  #chat-panel { max-width: none; border-left: none; border-top: 1px solid var(--border); }
+  #chat-panel { max-width: none; border-left: none; border-top: 1px solid hsl(var(--border)); }
 }

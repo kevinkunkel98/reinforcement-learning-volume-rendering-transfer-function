@@ -8,6 +8,7 @@ itself is thin enough to verify by running the real server (see the plan's Task 
 """
 import os
 
+import numpy as np
 import pytest
 
 from server import Session
@@ -78,6 +79,40 @@ def test_objective_search_appends_one_final_step():
     assert state["total"] == 2  # one new step, not one per iteration
     assert state["current"]["search"] is True
     assert state["current"]["masses"]["bone"] > 220.0
+
+
+def test_policy_search_raises_when_no_trained_model():
+    # _isolate_cwd (autouse) has already chdir'd to a scratch tmp_path, so
+    # out/rl_models/sac_tf_agent.zip does not exist here even if the real
+    # repo has a trained model on disk -- this is the fresh-checkout/CI path.
+    s = _fresh_session()
+    with pytest.raises(ValueError, match="no trained model"):
+        s.command("increase opacity for bone strongly", parser="rule",
+                   search=True, evaluator="policy", steps=3)
+    assert s.state()["total"] == 1  # nothing appended on failure
+
+
+def test_policy_search_appends_one_final_step(monkeypatch):
+    import server as server_module
+    from commands import _find_or_create_peak
+
+    def fake_run_policy(params, tissue, direction, idx, steps):
+        moved = params.copy()
+        moved[idx * 3 + 2] = min(1.0, moved[idx * 3 + 2] + 0.1)
+        return moved
+
+    monkeypatch.setattr(server_module, "run_policy", fake_run_policy)
+
+    s = _fresh_session()
+    before_params = s.state()["current"]["params"]
+    _, idx = _find_or_create_peak(np.array(before_params, dtype=np.float64), "bone")
+    expected_height = min(1.0, before_params[idx * 3 + 2] + 0.1)
+
+    state = s.command("increase opacity for bone strongly", parser="rule",
+                       search=True, evaluator="policy", steps=5)
+    assert state["total"] == 2  # one new step, not one per iteration
+    assert state["current"]["search"] is True
+    assert state["current"]["params"][idx * 3 + 2] == pytest.approx(expected_height)
 
 
 def test_human_search_returns_pending_and_judge_advances_it():
@@ -286,59 +321,3 @@ def test_camera_change_during_pending_judgment_does_not_corrupt_final_camera():
     session.judge("better")
     state = session.judge("worse")
     assert state["current"]["camera"] == rotated_camera
-
-
-def test_camera_delta_preview_does_not_change_history():
-    session = _fresh_session()
-    before_total = session.state()["total"]
-    before_cursor = session.cursor
-    result = session.camera_delta(30.0, 10.0, 1.2, commit=False)
-    assert session.state()["total"] == before_total
-    assert session.cursor == before_cursor
-    assert "image_b64" in result
-    assert result["camera"]["azimuth"] == pytest.approx(60.0)  # DEFAULT_CAMERA azimuth (30.0) + 30.0
-
-
-def test_camera_delta_preview_does_not_write_image_file():
-    session = _fresh_session()
-    session_dir = os.path.join("out", "ui_images", session.session_id)
-    before_files = set(os.listdir(session_dir)) if os.path.exists(session_dir) else set()
-    session.camera_delta(30.0, 10.0, 1.2, commit=False)
-    after_files = set(os.listdir(session_dir)) if os.path.exists(session_dir) else set()
-    assert after_files == before_files
-
-
-def test_camera_delta_commit_appends_one_history_step():
-    session = _fresh_session()
-    before_total = session.state()["total"]
-    state = session.camera_delta(30.0, 0.0, 1.0, commit=True)
-    assert state["total"] == before_total + 1
-    assert state["current"]["camera"]["azimuth"] == pytest.approx(60.0)
-    assert state["current"]["cmd_text"] == "manual rotation"
-
-
-def test_camera_delta_wraps_and_clamps_large_values():
-    session = _fresh_session()
-    from camera import ELEVATION_RANGE, ZOOM_RANGE
-    state = session.camera_delta(730.0, 500.0, 100.0, commit=True)
-    camera = state["current"]["camera"]
-    assert 0.0 <= camera["azimuth"] < 360.0
-    assert ELEVATION_RANGE[0] <= camera["elevation"] <= ELEVATION_RANGE[1]
-    assert ZOOM_RANGE[0] <= camera["zoom"] <= ZOOM_RANGE[1]
-
-
-def test_camera_delta_commit_works_while_judgment_pending():
-    session = _fresh_session()
-    session.command("increase opacity for bone strongly", parser="rule",
-                     search=True, evaluator="human", steps=2)
-    assert session.pending is not None
-    state = session.camera_delta(30.0, 0.0, 1.0, commit=True)
-    assert session.pending is not None  # pending judgment untouched
-    assert state["current"]["cmd_text"] == "manual rotation"
-
-
-def test_camera_delta_preview_then_different_commit_uses_original_camera():
-    session = _fresh_session()
-    session.camera_delta(90.0, 5.0, 2.0, commit=False)  # preview, discarded
-    state = session.camera_delta(30.0, 0.0, 1.0, commit=True)  # different delta
-    assert state["current"]["camera"]["azimuth"] == pytest.approx(60.0)  # 30 (default) + 30, not +90

@@ -97,8 +97,9 @@ navigation restores both together. Session state persists in
 Two Gymnasium environments, trained offline with `stable-baselines3` SAC against
 exact metrics computed directly on the data (no rendering, no human labels), each
 compared against the hand-coded hill-climbing baseline they're meant to replace.
-**Neither is wired into the live chat/voice loop yet** — this is offline
-training + evaluation only.
+**The camera-viewpoint policy is not wired into the live loop yet** — the
+opacity policy now is (chat UI only, see below); both remain trained and
+evaluated offline first.
 
 - **`rl/env.py` + `rl/train.py` + `rl/eval.py`** — transfer-function opacity.
   One episode = one (target tissue, direction) goal; the agent moves the
@@ -109,6 +110,9 @@ training + evaluation only.
 
       python -m rl.train --timesteps 200000
       python -m rl.eval
+
+  The trained policy is also wired live into the chat UI's search toggle
+  (`server.py`, evaluator = policy — no CLI equivalent) — see `rl/serve.py`.
 
 - **`rl/camera_env.py` + `rl/camera_train.py` + `rl/camera_eval.py`** — camera
   viewpoint. One episode = one target tissue on a real CT volume (`ct_skull`);
@@ -142,13 +146,15 @@ it was made domain-aware).
 - `datasets.py` — real CT dataset registry, checksum-verified download + NRRD loading
 - `search.py` — hill-climb search-step math, shared by `mvp.py`, `server.py`, and both RL evaluators
 - `server.py` + `static/` — FastAPI chat UI (text/voice commands, history navigation, human judging, camera)
-- `rl/env.py`, `rl/train.py`, `rl/eval.py` — offline SAC RL for transfer-function opacity
+- `rl/env.py`, `rl/train.py`, `rl/eval.py`, `rl/serve.py` — SAC RL for transfer-function opacity (train/eval offline, serve live)
 - `rl/camera_env.py`, `rl/camera_train.py`, `rl/camera_eval.py` — offline SAC RL for camera viewpoint
 - `docs/architecture.typ` — full architecture reference (compiled: `docs/architecture.pdf`)
 
-The hand-coded hill-climbing baseline (`search.py` + `evaluate.py`) remains the
-live loop's optimizer — both RL agents above are trained and evaluated
-offline against this baseline, not yet wired into `mvp.py`/`server.py`.
+The hand-coded hill-climbing baseline (`search.py` + `evaluate.py`) remains
+the default live-loop optimizer, and the only one `mvp.py` uses. `server.py`
+additionally offers the trained opacity policy as a third search option
+(`evaluator=policy`); the camera-viewpoint policy is trained and evaluated
+offline only, not yet wired into either loop.
 `out/log.jsonl` and `out/preferences.jsonl` are the data this baseline leaves
 behind, originally intended for a later learned agent to train on directly;
 both RL sub-projects instead trained against exact metrics computed straight

@@ -16,7 +16,7 @@
         <span id="app-title">TF<span class="thin">/RL</span> CONSOLE</span>
       </div>
       <div id="app-bar-right">
-        <button id="commands-help-btn" class="icon-btn" aria-label="Command reference" title="Command reference">?</button>
+        <button id="commands-help-btn" class="btn btn-ghost btn-icon" aria-label="Command reference" data-tooltip="Command reference">?</button>
         <span id="session-indicator"><span class="dot"></span>LOKALE SITZUNG</span>
       </div>
     </header>
@@ -24,8 +24,15 @@
     <div id="main">
       <section id="image-panel">
         <div id="dataset-row">
-          <label for="dataset-select">SAMPLE</label>
-          <select id="dataset-select"></select>
+          <label id="dataset-select-label">SAMPLE</label>
+          <div id="dataset-select" class="select-root">
+            <button type="button" id="dataset-select-trigger" class="select-trigger"
+                    aria-haspopup="listbox" aria-expanded="false" aria-labelledby="dataset-select-label dataset-select-value">
+              <span id="dataset-select-value">—</span>
+              <svg class="select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div id="dataset-select-popover" class="select-popover" role="listbox" aria-labelledby="dataset-select-label" hidden></div>
+          </div>
         </div>
 
         <div id="viewport">
@@ -34,14 +41,14 @@
               <img id="current-image" alt="rendered volume" />
             </div>
             <div id="nav">
-              <button id="back-btn" class="icon-btn" aria-label="Previous step">
+              <button id="back-btn" class="btn btn-outline btn-icon" aria-label="Previous step" data-tooltip="Previous step">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
               </button>
               <span id="step-counter">1 / 1</span>
-              <button id="forward-btn" class="icon-btn" aria-label="Next step">
+              <button id="forward-btn" class="btn btn-outline btn-icon" aria-label="Next step" data-tooltip="Next step">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
               </button>
-              <button id="reset-btn" class="pill-btn" title="Reset the transfer function to its default">Reset</button>
+              <button id="reset-btn" class="btn btn-secondary btn-sm" data-tooltip="Reset the transfer function to its default">Reset</button>
             </div>
           </div>
           <div id="judge-view" hidden>
@@ -51,8 +58,8 @@
             </div>
             <p id="judge-progress"></p>
             <div id="judge-buttons">
-              <button id="worse-btn" class="pill-btn bad">Worse</button>
-              <button id="better-btn" class="pill-btn good">Better</button>
+              <button id="worse-btn" class="btn btn-destructive">Worse</button>
+              <button id="better-btn" class="btn btn-success">Better</button>
             </div>
           </div>
         </div>
@@ -76,16 +83,23 @@
 
         <div id="composer">
           <div id="toolbar">
-            <button id="parser-toggle" class="chip" data-value="rule" title="Command parser">rule parser</button>
-            <button id="search-toggle-btn" class="chip" data-active="false" title="Hill-climb search">search</button>
+            <div id="parser-toggle-group" class="toggle-group" data-toggle-group="parser" role="radiogroup" aria-label="Command parser">
+              <button type="button" class="toggle-item" data-value="rule" data-state="on">rule</button>
+              <button type="button" class="toggle-item" data-value="llm" data-state="off">llm</button>
+            </div>
+            <button id="search-toggle-btn" class="toggle" data-active="false" data-tooltip="Hill-climb search">search</button>
             <div id="search-options" hidden>
-              <button id="evaluator-toggle" class="chip chip-quiet" data-value="objective" title="Evaluator">objective</button>
+              <div id="evaluator-toggle-group" class="toggle-group toggle-group-sm" data-toggle-group="evaluator" role="radiogroup" aria-label="Search evaluator">
+                <button type="button" class="toggle-item toggle-item-sm" data-value="objective" data-state="on">objective</button>
+                <button type="button" class="toggle-item toggle-item-sm" data-value="human" data-state="off">human</button>
+                <button type="button" class="toggle-item toggle-item-sm" data-value="policy" data-state="off">policy</button>
+              </div>
               <input id="steps-input" type="number" value="10" min="1" max="50" aria-label="Search steps" />
             </div>
           </div>
 
           <div id="input-row">
-            <button id="mic-btn" aria-label="Record voice command" title="Push to talk">
+            <button id="mic-btn" aria-label="Record voice command" data-tooltip="Push to talk">
               <svg id="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="9" y="2" width="6" height="12" rx="3"/>
                 <path d="M5 10a7 7 0 0 0 14 0"/>
@@ -96,7 +110,7 @@
               </div>
             </button>
             <textarea id="text-input" rows="1" placeholder="increase opacity for bone strongly"></textarea>
-            <button id="send-btn" aria-label="Send" disabled>
+            <button id="send-btn" aria-label="Send" data-tooltip="Send" disabled>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
             </button>
           </div>
@@ -107,10 +121,12 @@
     <dialog id="commands-modal" aria-labelledby="commands-modal-title">
       <div id="commands-modal-header">
         <h2 id="commands-modal-title">Command Reference</h2>
-        <button id="commands-modal-close" class="icon-btn" aria-label="Close">×</button>
+        <button id="commands-modal-close" class="btn btn-ghost btn-icon" aria-label="Close" data-tooltip="Close">×</button>
       </div>
       <div id="commands-list"></div>
     </dialog>
+
+    <div id="toast-viewport" role="region" aria-live="polite" aria-label="Notifications"></div>
   </div>
   <script src="/static/app.js"></script>
 </body>

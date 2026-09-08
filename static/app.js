@@ -18,9 +18,7 @@ async function refresh(data) {
   state.total = data.total;
   state.pending = data.pending;
   if (data.dataset && data.dataset !== state.dataset) {
-    state.dataset = data.dataset;
-    const select = el("dataset-select");
-    if (select.value !== data.dataset) select.value = data.dataset;
+    setSelectValue(data.dataset);
   }
 
   el("step-counter").textContent = `${state.cursor + 1} / ${state.total}`;
@@ -88,10 +86,6 @@ function appendMessage(step) {
   }
   if (tags.children.length) div.appendChild(tags);
 
-  const img = document.createElement("img");
-  img.src = `data:image/png;base64,${step.image_b64}`;
-  div.appendChild(img);
-
   div.appendChild(buildFeedbackRow(step));
 
   messagesEl.appendChild(div);
@@ -155,22 +149,12 @@ async function sendCommand(text) {
   });
   if (r.status !== 200) {
     const err = await r.json();
-    appendError(err.detail);
+    showToast(`Could not parse that: ${err.detail}`, "destructive");
     return;
   }
   const data = await r.json();
   await refresh(data);
   if (!data.pending) appendMessage(data.current);
-}
-
-function appendError(detail) {
-  if (emptyState.parentNode === messagesEl) messagesEl.removeChild(emptyState);
-  const div = document.createElement("div");
-  div.className = "msg";
-  div.style.color = "var(--bad)";
-  div.textContent = `Could not parse that: ${detail}`;
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 async function judge(verdict) {
@@ -217,14 +201,31 @@ el("reset-btn").addEventListener("click", () => sendCommand("reset"));
 el("better-btn").addEventListener("click", () => judge("better"));
 el("worse-btn").addEventListener("click", () => judge("worse"));
 
-// ---------- toolbar chips ----------
+// ---------- toolbar: toggle groups + single toggle ----------
 
-const parserToggle = el("parser-toggle");
-parserToggle.addEventListener("click", () => {
-  config.parser = config.parser === "rule" ? "llm" : "rule";
-  parserToggle.textContent = `${config.parser} parser`;
-  parserToggle.dataset.active = config.parser === "llm" ? "true" : "false";
-});
+// A ToggleGroup is a single-select set of buttons sharing one `data-toggle-group`
+// container: exactly one child carries data-state="on" at a time, clicking a
+// sibling flips it, and the container's mapped `config` key is kept in sync.
+function initToggleGroup(container) {
+  const key = container.dataset.toggleGroup;
+  const items = Array.from(container.querySelectorAll(".toggle-item"));
+  items.forEach((item) => {
+    item.setAttribute("role", "radio");
+    item.setAttribute("aria-checked", item.dataset.state === "on" ? "true" : "false");
+    item.addEventListener("click", () => {
+      if (item.dataset.state === "on") return;
+      items.forEach((other) => {
+        other.dataset.state = "off";
+        other.setAttribute("aria-checked", "false");
+      });
+      item.dataset.state = "on";
+      item.setAttribute("aria-checked", "true");
+      config[key] = item.dataset.value;
+    });
+  });
+}
+
+document.querySelectorAll("[data-toggle-group]").forEach(initToggleGroup);
 
 const searchToggleBtn = el("search-toggle-btn");
 const searchOptions = el("search-options");
@@ -232,12 +233,6 @@ searchToggleBtn.addEventListener("click", () => {
   config.search = !config.search;
   searchToggleBtn.dataset.active = String(config.search);
   searchOptions.hidden = !config.search;
-});
-
-const evaluatorToggle = el("evaluator-toggle");
-evaluatorToggle.addEventListener("click", () => {
-  config.evaluator = config.evaluator === "objective" ? "human" : "objective";
-  evaluatorToggle.textContent = config.evaluator;
 });
 
 // ---------- mic: push to talk + real audio-reactive waveform ----------
@@ -290,7 +285,7 @@ micBtn.addEventListener("click", async () => {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
-    appendError("microphone access denied or unavailable");
+    showToast("Microphone access denied or unavailable", "destructive");
     return;
   }
   mediaRecorder = new MediaRecorder(stream);
@@ -322,40 +317,104 @@ micBtn.addEventListener("click", async () => {
   startWaveform(stream);
 });
 
-// ---------- dataset selector ----------
+// ---------- dataset selector (custom Select: trigger button + listbox popover) ----------
 
-const datasetSelect = el("dataset-select");
+const selectTrigger = el("dataset-select-trigger");
+const selectValueLabel = el("dataset-select-value");
+const selectPopover = el("dataset-select-popover");
+let selectOptions = [];
+let selectHighlighted = -1;
+
+function setSelectValue(name) {
+  state.dataset = name;
+  selectValueLabel.textContent = name;
+  selectOptions.forEach((opt) => opt.setAttribute("aria-selected", String(opt.dataset.value === name)));
+}
+
+function openSelect() {
+  selectPopover.hidden = false;
+  selectTrigger.setAttribute("aria-expanded", "true");
+  selectHighlighted = selectOptions.findIndex((opt) => opt.dataset.value === state.dataset);
+  highlightSelectOption(selectHighlighted);
+}
+
+function closeSelect() {
+  selectPopover.hidden = true;
+  selectTrigger.setAttribute("aria-expanded", "false");
+}
+
+function highlightSelectOption(index) {
+  selectOptions.forEach((opt, i) => opt.classList.toggle("highlighted", i === index));
+  if (index >= 0) selectOptions[index].scrollIntoView({ block: "nearest" });
+}
+
+async function chooseDataset(name) {
+  if (name === state.dataset) { closeSelect(); return; }
+  const previous = state.dataset;
+  const r = await fetch("/api/dataset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (r.status !== 200) {
+    const err = await r.json();
+    showToast(`Could not switch dataset: ${err.detail}`, "destructive");
+    setSelectValue(previous);
+    closeSelect();
+    return;
+  }
+  const data = await r.json();
+  setSelectValue(name);
+  closeSelect();
+  messagesEl.innerHTML = "";
+  messagesEl.appendChild(emptyState);
+  await refresh(data);
+}
 
 async function loadDatasets() {
   const r = await fetch("/api/datasets");
   const data = await r.json();
-  datasetSelect.innerHTML = "";
-  data.available.forEach((name) => {
-    const opt = document.createElement("option");
-    opt.value = name;
+  selectPopover.innerHTML = "";
+  selectOptions = data.available.map((name) => {
+    const opt = document.createElement("div");
+    opt.className = "select-option";
+    opt.setAttribute("role", "option");
+    opt.dataset.value = name;
     opt.textContent = name;
-    datasetSelect.appendChild(opt);
+    opt.addEventListener("click", () => chooseDataset(name));
+    selectPopover.appendChild(opt);
+    return opt;
   });
-  datasetSelect.value = data.current;
-  state.dataset = data.current;
+  setSelectValue(data.current);
 }
 
-datasetSelect.addEventListener("change", async () => {
-  const r = await fetch("/api/dataset", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: datasetSelect.value }),
-  });
-  if (r.status !== 200) {
-    const err = await r.json();
-    alert(`Could not switch dataset: ${err.detail}`);
-    datasetSelect.value = state.dataset;
+selectTrigger.addEventListener("click", () => {
+  if (selectPopover.hidden) openSelect(); else closeSelect();
+});
+
+const SELECT_NAV_KEYS = ["ArrowDown", "ArrowUp", "Enter", " "];
+
+selectTrigger.addEventListener("keydown", (e) => {
+  if (SELECT_NAV_KEYS.includes(e.key)) e.preventDefault();
+  if (selectPopover.hidden) {
+    if (SELECT_NAV_KEYS.includes(e.key)) openSelect();
     return;
   }
-  const data = await r.json();
-  messagesEl.innerHTML = "";
-  messagesEl.appendChild(emptyState);
-  await refresh(data);
+  if (e.key === "ArrowDown") {
+    selectHighlighted = Math.min(selectHighlighted + 1, selectOptions.length - 1);
+    highlightSelectOption(selectHighlighted);
+  } else if (e.key === "ArrowUp") {
+    selectHighlighted = Math.max(selectHighlighted - 1, 0);
+    highlightSelectOption(selectHighlighted);
+  } else if ((e.key === "Enter" || e.key === " ") && selectHighlighted >= 0) {
+    chooseDataset(selectOptions[selectHighlighted].dataset.value);
+  } else if (e.key === "Escape") {
+    closeSelect();
+  }
+});
+
+document.addEventListener("click", (e) => {
+  if (!selectPopover.hidden && !el("dataset-select").contains(e.target)) closeSelect();
 });
 
 // ---------- command reference modal ----------
@@ -392,124 +451,101 @@ async function openCommandsModal() {
     }
   }
   modal.showModal();
+  // Dialog starts at opacity/scale 0 in CSS; adding this class one frame
+  // later is what makes the transition to full opacity/scale actually run
+  // (toggling it in the same frame as showModal() would skip straight to
+  // the end state with no visible animation).
+  requestAnimationFrame(() => modal.classList.add("dialog-open"));
+}
+
+function closeCommandsModal() {
+  const modal = el("commands-modal");
+  modal.classList.remove("dialog-open");
+  modal.close();
 }
 
 el("commands-help-btn").addEventListener("click", openCommandsModal);
-el("commands-modal-close").addEventListener("click", () => el("commands-modal").close());
+el("commands-modal-close").addEventListener("click", closeCommandsModal);
 el("commands-modal").addEventListener("click", (e) => {
-  if (e.target === el("commands-modal")) el("commands-modal").close();
+  if (e.target === el("commands-modal")) closeCommandsModal();
 });
 
-// ---------- manual camera rotation (drag) + zoom (scroll) ----------
+// ---------- tooltip ----------
+// One shared floating element, positioned above whichever [data-tooltip]
+// element is currently hovered/focused -- mirrors shadcn's Tooltip (a
+// single Radix popper instance reused per trigger, not one DOM node per
+// trigger).
 
-const DRAG_DEGREES_PER_PIXEL = 0.4;
-const DRAG_THROTTLE_MS = 110;
-const WHEEL_ZOOM_SENSITIVITY = 0.0015;
-const WHEEL_COMMIT_DEBOUNCE_MS = 300;
-const WHEEL_THROTTLE_MS = 110;
+const tooltipEl = document.createElement("div");
+tooltipEl.id = "tooltip";
+tooltipEl.hidden = true;
+document.body.appendChild(tooltipEl);
 
-const currentImage = el("current-image");
+let tooltipShowTimer = null;
 
-// Every preview/commit request gets the next sequence number; a response is
-// only applied to the DOM if it's still the most recent request sent. This
-// discards stale out-of-order responses -- e.g. a slow preview frame that
-// resolves after the drag's own commit already landed, which would otherwise
-// silently overwrite the just-committed image with an uncommitted one.
-let requestSeq = 0;
-
-async function sendCameraDelta(dAzimuth, dElevation, dZoomFactor, commit) {
-  const r = await fetch("/api/camera_delta", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ d_azimuth: dAzimuth, d_elevation: dElevation, d_zoom_factor: dZoomFactor, commit }),
-  });
-  return r.json();
+function positionTooltip(trigger) {
+  const rect = trigger.getBoundingClientRect();
+  const tipRect = tooltipEl.getBoundingClientRect();
+  const left = rect.left + rect.width / 2 - tipRect.width / 2;
+  const top = rect.top - tipRect.height - 8;
+  tooltipEl.style.left = `${Math.max(4, Math.min(left, window.innerWidth - tipRect.width - 4))}px`;
+  tooltipEl.style.top = `${Math.max(4, top)}px`;
 }
 
-let dragging = false;
-let dragStartX = 0;
-let dragStartY = 0;
-let lastDragSendAt = 0;
-
-function endDrag() {
-  dragging = false;
-  currentImage.classList.remove("dragging");
+function showTooltip(trigger) {
+  const text = trigger.dataset.tooltip;
+  if (!text) return;
+  tooltipShowTimer = setTimeout(() => {
+    tooltipEl.textContent = text;
+    tooltipEl.hidden = false;
+    positionTooltip(trigger);
+  }, 400);
 }
 
-currentImage.addEventListener("pointerdown", (e) => {
-  if (state.pending || e.button !== 0) return;
-  dragging = true;
-  dragStartX = e.clientX;
-  dragStartY = e.clientY;
-  lastDragSendAt = 0;
-  currentImage.setPointerCapture(e.pointerId);
-  currentImage.classList.add("dragging");
+function hideTooltip() {
+  clearTimeout(tooltipShowTimer);
+  tooltipEl.hidden = true;
+}
+
+document.querySelectorAll("[data-tooltip]").forEach((trigger) => {
+  trigger.addEventListener("mouseenter", () => showTooltip(trigger));
+  trigger.addEventListener("mouseleave", hideTooltip);
+  trigger.addEventListener("focus", () => showTooltip(trigger));
+  trigger.addEventListener("blur", hideTooltip);
+  trigger.addEventListener("click", hideTooltip);
 });
 
-currentImage.addEventListener("pointermove", async (e) => {
-  if (!dragging) return;
-  const now = performance.now();
-  if (now - lastDragSendAt < DRAG_THROTTLE_MS) return;
-  lastDragSendAt = now;
-  const dAzimuth = (e.clientX - dragStartX) * DRAG_DEGREES_PER_PIXEL;
-  const dElevation = -(e.clientY - dragStartY) * DRAG_DEGREES_PER_PIXEL;
-  const seq = ++requestSeq;
-  const data = await sendCameraDelta(dAzimuth, dElevation, 1.0, false);
-  if (seq !== requestSeq) return;
-  currentImage.src = `data:image/png;base64,${data.image_b64}`;
-});
+// ---------- toast ----------
 
-currentImage.addEventListener("pointerup", async (e) => {
-  if (!dragging) return;
-  endDrag();
-  const dAzimuth = (e.clientX - dragStartX) * DRAG_DEGREES_PER_PIXEL;
-  const dElevation = -(e.clientY - dragStartY) * DRAG_DEGREES_PER_PIXEL;
-  const seq = ++requestSeq;
-  const data = await sendCameraDelta(dAzimuth, dElevation, 1.0, true);
-  if (seq !== requestSeq) return;
-  await refresh(data);
-  appendMessage(data.current);
-});
+const toastViewport = el("toast-viewport");
+const TOAST_DURATION_MS = 5000;
 
-// Pointer capture keeps delivering move/up events to this element even once
-// the pointer leaves it, but the spec allows pointercancel to fire *instead
-// of* pointerup (lost window focus, an OS gesture, etc.) -- without this
-// handler, `dragging` would get stuck true forever, and every future mouse
-// movement over the image (no button held at all) would be misread as a drag.
-currentImage.addEventListener("pointercancel", () => {
-  if (!dragging) return;
-  endDrag();
-});
+function showToast(message, variant = "default") {
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${variant}`;
+  toast.setAttribute("role", variant === "destructive" ? "alert" : "status");
 
-let wheelZoomAccum = 1.0;
-let wheelCommitTimer = null;
-let lastWheelSendAt = 0;
+  const text = document.createElement("span");
+  text.className = "toast-text";
+  text.textContent = message;
+  toast.appendChild(text);
 
-currentImage.addEventListener("wheel", async (e) => {
-  if (state.pending) return;
-  e.preventDefault();
-  const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY);
-  wheelZoomAccum *= factor;
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "toast-close";
+  closeBtn.setAttribute("aria-label", "Dismiss");
+  closeBtn.textContent = "×";
+  toast.appendChild(closeBtn);
 
-  if (wheelCommitTimer) clearTimeout(wheelCommitTimer);
-  wheelCommitTimer = setTimeout(async () => {
-    const finalZoom = wheelZoomAccum;
-    wheelZoomAccum = 1.0;
-    const seq = ++requestSeq;
-    const finalData = await sendCameraDelta(0.0, 0.0, finalZoom, true);
-    if (seq !== requestSeq) return;
-    await refresh(finalData);
-    appendMessage(finalData.current);
-  }, WHEEL_COMMIT_DEBOUNCE_MS);
+  const dismiss = () => {
+    toast.classList.add("toast-leaving");
+    toast.addEventListener("transitionend", () => toast.remove(), { once: true });
+  };
+  closeBtn.addEventListener("click", dismiss);
+  setTimeout(dismiss, TOAST_DURATION_MS);
 
-  const now = performance.now();
-  if (now - lastWheelSendAt < WHEEL_THROTTLE_MS) return;
-  lastWheelSendAt = now;
-  const seq = ++requestSeq;
-  const data = await sendCameraDelta(0.0, 0.0, wheelZoomAccum, false);
-  if (seq !== requestSeq) return;
-  currentImage.src = `data:image/png;base64,${data.image_b64}`;
-}, { passive: false });
+  toastViewport.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("toast-visible"));
+}
 
 updateSendState();
 loadDatasets();

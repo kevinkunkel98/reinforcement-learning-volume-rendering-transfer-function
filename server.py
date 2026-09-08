@@ -25,8 +25,9 @@ from PIL import Image
 from pydantic import BaseModel
 
 from asr import _transcribe_path as asr_transcribe_path
-from camera import DEFAULT_CAMERA, apply_camera_command, apply_camera_delta
+from camera import DEFAULT_CAMERA, apply_camera_command
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
+from rl.serve import run_policy
 from datasets import list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import render as render_module
@@ -240,6 +241,14 @@ class Session:
         _, idx = _find_or_create_peak(params, cmd["target"])
         return self._next_pending_pair(cmd_text, cmd, params, idx, sign, step_size, 0, steps, self.session_id, camera)
 
+    def _log_command(self, cmd, current_params, new_params, step):
+        jsonl_append(LOG_PATH, {
+            "timestamp": step["timestamp"], "command": cmd,
+            "params_before": current_params.tolist(), "params_after": new_params.tolist(),
+            "features_before": self.history[self.cursor]["features"], "features_after": step["features"],
+            "verdict": None,
+        })
+
     def _run_objective_search(self, cmd, params, steps):
         sign = 1.0 if cmd["direction"] == "increase" else -1.0
         step = STRENGTH_WORDS[cmd["strength"] or "moderately"]
@@ -279,19 +288,20 @@ class Session:
             if evaluator == "human":
                 self.pending = self._start_human_search(text, cmd, current_params, steps, current_camera)
                 return self.state()
-            new_params = self._run_objective_search(cmd, current_params, steps)
+            if evaluator == "policy":
+                _, peak_idx = _find_or_create_peak(current_params, cmd["target"])
+                new_params = run_policy(current_params, cmd["target"], cmd["direction"], peak_idx, steps)
+            else:
+                new_params = self._run_objective_search(cmd, current_params, steps)
             step = _render_step(new_params, text, cmd, None, True,
                                  self.history[-1]["id"] + 1, self.session_id, current_camera)
+            if evaluator == "policy":
+                self._log_command(cmd, current_params, new_params, step)
         else:
             new_params = apply_command(cmd, current_params)
             step = _render_step(new_params, text, cmd, None, False,
                                  self.history[-1]["id"] + 1, self.session_id, current_camera)
-            jsonl_append(LOG_PATH, {
-                "timestamp": step["timestamp"], "command": cmd,
-                "params_before": current_params.tolist(), "params_after": new_params.tolist(),
-                "features_before": self.history[self.cursor]["features"], "features_after": step["features"],
-                "verdict": None,
-            })
+            self._log_command(cmd, current_params, new_params, step)
 
         self.history = self.history[:self.cursor + 1] + [step]
         self.cursor = len(self.history) - 1
@@ -336,29 +346,6 @@ class Session:
 
         self.pending = self._next_pending_pair(p["cmd_text"], p["cmd"], current, p["idx"], p["sign"],
                                                 step_size, iteration, p["max_steps"], p["session_id"], p["camera"])
-        return self.state()
-
-    def camera_delta(self, d_azimuth: float, d_elevation: float, d_zoom_factor: float, commit: bool) -> dict:
-        # Stateless by design: always recomputed from the cursor's committed
-        # camera, never from a prior preview -- a fast drag can call this
-        # (commit=False) many times per second with no history/disk growth,
-        # while commit=True returns a full state() payload like every other
-        # Session method (a lighter preview-only shape otherwise).
-        current_step = self.history[self.cursor]
-        candidate = apply_camera_delta(current_step["camera"], d_azimuth, d_elevation, d_zoom_factor)
-
-        if not commit:
-            params = np.array(current_step["params"], dtype=np.float64)
-            image_b64, _, _ = _render_image_b64(params, candidate)
-            return {"image_b64": image_b64, "camera": candidate}
-
-        current_params = np.array(current_step["params"], dtype=np.float64)
-        cmd_dict = {"camera": {"d_azimuth": d_azimuth, "d_elevation": d_elevation, "d_zoom_factor": d_zoom_factor}}
-        step = _render_step(current_params, "manual rotation", cmd_dict, None, False,
-                             self.history[-1]["id"] + 1, self.session_id, candidate)
-        self.history = self.history[:self.cursor + 1] + [step]
-        self.cursor = len(self.history) - 1
-        self.save()
         return self.state()
 
 
@@ -452,18 +439,6 @@ async def judge(req: JudgeRequest):
         return session.judge(req.verdict)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-
-class CameraDeltaRequest(BaseModel):
-    d_azimuth: float = 0.0
-    d_elevation: float = 0.0
-    d_zoom_factor: float = 1.0
-    commit: bool = False
-
-
-@app.post("/api/camera_delta")
-async def camera_delta(req: CameraDeltaRequest):
-    return session.camera_delta(req.d_azimuth, req.d_elevation, req.d_zoom_factor, req.commit)
 
 
 @app.post("/api/transcribe")
