@@ -92,6 +92,11 @@ travels alongside the transfer function in each history step, so back/forward
 navigation restores both together. Session state persists in
 `out/ui_session.json`.
 
+<p float="left">
+  <img src="docs/screenshots/chat-ui-synthetic.png" width="49%" alt="Chat UI on the synthetic phantom, bone tissue isolated" />
+  <img src="docs/screenshots/chat-ui-ct-skull.png" width="49%" alt="Chat UI on a real CT skull scan, bone tissue isolated" />
+</p>
+
 ## Reinforcement learning
 
 Two Gymnasium environments, trained offline with `stable-baselines3` SAC against
