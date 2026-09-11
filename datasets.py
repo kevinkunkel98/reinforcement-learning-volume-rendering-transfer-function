@@ -72,6 +72,14 @@ DATASETS = {
         ),
         "sha256": "cc211f0dfd9a05ca3841ce1141b292898b2dd2d3f08286affadf823a7e58df93",
         "modality": "mri",  # not Hounsfield units -- see module docstring and _rescale_intensity_to_hu_range
+        # This file's own NRRD "space directions" declare a different slice
+        # acquisition axis than the CT files (sagittal vs. the CT datasets'
+        # axial), so it loads upside down with no reorientation. Determined
+        # empirically (rendered all three single-axis flips and compared),
+        # not derived from the header math alone -- that math was tried
+        # first and got the axis wrong twice. No axis permutation needed,
+        # spacing is unaffected: just this one axis reversed.
+        "flip_axis": 1,
     },
 }
 
@@ -133,6 +141,8 @@ def load_dataset(name: str = "synthetic"):
         raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
     path = _ensure_downloaded(name)
     volume, spacing = _load_nrrd(path)
+    if "flip_axis" in DATASETS[name]:
+        volume = np.flip(volume, axis=DATASETS[name]["flip_axis"])
     if DATASETS[name].get("modality") == "mri":
         volume = _rescale_intensity_to_hu_range(volume)
     return volume, spacing
