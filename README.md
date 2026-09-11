@@ -99,6 +99,41 @@ navigation restores both together. Session state persists in
   <img src="docs/screenshots/chat-ui-ct-skull.png" width="49%" alt="Chat UI on a real CT skull scan, bone tissue isolated" />
 </p>
 
+### Running in the background, and checking it's actually up
+
+    .venv/bin/python server.py > /tmp/server.log 2>&1 &   # background, logs to a file
+    curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/   # expect 200
+    lsof -i :8000 -sTCP:LISTEN                              # confirm something's listening
+    tail -f /tmp/server.log                                 # watch logs live
+
+**Must be started from the repo root.** `server.py` uses relative paths (`out/`,
+`static/`) — if it's started from anywhere else (e.g. a git worktree that later
+gets removed), every request 500s with `FileNotFoundError: 'out'` or
+`RuntimeError: File at path static/index.html does not exist`. This can look
+like a browser/mic problem in the UI (push-to-talk silently "does nothing")
+when the real issue is the server itself is down — always `curl` the root path
+first before assuming it's a client-side issue.
+
+To stop a running (or broken) server:
+
+    pkill -f "server\.py"        # or: lsof -i :8000, then kill <pid>
+
+### Debugging the LLM parser (Ollama)
+
+    ollama serve                                # start Ollama if not already running
+    curl -s http://localhost:11434/api/tags     # confirm it's reachable
+    ollama ps                                   # which model is loaded, and for how long
+    ollama list                                 # installed models
+
+`parse_command_llm` sets `keep_alive: "30m"` so the model stays resident
+between commands — but the *first* command of a session (or the first after
+30 minutes idle) still pays an ~8-10s cold-start reload; that's expected, not
+a bug. `ollama stop <model>` unloads a resident model immediately (e.g. to
+free RAM) at the cost of the next command paying that reload again.
+
+    python eval_parsers.py --llm-model qwen2.5:7b   # rule vs LLM parser accuracy,
+                                                       # data/parser_eval_phrases.json
+
 ## Reinforcement learning
 
 Two Gymnasium environments, trained offline with `stable-baselines3` SAC against
