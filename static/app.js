@@ -276,11 +276,8 @@ function stopWaveform() {
   waveformBars.forEach((bar) => { bar.style.height = "4px"; });
 }
 
-micBtn.addEventListener("click", async () => {
-  if (mediaRecorder && mediaRecorder.state === "recording") {
-    mediaRecorder.stop();
-    return;
-  }
+async function startRecording() {
+  if (mediaRecorder && mediaRecorder.state === "recording") return;
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -315,6 +312,29 @@ micBtn.addEventListener("click", async () => {
   micIcon.style.display = "none";
   micWaveform.hidden = false;
   startWaveform(stream);
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.stop();
+}
+
+micBtn.addEventListener("click", () => {
+  if (mediaRecorder && mediaRecorder.state === "recording") stopRecording();
+  else startRecording();
+});
+
+// Push-to-talk hotkey: hold Space to record, release to stop. Skipped while
+// the text input is focused so typing a literal space still works there.
+document.addEventListener("keydown", (e) => {
+  if (e.code !== "Space" || e.repeat || document.activeElement === textInput) return;
+  e.preventDefault();
+  startRecording();
+});
+
+document.addEventListener("keyup", (e) => {
+  if (e.code !== "Space" || document.activeElement === textInput) return;
+  e.preventDefault();
+  stopRecording();
 });
 
 // ---------- dataset selector (custom Select: trigger button + listbox popover) ----------
