@@ -25,6 +25,7 @@ Der SAC-Agent (`stable-baselines3`) ist implementiert, trainiert und gegen die B
 #remark[
   Nahezu gleichauf mit dem Hill-Climber, aber langsamer konvergent (3.3 vs. 2.7
   Schritte bis 90 %) — ein optimierter Hand-Regler ist auf diesem niedrigdimensionalen
-  Problem ein starker Gegner @zhao2025natural. Noch nicht in die Live-Loop verdrahtet;
-  nächste Schritte: volle Peak-Kontrolle, Vergleich mit `preferences.jsonl` @scurto2021designing.
+  Problem ein starker Gegner @zhao2025natural. Mittlerweile live im Chat-UI nutzbar
+  (`server.py`, `policy`-Toggle) — als eingefrorene Inferenz, noch ohne Nachlernen
+  aus echter Nutzung (siehe nächste Folien).
 ]
