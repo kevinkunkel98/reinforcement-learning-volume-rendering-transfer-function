@@ -23,7 +23,7 @@ CAMERA_STATE_PATH = "out/camera_state.json"
 
 _VOLUME = None
 _SPACING = None
-_DATASET_NAME = "synthetic"
+_DATASET_NAME = "mri_head"
 
 
 def get_volume():
@@ -161,8 +161,8 @@ def main():
     ap.add_argument("--llm-model", default="qwen2.5:7b")
     ap.add_argument("--model-size", default="small")
     ap.add_argument("--lang", default="en")
-    ap.add_argument("--dataset", default="synthetic",
-                     help="synthetic, or a real CT dataset name (see datasets.DATASETS)")
+    ap.add_argument("--dataset", default="mri_head",
+                     help="a real CT/MRI dataset name (see datasets.DATASETS), or 'synthetic'")
     args = ap.parse_args()
 
     global _DATASET_NAME

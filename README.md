@@ -1,7 +1,8 @@
 # Voice-Driven Transfer Function MVP
 
-Local prototype: synthetic CT phantom (HU) -> 4-Gaussian-peak transfer function ->
-offscreen VTK render, driven by rule-based or local-LLM-parsed text/voice commands,
+Local prototype: real CT/MRI volumes (HU-calibrated, or rescaled onto the same
+range for MRI) -> 4-Gaussian-peak transfer function -> offscreen VTK render,
+driven by rule-based or local-LLM-parsed text/voice commands,
 searched by hill-climbing against an exact opacity-mass metric or a human judge.
 Camera viewing angle is a second, independent piece of controllable state, adjusted
 by the same command layer. Two offline reinforcement-learning sub-projects (see
@@ -68,22 +69,35 @@ transfer function. See `camera.py`.
 `--parser llm` understands considerably more free phrasing than this rigid grammar
 (e.g. "make the skeleton pop") — see `eval_parsers.py` for a measured comparison.
 
-## Real CT data
+## Real CT/MRI data
 
-By default everything runs on the synthetic phantom. Pass `--dataset ct_chest` to
-use a real, de-identified chest CT (public 3D Slicer test data, genuine Hounsfield
-units) instead — no other code changes needed, since the tissue table and transfer
-function are already defined in true HU space:
+By default everything runs on `mri_head`, a real, de-identified T1 MRI brain
+scan (public 3D Slicer test data) — no other code changes needed, the tissue
+table and transfer function already cover its rescaled range. Pass
+`--dataset ct_chest` (or `ct_skull`, `ct_cardio`, `ct_abdomen`) for a real CT
+scan instead, or `--dataset synthetic` for the old fast/offline phantom
+(still used internally by the RL training scripts — see
+[Reinforcement learning](#reinforcement-learning)):
 
     python mvp.py --dataset ct_chest --cmd "show only bone"
-    python server.py --dataset ct_chest              # chat UI on the real scan
+    python server.py --dataset ct_chest              # chat UI on a real CT scan
 
-The scan (~40MB) downloads once into `data/` (checksum-verified) and is cached
-afterward. See `datasets.py` for the registry.
+Each scan (6-60MB depending on dataset) downloads once into `data/`
+(checksum-verified) and is cached afterward. See `datasets.py` for the
+registry.
+
+**MRI caveat:** MRI has no calibrated Hounsfield-unit scale, and T1's own
+brightness ordering differs from CT's (skull is *dark* in T1, not the
+brightest structure as in CT). `mri_head`'s intensities are linearly
+rescaled onto the same numeric range the tissue bands already use, so every
+command mechanically works and the render looks correct — but tissue
+*labels* ("bone", "fat", ...) aren't radiologically accurate for this
+dataset (e.g. "show only bone" surfaces bright skin/fat signal, not the
+actual skull). See `datasets.py`'s module docstring.
 
 ## Chat UI
 
-    python server.py                    # http://127.0.0.1:8000, synthetic phantom
+    python server.py                    # http://127.0.0.1:8000, real MRI scan
     python server.py --dataset ct_chest # same UI, real CT chest scan
 
 Chat-driven version of the CLI: type or speak (🎤, via the browser mic + the same
@@ -230,7 +244,8 @@ online-learning variant are both explicitly out of scope for now.
 
 ## Files
 
-- `phantom.py` — synthetic CT volume in Hounsfield units
+- `phantom.py` — synthetic CT-like volume in Hounsfield units (fast/offline; used by the RL training scripts, not the default display dataset)
+- `datasets.py` — real CT/MRI dataset registry, checksum-verified download, MRI-to-HU-range rescale
 - `transfer.py` — 24-float vector <-> VTK transfer functions, `opacity_mass` metric
 - `render.py` — offscreen VTK render, pixel grab, image features
 - `camera.py` — camera state (azimuth/elevation/zoom), relative camera commands

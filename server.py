@@ -49,7 +49,7 @@ def _resolve_dataset_name():
         idx = sys.argv.index("--dataset")
         if idx + 1 < len(sys.argv):
             return sys.argv[idx + 1]
-    return os.environ.get("UI_DATASET", "synthetic")
+    return os.environ.get("UI_DATASET", "mri_head")
 
 
 _dataset_name = _resolve_dataset_name()
@@ -464,7 +464,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default=_dataset_name,
-                     help="synthetic, or a real CT dataset name (see datasets.DATASETS) "
+                     help="a real CT/MRI dataset name (see datasets.DATASETS), or 'synthetic' "
                           "-- already applied above; listed here only for --help")
     ap.add_argument("--port", type=int, default=8000)
     args = ap.parse_args()
