@@ -79,6 +79,8 @@
 #include "sections/08_ergebnisse.typ"
 #include "sections/09_erkenntnisse.typ"
 #include "sections/10_rl_ausblick.typ"
+#include "sections/11_online_lernen.typ"
+#include "sections/12_rlhf.typ"
 
 #slide(config: config-methods(header: _ => none, footer: _ => none))[
   #align(center + horizon)[
