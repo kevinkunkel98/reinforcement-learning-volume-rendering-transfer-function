@@ -2,11 +2,45 @@
 import numpy as np
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
-from transfer import vector_to_vtk
+from transfer import N_PEAKS, peak_internal, vector_to_vtk
 
 WIDTH, HEIGHT = 1024, 800
 _MAPPER_ANNOUNCED = False
 MAPPER_NAME = None  # set on first render(); real value, not a guess -- read by server.py for the UI
+
+VISIBLE_BOUNDS_STRIDE = 4  # measured: ~10ms strided vs ~1-2s at full resolution on real CT
+VISIBLE_BOUNDS_THRESHOLD = 0.05
+VISIBLE_BOUNDS_MARGIN = 0.15  # fraction of extent added as padding so content isn't cropped tight
+
+
+def _visible_bounds(volume: np.ndarray, params: np.ndarray, spacing) -> list | None:
+    """Physical-space bounds [xmin, xmax, ymin, ymax, zmin, zmax] of voxels
+    whose composited opacity exceeds VISIBLE_BOUNDS_THRESHOLD, so the camera
+    can fit to what's actually visible instead of the full volume extent
+    (mostly transparent "air" padding, especially once a command isolates
+    one small tissue). Returns None if nothing is visible, so the caller can
+    fall back to the full-volume framing. Downsampled by
+    VISIBLE_BOUNDS_STRIDE per axis -- see the module constant's comment for
+    why full resolution isn't viable here."""
+    sub = volume[::VISIBLE_BOUNDS_STRIDE, ::VISIBLE_BOUNDS_STRIDE, ::VISIBLE_BOUNDS_STRIDE]
+    opacity = np.zeros(sub.shape, dtype=np.float64)
+    for i in range(N_PEAKS):
+        p = peak_internal(params, i)
+        gauss = np.exp(-0.5 * ((sub - p["center"]) / p["width"]) ** 2)
+        opacity += p["height"] * gauss
+    mask = np.clip(opacity, 0.0, 1.0) > VISIBLE_BOUNDS_THRESHOLD
+    idx = np.nonzero(mask)
+    if idx[0].size == 0:
+        return None
+
+    bounds = []
+    for axis in range(3):
+        lo = idx[axis].min() * VISIBLE_BOUNDS_STRIDE
+        hi = idx[axis].max() * VISIBLE_BOUNDS_STRIDE
+        lo_phys, hi_phys = lo * spacing[axis], hi * spacing[axis]
+        pad = max((hi_phys - lo_phys) * VISIBLE_BOUNDS_MARGIN, spacing[axis] * VISIBLE_BOUNDS_STRIDE)
+        bounds.extend([lo_phys - pad, hi_phys + pad])
+    return bounds
 
 
 def _make_mapper(vtk_image):
@@ -80,7 +114,11 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), came
     win.AddRenderer(renderer)
     win.SetSize(WIDTH, HEIGHT)
 
-    renderer.ResetCamera()
+    bounds = _visible_bounds(volume, params, spacing)
+    if bounds is not None:
+        renderer.ResetCamera(bounds)
+    else:
+        renderer.ResetCamera()
     cam = renderer.GetActiveCamera()
     cam_state = camera or {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}
     cam.Azimuth(cam_state["azimuth"])
