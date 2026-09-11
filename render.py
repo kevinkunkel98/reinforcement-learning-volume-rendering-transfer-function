@@ -41,6 +41,19 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), came
     image.SetSpacing(*spacing)
     image.GetPointData().SetScalars(vtk_arr)
 
+    # The grainy look in real CT renders is the scan's own HU sensor noise,
+    # passed straight through the transfer function -- not a sampling
+    # artifact, so no amount of ray-sampling quality fixes it. A light
+    # Gaussian smooth of the volume itself does: measured negligible cost on
+    # the synthetic phantom (96^3, ~2ms) and ~115ms on real CT (512x512x139),
+    # re-paid on every render since nothing here is cached across calls.
+    smoother = vtk.vtkImageGaussianSmooth()
+    smoother.SetInputData(image)
+    smoother.SetStandardDeviations(1.0, 1.0, 1.0)
+    smoother.SetRadiusFactors(2.0, 2.0, 2.0)
+    smoother.Update()
+    image = smoother.GetOutput()
+
     ctf, otf = vector_to_vtk(params)
     prop = vtk.vtkVolumeProperty()
     prop.SetColor(ctf)
