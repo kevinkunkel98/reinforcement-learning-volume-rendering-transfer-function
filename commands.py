@@ -471,11 +471,20 @@ def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = OLLAMA_H
         "prompt": text,
         "format": "json",
         "stream": False,
+        # Keep the model resident between commands -- Ollama's default 5-minute
+        # idle unload means any gap between commands pays an 8-10s reload cost
+        # on the next one, which is what made this feel slow in practice.
+        "keep_alive": "30m",
     }).encode()
     req = Request(f"{host}/api/generate", data=body,
                    headers={"Content-Type": "application/json"})
     try:
-        with urlopen(req, timeout=10) as resp:
+        # 30s, not 10s: a cold start (first request after idle-unload, or the
+        # very first request of a session) can take ~8-10s on its own before
+        # generation even begins -- a tight timeout risked silently falling
+        # back to the rule parser on exactly the requests keep_alive can't
+        # help (the first one).
+        with urlopen(req, timeout=30) as resp:
             raw = _json.loads(resp.read().decode())
         raw_response = raw["response"]
         cmd = _json.loads(raw_response)
