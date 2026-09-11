@@ -49,6 +49,11 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), came
     prop.SetInterpolationTypeToLinear()
 
     mapper = _make_mapper(image)
+    # This render is one-shot and offscreen, not an interactive loop -- there's
+    # no reason to let VTK trade sampling quality for frame rate the way it
+    # does by default for interactive rendering.
+    mapper.AutoAdjustSampleDistancesOff()
+    mapper.SetSampleDistance(min(spacing) / 2.0)
     volume_actor = vtk.vtkVolume()
     volume_actor.SetMapper(mapper)
     volume_actor.SetProperty(prop)
