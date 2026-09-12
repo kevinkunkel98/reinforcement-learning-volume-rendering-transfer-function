@@ -1,0 +1,146 @@
+import json
+import subprocess
+import sys
+
+import numpy as np
+from PIL import Image
+
+from rl.extract_pairs import extract_pairs
+
+
+FEATURES = {"mean": 10.0, "std": 2.0, "coverage": 0.5, "entropy": 1.0}
+
+
+def write_jsonl(path, rows):
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+
+def observation(seed=0):
+    return {
+        "before_features": {**FEATURES, "mean": float(seed)},
+        "after_features": {**FEATURES, "mean": float(seed + 1)},
+        "before_image": None,
+        "after_image": None,
+    }
+
+
+def step(session, episode, step_id, *, accepted=None, ended=None, parent=None,
+         carried=None, seed=0, target="bone", direction="increase"):
+    row = {
+        "session_id": session,
+        "episode_id": episode,
+        "step_id": step_id,
+        "command": {"attribute": "opacity", "target": target, "direction": direction},
+        "accepted": accepted,
+        "ended": ended,
+        **observation(seed),
+    }
+    if parent is not None:
+        row["parent_step_id"] = parent
+    if carried is not None:
+        row["carried_forward"] = carried
+    return row
+
+
+def test_extracts_recoverable_branches_and_trajectory_pairs(tmp_path):
+    log = tmp_path / "canonical.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    write_jsonl(log, [
+        step("s", "e", 1, seed=1),
+        step("s", "e", 2, accepted=True, parent=1, carried=True, seed=2),
+        step("s", "e", 3, ended=True, seed=3),
+    ])
+
+    rows, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert len(rows) == 2
+    assert {row["source"] for row in rows} == {"branch", "trajectory"}
+    branch = next(row for row in rows if row["source"] == "branch")
+    assert branch["weight"] == 1.0
+    assert branch["label"] == 1
+    assert branch["target_tissue"] == "bone"
+    assert branch["direction"] == "increase"
+    assert branch["command"] == {"attribute": "opacity", "target": "bone", "direction": "increase"}
+    assert branch["observation_a"]["before_features"] == {**FEATURES, "mean": 2.0}
+    trajectory = next(row for row in rows if row["source"] == "trajectory")
+    assert trajectory["weight"] == 0.7
+    assert stats["branch"] == 1
+
+
+def test_branch_requires_explicit_recoverable_metadata_and_gap_is_two(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    write_jsonl(log, [
+        step("s", "e", 1, seed=1),
+        step("s", "e", 2, accepted=True, seed=2),
+        step("s", "e", 3, accepted=True, seed=3),
+        step("s", "e", 4, accepted=True, parent=1, carried=False, seed=4),
+    ])
+
+    rows, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert len(rows) == 3
+    assert all(row["source"] == "trajectory" for row in rows)
+    assert stats["branch"] == 0
+
+
+def test_thumbs_join_by_session_step_then_unique_params_fallback(tmp_path):
+    log = tmp_path / "log.jsonl"
+    feedback = tmp_path / "feedback.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    first = step("s", "e", 5, seed=5)
+    first["params_after"] = [1, 2]
+    second = step("s", "e", 6, seed=6)
+    second["params_after"] = [3, 4]
+    write_jsonl(log, [first, second])
+    write_jsonl(feedback, [
+        {"session_id": "s", "step_id": 5, "rating": "up"},
+        {"session_id": "other", "params": [3, 4], "rating": "down"},
+    ])
+
+    rows, _ = extract_pairs(log_path=log, feedback_path=feedback, out_path=out)
+
+    thumbs = [row for row in rows if row["source"] == "thumbs"]
+    assert len(thumbs) == 2
+    assert {row["weight"] for row in thumbs} == {0.4}
+    assert {row["label"] for row in thumbs} == {1, -1}
+
+
+def test_recovers_features_from_images_and_preserves_paths(tmp_path):
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.jpg"
+    Image.fromarray(np.full((2, 2, 3), 10, dtype=np.uint8)).save(before)
+    Image.fromarray(np.full((2, 2, 3), 20, dtype=np.uint8)).save(after)
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 1, seed=1)
+    row["before_features"] = None
+    row["after_features"] = None
+    row["before_image"] = str(before)
+    row["after_image"] = str(after)
+    row["accepted"] = True
+    write_jsonl(log, [row])
+    feedback = tmp_path / "feedback.jsonl"
+    write_jsonl(feedback, [{"session_id": "s", "step_id": 1, "rating": "up"}])
+
+    rows, stats = extract_pairs(log_path=log, feedback_path=feedback, out_path=out)
+
+    assert len(rows) == 1
+    assert rows[0]["source"] == "thumbs"
+    assert rows[0]["observation_a"]["before_features"]["mean"] == 10.0
+    assert rows[0]["observation_a"]["after_features"]["mean"] == 20.0
+    assert rows[0]["observation_a"]["before_image"] == str(before)
+    assert stats["skipped"] == 0
+    assert stats["total"] == 1
+
+
+def test_empty_inputs_write_valid_empty_output_and_cli_summary(tmp_path):
+    out = tmp_path / "nested" / "pairs.jsonl"
+    result = subprocess.run([
+        sys.executable, "-m", "rl.extract_pairs", "--out", str(out),
+    ], capture_output=True, text=True, check=True)
+
+    assert out.read_text() == ""
+    assert "source=" in result.stdout
+    assert "target=" in result.stdout
+    assert "total=0" in result.stdout

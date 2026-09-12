@@ -1,0 +1,214 @@
+"""Extract canonical goal-conditioned preference pairs from JSONL artifacts."""
+import argparse
+import json
+import os
+from collections import Counter, defaultdict
+
+import numpy as np
+from PIL import Image
+
+import render
+
+
+DEFAULT_LOG = "out/log.jsonl"
+DEFAULT_FEEDBACK = "out/feedback.jsonl"
+DEFAULT_OUT = "out/pairs.jsonl"
+WEIGHTS = {"branch": 1.0, "trajectory": 0.7, "thumbs": 0.4}
+RATING_LABELS = {"up": 1, "down": -1, "positive": 1, "negative": -1}
+FEATURE_KEYS = ("mean", "std", "coverage", "entropy")
+
+
+def _read_jsonl(path):
+    if not path or not os.path.exists(path):
+        return []
+    rows = []
+    with open(path) as stream:
+        for line in stream:
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
+
+
+def _command(row):
+    command = row.get("command") or row.get("cmd_dict") or {}
+    if not isinstance(command, dict):
+        return None
+    target = command.get("target_tissue", command.get("target"))
+    direction = command.get("direction")
+    attribute = command.get("attribute", "opacity")
+    if not target or direction not in ("increase", "decrease"):
+        return None
+    return {"attribute": attribute, "target": target, "direction": direction}
+
+
+def _image_features(path):
+    if not path:
+        return None
+    try:
+        with Image.open(path) as image:
+            return render.features(np.asarray(image.convert("RGB")))
+    except (OSError, ValueError):
+        return None
+
+
+def _observation(row):
+    observation = row.get("observation")
+    if isinstance(observation, dict):
+        result = dict(observation)
+    else:
+        result = {
+            "before_features": row.get("before_features", row.get("features_before")),
+            "after_features": row.get("after_features", row.get("features_after")),
+            "before_image": row.get("before_image", row.get("image_before")),
+            "after_image": row.get("after_image", row.get("image_after")),
+        }
+    for side in ("before", "after"):
+        feature_key = f"{side}_features"
+        image_key = f"{side}_image"
+        result[feature_key] = result.get(feature_key) or _image_features(result.get(image_key))
+    if not all(isinstance(result.get(f"{side}_features"), dict) and
+               all(key in result[f"{side}_features"] for key in FEATURE_KEYS)
+               for side in ("before", "after")):
+        return None
+    result.setdefault("before_image", None)
+    result.setdefault("after_image", None)
+    return result
+
+
+def _metadata(row):
+    return (row.get("session_id", "unknown"), row.get("episode_id", row.get("session_id", "unknown")),
+            row.get("step_id"))
+
+
+def _pair(a, b, command, source, label, metadata):
+    session, episode, a_step = metadata
+    return {
+        "observation_a": a,
+        "observation_b": b,
+        "command": command,
+        "target_tissue": command["target"],
+        "direction": command["direction"],
+        "label": int(label),
+        "source": source,
+        "weight": WEIGHTS[source],
+        "session_id": session,
+        "episode_id": episode,
+        "step_id": a_step,
+    }
+
+
+def _pair_key(source, a, b, command, metadata):
+    session, episode, _ = metadata
+    return (source, session, episode, a.get("step_id"), b.get("step_id"),
+            command["target"], command["direction"])
+
+
+def _with_step(observation, row):
+    result = dict(observation)
+    result["step_id"] = row.get("step_id")
+    return result
+
+
+def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK, out_path=DEFAULT_OUT):
+    raw_logs = _read_jsonl(log_path)
+    feedback = _read_jsonl(feedback_path)
+    logs = []
+    skipped = 0
+    for row in raw_logs:
+        command = _command(row)
+        observation = _observation(row)
+        if command is None or observation is None:
+            skipped += 1
+            continue
+        logs.append({"row": row, "command": command, "observation": observation})
+
+    pairs = []
+    seen = set()
+    stats = Counter({"branch": 0, "trajectory": 0, "thumbs": 0, "skipped": skipped})
+
+    def add(source, first, second, command, label, metadata):
+        key = _pair_key(source, first, second, command, metadata)
+        if key in seen:
+            return
+        seen.add(key)
+        pairs.append(_pair(first, second, command, source, label, metadata))
+        stats[source] += 1
+
+    by_episode = defaultdict(list)
+    for item in logs:
+        row = item["row"]
+        session, episode, step_id = _metadata(row)
+        by_episode[(session, episode, item["command"]["target"], item["command"]["direction"])].append(item)
+        # Branches require explicit parent and carried-forward metadata. No inference.
+        if "parent_step_id" in row and row.get("carried_forward") is True:
+            parent = next((candidate for candidate in logs
+                           if _metadata(candidate["row"])[0] == session and
+                           _metadata(candidate["row"])[1] == episode and
+                           candidate["row"].get("step_id") == row["parent_step_id"]), None)
+            if parent and (row.get("accepted") is True or row.get("ended") is True):
+                add("branch", _with_step(item["observation"], row),
+                    _with_step(parent["observation"], parent["row"]), item["command"], 1,
+                    (session, episode, step_id))
+
+    for items in by_episode.values():
+        items.sort(key=lambda item: item["row"].get("step_id", 0))
+        for current_index, current in enumerate(items):
+            current_row = current["row"]
+            if current_row.get("accepted") is not True and current_row.get("ended") is not True:
+                continue
+            current_step = current_row.get("step_id")
+            for earlier in items[:current_index]:
+                earlier_step = earlier["row"].get("step_id")
+                if isinstance(current_step, int) and isinstance(earlier_step, int) and current_step - earlier_step >= 2:
+                    add("trajectory", _with_step(current["observation"], current_row),
+                        _with_step(earlier["observation"], earlier["row"]), current["command"], 1,
+                        _metadata(current_row))
+
+    by_step = {(row["row"].get("session_id"), row["row"].get("step_id")): row for row in logs}
+    by_params = defaultdict(list)
+    for item in logs:
+        params = item["row"].get("params_after", item["row"].get("params"))
+        if params is not None:
+            by_params[tuple(params)].append(item)
+    for fb in feedback:
+        label = RATING_LABELS.get(fb.get("rating", fb.get("label")))
+        if label is None:
+            continue
+        item = by_step.get((fb.get("session_id"), fb.get("step_id")))
+        if item is None and fb.get("params") is not None:
+            candidates = by_params.get(tuple(fb["params"]), [])
+            item = candidates[0] if len(candidates) == 1 else None
+        if item is None:
+            skipped += 1
+            continue
+        command = _command(fb) or item["command"]
+        row = item["row"]
+        observation = _with_step(item["observation"], row)
+        add("thumbs", observation, observation, command, label, _metadata(row))
+
+    out_dir = os.path.dirname(os.fspath(out_path))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    with open(out_path, "w") as stream:
+        for pair in pairs:
+            stream.write(json.dumps(pair) + "\n")
+    stats["skipped"] = skipped
+    stats["total"] = len(pairs)
+    return pairs, dict(stats)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Extract canonical preference pairs from JSONL logs.")
+    parser.add_argument("--log", default=DEFAULT_LOG)
+    parser.add_argument("--feedback", default=DEFAULT_FEEDBACK)
+    parser.add_argument("--out", default=DEFAULT_OUT)
+    args = parser.parse_args()
+    rows, stats = extract_pairs(args.log, args.feedback, args.out)
+    sources = ",".join(f"{name}={stats.get(name, 0)}" for name in WEIGHTS)
+    targets = Counter(row["target_tissue"] for row in rows)
+    target_summary = ",".join(f"{name}={count}" for name, count in sorted(targets.items())) or "none=0"
+    print(f"source={sources} target={target_summary} skipped={stats['skipped']} total={stats['total']}")
+
+
+if __name__ == "__main__":
+    main()
