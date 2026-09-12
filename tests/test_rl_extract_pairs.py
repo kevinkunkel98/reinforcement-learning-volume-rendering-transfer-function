@@ -313,3 +313,39 @@ def test_malformed_nonnumeric_features_are_skipped_and_counted(tmp_path):
 
     assert pairs == []
     assert stats["skipped"] == 1
+
+
+def test_extracts_human_verdict_rows_and_recovers_before_png_after_png(tmp_path):
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    Image.fromarray(np.full((2, 2, 3), 10, dtype=np.uint8)).save(before)
+    Image.fromarray(np.full((2, 2, 3), 20, dtype=np.uint8)).save(after)
+    log = tmp_path / "preferences.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = {
+        "session_id": "s", "step_id": 1,
+        "cmd_dict": {"attribute": "opacity", "target": "bone", "direction": "increase"},
+        "features_before": None, "features_after": None,
+        "before_png": str(before), "after_png": str(after),
+        "human_verdict": "better",
+    }
+    write_jsonl(log, [row])
+
+    pairs, _ = extract_pairs(log_path=log, feedback_path=None, out_path=out)
+
+    assert len(pairs) == 1
+    assert pairs[0]["source"] == "thumbs"
+    assert pairs[0]["label"] == 1
+    assert pairs[0]["observation_a"]["before_features"]["mean"] == 20.0
+
+
+def test_extract_pairs_can_use_preferences_default(tmp_path, monkeypatch):
+    preferences = tmp_path / "preferences.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    write_jsonl(preferences, [])
+    monkeypatch.setattr("rl.extract_pairs.DEFAULT_PREFERENCES", str(preferences))
+
+    pairs, stats = extract_pairs(log_path=None, feedback_path=None, out_path=out)
+
+    assert pairs == []
+    assert stats["total"] == 0

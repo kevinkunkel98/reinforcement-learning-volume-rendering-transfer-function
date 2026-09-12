@@ -13,7 +13,7 @@ import render
 
 
 DEFAULT_COVERAGE_THRESHOLD = 0.01
-DEFAULT_MEAN_OPACITY_THRESHOLD = 250.0
+DEFAULT_MEAN_OPACITY_THRESHOLD = 0.95
 DEFAULT_HARD_PENALTY = -1.0
 
 
@@ -39,13 +39,16 @@ class RewardModelTFEnv(TFEnv):
         if (not math.isfinite(coverage_threshold) or
                 not 0.0 <= coverage_threshold <= 1.0):
             raise ValueError("coverage_threshold must be finite and between 0 and 1")
-        if not math.isfinite(mean_opacity_threshold) or mean_opacity_threshold < 0.0:
-            raise ValueError("mean_opacity_threshold must be finite and non-negative")
+        if (not math.isfinite(mean_opacity_threshold) or
+                not 0.0 <= mean_opacity_threshold <= 1.0):
+            raise ValueError("mean_opacity_threshold must be finite and between 0 and 1")
         if not math.isfinite(hard_penalty) or hard_penalty >= 0.0:
             raise ValueError("hard_penalty must be finite and negative")
         self.volume = volume
         self.spacing = spacing
         self.reward_model = reward_model
+        if isinstance(reward_model, (list, tuple)) and not reward_model:
+            raise ValueError("reward model ensemble must not be empty")
         self.camera = camera or dict(DEFAULT_CAMERA)
         self.alpha = float(alpha)
         self.coverage_threshold = float(coverage_threshold)

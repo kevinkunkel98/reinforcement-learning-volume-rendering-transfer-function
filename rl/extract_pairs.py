@@ -74,9 +74,11 @@ def _observation(row):
         result = {
             "before_features": row.get("before_features", row.get("features_before")),
             "after_features": row.get("after_features", row.get("features_after")),
-            "before_image": row.get("before_image", row.get("image_before")),
-            "after_image": row.get("after_image", row.get("image_after")),
+            "before_image": row.get("before_image", row.get("before_png", row.get("image_before"))),
+            "after_image": row.get("after_image", row.get("after_png", row.get("image_after"))),
         }
+    result.setdefault("before_image", result.get("before_png"))
+    result.setdefault("after_image", result.get("after_png"))
     for side in ("before", "after"):
         feature_key = f"{side}_features"
         image_key = f"{side}_image"
@@ -134,13 +136,17 @@ def _with_step(observation, row):
     return result
 
 
-def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK, out_path=DEFAULT_OUT):
+def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
+                  out_path=DEFAULT_OUT, preferences_path=None):
+    if preferences_path is None:
+        preferences_path = DEFAULT_PREFERENCES
     output = Path(out_path).resolve()
-    inputs = [path for path in (log_path, feedback_path) if path]
+    inputs = [path for path in (log_path, feedback_path, preferences_path) if path]
     if any(output == Path(path).resolve() for path in inputs):
         raise ValueError("input and output paths collide")
-    raw_logs = _read_jsonl(log_path)
-    feedback = _read_jsonl(feedback_path)
+    preference_rows = _read_jsonl(preferences_path)
+    raw_logs = _read_jsonl(log_path) + preference_rows
+    feedback = _read_jsonl(feedback_path) + preference_rows
     logs = []
     skipped = 0
     for row in raw_logs:
@@ -202,7 +208,10 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK, out_path
         if params is not None:
             by_params[tuple(params)].append(item)
     for fb in feedback:
+        verdict = fb.get("human_verdict")
         label = RATING_LABELS.get(fb.get("rating", fb.get("label")))
+        if label is None:
+            label = {"better": 1, "worse": -1}.get(verdict)
         if label is None:
             continue
         item = by_step.get((fb.get("session_id"), fb.get("step_id")))
@@ -240,9 +249,10 @@ def main():
     parser = argparse.ArgumentParser(description="Extract canonical preference pairs from JSONL logs.")
     parser.add_argument("--log", default=DEFAULT_LOG)
     parser.add_argument("--feedback", default=DEFAULT_FEEDBACK)
+    parser.add_argument("--preferences", default=DEFAULT_PREFERENCES)
     parser.add_argument("--out", default=DEFAULT_OUT)
     args = parser.parse_args()
-    rows, stats = extract_pairs(args.log, args.feedback, args.out)
+    rows, stats = extract_pairs(args.log, args.feedback, args.out, args.preferences)
     sources = ",".join(f"{name}={stats.get(name, 0)}" for name in WEIGHTS)
     targets = Counter(row["target_tissue"] for row in rows)
     target_summary = ",".join(f"{name}={count}" for name, count in sorted(targets.items())) or "none=0"

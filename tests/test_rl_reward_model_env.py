@@ -45,6 +45,20 @@ def test_alpha_one_uses_ensemble_mean_minus_std(monkeypatch):
     assert reward == pytest.approx(0.4)
 
 
+def test_default_opacity_threshold_is_normalized_and_empty_ensemble_rejected():
+    assert 0.0 <= reward_model_env.DEFAULT_MEAN_OPACITY_THRESHOLD <= 1.0
+    with pytest.raises(ValueError, match="ensemble"):
+        RewardModelTFEnv(
+            np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), [], seed=0,
+        )
+
+    with pytest.raises(ValueError, match="mean_opacity_threshold"):
+        RewardModelTFEnv(
+            np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), _StubRewardModel(),
+            mean_opacity_threshold=1.1,
+        )
+
+
 def test_alpha_must_be_between_zero_and_one():
     with pytest.raises(ValueError, match="alpha"):
         RewardModelTFEnv(np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), _StubRewardModel(), alpha=-0.1)

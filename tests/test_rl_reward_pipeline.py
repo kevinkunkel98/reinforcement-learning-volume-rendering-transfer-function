@@ -570,3 +570,13 @@ def test_fixed_split_metadata_rejects_tampering(mutation):
 
     with pytest.raises(ValueError, match="metadata"):
         eval_reward.select_fixed_test_rows(rows, metadata)
+
+
+def test_evaluation_split_arguments_must_match_persisted_metadata():
+    metadata = {"split_seed": 11, "test_fraction": 0.25}
+
+    eval_reward.validate_split_arguments(metadata, split_seed=11, test_fraction=0.25)
+    with pytest.raises(ValueError, match="split_seed"):
+        eval_reward.validate_split_arguments(metadata, split_seed=12, test_fraction=0.25)
+    with pytest.raises(ValueError, match="test_fraction"):
+        eval_reward.validate_split_arguments(metadata, split_seed=11, test_fraction=0.5)

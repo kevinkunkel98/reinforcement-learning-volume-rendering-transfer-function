@@ -256,12 +256,24 @@ def select_fixed_test_rows(rows: Iterable[dict], metadata: dict) -> list[dict]:
     return [known[row_hash] for row_hash in test_hashes]
 
 
+def validate_split_arguments(metadata: dict, *, split_seed: int,
+                             test_fraction: float) -> None:
+    if not isinstance(metadata, dict):
+        raise ValueError("fixed split metadata is missing")
+    if metadata.get("split_seed") != split_seed:
+        raise ValueError("split_seed does not match persisted metadata")
+    if metadata.get("test_fraction") != test_fraction:
+        raise ValueError("test_fraction does not match persisted metadata")
+
+
 def evaluate_files(preferences_path, pretrained_path, finetuned_path, *, test_rows=None,
                    disagreements_path=None, split_seed=0, test_fraction=0.2) -> dict:
     """Evaluate persisted artifacts; callers may pass persisted split rows."""
     rows = _read_jsonl(preferences_path)
     if test_rows is None:
         metadata = torch_load(finetuned_path).get("metadata")
+        validate_split_arguments(metadata, split_seed=split_seed,
+                                 test_fraction=test_fraction)
         test_rows = select_fixed_test_rows(rows, metadata)
     pretrained = _model_predictor(_load_members(pretrained_path))
     finetuned = _model_predictor(_load_members(finetuned_path))
