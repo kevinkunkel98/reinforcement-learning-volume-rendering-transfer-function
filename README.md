@@ -1,245 +1,173 @@
-# Voice-Driven Transfer Function MVP
+# Voice-Driven Transfer-Function Design
 
-**RLHF for speech-controlled volume rendering.** Say "show only bone" or "make
-the skeleton pop" and a real CT/MRI scan re-renders live — parsed by a rule
-engine or a local LLM, optimized by hill-climbing or a trained RL policy, and,
-as a research pilot, steered by a reward model learned from human preferences
-instead of a hand-coded metric.
+Speech-controlled volume rendering for CT and MRI data. A user describes a
+visual goal, the command parser changes the transfer function, and the result
+is rendered immediately. The project compares rule-based search, RL policies,
+and a goal-conditioned reward model trained from human preferences.
 
 <p align="center">
-  <img src="docs/screenshots/architecture-highlevel-dark.png" width="85%" alt="Architecture: command layer, transfer-function/render pipeline, RL sub-projects" />
+  <img src="docs/screenshots/architecture-highlevel-dark.png" width="85%" alt="Project architecture" />
 </p>
 
-For the full technical writeup (rendering pipeline, command layer,
-search/evaluation, camera control, all RL sub-projects, server session model),
-see `docs/architecture.typ` (compiled: `docs/architecture.pdf`) and
-`docs/rl-write-test.typ` (math reference, compiled: `docs/rl-math.pdf`).
+Detailed architecture and mathematical notes:
+
+- `docs/architecture.typ` and `docs/architecture.pdf`
+- `docs/rl-write-test.typ` and `docs/rl-math.pdf`
 
 ## Setup
 
-    python3 -m venv .venv
-    .venv/bin/pip install -r requirements.txt
+Use a virtual environment. Install dependencies with the same Python that will
+run the project:
 
-Whisper model downloads once on first use and is cached afterward. The LLM parser
-needs a local Ollama server (`ollama serve`, `ollama pull qwen2.5:7b`) — without it,
-`--parser llm` automatically falls back to the rule parser and says so.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
 
-## Usage
+First Whisper use downloads and caches a model. LLM parsing requires Ollama:
 
-    python mvp.py                                            # render current state -> out/start.png
-    python mvp.py --cmd "increase opacity for bone strongly"  # single apply -> before/after.png
-    python mvp.py --cmd "..." --learn --steps 15              # hill-climb, objective evaluator
-    python mvp.py --cmd "..." --learn --human --steps 10      # hill-climb, human evaluator (logs preferences)
-    python mvp.py --listen                                    # push-to-talk -> parse -> apply
-    python mvp.py --wav out/audio/xyz.wav                     # replay a prior recording
-    python mvp.py --cmd "make the skeleton pop" --parser llm --llm-model qwen2.5:7b
+```bash
+ollama serve
+ollama pull qwen2.5:7b
+```
 
-    python eval_parsers.py            # rule vs LLM parser accuracy table
-    python stats.py                   # preferences.jsonl agreement analysis
+Without Ollama, `--parser llm` falls back to the rule parser.
 
-State (the current 24-float transfer-function vector) persists in `out/state.json`
-across invocations, so commands compose: run several `--cmd` calls in a row to build
-up a view. `reset` (or deleting `out/state.json`) returns to the default vector.
+## Quick Start
+
+```bash
+python mvp.py
+python mvp.py --cmd "increase opacity for bone strongly"
+python mvp.py --cmd "show only bone" --learn --steps 15
+python mvp.py --listen
+python server.py
+```
+
+The web UI runs at `http://127.0.0.1:8000`. Start commands from repository
+root because the application uses relative paths such as `out/` and `static/`.
+
+The current transfer-function state persists in `out/state.json`. Delete that
+file or run `reset` to return to the default state.
 
 ## Commands
 
-Tissues: `bone`, `spongy`, `soft`, `fat`, `air` (each with synonyms both parsers
-understand — "cortical"/"skeleton" for bone, "cancellous"/"trabecular" for spongy,
-etc. — see `TISSUE_SYNONYMS` in `commands.py`).
-
-```
+```text
 increase|decrease opacity for <tissue> [slightly|moderately|strongly]
-show only <tissue> [and <tissue> ...]              # multi-target isolates all named tissues
-<low|medium|high> opacity for <tissue> [, <low|medium|high> opacity for <tissue> ...]
-sharpen|soften <tissue>                            # width
-brighten|darken <tissue>                           # brightness
-shift <tissue>'s center up|down                    # center position, clamped to its own HU band
-rotate left|right | tilt up|down | zoom in|out [slightly|moderately|strongly]
+show only <tissue> [and <tissue> ...]
+<low|medium|high> opacity for <tissue>
+sharpen|soften <tissue>
+brighten|darken <tissue>
+shift <tissue>'s center up|down
+rotate left|right | tilt up|down | zoom in|out
 reset
 ```
 
-The third form is an *absolute* level (distinct from increase/decrease's relative
-delta) — "high opacity spongy, low opacity bone" sets both in one command. Two or
-more in one sentence become a compound command; it's a one-shot assignment, not a
-hill-climb search target (there's no single peak, or "wrong direction", to search).
+Supported tissues: `bone`, `spongy`, `soft`, `fat`, and `air`. See
+`commands.py` for synonyms and the complete grammar. Camera commands change
+the view and do not change the transfer function.
 
-Camera commands (`rotate`/`tilt`/`zoom`) are a fully separate shape from every
-other command above — they adjust viewing angle/zoom only and never touch the
-transfer function. See `camera.py`.
+Useful evaluation commands:
 
-`--parser llm` understands considerably more free phrasing than this rigid grammar
-(e.g. "make the skeleton pop") — see `eval_parsers.py` for a measured comparison.
+```bash
+python eval_parsers.py
+python eval_parsers.py --llm-model qwen2.5:7b
+```
 
-## Real CT/MRI data
+## Data And UI
 
-By default everything runs on `mri_head`, a real, de-identified T1 MRI brain
-scan (public 3D Slicer test data) — no other code changes needed, the tissue
-table and transfer function already cover its rescaled range. Pass
-`--dataset ct_chest` (or `ct_skull`, `ct_cardio`, `ct_abdomen`) for a real CT
-scan instead, or `--dataset synthetic` for the old fast/offline phantom
-(still used internally by the RL training scripts — see
-[Reinforcement learning](#reinforcement-learning)):
+Default dataset is `mri_head`. Other datasets include `ct_chest`, `ct_skull`,
+`ct_cardio`, `ct_abdomen`, and `synthetic`.
 
-    python mvp.py --dataset ct_chest --cmd "show only bone"
-    python server.py --dataset ct_chest              # chat UI on a real CT scan
+```bash
+python mvp.py --dataset ct_chest --cmd "show only bone"
+python server.py --dataset ct_chest
+```
 
-Each scan (6-60MB depending on dataset) downloads once into `data/`
-(checksum-verified) and is cached afterward. See `datasets.py` for the
-registry.
+Datasets are downloaded into `data/` and cached. MRI intensities are rescaled
+to the transfer-function range, so tissue names are functional labels rather
+than guaranteed radiological labels. Use CT data for radiological claims.
 
-**MRI caveat:** MRI has no calibrated Hounsfield-unit scale, and T1's own
-brightness ordering differs from CT's (skull is *dark* in T1, not the
-brightest structure as in CT). `mri_head`'s intensities are linearly
-rescaled onto the same numeric range the tissue bands already use, so every
-command mechanically works and the render looks correct — but tissue
-*labels* ("bone", "fat", ...) aren't radiologically accurate for this
-dataset (e.g. "show only bone" surfaces bright skin/fat signal, not the
-actual skull). See `datasets.py`'s module docstring.
+The web UI supports:
 
-## Chat UI
+- Text and voice commands
+- Back/forward navigation through session history
+- Human Better/Worse judgments during search
+- Camera state stored with each history step
 
-    python server.py                    # http://127.0.0.1:8000, real MRI scan
-    python server.py --dataset ct_chest # same UI, real CT chest scan
+VR and web clients can use the same reward-data contract described below.
 
-Chat-driven version of the CLI: type or speak (🎤, via the browser mic + the same
-Whisper wrapper) a command, watch it render, step back/forward through the
-session's history, and judge hill-climb steps as Better/Worse when search is
-toggled on with the human evaluator. Camera state (azimuth/elevation/zoom)
-travels alongside the transfer function in each history step, so back/forward
-navigation restores both together. Session state persists in
-`out/ui_session.json`.
+## Reinforcement Learning
 
-<p align="center">
-  <img src="docs/screenshots/chat-ui-ct-skull.png" width="70%" alt="Chat UI on a real CT skull scan, bone tissue isolated" />
-</p>
+The project has three related RL experiments.
 
-### Running in the background, and checking it's actually up
+### Objective RL
 
-    .venv/bin/python server.py > /tmp/server.log 2>&1 &   # background, logs to a file
-    curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/   # expect 200
-    lsof -i :8000 -sTCP:LISTEN                              # confirm something's listening
-    tail -f /tmp/server.log                                 # watch logs live
+`rl/env.py` trains an opacity policy. Each episode has a target tissue and a
+direction. The policy changes the target peak and receives signed
+`mass_fraction` improvement.
 
-**Must be started from the repo root.** `server.py` uses relative paths (`out/`,
-`static/`) — if it's started from anywhere else (e.g. a git worktree that later
-gets removed), every request 500s with `FileNotFoundError: 'out'` or
-`RuntimeError: File at path static/index.html does not exist`. This can look
-like a browser/mic problem in the UI (push-to-talk silently "does nothing")
-when the real issue is the server itself is down — always `curl` the root path
-first before assuming it's a client-side issue.
+```bash
+python -m rl.train --timesteps 200000
+python -m rl.eval
+```
 
-To stop a running (or broken) server:
+`rl/camera_env.py` trains a separate camera policy against a centroid-alignment
+objective:
 
-    pkill -f "server\.py"        # or: lsof -i :8000, then kill <pid>
+```bash
+python -m rl.camera_train --timesteps 200000
+python -m rl.camera_eval
+```
 
-### Debugging the LLM parser (Ollama)
+`rl/online_train.py` trains the opacity policy continuously and evaluates it
+against fixed held-out episodes:
 
-    ollama serve                                # start Ollama if not already running
-    curl -s http://localhost:11434/api/tags     # confirm it's reachable
-    ollama ps                                   # which model is loaded, and for how long
-    ollama list                                 # installed models
+```bash
+python -m rl.online_train --timesteps 50000 --eval-interval 5000
+python -m plots.online_eval_curve
+```
 
-`parse_command_llm` sets `keep_alive: "30m"` so the model stays resident
-between commands — but the *first* command of a session (or the first after
-30 minutes idle) still pays an ~8-10s cold-start reload; that's expected, not
-a bug. `ollama stop <model>` unloads a resident model immediately (e.g. to
-free RAM) at the cost of the next command paying that reload again.
+`mass_fraction` is useful for optimization, but it only measures whether a
+transfer-function change follows the literal command. It does not measure
+whether the rendered image is useful to the user.
 
-    python eval_parsers.py --llm-model qwen2.5:7b   # rule vs LLM parser accuracy,
-                                                       # data/parser_eval_phrases.json
+### Goal-Conditioned Reward Model
 
-## Reinforcement learning
+This project now treats reward learning as a goal-conditioned preference
+problem:
 
-Two Gymnasium environments, trained offline with `stable-baselines3` SAC against
-exact metrics computed directly on the data (no rendering, no human labels), each
-compared against the hand-coded hill-climbing baseline they're meant to replace.
-**The camera-viewpoint policy is not wired into the live loop yet** — the
-opacity policy now is (chat UI only, see below); both remain trained and
-evaluated offline first. Two further pieces build on the opacity agent: a
-continual **online-learning** variant, and an **RLHF** pilot that replaces the
-automatic metric with a reward model learned from human judgments.
+> Does conditioning reward on the user's tissue and direction improve
+> preference prediction and policy behavior beyond a hand-designed objective?
 
-- **`rl/env.py` + `rl/train.py` + `rl/eval.py`** — transfer-function opacity.
-  One episode = one (target tissue, direction) goal; the agent moves the
-  resolved peak's height; reward = Δ`mass_fraction`. Result (200k timesteps,
-  20 held-out episodes): policy `0.344` vs. hill-climb `0.347` mean final mass
-  fraction, `3.3` vs `2.7` steps to 90% of best — near-parity, a well-tuned
-  hand controller is a strong baseline on this low-dimensional problem.
-
-      python -m rl.train --timesteps 200000
-      python -m rl.eval
-
-  The trained policy is also wired live into the chat UI's search toggle
-  (`server.py`, evaluator = policy — no CLI equivalent) — see `rl/serve.py`.
-
-- **`rl/camera_env.py` + `rl/camera_train.py` + `rl/camera_eval.py`** — camera
-  viewpoint. One episode = one target tissue on a real CT volume (`ct_skull`);
-  the agent moves azimuth/elevation to maximize alignment with that tissue's
-  centroid direction from the volume center (a directional proxy — no
-  occlusion model). Result: policy `0.997` vs. hill-climb `1.000` mean final
-  alignment, `3.05` vs `4.05` steps to 90% — both reach near-perfect alignment,
-  the policy converges faster.
-
-      python -m rl.camera_train --timesteps 200000
-      python -m rl.camera_eval
-
-See `docs/architecture.typ` §6-7 for full detail on both, including two real
-bugs found and fixed during development (a `_resolve_target` fallback that
-could silently return no direction, and a shared step-resizing utility whose
-opacity-domain-tuned growth cap crippled the camera hill-climb baseline until
-it was made domain-aware).
-
-### Online learning
-
-`rl/online_train.py` trains a *fresh* opacity agent continuously on a single
-environment instead of one 200k-step batch across 4 parallel envs — chunked
-`model.learn()` calls, re-evaluated against the same 20 held-out episodes
-after each chunk, so the held-out metric's improvement over training is
-directly observable rather than only inferred from SAC's own reward curve.
-
-    python -m rl.online_train --timesteps 50000 --eval-interval 5000
-    python -m plots.online_eval_curve   # held-out metric vs. offline baselines
-
-Result (50k timesteps, single env — 25% of the offline run's environment-step
-budget): `mean_final_mass_fraction` climbs `0.199` (5k) → `0.347` (15k) →
-`0.346` (50k), landing almost exactly between the offline policy (`0.344`)
-and hill-climb (`0.347`) baselines, with steps-to-90%-of-best falling from
-`17.4` to `3.2` — a clean, converging learning curve on a quarter of the
-offline budget, not a coincidence.
-
-### RLHF: learning from human feedback
-
-`mass_fraction` measures whether a transfer-function change follows the
-literal command. The goal-conditioned reward model adds human preference over
-the rendered result without losing that objective signal. Each observation is
-an 18-value `float32` vector:
+The reward model sees this 18-value observation:
 
 ```text
 [features_after(4), features_before(4), after-before(4), target_onehot(5), direction(1)]
 ```
 
-The four image features are `mean`, `std`, `coverage`, and `entropy`. Target
-one-hot order is `air`, `fat`, `soft`, `spongy`, `bone`; direction is the
-requested increase/decrease sign. `RewardModel` is an `18 -> 64 -> 32 -> 1`
-MLP whose scalar output is a logit. Pair training uses weighted Bradley-Terry
-loss, `weight * -log(sigmoid(R(preferred) - R(other)))`, rather than the old
-10-input binary-cross-entropy pilot.
+Image features are `mean`, `std`, `coverage`, and `entropy`. Target order is
+`air`, `fat`, `soft`, `spongy`, `bone`. The model is an `18 -> 64 -> 32 -> 1`
+MLP trained with weighted Bradley-Terry loss. Reward mapping is:
 
-#### Preference data contract
+```text
+r_model = 2 * sigmoid(R(z)) - 1
+```
 
-Web and VR clients write canonical JSONL records. One pair record has this
-shape (one JSON object per line):
+Training uses scalar image features, not pixels. PNG/JPEG files are retained
+for audit, blind evaluation, and recovery of missing legacy features. This
+keeps the same data contract usable by web and VR clients without requiring a
+vision model.
+
+#### Preference data
+
+Canonical clients write one JSON object per line:
 
 ```json
 {
-  "observation_a": {
-    "before_features": {}, "after_features": {},
-    "before_image": null, "after_image": null
-  },
-  "observation_b": {
-    "before_features": {}, "after_features": {},
-    "before_image": null, "after_image": null
-  },
+  "observation_a": {"before_features": {}, "after_features": {}, "before_image": null, "after_image": null},
+  "observation_b": {"before_features": {}, "after_features": {}, "before_image": null, "after_image": null},
   "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
   "target_tissue": "bone",
   "direction": "increase",
@@ -249,47 +177,67 @@ shape (one JSON object per line):
 }
 ```
 
-`label=1` means A is preferred; `label=-1` means B is preferred. Client logs
-may additionally carry `session_id`, `episode_id`, `step_id`,
-`parent_step_id`, `branch_id`, `carried_forward`, `accepted`, and `ended`.
-Feature dictionaries are authoritative. PNG/JPEG paths are audit artifacts:
-they support visual review and recovery of missing legacy features through
-Pillow, but training consumes extracted features, not pixels. Missing image
-artifacts are skipped and counted.
+`label=1` means A is preferred. `label=-1` means B is preferred. Pair sources
+have different weights:
 
-#### Extract, train, evaluate
+- Branch choices: `1.0`, strongest signal
+- Accepted/ended episode states: `0.7`
+- Absolute thumbs up/down: `0.4`, weakest signal
 
-Extract current logs, feedback, and canonical web/VR preferences without
-mutating source files:
+Branches are extracted only when logs preserve explicit parent/child and
+carried-forward metadata. The extractor never guesses branches from similar
+parameters.
+
+#### Train and evaluate
+
+Run from repository root:
 
 ```bash
 python -m rl.extract_pairs \
-  --log out/rl_logs.jsonl \
+  --log out/log.jsonl \
   --feedback out/feedback.jsonl \
-  --preferences out/web_vr_preferences.jsonl \
+  --preferences out/rlhf_preferences.jsonl \
   --out out/pairs.jsonl
 ```
 
-The extractor reports counts by source, target, skipped rows, and total. Branch
-pairs require explicit parent/child and carried-forward metadata, or equivalent
-history metadata. It never guesses branches from parameter similarity. If no
-branch is recoverable, it reports `branch=0` and continues with valid
-within-episode (`weight=0.7`) and thumbs (`weight=0.4`) pairs. Branch pairs
-have `weight=1.0`.
+The command prints counts by source, target, and total. Historical logs may
+report zero branch pairs because old sessions did not preserve branch metadata.
 
-Pretrain on synthetic rendered pairs, then fine-tune separate artifacts on a
-fixed seeded human split:
+Pretrain on synthetic rendered pairs. Use a small run first:
+
+```bash
+python -m rl.pretrain_reward \
+  --pairs 20 --members 1 --epochs 2 \
+  --out out/rl_models/reward_pretrained_smoke.pt
+```
+
+Full pretraining:
 
 ```bash
 python -m rl.pretrain_reward \
   --pairs 20000 --members 5 \
   --out out/rl_models/reward_pretrained.pt
+```
 
+Synthetic labels currently use signed `mass_fraction`. This is a cold-start
+objective, not a human label. The implementation marks the location where a
+visibility metric should replace it.
+
+Fine-tune on real preference pairs:
+
+```bash
 python -m rl.finetune_reward \
   --preferences out/pairs.jsonl \
   --pretrained out/rl_models/reward_pretrained.pt \
   --out out/rl_models/reward_finetuned.pt
+```
 
+Pretrained and fine-tuned artifacts remain separate. Fine-tuning uses a fixed,
+seeded held-out split and never trains on evaluation rows.
+
+Evaluate both models on the same test split:
+
+```bash
 python -m rl.eval_reward \
   --preferences out/pairs.jsonl \
   --pretrained out/rl_models/reward_pretrained.pt \
@@ -298,53 +246,56 @@ python -m rl.eval_reward \
   --out out/reward_report.json
 ```
 
-`reward_pretrained.pt` and its member checkpoints are never overwritten by
-fine-tuning. Fine-tuning writes `reward_finetuned.pt` and separate member
-checkpoints, trains only on the persisted train rows, and evaluates both model
-families on exactly the same persisted test rows. Missing logs, checkpoints,
-or render artifacts produce an explicit error or an empty summary; results
-are never fabricated.
+Evaluation reports:
 
-#### Reward safeguards and independent comparisons
+1. Pretrained and fine-tuned accuracy, overall and by pair source
+2. RLHF policy performance against the objective metric
+3. Blind policy versus hill-climber judgments in a separate results file
 
-`RewardModelTFEnv` combines ensemble reward and the automatic objective:
+The disagreement file identifies cases where the objective and human verdict
+disagree, including image paths. These cases show where the objective metric is
+blind.
+
+#### Reward safeguards
+
+`RewardModelTFEnv` combines model and objective rewards:
 
 ```text
 r = alpha * (mean(model_reward) - std(model_reward))
     + (1 - alpha) * objective_reward
 ```
 
-Default `alpha` is `0.7`. Run identical evaluation episodes for the anchor
-settings `alpha=0.0`, `alpha=0.7`, and `alpha=1.0`; record each result
-separately. The near-black coverage and near-opaque mean-opacity hard
-penalties apply independently of model output. Alpha ablations are an
-evaluation comparison, not new training data.
+Default `alpha` is `0.7`. The useful ablations are:
 
-The final report keeps three results separate:
+- `alpha=0.0`: objective only
+- `alpha=0.7`: blended reward
+- `alpha=1.0`: learned reward only
 
-1. Pretrained versus fine-tuned reward-only accuracy, overall and by source,
-   on the fixed held-out human split.
-2. RLHF policy versus hill-climber objective performance, as a reward-hacking
-   sanity check.
-3. Blind head-to-head policy versus hill-climber rendering, with seeded random
-   A/B order and verdicts written to a separate file.
-
-Use `evaluate_rl_policy_against_hill_climb()` for the objective sanity check
-and `collect_blind_head_to_head()` for the blind comparison. The latter takes
-render callbacks and optional `better`/`worse`/`tie` verdicts, writes records
-such as `out/blind_head_to_head.jsonl`, and never sends verdicts to extraction
-or training. Store alpha results, reward metrics, disagreement records
-(`out/reward_disagreements.jsonl`), and blind verdicts independently in the
-final report; do not merge blind judgments back into `out/pairs.jsonl`.
-
-## Project layout
-
-The core pipeline (dataset loading, transfer function, VTK render, camera,
-command parsing, hill-climb search, CLI/chat-UI) lives at the repo root;
-`rl/` holds both offline RL sub-projects plus the online-learning and RLHF
-extensions; `plots/` regenerates the training-curve figures. See
-`docs/architecture.typ` for the full component-by-component breakdown.
+Near-black and near-opaque states receive independent hard penalties. The
+ensemble standard deviation discourages states outside the training
+distribution.
 
 ## Tests
 
-    .venv/bin/pytest -v
+```bash
+python -m pytest -q -m "not slow"
+python -m pytest -q
+```
+
+Reward pipeline tests:
+
+```bash
+python -m pytest -q \
+  tests/test_rl_reward_model.py \
+  tests/test_rl_reward_model_env.py \
+  tests/test_rl_extract_pairs.py \
+  tests/test_rl_reward_pipeline.py
+```
+
+## Project Layout
+
+- Root files: rendering, transfer functions, parser, CLI, and web UI
+- `rl/`: environments, policies, reward model, data pipeline, evaluation
+- `data/`: datasets and parser evaluation phrases
+- `out/`: runtime state, logs, images, models, and reports
+- `tests/`: automated tests
