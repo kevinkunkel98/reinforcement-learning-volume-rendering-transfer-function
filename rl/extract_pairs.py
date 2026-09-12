@@ -70,12 +70,25 @@ def _observation(row):
         image_key = f"{side}_image"
         result[feature_key] = result.get(feature_key) or _image_features(result.get(image_key))
     if not all(isinstance(result.get(f"{side}_features"), dict) and
-               all(key in result[f"{side}_features"] for key in FEATURE_KEYS)
+               all(key in result[f"{side}_features"] for key in FEATURE_KEYS) and
+               all(np.isfinite(float(result[f"{side}_features"][key])) for key in FEATURE_KEYS)
                for side in ("before", "after")):
         return None
     result.setdefault("before_image", None)
     result.setdefault("after_image", None)
     return result
+
+
+def _state_observation(observation, side, step_id=None):
+    features = observation[f"{side}_features"]
+    image = observation.get(f"{side}_image")
+    return {
+        "before_features": dict(features),
+        "after_features": dict(features),
+        "before_image": image,
+        "after_image": image,
+        "step_id": step_id,
+    }
 
 
 def _metadata(row):
@@ -188,8 +201,10 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK, out_path
             continue
         command = _command(fb) or item["command"]
         row = item["row"]
-        observation = _with_step(item["observation"], row)
-        add("thumbs", observation, observation, command, label, _metadata(row))
+        step_id = row.get("step_id")
+        add("thumbs", _state_observation(item["observation"], "after", step_id),
+            _state_observation(item["observation"], "before", step_id), command, label,
+            _metadata(row))
 
     out_dir = os.path.dirname(os.fspath(out_path))
     if out_dir:

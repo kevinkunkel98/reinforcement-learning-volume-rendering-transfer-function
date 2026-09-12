@@ -31,6 +31,8 @@ def featurize(before_features: dict, after_features: dict, target_tissue: str,
     """Return after, before, delta, goal one-hot, and direction features."""
     after = [float(after_features[key]) for key in FEATURE_KEYS]
     before = [float(before_features[key]) for key in FEATURE_KEYS]
+    if not np.isfinite(after + before).all():
+        raise ValueError("features must be finite")
     delta = [a - b for a, b in zip(after, before)]
     goal = encode_target({"target_tissue": target_tissue, "direction": direction})
     return np.concatenate([
@@ -96,6 +98,9 @@ def _pair_arrays(records):
         weight = float(record.get("weight", 1.0))
         if not np.isfinite(weight) or weight <= 0:
             raise ValueError("weights must be finite and positive")
+        if "label" in record and (isinstance(record["label"], bool) or
+                                   record["label"] not in (-1, 1)):
+            raise ValueError("label must be -1 or 1")
         if "observation_a" in record and "observation_b" in record:
             first = _pair_observation_features(record["observation_a"], target, direction)
             second = _pair_observation_features(record["observation_b"], target, direction)

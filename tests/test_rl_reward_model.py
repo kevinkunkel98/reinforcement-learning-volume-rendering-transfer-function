@@ -87,6 +87,26 @@ def test_pair_arrays_parses_canonical_observations_and_swaps_negative_label():
     np.testing.assert_allclose(preferred[0, :4].numpy(), [30.0, 3.0, 0.3, 0.4])
     np.testing.assert_allclose(other[0, :4].numpy(), [20.0, 2.0, 0.2, 0.3])
     np.testing.assert_allclose(weights.numpy(), [1.0])
+    assert not torch.equal(preferred, other)
+    assert torch.count_nonzero(preferred - other).item() > 0
+
+
+def test_pair_arrays_rejects_canonical_labels_other_than_plus_or_minus_one():
+    features = {"mean": 1.0, "std": 1.0, "coverage": 1.0, "entropy": 1.0}
+    record = {
+        "target_tissue": "bone", "direction": "increase", "label": 0,
+        "observation_a": {"before_features": features, "after_features": features},
+        "observation_b": {"before_features": features, "after_features": features},
+    }
+    with pytest.raises(ValueError, match="label"):
+        _pair_arrays([record])
+
+
+def test_featurize_rejects_non_finite_features():
+    before = {"mean": 1.0, "std": 1.0, "coverage": 1.0, "entropy": 1.0}
+    after = {**before, "mean": float("inf")}
+    with pytest.raises(ValueError, match="finite"):
+        featurize(before, after, "bone", "increase")
 
 
 @pytest.mark.parametrize("weight", [0.0, -1.0, np.nan, np.inf])

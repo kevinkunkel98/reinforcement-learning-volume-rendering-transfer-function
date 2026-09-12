@@ -127,9 +127,10 @@ def test_recovers_features_from_images_and_preserves_paths(tmp_path):
 
     assert len(rows) == 1
     assert rows[0]["source"] == "thumbs"
-    assert rows[0]["observation_a"]["before_features"]["mean"] == 10.0
-    assert rows[0]["observation_a"]["after_features"]["mean"] == 20.0
-    assert rows[0]["observation_a"]["before_image"] == str(before)
+    assert rows[0]["observation_a"]["before_features"]["mean"] == 20.0
+    assert rows[0]["observation_b"]["before_features"]["mean"] == 10.0
+    assert rows[0]["observation_a"] != rows[0]["observation_b"]
+    assert rows[0]["observation_a"]["before_image"] == str(after)
     assert stats["skipped"] == 0
     assert stats["total"] == 1
 
@@ -216,4 +217,35 @@ def test_current_log_feedback_schema_remains_supported(tmp_path):
 
     assert len(pairs) == 1
     assert pairs[0]["source"] == "thumbs"
-    assert pairs[0]["observation_a"]["before_features"] == FEATURES
+    assert pairs[0]["observation_a"]["before_features"]["mean"] == 11.0
+
+
+def test_thumb_pair_has_nonzero_training_signal_and_rating_semantics(tmp_path):
+    log = tmp_path / "log.jsonl"
+    feedback = tmp_path / "feedback.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 7, seed=1)
+    write_jsonl(log, [row])
+    write_jsonl(feedback, [{"session_id": "s", "step_id": 7, "rating": "down"}])
+
+    pairs, _ = extract_pairs(log_path=log, feedback_path=feedback, out_path=out)
+
+    pair = pairs[0]
+    assert pair["label"] == -1
+    assert pair["observation_a"] != pair["observation_b"]
+    assert pair["observation_a"]["before_features"] == row["after_features"]
+    assert pair["observation_b"]["before_features"] == row["before_features"]
+    assert pair["observation_a"]["before_features"]["mean"] != pair["observation_b"]["before_features"]["mean"]
+
+
+def test_non_finite_features_are_skipped(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 1, seed=1)
+    row["after_features"]["mean"] = float("nan")
+    write_jsonl(log, [row])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert pairs == []
+    assert stats["skipped"] == 1
