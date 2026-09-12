@@ -349,3 +349,13 @@ def test_extract_pairs_can_use_preferences_default(tmp_path, monkeypatch):
 
     assert pairs == []
     assert stats["total"] == 0
+
+
+def test_default_parser_path_defines_preferences_input(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["rl.extract_pairs"])
+
+    import rl.extract_pairs as extract_module
+    extract_module.main()
+
+    assert (tmp_path / "out" / "pairs.jsonl").read_text() == ""

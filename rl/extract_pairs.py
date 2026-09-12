@@ -14,6 +14,7 @@ import render
 
 DEFAULT_LOG = "out/log.jsonl"
 DEFAULT_FEEDBACK = "out/feedback.jsonl"
+DEFAULT_PREFERENCES = "out/rlhf_preferences.jsonl"
 DEFAULT_OUT = "out/pairs.jsonl"
 WEIGHTS = {"branch": 1.0, "trajectory": 0.7, "thumbs": 0.4}
 RATING_LABELS = {"up": 1, "down": -1, "positive": 1, "negative": -1}
