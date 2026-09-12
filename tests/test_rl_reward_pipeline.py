@@ -6,6 +6,7 @@ import torch
 
 from rl import pretrain_reward
 from rl import finetune_reward
+from rl import eval_reward
 from rl.env import TISSUES
 
 
@@ -377,3 +378,100 @@ def test_finetune_rejects_output_path_matching_pretrained_member(tmp_path):
         finetune_reward.finetune(
             preferences, pretrained, output_path=member_path, epochs=1
         )
+
+
+def _evaluation_row(row_id, source="human", label=1):
+    return {
+        "id": row_id,
+        "source": source,
+        "target_tissue": "bone",
+        "direction": "increase",
+        "label": label,
+        "objective_a": 0.8,
+        "objective_b": 0.2,
+        "observation_a": {
+            "before_features": FEATURES,
+            "after_features": FEATURES,
+            "before_image": f"before-{row_id}.png",
+            "after_image": f"after-{row_id}.png",
+        },
+        "observation_b": {
+            "before_features": FEATURES,
+            "after_features": FEATURES,
+            "before_image": f"other-before-{row_id}.png",
+            "after_image": f"other-after-{row_id}.png",
+        },
+    }
+
+
+def test_reward_only_accuracy_reports_same_rows_and_source_breakdown():
+    rows = [_evaluation_row(1, "branch"), _evaluation_row(2, "thumb", -1)]
+    result = eval_reward.evaluate_reward_only(
+        rows,
+        pretrained_predictor=lambda row: row["label"],
+        finetuned_predictor=lambda row: 1,
+    )
+
+    assert result["test_row_ids"] == [1, 2]
+    assert result["pretrained"]["overall_accuracy"] == 1.0
+    assert result["pretrained"]["by_source"] == {"branch": 1.0, "thumb": 1.0}
+    assert result["finetuned"]["overall_accuracy"] == 0.5
+    assert result["finetuned"]["by_source"]["thumb"] == 0.0
+
+
+def test_disagreements_preserve_audit_images_and_goal_context():
+    row = _evaluation_row(7, "episode", label=1)
+    records = eval_reward.find_disagreements(
+        [row],
+        human_predictor=lambda row: row["label"],
+        objective_predictor=lambda row: -1,
+    )
+
+    assert records == [{
+        "id": 7,
+        "source": "episode",
+        "target_tissue": "bone",
+        "direction": "increase",
+        "human_label": 1,
+        "objective_label": -1,
+        "observation_a_images": {
+            "before": "before-7.png", "after": "after-7.png"
+        },
+        "observation_b_images": {
+            "before": "other-before-7.png", "after": "other-after-7.png"
+        },
+    }]
+
+
+def test_policy_sanity_check_compares_objective_finals_without_rendering():
+    episodes = [{"id": 1}, {"id": 2}]
+    result = eval_reward.policy_objective_sanity_check(
+        episodes,
+        policy_runner=lambda episode: [0.1, 0.4],
+        baseline_runner=lambda episode: [0.1, 0.2],
+    )
+
+    assert result == {
+        "n_episodes": 2,
+        "policy_mean_final_objective": 0.4,
+        "baseline_mean_final_objective": 0.2,
+    }
+
+
+def test_blind_head_to_head_randomizes_display_and_writes_separate_verdicts(tmp_path):
+    verdict_path = tmp_path / "verdicts.jsonl"
+    result = eval_reward.collect_blind_head_to_head(
+        [{"id": 1}, {"id": 2}],
+        render_policy=lambda episode: f"policy-{episode['id']}.png",
+        render_baseline=lambda episode: f"baseline-{episode['id']}.png",
+        seed=4,
+        verdicts=["A", "tie"],
+        verdict_path=verdict_path,
+    )
+
+    assert len(result) == 2
+    assert {row["display_order"] for row in result} == {"policy_baseline", "baseline_policy"}
+    assert all("verdict" in row for row in result)
+    assert all("verdict" not in row or row["verdict"] in ("A", "B", "tie") for row in result)
+    written = [json.loads(line) for line in verdict_path.read_text().splitlines()]
+    assert written == result
