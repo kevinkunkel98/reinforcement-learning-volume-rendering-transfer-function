@@ -37,6 +37,8 @@ def _command(row):
     target = command.get("target_tissue", command.get("target"))
     direction = command.get("direction")
     attribute = command.get("attribute", "opacity")
+    if attribute != "opacity":
+        return None
     if isinstance(target, str) and target not in TISSUE_HU:
         target = _find_tissue(target)
     if not target or target not in TISSUE_HU or direction not in ("increase", "decrease"):
@@ -132,6 +134,10 @@ def _with_step(observation, row):
 
 
 def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK, out_path=DEFAULT_OUT):
+    output = os.path.abspath(os.fspath(out_path))
+    inputs = [path for path in (log_path, feedback_path) if path]
+    if any(output == os.path.abspath(os.fspath(path)) for path in inputs):
+        raise ValueError("input and output paths collide")
     raw_logs = _read_jsonl(log_path)
     feedback = _read_jsonl(feedback_path)
     logs = []
@@ -205,17 +211,23 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK, out_path
         if item is None:
             skipped += 1
             continue
-        command = _command(fb) or item["command"]
+        if "command" in fb or "cmd_dict" in fb:
+            command = _command(fb)
+            if command is None:
+                skipped += 1
+                continue
+        else:
+            command = item["command"]
         row = item["row"]
         step_id = row.get("step_id")
         add("thumbs", _state_observation(item["observation"], "after", step_id),
             _state_observation(item["observation"], "before", step_id), command, label,
             _metadata(row))
 
-    out_dir = os.path.dirname(os.fspath(out_path))
+    out_dir = os.path.dirname(output)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-    with open(out_path, "w") as stream:
+    with open(output, "w") as stream:
         for pair in pairs:
             stream.write(json.dumps(pair) + "\n")
     stats["skipped"] = skipped

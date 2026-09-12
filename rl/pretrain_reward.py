@@ -1,6 +1,5 @@
 """Synthetic objective pretraining for goal-conditioned reward models."""
 import argparse
-import os
 from pathlib import Path
 
 import numpy as np
@@ -65,18 +64,25 @@ def generate_synthetic_pairs(pair_count: int = DEFAULT_PAIR_COUNT, *, seed: int 
     renderer = renderer or _default_renderer()
     feature_extractor = render_features_fn or render_features
     rows = []
-    for _ in range(pair_count):
+    attempts = 0
+    max_attempts = max(100, pair_count * 100)
+    while len(rows) < pair_count:
+        attempts += 1
+        if attempts > max_attempts:
+            raise RuntimeError("could not sample enough distinct, non-tied pairs")
         start = sample_start_params(rng)
         target, direction = sample_goal(rng)
         after_a = np.clip(start + sample_delta(rng), -1.0, 1.0)
         after_b = np.clip(start + sample_delta(rng), -1.0, 1.0)
-        before_features = feature_extractor(renderer, start)
-        after_a_features = feature_extractor(renderer, after_a)
-        after_b_features = feature_extractor(renderer, after_b)
         objective_a = _objective(start, after_a, target, direction)
         objective_b = _objective(start, after_b, target, direction)
         # TODO: replace mass_fraction objective with rendered visibility metric when available.
-        label = 1 if objective_a >= objective_b else -1
+        if np.array_equal(after_a, after_b) or objective_a == objective_b:
+            continue
+        before_features = feature_extractor(renderer, start)
+        after_a_features = feature_extractor(renderer, after_a)
+        after_b_features = feature_extractor(renderer, after_b)
+        label = 1 if objective_a > objective_b else -1
         rows.append({
             "source": "synthetic",
             "command": {"attribute": "opacity", "target": target, "direction": direction},
@@ -118,19 +124,21 @@ def pretrain(pair_count: int = DEFAULT_PAIR_COUNT, *, epochs: int = 200, seed: i
     """Train seeded ensemble and save member plus aggregate artifacts."""
     if members < 1:
         raise ValueError("members must be positive")
+    output = Path(output_path)
+    member_paths = [output.with_name(f"{output.stem}_member{index}{output.suffix}")
+                    for index in range(members)]
+    if output.exists() or any(path.exists() for path in member_paths):
+        raise FileExistsError(f"pretraining artifact already exists: {output}")
     records = generate_synthetic_pairs(
         pair_count, seed=seed, renderer=renderer,
         render_features_fn=render_features_fn,
     )
-    output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    member_paths = []
     for index in range(members):
-        member_path = output.with_name(f"{output.stem}_member{index}{output.suffix}")
+        member_path = member_paths[index]
         model = _train_member(records, seed=seed + index, epochs=epochs,
                               learning_rate=learning_rate)
         save_reward_model(model, member_path)
-        member_paths.append(member_path)
     torch.save({
         "member_paths": [str(path) for path in member_paths],
         "seeds": [seed + index for index in range(members)],

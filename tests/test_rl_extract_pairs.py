@@ -3,6 +3,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from rl.extract_pairs import extract_pairs
@@ -156,15 +157,53 @@ def test_grouping_and_dedupe_include_full_normalized_command(tmp_path):
         step("s", "e", 5, accepted=True, seed=5),
     ])
     rows = [json.loads(line) for line in log.read_text().splitlines()]
-    rows[0]["command"]["attribute"] = "width"
-    rows[1]["command"]["attribute"] = "width"
-    rows[2]["command"]["attribute"] = "opacity"
+    rows[1]["command"]["target"] = "fat"
+    rows[2]["command"]["target"] = "fat"
     write_jsonl(log, rows)
 
     pairs, _ = extract_pairs(log_path=log, out_path=out)
 
     assert len(pairs) == 1
-    assert pairs[0]["command"]["attribute"] == "width"
+    assert pairs[0]["command"] == {
+        "attribute": "opacity", "target": "fat", "direction": "increase"
+    }
+
+
+def test_non_opacity_commands_are_skipped(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 1, seed=1)
+    row["command"]["attribute"] = "width"
+    write_jsonl(log, [row])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert pairs == []
+    assert stats["skipped"] == 1
+
+
+def test_non_opacity_feedback_is_skipped_instead_of_using_log_command(tmp_path):
+    log = tmp_path / "log.jsonl"
+    feedback = tmp_path / "feedback.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    write_jsonl(log, [step("s", "e", 1, seed=1)])
+    write_jsonl(feedback, [{
+        "session_id": "s", "step_id": 1, "rating": "up",
+        "command": {"attribute": "width", "target": "bone", "direction": "increase"},
+    }])
+
+    pairs, stats = extract_pairs(log_path=log, feedback_path=feedback, out_path=out)
+
+    assert pairs == []
+    assert stats["skipped"] == 1
+
+
+def test_input_output_path_collision_is_rejected(tmp_path):
+    log = tmp_path / "log.jsonl"
+    write_jsonl(log, [step("s", "e", 1, seed=1)])
+
+    with pytest.raises(ValueError, match="input and output|collision"):
+        extract_pairs(log_path=log, feedback_path=log, out_path=log)
 
 
 def test_branch_parent_must_match_full_command_context(tmp_path):

@@ -189,9 +189,33 @@ def test_checkpoint_round_trip_preserves_prediction(tmp_path):
     assert loaded(x).item() == pytest.approx(model(x).item())
 
 
+def test_load_reward_model_rejects_unversioned_legacy_checkpoint(tmp_path):
+    path = tmp_path / "legacy.pt"
+    torch.save(RewardModel().state_dict(), path)
+    with pytest.raises(ValueError, match="legacy|version"):
+        load_reward_model(str(path))
+
+
+def test_load_reward_model_rejects_unknown_checkpoint_version(tmp_path):
+    path = tmp_path / "future.pt"
+    torch.save({
+        "format": "goal-conditioned-reward",
+        "version": 999,
+        "state_dict": RewardModel().state_dict(),
+    }, path)
+    with pytest.raises(ValueError, match="version"):
+        load_reward_model(str(path))
+
+
 def test_ensemble_reward_is_mean_minus_std():
     values = np.array([[.2, .4], [.6, .2]])
     assert ensemble_reward(values) == pytest.approx(values.mean() - values.std())
+
+
+@pytest.mark.parametrize("values", [[], [np.nan], [np.inf], [-np.inf]])
+def test_ensemble_reward_rejects_empty_or_nonfinite_values(values):
+    with pytest.raises(ValueError, match="non-empty|finite"):
+        ensemble_reward(values)
 
 
 def test_predict_reward_stays_finite_for_extreme_logit():

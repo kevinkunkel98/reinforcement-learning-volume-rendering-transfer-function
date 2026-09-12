@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from rl import pretrain_reward
@@ -110,3 +111,51 @@ def test_pretrain_saves_aggregate_and_distinct_seeded_members(tmp_path):
     checkpoint = torch.load(out, map_location="cpu")
     assert checkpoint["member_paths"] == [str(path) for path in paths]
     assert checkpoint["seeds"] == [7, 8]
+
+
+def test_pretrain_refuses_existing_artifacts(tmp_path):
+    out = tmp_path / "reward_pretrained.pt"
+    out.write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        pretrain_reward.pretrain(
+            pair_count=1,
+            epochs=1,
+            members=1,
+            output_path=out,
+            renderer=lambda params: params,
+            render_features_fn=lambda renderer, params: FEATURES,
+        )
+
+
+def test_pretrain_refuses_existing_member_artifact(tmp_path):
+    out = tmp_path / "reward_pretrained.pt"
+    out.with_name("reward_pretrained_member0.pt").write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        pretrain_reward.pretrain(
+            pair_count=1,
+            epochs=1,
+            members=1,
+            output_path=out,
+            renderer=lambda params: params,
+            render_features_fn=lambda renderer, params: FEATURES,
+        )
+
+
+def test_generate_pairs_resamples_duplicates_and_ties(monkeypatch):
+    monkeypatch.setattr(pretrain_reward, "sample_start_params", lambda rng: np.zeros(24))
+    deltas = iter((
+        np.zeros(24), np.zeros(24),  # duplicate candidates
+        np.full(24, 0.25), np.full(24, 0.25),  # tied objectives
+        np.full(24, 0.25), np.full(24, 0.5),  # accepted pair
+    ))
+    monkeypatch.setattr(pretrain_reward, "sample_delta", lambda rng: next(deltas))
+    monkeypatch.setattr(pretrain_reward, "sample_goal", lambda rng: ("bone", "increase"))
+    monkeypatch.setattr(pretrain_reward, "render_features", lambda renderer, params: FEATURES)
+    monkeypatch.setattr(pretrain_reward, "mass_fraction", lambda params, tissue: float(params[0]))
+
+    rows = pretrain_reward.generate_synthetic_pairs(1, seed=0, renderer=lambda p: p)
+
+    assert len(rows) == 1
+    assert rows[0]["objective_a"] != rows[0]["objective_b"]

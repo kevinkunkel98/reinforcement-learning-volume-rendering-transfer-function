@@ -11,6 +11,8 @@ from rl.env import TISSUES
 
 FEATURE_KEYS = ("mean", "std", "coverage", "entropy")
 INPUT_DIM = len(FEATURE_KEYS) * 3 + len(TISSUES) + 1
+CHECKPOINT_FORMAT = "goal-conditioned-reward"
+CHECKPOINT_VERSION = 1
 
 
 def encode_target(cmd: dict) -> np.ndarray:
@@ -136,7 +138,11 @@ def save_reward_model(model: RewardModel, model_path) -> None:
     directory = os.path.dirname(os.fspath(model_path))
     if directory:
         os.makedirs(directory, exist_ok=True)
-    torch.save(model.state_dict(), model_path)
+    torch.save({
+        "format": CHECKPOINT_FORMAT,
+        "version": CHECKPOINT_VERSION,
+        "state_dict": model.state_dict(),
+    }, model_path)
 
 
 def train_reward_model(preferences_path: str, model_path: str, epochs: int = 200,
@@ -173,7 +179,17 @@ def train_reward_model(preferences_path: str, model_path: str, epochs: int = 200
 
 def load_reward_model(model_path: str) -> RewardModel:
     model = RewardModel()
-    model.load_state_dict(torch.load(model_path, map_location="cpu"))
+    checkpoint = torch.load(model_path, map_location="cpu")
+    if not isinstance(checkpoint, dict) or checkpoint.get("format") != CHECKPOINT_FORMAT:
+        raise ValueError(
+            "legacy reward checkpoint rejected: resave it with save_reward_model()"
+        )
+    if checkpoint.get("version") != CHECKPOINT_VERSION:
+        raise ValueError(f"unsupported reward checkpoint version: {checkpoint.get('version')!r}")
+    state_dict = checkpoint.get("state_dict")
+    if not isinstance(state_dict, dict):
+        raise ValueError("reward checkpoint missing state_dict")
+    model.load_state_dict(state_dict)
     model.eval()
     return model
 
@@ -188,6 +204,8 @@ def predict_reward(model: RewardModel, before_features: dict, after_features: di
 
 def ensemble_reward(values) -> float:
     values = np.asarray(values, dtype=np.float32)
+    if values.size == 0 or not np.isfinite(values).all():
+        raise ValueError("ensemble values must be non-empty and finite")
     return float(values.mean() - values.std())
 
 
