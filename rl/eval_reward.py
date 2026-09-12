@@ -6,6 +6,7 @@ an independent blind comparison. Blind verdicts are deliberately written to a
 different file and are never passed to pair extraction or fine-tuning.
 """
 import argparse
+import hashlib
 import json
 import random
 from pathlib import Path
@@ -154,10 +155,14 @@ def collect_blind_head_to_head(
             order, a_path, b_path = "baseline_policy", baseline_path, policy_path
         raw_verdict = next(verdict_iter, None)
         verdict = None if raw_verdict is None else str(raw_verdict).lower()
-        if verdict in ("policy", "baseline"):
+        if verdict in ("better", "a"):
+            verdict = "A"
+        elif verdict in ("worse", "b"):
+            verdict = "B"
+        elif verdict in ("policy", "baseline"):
             verdict = "A" if (verdict == "policy") == policy_first else "B"
         if verdict not in (None, "A", "B", "tie"):
-            raise ValueError("verdict must be A, B, tie, policy, or baseline")
+            raise ValueError("verdict must be better, worse, tie, policy, or baseline")
         results.append({
             "id": episode.get("id", index),
             "display_order": order,
@@ -168,7 +173,7 @@ def collect_blind_head_to_head(
     if verdict_path is not None:
         path = Path(verdict_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as stream:
+        with path.open("a", encoding="utf-8") as stream:
             for result in results:
                 stream.write(json.dumps(result, sort_keys=True) + "\n")
     return results
@@ -184,9 +189,30 @@ def _load_members(aggregate_path) -> list:
     names = checkpoint.get("member_paths") if isinstance(checkpoint, dict) else None
     if not names:
         raise ValueError(f"checkpoint missing member_paths: {aggregate_path}")
-    base = Path(aggregate_path).parent
-    return [load_reward_model(path if Path(path).is_absolute() else base / path)
+    return [load_reward_model(_resolve_member_path(path, aggregate_path))
             for path in names]
+
+
+def _resolve_member_path(member_name, aggregate_path) -> Path:
+    """Resolve stored member paths from absolute, cwd, or artifact layouts."""
+    member = Path(member_name)
+    if member.is_absolute() and member.exists():
+        return member
+    aggregate = Path(aggregate_path)
+    candidates = []
+    if member.is_absolute():
+        candidates.append(member)
+    else:
+        candidates.extend((member, Path.cwd() / member,
+                           aggregate.parent / member,
+                           aggregate.parent / member.name))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        f"reward member not found: {member_name!r}; tried "
+        + ", ".join(str(candidate) for candidate in candidates)
+    )
 
 
 def torch_load(path):
@@ -195,19 +221,45 @@ def torch_load(path):
     return torch.load(path, map_location="cpu")
 
 
+def _row_hash(record: dict, ordinal: int) -> str:
+    payload = json.dumps(
+        {"ordinal": ordinal, "record": record}, sort_keys=True,
+        separators=(",", ":"), ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def select_fixed_test_rows(rows: Iterable[dict], metadata: dict) -> list[dict]:
+    """Validate persisted split identity and return its test rows.
+
+    Missing or inconsistent metadata is fatal. Evaluation never regenerates a
+    different split when the persisted split cannot be proven intact.
+    """
+    rows = list(rows)
+    required = ("train_count", "test_count", "train_row_hashes", "test_row_hashes")
+    if not isinstance(metadata, dict) or any(key not in metadata for key in required):
+        raise ValueError("fixed split metadata is missing required metadata")
+    train_hashes = list(metadata["train_row_hashes"])
+    test_hashes = list(metadata["test_row_hashes"])
+    if (metadata["train_count"] != len(train_hashes) or
+            metadata["test_count"] != len(test_hashes)):
+        raise ValueError("fixed split metadata counts do not match metadata hashes")
+    if set(train_hashes) & set(test_hashes):
+        raise ValueError("fixed split metadata has overlapping train/test hashes")
+    known = {_row_hash(row, ordinal): row for ordinal, row in enumerate(rows)}
+    expected = set(train_hashes) | set(test_hashes)
+    if len(expected) != len(rows) or set(known) != expected:
+        raise ValueError("fixed split metadata hashes do not match preference rows")
+    return [known[row_hash] for row_hash in test_hashes]
+
+
 def evaluate_files(preferences_path, pretrained_path, finetuned_path, *, test_rows=None,
                    disagreements_path=None, split_seed=0, test_fraction=0.2) -> dict:
     """Evaluate persisted artifacts; callers may pass persisted split rows."""
-    from rl.finetune_reward import split_pairs
     rows = _read_jsonl(preferences_path)
     if test_rows is None:
-        metadata = torch_load(finetuned_path).get("metadata", {})
-        ids = metadata.get("test_ids")
-        if ids:
-            wanted = set(ids)
-            test_rows = [row for row in rows if row.get("id") in wanted]
-        else:
-            _, test_rows = split_pairs(rows, seed=split_seed, test_fraction=test_fraction)
+        metadata = torch_load(finetuned_path).get("metadata")
+        test_rows = select_fixed_test_rows(rows, metadata)
     pretrained = _model_predictor(_load_members(pretrained_path))
     finetuned = _model_predictor(_load_members(finetuned_path))
     result = evaluate_reward_only(rows=test_rows, pretrained_predictor=pretrained,

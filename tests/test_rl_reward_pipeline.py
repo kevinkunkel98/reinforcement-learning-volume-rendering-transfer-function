@@ -475,3 +475,71 @@ def test_blind_head_to_head_randomizes_display_and_writes_separate_verdicts(tmp_
     assert all("verdict" not in row or row["verdict"] in ("A", "B", "tie") for row in result)
     written = [json.loads(line) for line in verdict_path.read_text().splitlines()]
     assert written == result
+
+
+def test_blind_verdicts_normalize_better_worse_relative_to_display_and_append(tmp_path):
+    verdict_path = tmp_path / "verdicts.jsonl"
+    verdict_path.write_text('{"previous": true}\n')
+
+    result = eval_reward.collect_blind_head_to_head(
+        [{"id": 1}, {"id": 2}],
+        render_policy=lambda episode: f"policy-{episode['id']}.png",
+        render_baseline=lambda episode: f"baseline-{episode['id']}.png",
+        seed=4,
+        verdicts=["better", "worse"],
+        verdict_path=verdict_path,
+    )
+
+    assert [row["verdict"] for row in result] == ["A", "B"]
+    written = verdict_path.read_text().splitlines()
+    assert written[0] == '{"previous": true}'
+    assert [json.loads(line)["verdict"] for line in written[1:]] == ["A", "B"]
+
+
+def test_evaluation_resolves_member_paths_from_default_artifact_layout(tmp_path):
+    aggregate = tmp_path / "out" / "rl_models" / "reward_pretrained.pt"
+    member = aggregate.with_name("reward_pretrained_member0.pt")
+    member.parent.mkdir(parents=True)
+    member.write_bytes(b"member")
+
+    resolved = eval_reward._resolve_member_path(
+        "out/rl_models/reward_pretrained_member0.pt", aggregate
+    )
+
+    assert resolved == member
+
+
+def test_fixed_split_metadata_is_required_and_validated():
+    rows = [_evaluation_row(index) for index in range(4)]
+    train, test = finetune_reward.split_pairs(rows, seed=11, test_fraction=0.5)
+    metadata = {
+        "train_count": len(train),
+        "test_count": len(test),
+        "train_row_hashes": finetune_reward._hash_subset(rows, train),
+        "test_row_hashes": finetune_reward._hash_subset(rows, test),
+    }
+
+    assert eval_reward.select_fixed_test_rows(rows, metadata) == test
+    with pytest.raises(ValueError, match="metadata"):
+        eval_reward.select_fixed_test_rows(rows, {})
+
+
+@pytest.mark.parametrize("mutation", ["count", "hash", "overlap"])
+def test_fixed_split_metadata_rejects_tampering(mutation):
+    rows = [_evaluation_row(index) for index in range(4)]
+    train, test = finetune_reward.split_pairs(rows, seed=11, test_fraction=0.5)
+    metadata = {
+        "train_count": len(train),
+        "test_count": len(test),
+        "train_row_hashes": finetune_reward._hash_subset(rows, train),
+        "test_row_hashes": finetune_reward._hash_subset(rows, test),
+    }
+    if mutation == "count":
+        metadata["test_count"] += 1
+    elif mutation == "hash":
+        metadata["test_row_hashes"][0] = "0" * 64
+    else:
+        metadata["test_row_hashes"][0] = metadata["train_row_hashes"][0]
+
+    with pytest.raises(ValueError, match="metadata"):
+        eval_reward.select_fixed_test_rows(rows, metadata)
