@@ -153,6 +153,7 @@ def test_extracts_flat_collect_preference_rows_as_thumbs(tmp_path):
     write_jsonl(preferences, [{
         "target_tissue": "bone",
         "direction": "increase",
+        "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
         "before_features": FEATURES,
         "after_features": {**FEATURES, "mean": 12.0},
         "before_png": "before.png",
@@ -173,6 +174,50 @@ def test_extracts_flat_collect_preference_rows_as_thumbs(tmp_path):
         "attribute": "opacity", "target": "bone", "direction": "increase",
     }
     assert rows[0]["observation_a"]["after_features"]["mean"] == 12.0
+
+
+@pytest.mark.parametrize("label", [-1, 1])
+def test_extracts_numeric_flat_preference_labels(tmp_path, label):
+    preferences = tmp_path / f"preferences-{label}.jsonl"
+    out = tmp_path / f"pairs-{label}.jsonl"
+    write_jsonl(preferences, [{
+        "target_tissue": "bone",
+        "direction": "increase",
+        "before_features": FEATURES,
+        "after_features": FEATURES,
+        "label": label,
+    }])
+
+    rows, _ = extract_pairs(
+        log_path=None, feedback_path=None, preferences_path=preferences, out_path=out,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["label"] == label
+
+
+def test_flat_preference_row_is_not_emitted_again_as_feedback(tmp_path):
+    preferences = tmp_path / "preferences.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = {
+        "session_id": "s",
+        "step_id": 1,
+        "target_tissue": "bone",
+        "direction": "increase",
+        "before_features": FEATURES,
+        "after_features": {**FEATURES, "mean": 12.0},
+        "label": 1,
+        "params": [1, 2],
+        "accepted": True,
+    }
+    write_jsonl(preferences, [row])
+
+    rows, stats = extract_pairs(
+        log_path=None, feedback_path=None, preferences_path=preferences, out_path=out,
+    )
+
+    assert len(rows) == 1
+    assert stats["thumbs"] == 1
 
 
 def test_empty_inputs_write_valid_empty_output_and_cli_summary(tmp_path):

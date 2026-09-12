@@ -164,7 +164,10 @@ def _canonical_pair(row):
 def _flat_preference_pair(row):
     """Convert collect_preferences/ingest_feedback rows to a thumbs pair."""
     command = _command(row)
-    label = RATING_LABELS.get(row.get("rating", row.get("label")))
+    raw_label = row.get("rating", row.get("label"))
+    label = None if isinstance(raw_label, bool) else RATING_LABELS.get(raw_label)
+    if label is None and raw_label in (-1, 1):
+        label = int(raw_label)
     if label is None:
         label = {"better": 1, "worse": -1}.get(row.get("human_verdict"))
     observation = _observation(row)
@@ -206,9 +209,9 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
             pair = _flat_preference_pair(row)
             if pair is not None:
                 flat_preference_pairs.append(pair)
-    raw_logs = [row for row in [*log_rows, *preference_rows]
+    raw_logs = [row for row in log_rows
                 if "observation_a" not in row and "observation_b" not in row]
-    feedback = [row for row in [*feedback_rows, *preference_rows]
+    feedback = [row for row in feedback_rows
                 if "observation_a" not in row and "observation_b" not in row]
     logs = []
     skipped = 0
