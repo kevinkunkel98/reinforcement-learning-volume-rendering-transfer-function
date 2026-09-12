@@ -1,18 +1,19 @@
 # Voice-Driven Transfer Function MVP
 
-Local prototype: real CT/MRI volumes (HU-calibrated, or rescaled onto the same
-range for MRI) -> 4-Gaussian-peak transfer function -> offscreen VTK render,
-driven by rule-based or local-LLM-parsed text/voice commands,
-searched by hill-climbing against an exact opacity-mass metric or a human judge.
-Camera viewing angle is a second, independent piece of controllable state, adjusted
-by the same command layer. Two offline reinforcement-learning sub-projects (see
-below) each train a policy to match or beat the hand-coded hill-climbing baseline;
-a continual online-learning variant and an RLHF pilot (reward model learned from
-human judgments) build further on the opacity agent.
+**RLHF for speech-controlled volume rendering.** Say "show only bone" or "make
+the skeleton pop" and a real CT/MRI scan re-renders live — parsed by a rule
+engine or a local LLM, optimized by hill-climbing or a trained RL policy, and,
+as a research pilot, steered by a reward model learned from human preferences
+instead of a hand-coded metric.
 
-For a full technical writeup of the current architecture (rendering pipeline,
-command layer, search/evaluation, camera control, both RL sub-projects, server
-session model), see `docs/architecture.typ` (compiled: `docs/architecture.pdf`).
+<p align="center">
+  <img src="slides/architecture-highlevel.png" width="85%" alt="Architecture: command layer, transfer-function/render pipeline, RL sub-projects" />
+</p>
+
+For the full technical writeup (rendering pipeline, command layer,
+search/evaluation, camera control, all RL sub-projects, server session model),
+see `docs/architecture.typ` (compiled: `docs/architecture.pdf`) and
+`docs/rl-write-test.typ` (math reference, compiled: `docs/rl-math.pdf`).
 
 ## Setup
 
@@ -108,9 +109,8 @@ travels alongside the transfer function in each history step, so back/forward
 navigation restores both together. Session state persists in
 `out/ui_session.json`.
 
-<p float="left">
-  <img src="docs/screenshots/chat-ui-synthetic.png" width="49%" alt="Chat UI on the synthetic phantom, bone tissue isolated" />
-  <img src="docs/screenshots/chat-ui-ct-skull.png" width="49%" alt="Chat UI on a real CT skull scan, bone tissue isolated" />
+<p align="center">
+  <img src="docs/screenshots/chat-ui-ct-skull.png" width="70%" alt="Chat UI on a real CT skull scan, bone tissue isolated" />
 </p>
 
 ### Running in the background, and checking it's actually up
@@ -242,43 +242,13 @@ run against real collected labels (that step needs a live human, so it can't
 run unattended). Camera-viewpoint RLHF and live chat-UI wiring for either
 online-learning variant are both explicitly out of scope for now.
 
-## Files
+## Project layout
 
-- `phantom.py` — synthetic CT-like volume in Hounsfield units (fast/offline; used by the RL training scripts, not the default display dataset)
-- `datasets.py` — real CT/MRI dataset registry, checksum-verified download, MRI-to-HU-range rescale
-- `transfer.py` — 24-float vector <-> VTK transfer functions, `opacity_mass` metric
-- `render.py` — offscreen VTK render, pixel grab, image features
-- `camera.py` — camera state (azimuth/elevation/zoom), relative camera commands
-- `commands.py` — rule-based parser, Ollama LLM parser, `apply_command`
-- `evaluate.py` — objective (`opacity_mass`) and human console evaluators, preference logging
-- `asr.py` — faster-whisper push-to-talk mic capture and file transcription
-- `mvp.py` — CLI, hill-climbing loop, state persistence
-- `eval_parsers.py` — rule vs LLM parser accuracy comparison
-- `stats.py` — `out/preferences.jsonl` agreement analysis
-- `datasets.py` — real CT dataset registry, checksum-verified download + NRRD loading
-- `search.py` — hill-climb search-step math, shared by `mvp.py`, `server.py`, and both RL evaluators
-- `server.py` + `static/` — FastAPI chat UI (text/voice commands, history navigation, human judging, camera)
-- `rl/env.py`, `rl/train.py`, `rl/eval.py`, `rl/serve.py` — SAC RL for transfer-function opacity (train/eval offline, serve live)
-- `rl/online_train.py` — continual online-learning variant, single env, chunked eval logging
-- `rl/camera_env.py`, `rl/camera_train.py`, `rl/camera_eval.py` — offline SAC RL for camera viewpoint
-- `rl/collect_preferences.py`, `rl/reward_model.py`, `rl/reward_model_env.py`, `rl/reward_model_train.py` — RLHF pilot: human-labeled preferences → learned reward model → RL against it
-- `plots/` — matplotlib figure generation from SB3/eval logs (training curves, online-learning eval curve)
-- `docs/architecture.typ` — full architecture reference (compiled: `docs/architecture.pdf`)
-- `docs/rl-write-test.typ` — RL math/implementation reference (compiled: `docs/rl-math.pdf`)
-
-The hand-coded hill-climbing baseline (`search.py` + `evaluate.py`) remains
-the default live-loop optimizer, and the only one `mvp.py` uses. `server.py`
-additionally offers the trained opacity policy as a third search option
-(`evaluator=policy`); the camera-viewpoint policy is trained and evaluated
-offline only, not yet wired into either loop.
-`out/log.jsonl` and `out/preferences.jsonl` are the data the hill-climb
-baseline leaves behind, originally intended for a later learned agent to
-train on directly; the opacity/camera RL sub-projects instead trained
-against exact metrics computed straight from the data, so that specific data
-remains unused by them. The RLHF pilot above is the first consumer of
-human-labeled preference data, though it logs to a separate,
-purpose-built `out/rlhf_preferences.jsonl` rather than reusing
-`out/preferences.jsonl`'s schema.
+The core pipeline (dataset loading, transfer function, VTK render, camera,
+command parsing, hill-climb search, CLI/chat-UI) lives at the repo root;
+`rl/` holds both offline RL sub-projects plus the online-learning and RLHF
+extensions; `plots/` regenerates the training-curve figures. See
+`docs/architecture.typ` for the full component-by-component breakdown.
 
 ## Tests
 
