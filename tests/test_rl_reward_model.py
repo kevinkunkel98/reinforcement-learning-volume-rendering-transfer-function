@@ -48,6 +48,15 @@ def test_encode_target_accepts_command_dict():
                                [0.0, 0.0, 0.0, 0.0, 1.0, 1.0])
 
 
+@pytest.mark.parametrize("cmd", [
+    {"target_tissue": "unknown", "direction": "increase"},
+    {"target_tissue": "bone", "direction": "sideways"},
+])
+def test_encode_target_rejects_invalid_goal(cmd):
+    with pytest.raises(ValueError, match="target|direction"):
+        encode_target(cmd)
+
+
 def test_reward_model_has_two_hidden_layers():
     layers = list(RewardModel().net)
     assert [layer.out_features for layer in layers if isinstance(layer, nn.Linear)] == [64, 32, 1]
@@ -78,6 +87,20 @@ def test_pair_arrays_parses_canonical_observations_and_swaps_negative_label():
     np.testing.assert_allclose(preferred[0, :4].numpy(), [30.0, 3.0, 0.3, 0.4])
     np.testing.assert_allclose(other[0, :4].numpy(), [20.0, 2.0, 0.2, 0.3])
     np.testing.assert_allclose(weights.numpy(), [1.0])
+
+
+@pytest.mark.parametrize("weight", [0.0, -1.0, np.nan, np.inf])
+def test_pair_arrays_rejects_non_positive_or_non_finite_weight(weight):
+    record = {
+        "target_tissue": "bone",
+        "direction": "increase",
+        "before_features": {"mean": 1.0, "std": 1.0, "coverage": 1.0, "entropy": 1.0},
+        "after_features": {"mean": 2.0, "std": 1.0, "coverage": 1.0, "entropy": 1.0},
+        "label": 1,
+        "weight": weight,
+    }
+    with pytest.raises(ValueError, match="weight"):
+        _pair_arrays([record])
 
 
 def _make_separable_preferences(path, n=40):
@@ -117,6 +140,13 @@ def test_train_reward_model_learns_separable_data(tmp_path):
     assert better > worse
 
 
+def test_train_reward_model_rejects_single_record(tmp_path):
+    prefs_path = tmp_path / "preferences.jsonl"
+    _make_separable_preferences(prefs_path, n=1)
+    with pytest.raises(ValueError, match="at least two"):
+        train_reward_model(str(prefs_path), str(tmp_path / "reward_model.pt"), epochs=1)
+
+
 def test_load_reward_model_roundtrip(tmp_path):
     prefs_path = tmp_path / "preferences.jsonl"
     _make_separable_preferences(prefs_path)
@@ -142,3 +172,14 @@ def test_checkpoint_round_trip_preserves_prediction(tmp_path):
 def test_ensemble_reward_is_mean_minus_std():
     values = np.array([[.2, .4], [.6, .2]])
     assert ensemble_reward(values) == pytest.approx(values.mean() - values.std())
+
+
+def test_predict_reward_stays_finite_for_extreme_logit():
+    class ExtremeModel:
+        def __call__(self, x):
+            return torch.tensor([1000.0])
+
+    features = {"mean": 1.0, "std": 1.0, "coverage": 1.0, "entropy": 1.0}
+    reward = predict_reward(ExtremeModel(), features, features, "bone", "increase")
+    assert reward == pytest.approx(1.0)
+    assert np.isfinite(reward)

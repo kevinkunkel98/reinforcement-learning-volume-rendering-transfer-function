@@ -17,6 +17,10 @@ def encode_target(cmd: dict) -> np.ndarray:
     """Encode command goal; future versions can swap this for text embeddings."""
     target = cmd.get("target_tissue", cmd.get("target"))
     direction = cmd.get("direction")
+    if target not in TISSUES:
+        raise ValueError(f"invalid target tissue: {target!r}")
+    if direction not in ("increase", "decrease"):
+        raise ValueError(f"invalid direction: {direction!r}")
     onehot = [1.0 if tissue == target else 0.0 for tissue in TISSUES]
     direction_flag = 1.0 if direction == "increase" else -1.0
     return np.asarray(onehot + [direction_flag], dtype=np.float32)
@@ -52,6 +56,8 @@ class RewardModel(nn.Module):
 def bradley_terry_loss(preferred: torch.Tensor, other: torch.Tensor,
                        weights: torch.Tensor) -> torch.Tensor:
     """Weighted negative log likelihood that preferred scores beat others."""
+    if not torch.isfinite(weights).all() or (weights <= 0).any():
+        raise ValueError("weights must be finite and positive")
     losses = -torch.nn.functional.logsigmoid(preferred - other)
     return (losses * weights).sum() / weights.sum().clamp_min(torch.finfo(losses.dtype).eps)
 
@@ -88,6 +94,8 @@ def _pair_arrays(records):
         target = record.get("target_tissue", record.get("target"))
         direction = record["direction"]
         weight = float(record.get("weight", 1.0))
+        if not np.isfinite(weight) or weight <= 0:
+            raise ValueError("weights must be finite and positive")
         if "observation_a" in record and "observation_b" in record:
             first = _pair_observation_features(record["observation_a"], target, direction)
             second = _pair_observation_features(record["observation_b"], target, direction)
@@ -135,6 +143,8 @@ def train_reward_model(preferences_path: str, model_path: str, epochs: int = 200
 
     torch.manual_seed(seed)
     preferred, other, weights = _pair_arrays(records)
+    if len(preferred) < 2:
+        raise ValueError("at least two preference records are required for training")
     rng = np.random.default_rng(seed)
     idx = rng.permutation(len(preferred))
     n_val = max(1, len(idx) // 5)
@@ -168,7 +178,7 @@ def predict_reward(model: RewardModel, before_features: dict, after_features: di
     x = torch.from_numpy(featurize(before_features, after_features, target_tissue, direction)).unsqueeze(0)
     with torch.no_grad():
         logit = model(x).item()
-    return float(2.0 / (1.0 + np.exp(-logit)) - 1.0)
+    return float(2.0 * torch.sigmoid(torch.tensor(logit)).item() - 1.0)
 
 
 def ensemble_reward(values) -> float:
