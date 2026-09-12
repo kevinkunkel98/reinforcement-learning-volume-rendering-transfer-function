@@ -147,6 +147,34 @@ def test_recovers_features_from_images_and_preserves_paths(tmp_path):
     assert stats["total"] == 1
 
 
+def test_extracts_flat_collect_preference_rows_as_thumbs(tmp_path):
+    preferences = tmp_path / "preferences.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    write_jsonl(preferences, [{
+        "target_tissue": "bone",
+        "direction": "increase",
+        "before_features": FEATURES,
+        "after_features": {**FEATURES, "mean": 12.0},
+        "before_png": "before.png",
+        "after_png": "after.png",
+        "label": -1,
+    }])
+
+    rows, stats = extract_pairs(
+        log_path=None, feedback_path=None, preferences_path=preferences, out_path=out,
+    )
+
+    assert len(rows) == 1
+    assert stats["thumbs"] == 1
+    assert rows[0]["source"] == "thumbs"
+    assert rows[0]["weight"] == 0.4
+    assert rows[0]["label"] == -1
+    assert rows[0]["command"] == {
+        "attribute": "opacity", "target": "bone", "direction": "increase",
+    }
+    assert rows[0]["observation_a"]["after_features"]["mean"] == 12.0
+
+
 def test_empty_inputs_write_valid_empty_output_and_cli_summary(tmp_path):
     out = tmp_path / "nested" / "pairs.jsonl"
     result = subprocess.run([

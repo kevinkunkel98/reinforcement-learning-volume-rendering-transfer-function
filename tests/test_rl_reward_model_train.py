@@ -5,8 +5,9 @@ import json
 import os
 
 import pytest
+import torch
 
-from rl.reward_model import train_reward_model
+from rl.reward_model import RewardModel, save_reward_model, train_reward_model
 from rl.reward_model_train import reward_model_train
 
 
@@ -69,3 +70,15 @@ def test_model_parent_dir_is_optional(tmp_path):
 
     _ensure_parent_dir("agent.zip")
     _ensure_parent_dir(str(tmp_path / "nested" / "agent.zip"))
+
+
+def test_load_reward_models_accepts_aggregate_and_single_checkpoints(tmp_path):
+    from rl.reward_model_train import _load_reward_models
+
+    member = tmp_path / "member.pt"
+    save_reward_model(RewardModel(), member)
+    aggregate = tmp_path / "aggregate.pt"
+    torch.save({"member_paths": [str(member)], "seeds": [0]}, aggregate)
+
+    assert len(_load_reward_models(aggregate)) == 1
+    assert len(_load_reward_models(member)) == 1

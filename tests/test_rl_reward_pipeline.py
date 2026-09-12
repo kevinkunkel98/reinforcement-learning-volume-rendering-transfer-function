@@ -358,6 +358,36 @@ def test_finetune_cleans_published_members_if_aggregate_publish_fails(tmp_path, 
     assert not list(tmp_path.glob("reward_finetuned_member*.pt"))
 
 
+def test_finetune_rolls_back_members_published_before_aggregate_failure(tmp_path, monkeypatch):
+    pretrained = tmp_path / "reward_pretrained.pt"
+    pretrain_reward.pretrain(
+        pair_count=4, epochs=1, seed=7, members=2, learning_rate=1e-3,
+        output_path=pretrained, renderer=lambda params: params,
+        render_features_fn=lambda renderer, params: FEATURES,
+    )
+    preferences = tmp_path / "pairs.jsonl"
+    record = {
+        "target_tissue": "bone", "direction": "increase", "label": 1,
+        "observation_a": {"before_features": FEATURES, "after_features": FEATURES},
+        "observation_b": {"before_features": FEATURES, "after_features": FEATURES},
+    }
+    preferences.write_text("".join(f"{json.dumps(record)}\n" for _ in range(4)))
+    original_replace = finetune_reward.Path.replace
+
+    def fail_after_members(path, target):
+        if Path(target).name == "reward_finetuned.pt":
+            raise RuntimeError("publish failed")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(finetune_reward.Path, "replace", fail_after_members)
+    output = tmp_path / "reward_finetuned.pt"
+    with pytest.raises(RuntimeError, match="publish failed"):
+        finetune_reward.finetune(preferences, pretrained, output_path=output, epochs=1)
+
+    assert not output.exists()
+    assert not list(tmp_path.glob("reward_finetuned_member*.pt"))
+
+
 def test_finetune_rejects_output_path_matching_pretrained_member(tmp_path):
     pretrained = tmp_path / "reward_pretrained.pt"
     pretrain_reward.pretrain(

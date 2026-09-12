@@ -125,6 +125,7 @@ def finetune(preferences_path, pretrained_path, *, output_path=DEFAULT_OUTPUT,
         raise FileExistsError(f"fine-tuning artifact already exists: {output}")
 
     learning_rate = pretrain_lr / 10.0
+    published_members = []
     try:
         for index, member_name in enumerate(member_names):
             member_path = pretrained_member_paths[index]
@@ -156,9 +157,10 @@ def finetune(preferences_path, pretrained_path, *, output_path=DEFAULT_OUTPUT,
         }, temporary_output)
         for temporary, final in zip(temporary_paths, member_paths):
             temporary.replace(final)
+            published_members.append(final)
         temporary_output.replace(output)
     except Exception:
-        for path in [temporary_output, *temporary_paths, output, *member_paths]:
+        for path in [temporary_output, *temporary_paths, output, *published_members]:
             path.unlink(missing_ok=True)
         raise
     return member_paths

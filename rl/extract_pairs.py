@@ -34,6 +34,12 @@ def _read_jsonl(path):
 
 def _command(row):
     command = row.get("command") or row.get("cmd_dict") or {}
+    if not command and row.get("target_tissue") is not None:
+        command = {
+            "attribute": "opacity",
+            "target": row.get("target_tissue"),
+            "direction": row.get("direction"),
+        }
     if not isinstance(command, dict):
         return None
     target = command.get("target_tissue", command.get("target"))
@@ -155,6 +161,22 @@ def _canonical_pair(row):
     return pair
 
 
+def _flat_preference_pair(row):
+    """Convert collect_preferences/ingest_feedback rows to a thumbs pair."""
+    command = _command(row)
+    label = RATING_LABELS.get(row.get("rating", row.get("label")))
+    if label is None:
+        label = {"better": 1, "worse": -1}.get(row.get("human_verdict"))
+    observation = _observation(row)
+    if command is None or label is None or observation is None:
+        return None
+    return _pair(
+        _state_observation(observation, "after", row.get("step_id")),
+        _state_observation(observation, "before", row.get("step_id")),
+        command, "thumbs", label, _metadata(row),
+    )
+
+
 def _with_step(observation, row):
     result = dict(observation)
     result["step_id"] = row.get("step_id")
@@ -178,6 +200,12 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
             pair = _canonical_pair(row)
             if pair is not None:
                 canonical_pairs.append(pair)
+    flat_preference_pairs = []
+    for row in preference_rows:
+        if "observation_a" not in row and "observation_b" not in row:
+            pair = _flat_preference_pair(row)
+            if pair is not None:
+                flat_preference_pairs.append(pair)
     raw_logs = [row for row in [*log_rows, *preference_rows]
                 if "observation_a" not in row and "observation_b" not in row]
     feedback = [row for row in [*feedback_rows, *preference_rows]
@@ -206,6 +234,13 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
 
     for pair in canonical_pairs:
         key = ("canonical", json.dumps(pair, sort_keys=True, default=str))
+        if key not in seen:
+            seen.add(key)
+            pairs.append(pair)
+            stats[pair["source"]] += 1
+
+    for pair in flat_preference_pairs:
+        key = ("flat", json.dumps(pair, sort_keys=True, default=str))
         if key not in seen:
             seen.add(key)
             pairs.append(pair)
