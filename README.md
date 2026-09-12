@@ -1,9 +1,10 @@
-# Voice-Driven Transfer-Function Design
+# Voice-Driven Transfer Function MVP
 
-Speech-controlled volume rendering for CT and MRI data. A user describes a
-visual goal, the command parser changes the transfer function, and the result
-is rendered immediately. The project compares rule-based search, RL policies,
-and a goal-conditioned reward model trained from human preferences.
+**RLHF for speech-controlled volume rendering.** Say "show only bone" or "make
+the skeleton pop" and a real CT/MRI scan re-renders live — parsed by a rule
+engine or a local LLM, optimized by hill-climbing or a trained RL policy, and
+steered by a goal-conditioned reward model learned from human preferences
+instead of a hand-coded metric.
 
 <p align="center">
   <img src="docs/screenshots/architecture-highlevel-dark.png" width="85%" alt="Project architecture" />
@@ -50,6 +51,10 @@ root because the application uses relative paths such as `out/` and `static/`.
 
 The current transfer-function state persists in `out/state.json`. Delete that
 file or run `reset` to return to the default state.
+
+<p align="center">
+  <img src="docs/screenshots/chat-ui-ct-skull.png" width="70%" alt="Chat UI on a real CT skull scan, bone tissue isolated" />
+</p>
 
 ## Commands
 
