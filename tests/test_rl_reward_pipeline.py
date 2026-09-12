@@ -224,8 +224,62 @@ def test_finetune_saves_separate_members_and_split_metadata(tmp_path):
         "split_seed": 11,
         "train_count": 4,
         "test_count": 2,
+        "test_fraction": 1 / 3,
         "train_ids": [0, 2, 4, 5],
         "test_ids": [1, 3],
         "learning_rate": 1e-4,
+    } | {
+        "train_row_hashes": checkpoint["metadata"]["train_row_hashes"],
+        "test_row_hashes": checkpoint["metadata"]["test_row_hashes"],
     }
+    assert len(set(checkpoint["metadata"]["train_row_hashes"] +
+                   checkpoint["metadata"]["test_row_hashes"])) == 6
     assert checkpoint["pretrained_path"] == str(pretrained)
+
+
+def test_finetune_resolves_default_relative_member_paths_and_hashes_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pretrained = "out/rl_models/reward_pretrained.pt"
+    pretrain_reward.pretrain(
+        pair_count=4,
+        epochs=1,
+        seed=7,
+        members=1,
+        learning_rate=1e-3,
+        output_path=pretrained,
+        renderer=lambda params: params,
+        render_features_fn=lambda renderer, params: FEATURES,
+    )
+    records = [
+        {
+            "source": "human",
+            "target_tissue": "bone",
+            "direction": "increase",
+            "label": 1,
+            "weight": 1.0,
+            "observation_a": {"before_features": FEATURES, "after_features": FEATURES},
+            "observation_b": {"before_features": FEATURES, "after_features": FEATURES},
+        }
+        for _ in range(5)
+    ]
+    preferences = tmp_path / "pairs.jsonl"
+    preferences.write_text("".join(f"{json.dumps(row)}\n" for row in records))
+
+    output = "out/rl_models/reward_finetuned.pt"
+    finetune_reward.finetune(
+        preferences,
+        pretrained,
+        output_path=output,
+        epochs=1,
+        split_seed=3,
+        test_fraction=0.4,
+        pretrain_lr=1e-3,
+    )
+
+    checkpoint = torch.load(output, map_location="cpu")
+    metadata = checkpoint["metadata"]
+    assert metadata["test_fraction"] == 0.4
+    assert len(metadata["train_row_hashes"]) == metadata["train_count"]
+    assert len(metadata["test_row_hashes"]) == metadata["test_count"]
+    assert set(metadata["train_row_hashes"]).isdisjoint(metadata["test_row_hashes"])
+    assert all(len(row_hash) == 64 for row_hash in metadata["train_row_hashes"] + metadata["test_row_hashes"])

@@ -1,5 +1,6 @@
 """Fine-tune pretrained reward-model members on canonical human preference pairs."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -30,6 +31,35 @@ def split_pairs(records: list[dict], *, seed: int = 0,
     train = [record for index, record in enumerate(records) if index not in test_indices]
     test = [record for index, record in enumerate(records) if index in test_indices]
     return train, test
+
+
+def _row_hash(record: dict, ordinal: int) -> str:
+    payload = json.dumps(
+        {"ordinal": ordinal, "record": record},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _hash_subset(records: list[dict], subset: list[dict]) -> list[str]:
+    ordinals = {id(record): ordinal for ordinal, record in enumerate(records)}
+    return [_row_hash(record, ordinals[id(record)]) for record in subset]
+
+
+def _resolve_member_path(member_name: str, pretrained: Path) -> Path:
+    member_path = Path(member_name)
+    if member_path.is_absolute():
+        return member_path
+    candidates = (Path.cwd() / member_path, pretrained.parent / member_path)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        f"pretrained member not found: {member_name!r}; tried "
+        + ", ".join(str(path) for path in candidates)
+    )
 
 
 def _load_records(preferences_path) -> list[dict]:
@@ -84,9 +114,7 @@ def finetune(preferences_path, pretrained_path, *, output_path=DEFAULT_OUTPUT,
 
     learning_rate = pretrain_lr / 10.0
     for index, member_name in enumerate(member_names):
-        member_path = Path(member_name)
-        if not member_path.is_absolute():
-            member_path = pretrained.parent / member_path
+        member_path = _resolve_member_path(member_name, pretrained)
         model = load_reward_model(member_path)
         model = _train_member(model, train_records, seed=int(seeds[index]),
                               epochs=epochs, learning_rate=learning_rate)
@@ -99,8 +127,11 @@ def finetune(preferences_path, pretrained_path, *, output_path=DEFAULT_OUTPUT,
         "split_seed": split_seed,
         "train_count": len(train_records),
         "test_count": len(test_records),
+        "test_fraction": test_fraction,
         "train_ids": train_ids,
         "test_ids": test_ids,
+        "train_row_hashes": _hash_subset(preferences, train_records),
+        "test_row_hashes": _hash_subset(preferences, test_records),
         "learning_rate": learning_rate,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
