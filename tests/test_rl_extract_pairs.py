@@ -1,6 +1,8 @@
 import json
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -10,6 +12,14 @@ from rl.extract_pairs import extract_pairs
 
 
 FEATURES = {"mean": 10.0, "std": 2.0, "coverage": 0.5, "entropy": 1.0}
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """Prevent extract_pairs' relative default paths (out/feedback.jsonl, ...)
+    from reading real accumulated project data when a test omits an explicit
+    path and relies on the default."""
+    monkeypatch.chdir(tmp_path)
 
 
 def write_jsonl(path, rows):
@@ -222,9 +232,11 @@ def test_flat_preference_row_is_not_emitted_again_as_feedback(tmp_path):
 
 def test_empty_inputs_write_valid_empty_output_and_cli_summary(tmp_path):
     out = tmp_path / "nested" / "pairs.jsonl"
+    repo_root = Path(__file__).resolve().parents[1]
+    env = {**os.environ, "PYTHONPATH": str(repo_root)}
     result = subprocess.run([
         sys.executable, "-m", "rl.extract_pairs", "--out", str(out),
-    ], capture_output=True, text=True, check=True)
+    ], capture_output=True, text=True, check=True, env=env)
 
     assert out.read_text() == ""
     assert "source=" in result.stdout
