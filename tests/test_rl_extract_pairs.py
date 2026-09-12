@@ -144,3 +144,76 @@ def test_empty_inputs_write_valid_empty_output_and_cli_summary(tmp_path):
     assert "source=" in result.stdout
     assert "target=" in result.stdout
     assert "total=0" in result.stdout
+
+
+def test_grouping_and_dedupe_include_full_normalized_command(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    write_jsonl(log, [
+        step("s", "e", 1, seed=1),
+        step("s", "e", 3, accepted=True, seed=3),
+        step("s", "e", 5, accepted=True, seed=5),
+    ])
+    rows = [json.loads(line) for line in log.read_text().splitlines()]
+    rows[0]["command"]["attribute"] = "width"
+    rows[1]["command"]["attribute"] = "width"
+    rows[2]["command"]["attribute"] = "opacity"
+    write_jsonl(log, rows)
+
+    pairs, _ = extract_pairs(log_path=log, out_path=out)
+
+    assert len(pairs) == 1
+    assert pairs[0]["command"]["attribute"] == "width"
+
+
+def test_branch_parent_must_match_full_command_context(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    parent = step("s", "e", 1, seed=1)
+    parent["command"]["attribute"] = "width"
+    child = step("s", "e", 2, accepted=True, parent=1, carried=True, seed=2)
+    child["command"]["attribute"] = "opacity"
+    write_jsonl(log, [parent, child])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert not any(pair["source"] == "branch" for pair in pairs)
+    assert stats["branch"] == 0
+
+
+def test_aliases_are_canonicalized_and_unknown_tissues_rejected(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    alias = step("s", "e", 1, seed=1, target="bones")
+    unknown = step("s", "e", 2, seed=2, target="marrow")
+    write_jsonl(log, [alias, unknown])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert stats["skipped"] == 1
+    assert pairs == []
+
+
+def test_current_log_feedback_schema_remains_supported(tmp_path):
+    log = tmp_path / "log.jsonl"
+    feedback = tmp_path / "feedback.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = {
+        "session_id": "s",
+        "step_id": 7,
+        "command": {"target": "bone", "attribute": "opacity", "direction": "increase"},
+        "params_after": [1, 2],
+        "features_before": FEATURES,
+        "features_after": {**FEATURES, "mean": 11.0},
+    }
+    write_jsonl(log, [row])
+    write_jsonl(feedback, [{
+        "session_id": "s", "step_id": 7, "params": [1, 2], "rating": "up",
+        "cmd_dict": {"target": "bone", "attribute": "opacity", "direction": "increase"},
+    }])
+
+    pairs, _ = extract_pairs(log_path=log, feedback_path=feedback, out_path=out)
+
+    assert len(pairs) == 1
+    assert pairs[0]["source"] == "thumbs"
+    assert pairs[0]["observation_a"]["before_features"] == FEATURES

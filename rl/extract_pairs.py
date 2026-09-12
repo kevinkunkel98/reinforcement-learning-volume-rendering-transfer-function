@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 import numpy as np
 from PIL import Image
 
+from commands import TISSUE_HU, _find_tissue
 import render
 
 
@@ -36,7 +37,9 @@ def _command(row):
     target = command.get("target_tissue", command.get("target"))
     direction = command.get("direction")
     attribute = command.get("attribute", "opacity")
-    if not target or direction not in ("increase", "decrease"):
+    if isinstance(target, str) and target not in TISSUE_HU:
+        target = _find_tissue(target)
+    if not target or target not in TISSUE_HU or direction not in ("increase", "decrease"):
         return None
     return {"attribute": attribute, "target": target, "direction": direction}
 
@@ -100,7 +103,7 @@ def _pair(a, b, command, source, label, metadata):
 def _pair_key(source, a, b, command, metadata):
     session, episode, _ = metadata
     return (source, session, episode, a.get("step_id"), b.get("step_id"),
-            command["target"], command["direction"])
+            command["attribute"], command["target"], command["direction"])
 
 
 def _with_step(observation, row):
@@ -138,12 +141,14 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK, out_path
     for item in logs:
         row = item["row"]
         session, episode, step_id = _metadata(row)
-        by_episode[(session, episode, item["command"]["target"], item["command"]["direction"])].append(item)
+        command = item["command"]
+        by_episode[(session, episode, command["attribute"], command["target"], command["direction"])].append(item)
         # Branches require explicit parent and carried-forward metadata. No inference.
         if "parent_step_id" in row and row.get("carried_forward") is True:
             parent = next((candidate for candidate in logs
                            if _metadata(candidate["row"])[0] == session and
                            _metadata(candidate["row"])[1] == episode and
+                           candidate["command"] == item["command"] and
                            candidate["row"].get("step_id") == row["parent_step_id"]), None)
             if parent and (row.get("accepted") is True or row.get("ended") is True):
                 add("branch", _with_step(item["observation"], row),
