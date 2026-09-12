@@ -19,5 +19,5 @@
   [*6 — Kommandogrammatik & Parser-Auswertung*], [~2 Min.],
   [*7 — Ergebnisse an echten CT-Daten*], [~1 Min.],
   [*8 — Erkenntnisse aus dem Testen*], [~1 Min.],
-  [*9 — Von der Baseline zum RL-Agenten:* Forschungsplan], [~2 Min.],
+  [*9 — Von der Baseline zum RL-Agenten:* SAC, Online-Lernen, RLHF], [~4 Min.],
 )

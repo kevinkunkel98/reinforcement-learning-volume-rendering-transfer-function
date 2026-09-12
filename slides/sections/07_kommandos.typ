@@ -37,6 +37,6 @@
     inset: 8pt,
     [*Parser*], [*Korrekt*],
     [Regelbasiert], [0 / 20],
-    [LLM (qwen2.5:7b)], [*16 / 20*],
+    [LLM (qwen2.5:7b)], [*18 / 20*],
   ),
 )

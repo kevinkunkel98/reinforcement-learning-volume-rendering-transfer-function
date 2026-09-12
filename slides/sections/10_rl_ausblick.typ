@@ -8,16 +8,16 @@
 #v(0.05em)
 Der SAC-Agent (`stable-baselines3`) ist implementiert, trainiert und gegen die Baseline evaluiert — online gegen `opacity_mass`, ganz ohne menschliche Trainingsdaten.
 
-#v(0.3em)
+#v(0.2em)
 #table(
   columns: (auto, 1fr),
   stroke: none,
-  row-gutter: 0.5em,
+  row-gutter: 0.4em,
   column-gutter: 0.8em,
   inset: (x: 0pt, y: 2pt),
   [*Zustand*], [TF-Vektor (24) + Ziel-Gewebe + Richtung + `mass_fraction` (31-dim)],
   [*Aktion*], [kontinuierliches Delta auf die Höhe des aufgelösten Ziel-Peaks],
-  [*Reward*], [Δ`mass_fraction` im Ziel-Band, pro Schritt — exakt, kostenlos, kein MLLM],
+  [*Reward*], [$r = op("sign")(d) dot (phi(p',t) - phi(p,t))$ — Δ`mass_fraction` im Ziel-Band],
   [*Ergebnis*], [*0.344* vs. *0.347* (Baseline) `mass_fraction`, 20 Test-Episoden],
 )
 
