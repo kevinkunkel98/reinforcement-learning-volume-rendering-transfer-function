@@ -209,38 +209,133 @@ offline budget, not a coincidence.
 
 ### RLHF: learning from human feedback
 
-`mass_fraction` only measures whether the transfer-function curve moved the
-way a command literally asked — never whether the resulting *image* looks
-good. Four modules close that gap by training a small reward model on human
-better/worse judgments of rendered before/after pairs, then training RL
-against that learned reward instead of the automatic metric:
+`mass_fraction` measures whether a transfer-function change follows the
+literal command. The goal-conditioned reward model adds human preference over
+the rendered result without losing that objective signal. Each observation is
+an 18-value `float32` vector:
 
-- **`rl/collect_preferences.py`** — interactive: renders ~50 before/after
-  pairs and asks a human to judge each (reusing `evaluate.human()`'s console
-  prompt), logging both the judgment and the rendered images' features to
-  `out/rlhf_preferences.jsonl`.
-- **`rl/reward_model.py`** — a tiny PyTorch MLP (10 inputs: Δmean/Δstd/
-  Δcoverage/Δentropy + tissue one-hot + direction → 1 output) trained on
-  those labels via binary cross-entropy, reporting train/val accuracy
-  honestly (this is a single-rater pilot at n≈50, not a generalization
-  claim).
-- **`rl/reward_model_env.py`** — `RewardModelTFEnv`, a `TFEnv` subclass whose
-  reward comes from rendering + the trained reward model instead of
-  `mass_fraction` (one VTK render per step via before/after caching,
-  measured at ~109ms/render on the synthetic phantom).
-- **`rl/reward_model_train.py`** — mirrors `online_train.py`'s chunked-eval
-  shape at a much smaller step budget (every step now renders for real),
-  logging the learned-reward score *and* the true `mass_fraction` metric
-  side by side, plus a final before/after render gallery to inspect directly.
+```text
+[features_after(4), features_before(4), after-before(4), target_onehot(5), direction(1)]
+```
 
-      python -m rl.collect_preferences --n-pairs 50 --rater-id <name>  # interactive
-      python -m rl.reward_model --preferences out/rlhf_preferences.jsonl
-      python -m rl.reward_model_train --timesteps 2000 --eval-interval 500
+The four image features are `mean`, `std`, `coverage`, and `entropy`. Target
+one-hot order is `air`, `fat`, `soft`, `spongy`, `bone`; direction is the
+requested increase/decrease sign. `RewardModel` is an `18 -> 64 -> 32 -> 1`
+MLP whose scalar output is a logit. Pair training uses weighted Bradley-Terry
+loss, `weight * -log(sigmoid(R(preferred) - R(other)))`, rather than the old
+10-input binary-cross-entropy pilot.
 
-All four modules are implemented and tested; the pipeline has not yet been
-run against real collected labels (that step needs a live human, so it can't
-run unattended). Camera-viewpoint RLHF and live chat-UI wiring for either
-online-learning variant are both explicitly out of scope for now.
+#### Preference data contract
+
+Web and VR clients write canonical JSONL records. One pair record has this
+shape (one JSON object per line):
+
+```json
+{
+  "observation_a": {
+    "before_features": {}, "after_features": {},
+    "before_image": null, "after_image": null
+  },
+  "observation_b": {
+    "before_features": {}, "after_features": {},
+    "before_image": null, "after_image": null
+  },
+  "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
+  "target_tissue": "bone",
+  "direction": "increase",
+  "label": 1,
+  "source": "branch",
+  "weight": 1.0
+}
+```
+
+`label=1` means A is preferred; `label=-1` means B is preferred. Client logs
+may additionally carry `session_id`, `episode_id`, `step_id`,
+`parent_step_id`, `branch_id`, `carried_forward`, `accepted`, and `ended`.
+Feature dictionaries are authoritative. PNG/JPEG paths are audit artifacts:
+they support visual review and recovery of missing legacy features through
+Pillow, but training consumes extracted features, not pixels. Missing image
+artifacts are skipped and counted.
+
+#### Extract, train, evaluate
+
+Extract current logs, feedback, and canonical web/VR preferences without
+mutating source files:
+
+```bash
+python -m rl.extract_pairs \
+  --log out/rl_logs.jsonl \
+  --feedback out/feedback.jsonl \
+  --preferences out/web_vr_preferences.jsonl \
+  --out out/pairs.jsonl
+```
+
+The extractor reports counts by source, target, skipped rows, and total. Branch
+pairs require explicit parent/child and carried-forward metadata, or equivalent
+history metadata. It never guesses branches from parameter similarity. If no
+branch is recoverable, it reports `branch=0` and continues with valid
+within-episode (`weight=0.7`) and thumbs (`weight=0.4`) pairs. Branch pairs
+have `weight=1.0`.
+
+Pretrain on synthetic rendered pairs, then fine-tune separate artifacts on a
+fixed seeded human split:
+
+```bash
+python -m rl.pretrain_reward \
+  --pairs 20000 --members 5 \
+  --out out/rl_models/reward_pretrained.pt
+
+python -m rl.finetune_reward \
+  --preferences out/pairs.jsonl \
+  --pretrained out/rl_models/reward_pretrained.pt \
+  --out out/rl_models/reward_finetuned.pt
+
+python -m rl.eval_reward \
+  --preferences out/pairs.jsonl \
+  --pretrained out/rl_models/reward_pretrained.pt \
+  --finetuned out/rl_models/reward_finetuned.pt \
+  --disagreements out/reward_disagreements.jsonl \
+  --out out/reward_report.json
+```
+
+`reward_pretrained.pt` and its member checkpoints are never overwritten by
+fine-tuning. Fine-tuning writes `reward_finetuned.pt` and separate member
+checkpoints, trains only on the persisted train rows, and evaluates both model
+families on exactly the same persisted test rows. Missing logs, checkpoints,
+or render artifacts produce an explicit error or an empty summary; results
+are never fabricated.
+
+#### Reward safeguards and independent comparisons
+
+`RewardModelTFEnv` combines ensemble reward and the automatic objective:
+
+```text
+r = alpha * (mean(model_reward) - std(model_reward))
+    + (1 - alpha) * objective_reward
+```
+
+Default `alpha` is `0.7`. Run identical evaluation episodes for the anchor
+settings `alpha=0.0`, `alpha=0.7`, and `alpha=1.0`; record each result
+separately. The near-black coverage and near-opaque mean-opacity hard
+penalties apply independently of model output. Alpha ablations are an
+evaluation comparison, not new training data.
+
+The final report keeps three results separate:
+
+1. Pretrained versus fine-tuned reward-only accuracy, overall and by source,
+   on the fixed held-out human split.
+2. RLHF policy versus hill-climber objective performance, as a reward-hacking
+   sanity check.
+3. Blind head-to-head policy versus hill-climber rendering, with seeded random
+   A/B order and verdicts written to a separate file.
+
+Use `evaluate_rl_policy_against_hill_climb()` for the objective sanity check
+and `collect_blind_head_to_head()` for the blind comparison. The latter takes
+render callbacks and optional `better`/`worse`/`tie` verdicts, writes records
+such as `out/blind_head_to_head.jsonl`, and never sends verdicts to extraction
+or training. Store alpha results, reward metrics, disagreement records
+(`out/reward_disagreements.jsonl`), and blind verdicts independently in the
+final report; do not merge blind judgments back into `out/pairs.jsonl`.
 
 ## Project layout
 
