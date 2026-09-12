@@ -50,9 +50,32 @@ def test_alpha_must_be_between_zero_and_one():
         RewardModelTFEnv(np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), _StubRewardModel(), alpha=-0.1)
 
 
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"alpha": np.nan}, "alpha"),
+        ({"coverage_threshold": -0.1}, "coverage_threshold"),
+        ({"coverage_threshold": 1.1}, "coverage_threshold"),
+        ({"coverage_threshold": np.inf}, "coverage_threshold"),
+        ({"mean_opacity_threshold": -1.0}, "mean_opacity_threshold"),
+        ({"mean_opacity_threshold": np.inf}, "mean_opacity_threshold"),
+        ({"hard_penalty": 0.0}, "hard_penalty"),
+        ({"hard_penalty": np.inf}, "hard_penalty"),
+    ],
+)
+def test_reward_parameters_must_be_finite_and_sensible(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        RewardModelTFEnv(
+            np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), _StubRewardModel(), **kwargs
+        )
+
+
 def test_alpha_zero_uses_signed_objective_anchor(monkeypatch):
-    monkeypatch.setattr(reward_model_env, "predict_reward", lambda *args: 0.9)
-    env = _env(monkeypatch, [_features(), _features()], alpha=0.0)
+    class _UnusableModel:
+        def __getattr__(self, name):
+            raise AssertionError("model inference must be skipped")
+
+    env = _env(monkeypatch, [_features(), _features()], reward_model=_UnusableModel(), alpha=0.0)
     env.direction = "increase"
     monkeypatch.setattr(
         reward_model_env.TFEnv,

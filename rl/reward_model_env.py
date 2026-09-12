@@ -2,6 +2,8 @@
 rendered image features, instead of the automatic mass_fraction metric. See
 rl/reward_model.py for the reward model itself, and
 docs/superpowers/specs/2026-09-09-rlhf-reward-model-design.md for why."""
+import math
+
 from camera import DEFAULT_CAMERA
 from rl.env import TFEnv
 from rl.reward_model import ensemble_reward, predict_reward
@@ -25,8 +27,15 @@ class RewardModelTFEnv(TFEnv):
                  mean_opacity_threshold=DEFAULT_MEAN_OPACITY_THRESHOLD,
                  hard_penalty=DEFAULT_HARD_PENALTY):
         super().__init__(seed=seed)
-        if not 0.0 <= alpha <= 1.0:
+        if not math.isfinite(alpha) or not 0.0 <= alpha <= 1.0:
             raise ValueError("alpha must be between 0 and 1")
+        if (not math.isfinite(coverage_threshold) or
+                not 0.0 <= coverage_threshold <= 1.0):
+            raise ValueError("coverage_threshold must be finite and between 0 and 1")
+        if not math.isfinite(mean_opacity_threshold) or mean_opacity_threshold < 0.0:
+            raise ValueError("mean_opacity_threshold must be finite and non-negative")
+        if not math.isfinite(hard_penalty) or hard_penalty >= 0.0:
+            raise ValueError("hard_penalty must be finite and negative")
         self.volume = volume
         self.spacing = spacing
         self.reward_model = reward_model
@@ -49,12 +58,16 @@ class RewardModelTFEnv(TFEnv):
     def step(self, action):
         obs, automatic_reward, terminated, truncated, info = super().step(action)
         after_features = self._render_features(self.params)
-        models = (self.reward_model,) if not isinstance(self.reward_model, (list, tuple)) else self.reward_model
-        model_rewards = [predict_reward(model, self._prev_features, after_features,
-                                         self.target_tissue, self.direction)
-                         for model in models]
-        model_reward = ensemble_reward(model_rewards)
-        reward = self.alpha * model_reward + (1.0 - self.alpha) * automatic_reward
+        if self.alpha == 0.0:
+            reward = automatic_reward
+        else:
+            models = ((self.reward_model,) if
+                      not isinstance(self.reward_model, (list, tuple)) else self.reward_model)
+            model_rewards = [predict_reward(model, self._prev_features, after_features,
+                                             self.target_tissue, self.direction)
+                             for model in models]
+            model_reward = ensemble_reward(model_rewards)
+            reward = self.alpha * model_reward + (1.0 - self.alpha) * automatic_reward
         if (after_features["coverage"] < self.coverage_threshold or
                 after_features["mean"] > self.mean_opacity_threshold):
             reward += self.hard_penalty
