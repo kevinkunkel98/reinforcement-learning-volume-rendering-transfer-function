@@ -131,6 +131,30 @@ def _pair_key(source, a, b, command, metadata):
             command["attribute"], command["target"], command["direction"])
 
 
+def _canonical_pair(row):
+    if not isinstance(row.get("observation_a"), dict) or not isinstance(row.get("observation_b"), dict):
+        return None
+    command = _command(row)
+    if command is None or row.get("label") not in (-1, 1):
+        return None
+    source = row.get("source")
+    if source not in WEIGHTS:
+        return None
+    observation_a = _observation({"observation": row["observation_a"]})
+    observation_b = _observation({"observation": row["observation_b"]})
+    if observation_a is None or observation_b is None:
+        return None
+    pair = dict(row)
+    pair["observation_a"] = observation_a
+    pair["observation_b"] = observation_b
+    pair["command"] = command
+    pair["target_tissue"] = command["target"]
+    pair["direction"] = command["direction"]
+    pair["label"] = int(row["label"])
+    pair["weight"] = float(row.get("weight", WEIGHTS[source]))
+    return pair
+
+
 def _with_step(observation, row):
     result = dict(observation)
     result["step_id"] = row.get("step_id")
@@ -145,9 +169,17 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
     inputs = [path for path in (log_path, feedback_path, preferences_path) if path]
     if any(output == Path(path).resolve() for path in inputs):
         raise ValueError("input and output paths collide")
+    log_rows = _read_jsonl(log_path)
+    feedback_rows = _read_jsonl(feedback_path)
     preference_rows = _read_jsonl(preferences_path)
-    raw_logs = _read_jsonl(log_path) + preference_rows
-    feedback = _read_jsonl(feedback_path) + preference_rows
+    canonical_pairs = []
+    for row in [*log_rows, *feedback_rows, *preference_rows]:
+        if "observation_a" in row or "observation_b" in row:
+            pair = _canonical_pair(row)
+            if pair is not None:
+                canonical_pairs.append(pair)
+    raw_logs = [row for row in log_rows if "observation_a" not in row]
+    feedback = [row for row in feedback_rows if "observation_a" not in row]
     logs = []
     skipped = 0
     for row in raw_logs:
@@ -169,6 +201,13 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
         seen.add(key)
         pairs.append(_pair(first, second, command, source, label, metadata))
         stats[source] += 1
+
+    for pair in canonical_pairs:
+        key = ("canonical", json.dumps(pair, sort_keys=True, default=str))
+        if key not in seen:
+            seen.add(key)
+            pairs.append(pair)
+            stats[pair["source"]] += 1
 
     by_episode = defaultdict(list)
     for item in logs:

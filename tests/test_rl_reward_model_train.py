@@ -10,6 +10,19 @@ from rl.reward_model import train_reward_model
 from rl.reward_model_train import reward_model_train
 
 
+@pytest.mark.parametrize("argument", ["total_timesteps", "eval_interval"])
+def test_reward_model_train_rejects_nonpositive_intervals(tmp_path, argument):
+    kwargs = {
+        "total_timesteps": 1,
+        "eval_interval": 1,
+        "reward_model_path": str(tmp_path / "missing-model.pt"),
+    }
+    kwargs[argument] = 0
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        reward_model_train(**kwargs)
+
+
 def _make_tiny_reward_model(tmp_path):
     prefs_path = tmp_path / "preferences.jsonl"
     with open(prefs_path, "w") as f:

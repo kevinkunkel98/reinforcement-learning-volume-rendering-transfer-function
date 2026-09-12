@@ -29,6 +29,12 @@ N_GALLERY_EPISODES = 3
 MAX_STEPS = 20
 
 
+def _ensure_parent_dir(path):
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
 def _seed_episode(env, episode):
     env.params = episode["params"].copy()
     env.target_tissue = episode["target_tissue"]
@@ -53,9 +59,11 @@ def _run_policy_with_logging(model, env, episode):
 def reward_model_train(total_timesteps: int = 2000, eval_interval: int = 500, seed: int = 0,
                         reward_model_path: str = "out/rl_models/reward_model.pt",
                         model_path: str = MODEL_PATH) -> SAC:
+    if total_timesteps <= 0 or eval_interval <= 0:
+        raise ValueError("total_timesteps and eval_interval must be greater than zero")
     run_dir = os.path.join(LOG_DIR, f"reward_model_run_seed{seed}")
     os.makedirs(run_dir, exist_ok=True)
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    _ensure_parent_dir(model_path)
 
     volume, spacing = load_dataset("synthetic")
     reward_model = load_reward_model(reward_model_path)

@@ -270,6 +270,36 @@ def test_current_log_feedback_schema_remains_supported(tmp_path):
     assert pairs[0]["observation_a"]["before_features"]["mean"] == 11.0
 
 
+def test_canonical_preference_records_are_emitted_directly(tmp_path):
+    preferences = tmp_path / "preferences.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    record = {
+        "observation_a": observation(10),
+        "observation_b": observation(20),
+        "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
+        "target_tissue": "bone",
+        "direction": "increase",
+        "label": -1,
+        "source": "branch",
+        "weight": 1.0,
+        "session_id": "web-session",
+        "episode_id": "web-episode",
+        "step_id": 4,
+    }
+    write_jsonl(preferences, [record])
+
+    pairs, stats = extract_pairs(
+        log_path=tmp_path / "missing-log.jsonl",
+        feedback_path=tmp_path / "missing-feedback.jsonl",
+        preferences_path=preferences,
+        out_path=out,
+    )
+
+    assert pairs == [record]
+    assert stats["branch"] == 1
+    assert stats["total"] == 1
+
+
 def test_thumb_pair_has_nonzero_training_signal_and_rating_semantics(tmp_path):
     log = tmp_path / "log.jsonl"
     feedback = tmp_path / "feedback.jsonl"
