@@ -47,7 +47,11 @@ def _command(row):
     attribute = command.get("attribute", "opacity")
     if attribute != "opacity":
         return None
-    if isinstance(target, str) and target not in TISSUE_HU:
+    if not isinstance(target, str):
+        # Multi-target commands (e.g. "show only bone and fat") carry a list;
+        # the single-tissue goal encoding can't represent that, so skip.
+        return None
+    if target not in TISSUE_HU:
         target = _find_tissue(target)
     if not target or target not in TISSUE_HU or direction not in ("increase", "decrease"):
         return None
@@ -204,7 +208,7 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
             if pair is not None:
                 canonical_pairs.append(pair)
     flat_preference_pairs = []
-    for row in preference_rows:
+    for row in [*log_rows, *feedback_rows, *preference_rows]:
         if "observation_a" not in row and "observation_b" not in row:
             pair = _flat_preference_pair(row)
             if pair is not None:

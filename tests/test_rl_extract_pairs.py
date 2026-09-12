@@ -318,6 +318,19 @@ def test_aliases_are_canonicalized_and_unknown_tissues_rejected(tmp_path):
     assert pairs == []
 
 
+def test_multi_target_list_commands_are_skipped_not_crashed(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 1, seed=1)
+    row["command"]["target"] = ["spongy", "bone"]
+    write_jsonl(log, [row])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert pairs == []
+    assert stats["skipped"] == 1
+
+
 def test_current_log_feedback_schema_remains_supported(tmp_path):
     log = tmp_path / "log.jsonl"
     feedback = tmp_path / "feedback.jsonl"
