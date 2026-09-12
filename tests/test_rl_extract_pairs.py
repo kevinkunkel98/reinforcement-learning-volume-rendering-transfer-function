@@ -369,6 +369,26 @@ def test_extracts_human_verdict_rows_and_recovers_before_png_after_png(tmp_path)
     assert pairs[0]["observation_a"]["before_features"]["mean"] == 20.0
 
 
+def test_extracts_inline_human_verdict_from_preferences_as_thumbs(tmp_path):
+    preferences = tmp_path / "preferences.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 2, seed=2)
+    row["human_verdict"] = "worse"
+    write_jsonl(preferences, [row])
+
+    pairs, stats = extract_pairs(
+        log_path=None,
+        feedback_path=None,
+        preferences_path=preferences,
+        out_path=out,
+    )
+
+    assert len(pairs) == 1
+    assert pairs[0]["source"] == "thumbs"
+    assert pairs[0]["label"] == -1
+    assert stats["thumbs"] == 1
+
+
 def test_extract_pairs_can_use_preferences_default(tmp_path, monkeypatch):
     preferences = tmp_path / "preferences.jsonl"
     out = tmp_path / "pairs.jsonl"

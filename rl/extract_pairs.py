@@ -178,8 +178,10 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
             pair = _canonical_pair(row)
             if pair is not None:
                 canonical_pairs.append(pair)
-    raw_logs = [row for row in log_rows if "observation_a" not in row]
-    feedback = [row for row in feedback_rows if "observation_a" not in row]
+    raw_logs = [row for row in [*log_rows, *preference_rows]
+                if "observation_a" not in row and "observation_b" not in row]
+    feedback = [row for row in [*feedback_rows, *preference_rows]
+                if "observation_a" not in row and "observation_b" not in row]
     logs = []
     skipped = 0
     for row in raw_logs:
