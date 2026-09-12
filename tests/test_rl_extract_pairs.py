@@ -249,3 +249,17 @@ def test_non_finite_features_are_skipped(tmp_path):
 
     assert pairs == []
     assert stats["skipped"] == 1
+
+
+def test_malformed_nonnumeric_features_are_skipped_and_counted(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 1, seed=1)
+    row["before_features"]["mean"] = "not-a-number"
+    row["after_features"]["std"] = {"malformed": True}
+    write_jsonl(log, [row])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert pairs == []
+    assert stats["skipped"] == 1

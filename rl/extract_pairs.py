@@ -54,6 +54,15 @@ def _image_features(path):
         return None
 
 
+def _valid_features(features):
+    if not isinstance(features, dict) or not all(key in features for key in FEATURE_KEYS):
+        return False
+    try:
+        return all(np.isfinite(float(features[key])) for key in FEATURE_KEYS)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _observation(row):
     observation = row.get("observation")
     if isinstance(observation, dict):
@@ -69,10 +78,7 @@ def _observation(row):
         feature_key = f"{side}_features"
         image_key = f"{side}_image"
         result[feature_key] = result.get(feature_key) or _image_features(result.get(image_key))
-    if not all(isinstance(result.get(f"{side}_features"), dict) and
-               all(key in result[f"{side}_features"] for key in FEATURE_KEYS) and
-               all(np.isfinite(float(result[f"{side}_features"][key])) for key in FEATURE_KEYS)
-               for side in ("before", "after")):
+    if not all(_valid_features(result.get(f"{side}_features")) for side in ("before", "after")):
         return None
     result.setdefault("before_image", None)
     result.setdefault("after_image", None)
