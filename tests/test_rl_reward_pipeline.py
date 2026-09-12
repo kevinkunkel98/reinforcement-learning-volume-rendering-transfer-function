@@ -355,3 +355,25 @@ def test_finetune_cleans_published_members_if_aggregate_publish_fails(tmp_path, 
 
     assert not output.exists()
     assert not list(tmp_path.glob("reward_finetuned_member*.pt"))
+
+
+def test_finetune_rejects_output_path_matching_pretrained_member(tmp_path):
+    pretrained = tmp_path / "reward_pretrained.pt"
+    pretrain_reward.pretrain(
+        pair_count=4, epochs=1, seed=7, members=1, learning_rate=1e-3,
+        output_path=pretrained, renderer=lambda params: params,
+        render_features_fn=lambda renderer, params: FEATURES,
+    )
+    preferences = tmp_path / "pairs.jsonl"
+    record = {
+        "target_tissue": "bone", "direction": "increase", "label": 1,
+        "observation_a": {"before_features": FEATURES, "after_features": FEATURES},
+        "observation_b": {"before_features": FEATURES, "after_features": FEATURES},
+    }
+    preferences.write_text("".join(f"{json.dumps(record)}\n" for _ in range(4)))
+    member_path = tmp_path / "reward_pretrained_member0.pt"
+
+    with pytest.raises(ValueError, match="overwrite pretrained"):
+        finetune_reward.finetune(
+            preferences, pretrained, output_path=member_path, epochs=1
+        )

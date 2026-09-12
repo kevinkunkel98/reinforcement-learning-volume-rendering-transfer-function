@@ -106,12 +106,17 @@ def finetune(preferences_path, pretrained_path, *, output_path=DEFAULT_OUTPUT,
     seeds = aggregate.get("seeds") if isinstance(aggregate, dict) else None
     if not member_names or not seeds or len(member_names) != len(seeds):
         raise ValueError("pretrained checkpoint missing member_paths or seeds")
+    pretrained_member_paths = [
+        _resolve_member_path(member_name, pretrained) for member_name in member_names
+    ]
     member_paths = [output.with_name(f"{output.stem}_member{index}{output.suffix}")
                     for index in range(len(member_names))]
     temporary_paths = [path.with_name(f".{path.name}.tmp") for path in member_paths]
     temporary_output = output.with_name(f".{output.name}.tmp")
-    if output.resolve() == pretrained.resolve() or any(
-            path.resolve() == pretrained.resolve() for path in member_paths):
+    if output.resolve() in {
+            pretrained.resolve(),
+            *(path.resolve() for path in pretrained_member_paths),
+    } or any(path.resolve() == pretrained.resolve() for path in member_paths):
         raise ValueError("fine-tuned artifacts must not overwrite pretrained artifacts")
     if (output.exists() or any(path.exists() for path in member_paths) or
             temporary_output.exists() or any(path.exists() for path in temporary_paths)):
@@ -120,7 +125,7 @@ def finetune(preferences_path, pretrained_path, *, output_path=DEFAULT_OUTPUT,
     learning_rate = pretrain_lr / 10.0
     try:
         for index, member_name in enumerate(member_names):
-            member_path = _resolve_member_path(member_name, pretrained)
+            member_path = pretrained_member_paths[index]
             model = load_reward_model(member_path)
             model = _train_member(model, train_records, seed=int(seeds[index]),
                                   epochs=epochs, learning_rate=learning_rate)
