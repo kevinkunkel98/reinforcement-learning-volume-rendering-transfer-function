@@ -5,9 +5,23 @@ import json
 import os
 
 import pytest
+import torch
 
-from rl.reward_model import train_reward_model
+from rl.reward_model import RewardModel, save_reward_model, train_reward_model
 from rl.reward_model_train import reward_model_train
+
+
+@pytest.mark.parametrize("argument", ["total_timesteps", "eval_interval"])
+def test_reward_model_train_rejects_nonpositive_intervals(tmp_path, argument):
+    kwargs = {
+        "total_timesteps": 1,
+        "eval_interval": 1,
+        "reward_model_path": str(tmp_path / "missing-model.pt"),
+    }
+    kwargs[argument] = 0
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        reward_model_train(**kwargs)
 
 
 def _make_tiny_reward_model(tmp_path):
@@ -49,3 +63,22 @@ def test_reward_model_train_writes_eval_log_and_gallery(tmp_path, monkeypatch):
     assert os.path.exists(os.path.join(gallery_dir, "0_after.png"))
 
     assert os.path.exists("out/rl_models/test_reward_model_agent.zip")
+
+
+def test_model_parent_dir_is_optional(tmp_path):
+    from rl.reward_model_train import _ensure_parent_dir
+
+    _ensure_parent_dir("agent.zip")
+    _ensure_parent_dir(str(tmp_path / "nested" / "agent.zip"))
+
+
+def test_load_reward_models_accepts_aggregate_and_single_checkpoints(tmp_path):
+    from rl.reward_model_train import _load_reward_models
+
+    member = tmp_path / "member.pt"
+    save_reward_model(RewardModel(), member)
+    aggregate = tmp_path / "aggregate.pt"
+    torch.save({"member_paths": [str(member)], "seeds": [0]}, aggregate)
+
+    assert len(_load_reward_models(aggregate)) == 1
+    assert len(_load_reward_models(member)) == 1

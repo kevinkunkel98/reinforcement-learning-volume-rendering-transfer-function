@@ -7,8 +7,10 @@ import argparse
 import csv
 import math
 import os
+from pathlib import Path
 
 import numpy as np
+import torch
 from PIL import Image
 from stable_baselines3 import SAC
 from stable_baselines3.common.logger import configure as configure_logger
@@ -22,6 +24,7 @@ from rl.reward_model_env import RewardModelTFEnv
 import render
 
 MODEL_PATH = "out/rl_models/sac_tf_reward_model_agent.zip"
+DEFAULT_REWARD_MODEL_PATH = "out/rl_models/reward_finetuned.pt"
 LOG_DIR = "out/rl_logs"
 EVAL_N_EPISODES = 5
 EVAL_SEED = 12345
@@ -33,6 +36,30 @@ def _ensure_parent_dir(path):
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
+
+
+def _load_reward_models(model_path):
+    """Load an aggregate member manifest or one legacy model checkpoint."""
+    path = Path(model_path)
+    checkpoint = torch.load(path, map_location="cpu")
+    member_names = checkpoint.get("member_paths") if isinstance(checkpoint, dict) else None
+    if not member_names:
+        return [load_reward_model(path)]
+    models = []
+    for member_name in member_names:
+        member = Path(member_name)
+        candidates = [member] if member.is_absolute() else [
+            path.parent / member, Path.cwd() / member,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                models.append(load_reward_model(candidate))
+                break
+        else:
+            raise FileNotFoundError(
+                f"reward member not found: {member_name!r} relative to {path}"
+            )
+    return models
 
 
 def _seed_episode(env, episode):
@@ -57,20 +84,22 @@ def _run_policy_with_logging(model, env, episode):
 
 
 def reward_model_train(total_timesteps: int = 2000, eval_interval: int = 500, seed: int = 0,
-                        reward_model_path: str = "out/rl_models/reward_model.pt",
+                        reward_model_path: str = DEFAULT_REWARD_MODEL_PATH,
                         model_path: str = MODEL_PATH) -> SAC:
+    if total_timesteps <= 0 or eval_interval <= 0:
+        raise ValueError("total_timesteps and eval_interval must be greater than zero")
     run_dir = os.path.join(LOG_DIR, f"reward_model_run_seed{seed}")
     os.makedirs(run_dir, exist_ok=True)
     _ensure_parent_dir(model_path)
 
     volume, spacing = load_dataset("synthetic")
-    reward_model = load_reward_model(reward_model_path)
-    env = RewardModelTFEnv(volume, spacing, reward_model, seed=seed)
+    reward_models = _load_reward_models(reward_model_path)
+    env = RewardModelTFEnv(volume, spacing, reward_models, seed=seed)
     model = SAC("MlpPolicy", env, seed=seed)
     model.set_logger(configure_logger(run_dir, ["stdout", "csv", "tensorboard"]))
 
     eval_episodes = _build_episodes(EVAL_N_EPISODES, EVAL_SEED)
-    eval_env = RewardModelTFEnv(volume, spacing, reward_model, seed=seed + 1)
+    eval_env = RewardModelTFEnv(volume, spacing, reward_models, seed=seed + 1)
 
     eval_log_path = os.path.join(run_dir, "eval_progress.csv")
     with open(eval_log_path, "w", newline="") as f:
@@ -117,7 +146,7 @@ def main():
     parser.add_argument("--timesteps", type=int, default=2000)
     parser.add_argument("--eval-interval", type=int, default=500)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--reward-model", type=str, default="out/rl_models/reward_model.pt")
+    parser.add_argument("--reward-model", type=str, default=DEFAULT_REWARD_MODEL_PATH)
     parser.add_argument("--out", type=str, default=MODEL_PATH)
     args = parser.parse_args()
     reward_model_train(args.timesteps, eval_interval=args.eval_interval, seed=args.seed,

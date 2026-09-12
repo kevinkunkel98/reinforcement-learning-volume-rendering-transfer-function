@@ -11,6 +11,142 @@ class _StubRewardModel:
           # this never needs real behavior
 
 
+def _patch_render(monkeypatch, feature_sequence):
+    monkeypatch.setattr(reward_model_env.render, "render", lambda *args: object())
+    monkeypatch.setattr(reward_model_env.render, "grab", lambda win: object())
+    monkeypatch.setattr(
+        reward_model_env.render, "features", lambda rgb: next(feature_sequence)
+    )
+
+
+def _env(monkeypatch, features, **kwargs):
+    _patch_render(monkeypatch, iter(features))
+    return RewardModelTFEnv(
+        volume=np.zeros((4, 4, 4)),
+        spacing=(1.0, 1.0, 1.0),
+        reward_model=kwargs.pop("reward_model", _StubRewardModel()),
+        seed=0,
+        **kwargs,
+    )
+
+
+def _features(mean=0.0, coverage=0.5):
+    return {"mean": mean, "std": 0.0, "coverage": coverage, "entropy": 0.0}
+
+
+def test_alpha_one_uses_ensemble_mean_minus_std(monkeypatch):
+    predictions = iter([0.8, 0.4])
+    monkeypatch.setattr(reward_model_env, "predict_reward", lambda *args: next(predictions))
+    env = _env(monkeypatch, [_features(), _features()], reward_model=[object(), object()], alpha=1.0)
+
+    env.reset()
+    _, reward, _, _, _ = env.step([0.3])
+
+    assert reward == pytest.approx(0.4)
+
+
+def test_default_opacity_threshold_is_normalized_and_empty_ensemble_rejected():
+    assert 0.0 <= reward_model_env.DEFAULT_MEAN_OPACITY_THRESHOLD <= 1.0
+    with pytest.raises(ValueError, match="ensemble"):
+        RewardModelTFEnv(
+            np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), [], seed=0,
+        )
+
+    with pytest.raises(ValueError, match="mean_opacity_threshold"):
+        RewardModelTFEnv(
+            np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), _StubRewardModel(),
+            mean_opacity_threshold=1.1,
+        )
+
+
+def test_alpha_must_be_between_zero_and_one():
+    with pytest.raises(ValueError, match="alpha"):
+        RewardModelTFEnv(np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), _StubRewardModel(), alpha=-0.1)
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"alpha": np.nan}, "alpha"),
+        ({"coverage_threshold": -0.1}, "coverage_threshold"),
+        ({"coverage_threshold": 1.1}, "coverage_threshold"),
+        ({"coverage_threshold": np.inf}, "coverage_threshold"),
+        ({"mean_opacity_threshold": -1.0}, "mean_opacity_threshold"),
+        ({"mean_opacity_threshold": np.inf}, "mean_opacity_threshold"),
+        ({"hard_penalty": 0.0}, "hard_penalty"),
+        ({"hard_penalty": np.inf}, "hard_penalty"),
+    ],
+)
+def test_reward_parameters_must_be_finite_and_sensible(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        RewardModelTFEnv(
+            np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), _StubRewardModel(), **kwargs
+        )
+
+
+def test_alpha_zero_uses_signed_objective_anchor(monkeypatch):
+    class _UnusableModel:
+        def __getattr__(self, name):
+            raise AssertionError("model inference must be skipped")
+
+    env = _env(monkeypatch, [_features(), _features()], reward_model=_UnusableModel(), alpha=0.0)
+    env.direction = "increase"
+    monkeypatch.setattr(
+        reward_model_env.TFEnv,
+        "step",
+        lambda self, action: (np.zeros(1), 0.5, False, False, {}),
+    )
+
+    env.reset()
+    _, reward, _, _, _ = env.step([0.3])
+
+    assert reward == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    "features",
+    [[_features(mean=0.0, coverage=0.01), _features(mean=0.0, coverage=0.01)],
+     [_features(mean=1.0, coverage=0.5), _features(mean=1.0, coverage=0.5)]],
+)
+def test_degenerate_render_receives_independent_hard_penalty(monkeypatch, features):
+    monkeypatch.setattr(reward_model_env, "predict_reward", lambda *args: 0.0)
+    monkeypatch.setattr(
+        reward_model_env,
+        "opacity_statistic",
+        lambda params: 1.0 if features[0]["mean"] > 0.5 else 0.0,
+    )
+    env = _env(
+        monkeypatch,
+        features,
+        alpha=1.0,
+        coverage_threshold=0.05,
+        mean_opacity_threshold=0.95,
+        hard_penalty=-2.0,
+    )
+
+    env.reset()
+    _, reward, _, _, _ = env.step([0.3])
+
+    assert reward == pytest.approx(-2.0)
+
+
+def test_hard_penalty_uses_opacity_statistic_not_grayscale_mean(monkeypatch):
+    monkeypatch.setattr(reward_model_env, "opacity_statistic", lambda params: 0.9)
+    monkeypatch.setattr(reward_model_env, "predict_reward", lambda *args: 0.0)
+    env = _env(
+        monkeypatch,
+        [_features(mean=1.0, coverage=0.5), _features(mean=1.0, coverage=0.5)],
+        alpha=1.0,
+        mean_opacity_threshold=0.95,
+        hard_penalty=-2.0,
+    )
+
+    env.reset()
+    _, reward, _, _, _ = env.step([0.3])
+
+    assert reward == pytest.approx(0.0)
+
+
 def test_step_caches_previous_after_as_next_before(monkeypatch):
     render_calls = []
 
