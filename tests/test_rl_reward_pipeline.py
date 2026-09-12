@@ -29,6 +29,11 @@ def test_generate_pairs_uses_two_deltas_and_objective_label(monkeypatch):
     assert all(row["source"] == "synthetic" for row in rows)
     assert all(row["target_tissue"] in TISSUES for row in rows)
     assert all(row["direction"] in ("increase", "decrease") for row in rows)
+    assert all(row["command"] == {
+        "attribute": "opacity",
+        "target": row["target_tissue"],
+        "direction": row["direction"],
+    } for row in rows)
     assert all(row["weight"] == 1.0 for row in rows)
     assert all(row["label"] in (-1, 1) for row in rows)
     assert all(set(row["observation_a"]) >= {"before_features", "after_features"}
@@ -38,13 +43,36 @@ def test_generate_pairs_uses_two_deltas_and_objective_label(monkeypatch):
     assert len(rendered) == 12  # one shared start plus two after states per pair
 
 
-def test_generate_pairs_applies_decrease_sign_to_mass_fraction(monkeypatch):
+def test_generate_pairs_labels_unequal_increase_objectives(monkeypatch):
     monkeypatch.setattr(
         pretrain_reward,
         "sample_start_params",
         lambda rng: np.zeros(24, dtype=np.float64),
     )
-    monkeypatch.setattr(pretrain_reward, "sample_delta", lambda rng: np.ones(24))
+    deltas = iter((np.full(24, 0.5), np.full(24, 0.75)))
+    monkeypatch.setattr(pretrain_reward, "sample_delta", lambda rng: next(deltas))
+    monkeypatch.setattr(pretrain_reward, "render_features", lambda *args: FEATURES)
+    monkeypatch.setattr(
+        pretrain_reward,
+        "mass_fraction",
+        lambda params, tissue: float(params[0]),
+    )
+    monkeypatch.setattr(pretrain_reward, "sample_goal", lambda rng: ("bone", "increase"))
+    rows = pretrain_reward.generate_synthetic_pairs(1, seed=0, renderer=lambda p: p)
+    row = rows[0]
+    assert row["objective_a"] == 0.5
+    assert row["objective_b"] == 0.75
+    assert row["label"] == -1
+
+
+def test_generate_pairs_labels_unequal_decrease_objectives(monkeypatch):
+    monkeypatch.setattr(
+        pretrain_reward,
+        "sample_start_params",
+        lambda rng: np.zeros(24, dtype=np.float64),
+    )
+    deltas = iter((np.full(24, 0.5), np.full(24, 0.75)))
+    monkeypatch.setattr(pretrain_reward, "sample_delta", lambda rng: next(deltas))
     monkeypatch.setattr(pretrain_reward, "render_features", lambda *args: FEATURES)
     monkeypatch.setattr(
         pretrain_reward,
@@ -52,11 +80,11 @@ def test_generate_pairs_applies_decrease_sign_to_mass_fraction(monkeypatch):
         lambda params, tissue: float(params[0]),
     )
     monkeypatch.setattr(pretrain_reward, "sample_goal", lambda rng: ("bone", "decrease"))
-    rows = pretrain_reward.generate_synthetic_pairs(1, seed=0, renderer=lambda p: p)
-    row = rows[0]
-    assert row["direction"] == "decrease"
-    assert row["objective_a"] == -1.0
-    assert row["objective_b"] == -1.0
+    row = pretrain_reward.generate_synthetic_pairs(
+        1, seed=0, renderer=lambda p: p
+    )[0]
+    assert row["objective_a"] == -0.5
+    assert row["objective_b"] == -0.75
     assert row["label"] == 1
 
 

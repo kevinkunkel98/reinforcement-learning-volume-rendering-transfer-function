@@ -79,6 +79,7 @@ def generate_synthetic_pairs(pair_count: int = DEFAULT_PAIR_COUNT, *, seed: int 
         label = 1 if objective_a >= objective_b else -1
         rows.append({
             "source": "synthetic",
+            "command": {"attribute": "opacity", "target": target, "direction": direction},
             "target_tissue": target,
             "direction": direction,
             "weight": 1.0,
