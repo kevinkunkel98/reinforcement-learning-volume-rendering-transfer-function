@@ -48,8 +48,9 @@ hand-coded baseline both agents are compared against. Both base agents train
 from raw data — neither ever calls the VTK renderer. Two extensions build on
 the opacity agent specifically: @sec-online trains the same MDP continually
 instead of in one batch, and @sec-rlhf replaces the automatic metric with a
-reward model learned from human judgments of rendered images — the first
-point in this document where rendering enters the RL loop at all.
+goal-conditioned reward model learned from real human preference signal
+mined out of ordinary app usage — the first point in this document where
+rendering enters the RL loop at all.
 
 #outline(title: "Contents", indent: 1.5em)
 
@@ -330,66 +331,156 @@ offline result table reports, making the two directly comparable.
 
 #pagebreak()
 
-= Extension: RLHF reward model <sec-rlhf>
+= Extension: goal-conditioned RLHF reward model <sec-rlhf>
 
 $phi$ (@sec-tf) measures only whether the TF curve moved the way a command
 literally asked — never whether the resulting *image* looks good. This
-extension trains a small reward model from human judgments of rendered
-before/after pairs, then trains RL against that learned reward instead of
-$phi$'s exact delta — the RLHF pattern, and the first point in this
-document where the VTK renderer enters the RL loop at all.
+extension trains a reward model from real human preference signal, then
+trains RL against that learned reward instead of $phi$'s exact delta — the
+RLHF pattern, and the first point in this document where the VTK renderer
+enters the RL loop at all. Unlike a generic image-quality score, the model
+is *goal-conditioned*: it sees which tissue and direction the user actually
+asked for, so it learns whether a transition served that specific request,
+not just whether the resulting frame looks nicer in general.
 
-== Preference collection and featurization
+== Preference sources and extraction
 
-`render.features(rgb)` (already used elsewhere for logging) reduces a
-rendered frame to four cheap scalars:
+No dedicated labeling session is required. `rl/extract_pairs.py` mines
+three signals the application already produces during ordinary use, each
+trusted in proportion to how unambiguous it is:
+
+#table(
+  columns: (auto, 1fr, auto),
+  stroke: (bottom: 0.5pt + luma(200)),
+  inset: (x: 6pt, y: 5pt),
+  table.header([*Source*], [*Signal*], [*Weight* $w$]),
+  [Branch], [Explicit A/B: two children of the same parent step, one accepted], [$1.0$],
+  [Trajectory], [Within an episode, an accepted/ended step vs.\ an earlier one ($k - j >= 2$)], [$0.7$],
+  [Thumbs], [Standalone up/down rating, joined to a rendered step by session/step], [$0.4$],
+)
+
+Branches are extracted only from explicit parent/carried-forward metadata —
+never inferred from similar parameters — so historical logs that predate
+branch tracking correctly report zero branch pairs rather than guessing.
+Each extracted pair carries its source weight $w_i$ through to training.
+
+== Goal-conditioned featurization
+
+`render.features(rgb)` reduces a rendered frame to four cheap scalars:
 
 $ f(x) = ("mean"(x), thin "std"(x), thin "coverage"(x), thin "entropy"(x)) in RR^4 . $
 
-`rl/collect_preferences.py` samples cases the same way @sec-tf's episodes
-are sampled, applies one random action, renders before/after, and asks a
-human for a label $y in {0,1}$ (better/worse). Each labeled example is
-reduced to a 10-dimensional feature vector — the same information a policy
-would have available when it takes that step:
+Where the design changes is the observation itself. Each side of a pair is
+encoded as *after*, *before*, their *delta*, and the goal that was actually
+asked for — an 18-dimensional vector instead of the earlier 10-dimensional,
+goal-blind one:
 
-$ z = ( f("after") - f("before"), thin op("onehot")(t), thin d ) in RR^(4+5+1) = RR^10 . $
+$ z = ( f("after"), thin f("before"), thin f("after") - f("before"),
+  thin op("onehot")(t), thin d ) in RR^(4+4+4+5+1) = RR^18 , $
 
-== Reward model
+with $t$ the target tissue (one of the five tissue classes) and
+$d in {+1, -1}$ the requested direction (increase/decrease).
 
-A small MLP $R_theta : RR^10 -> RR$ ($10 arrow.r 16 arrow.r 1$, ReLU) is
-trained on labeled pairs $(z_i, y_i)$ via binary cross-entropy on the
-sigmoid of its output:
+== Reward model and preference loss
 
-$ cal(L)(theta) = -1/N sum_(i=1)^N [ y_i log sigma(R_theta (z_i)) +
-  (1-y_i) log(1 - sigma(R_theta (z_i))) ] . $
+A small MLP $R_theta : RR^18 -> RR$ ($18 arrow.r 64 arrow.r 32 arrow.r 1$,
+ReLU) scores a single observation. Training operates on *pairs*, not single
+labels: given a preferred observation $z_i^+$ and the alternative
+$z_i^-$, the weighted Bradley-Terry loss pushes the preferred score higher
+in proportion to how confident that pair's source is:
 
-At inference, the reward handed to RL is the sigmoid output remapped to a
-signed range matching $phi$'s reward shape:
+$ cal(L)(theta) = -(sum_i w_i log sigma(R_theta (z_i^+) - R_theta (z_i^-)))
+  / (sum_i w_i) . $
+
+At inference the reward handed to RL is, as before, the sigmoid output
+remapped to a signed range:
 
 $ tilde(r)(z) = 2 sigma(R_theta (z)) - 1 in [-1, 1] . $
 
-== Environment: one render per step, not two
+== Two-phase training: synthetic pretraining, then human fine-tuning
+
+Real preference data is scarce by construction — a handful of pairs from
+ordinary usage, not a curated dataset — so the model never trains from a
+random initialization on that data alone.
+
+*Pretraining* (`rl/pretrain_reward.py`) generates a configurable number of
+*synthetic* pairs (default $20"k"$): a random starting TF vector, a random
+goal $(t, d)$, and two random deltas, both rendered and labeled by which
+one moved the *signed* `mass_fraction` objective further — the same $phi$
+from @sec-tf, not a human label. This only warm-starts the weights into a
+sane region; an in-code `TODO` marks the exact spot where a genuine
+rendered-visibility metric should eventually replace this proxy. An
+ensemble of $K = 5$ independently seeded members is trained this way by
+default (see the reward composition below for why).
+
+*Fine-tuning* (`rl/finetune_reward.py`) loads the pretrained ensemble and
+continues training — *only* on real extracted pairs — at one tenth the
+pretraining learning rate, on a fixed, seeded train/test split that is
+persisted in the checkpoint metadata and never touched again by later
+evaluation runs. Pretrained and fine-tuned checkpoints are saved as
+separate artifact families; fine-tuning never overwrites the cold-start
+weights, so both can always be compared against each other.
+
+== Reward composition and anti-hacking safeguards
 
 `RewardModelTFEnv` subclasses `TFEnv` from @sec-tf unchanged — same
-sampling, same action, same *observation* (which still includes the free
-$phi$ value) — and overrides only the reward: `step()` renders the new
-state, computes $tilde(r)$ from $Delta f$ against the *previous* step's
-rendered features, then caches this step's features as next step's
-"before" — so a rollout of $k$ steps costs $k+1$ renders, not $2k$.
-Measured directly on the synthetic phantom (96³, GPU raycast): *109 ms per
-render*, which is why this extension's step budget (~2,000) is two orders
-of magnitude smaller than the automatic-metric agents' — every step now
-does real work a $phi$-based step never had to.
+sampling, same action, same observation shape (still including the free
+$phi$ value) — and overrides only the reward. As before, it caches the
+previous step's rendered features so a rollout of $k$ steps costs $k+1$
+renders, not $2k$; measured on the synthetic phantom: *109 ms per render*,
+the reason this extension's step budgets stay two orders of magnitude
+below the automatic-metric agents'.
+
+The reward itself is no longer the ensemble's raw output. Given $K$ member
+scores $R_(theta_1)(z), dots, R_(theta_K)(z)$ (each already remapped via
+$tilde(r)$), the *ensemble reward* is mean penalized by disagreement:
+
+$ r_"model"(z) = macron(tilde(r))(z) - s(z), quad
+  macron(tilde(r))(z) = 1/K sum_(k=1)^K tilde(r)_k (z), quad
+  s(z) = sqrt(1/K sum_(k=1)^K (tilde(r)_k (z) - macron(tilde(r))(z))^2) . $
+
+States where the ensemble disagrees — plausibly outside the training
+distribution — are automatically discounted, without any explicit
+out-of-distribution detector. The final reward blends this against the
+untouched objective anchor:
+
+$ r = alpha dot r_"model"(z) + (1 - alpha) dot phi_"signed", quad alpha in [0, 1] , $
+
+with default $alpha = 0.7$; $alpha = 0$ recovers the pre-RLHF automatic-metric
+agent exactly, and $alpha = 1$ trains against the learned reward alone —
+both are one-line ablations, not separate code paths. Independently of
+$alpha$, a *hard* penalty $r = -1.0$ overrides everything whenever a state
+is degenerate — `coverage` below $0.01$ (near-black) or mean opacity above
+$0.95$ (fully opaque) — so the policy cannot win by rendering something
+the learned model happens to score well but no human would call useful.
+
+== Evaluation: three independent checks
+
+`rl/eval_reward.py` keeps three questions separate, none of them feeding
+back into training:
+
++ *Reward accuracy* — pretrained vs.\ fine-tuned agreement with human
+  labels on the same held-out split, reported overall and per source, so a
+  single branch pair and ten low-confidence thumbs pairs are not silently
+  averaged together.
++ *Policy sanity* — the RLHF-trained policy's performance on the plain
+  automatic metric, as a collapse/reward-hacking check independent of the
+  learned reward that trained it.
++ *Blind head-to-head* — the RLHF policy vs.\ the hill-climb baseline,
+  randomized A/B order, judged by a human with no visibility into which
+  policy produced which image; verdicts are appended only to a separate
+  results file.
 
 #note(title: "Scope", color: rgb("#8a2e2e"))[
-  Deliberately framed as a single-rater pilot ($n approx 50$ labels), not a
-  generalizable result — reward-model train/val accuracy is reported
-  honestly regardless of value, per the design's explicit methodological
-  stance. All four modules (`rl/collect_preferences.py`,
-  `rl/reward_model.py`, `rl/reward_model_env.py`,
-  `rl/reward_model_train.py`) are implemented and tested; the pipeline has
-  not yet been run against real collected labels, since that step needs a
-  live human and cannot run unattended. Camera-viewpoint RLHF and live
-  chat-UI wiring for either extension in this section are both out of
-  scope for now.
+  End-to-end mechanics are validated against real data — extraction,
+  pretraining, fine-tuning, evaluation, and RL training against the
+  fine-tuned model all run cleanly on real logs, and two real bugs
+  surfaced this way (not by the test suite) are fixed: preference rows
+  embedded in `log.jsonl`/`feedback.jsonl` were previously invisible to
+  the extractor, and multi-target commands ("show only bone and fat")
+  crashed it outright. What remains a pilot is *volume*: real usage has
+  produced only a handful of extractable pairs so far, so fine-tuned
+  accuracy numbers are not yet a generalizable result and are reported
+  honestly as such, per the design's explicit methodological stance.
+  Camera-viewpoint RLHF is out of scope for now.
 ]
