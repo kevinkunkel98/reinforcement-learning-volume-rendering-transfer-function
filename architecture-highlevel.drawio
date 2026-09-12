@@ -1,0 +1,74 @@
+<mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="700" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <mxCell id="input" value="Voice / Text Input" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;fillColor=#dce9f7;strokeColor=#1c3a5e;fontColor=#1c3a5e;fontSize=13;fontStyle=1;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="40" y="60" width="160" height="60" as="geometry" />
+    </mxCell>
+
+    <mxCell id="parser" value="Command Parser&lt;br&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#5a7a9a&quot;&gt;rule-based or local LLM&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1a4f8a;fontColor=#1a4f8a;fontSize=13;fontStyle=1;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="280" y="55" width="200" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="cmdlayer" value="Command Layer&lt;br&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#5a7a9a&quot;&gt;transfer function + camera state&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1a4f8a;fontColor=#1a4f8a;fontSize=13;fontStyle=1;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="560" y="55" width="220" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="render" value="Volume Rendering&lt;br&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#5a7a9a&quot;&gt;VTK, offscreen&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1a4f8a;fontColor=#1a4f8a;fontSize=13;fontStyle=1;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="860" y="55" width="200" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="searcheval" value="Search &amp;amp; Evaluation&lt;br&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#5a7a9a&quot;&gt;hill-climbing baseline + evaluators&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1a4f8a;fontColor=#1a4f8a;fontSize=13;fontStyle=1;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="860" y="280" width="200" height="70" as="geometry" />
+    </mxCell>
+
+    <mxCell id="rl" value="Reinforcement Learning&lt;br&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#3e8a5f&quot;&gt;offline train/eval, online learning,&lt;br&gt;RLHF — opacity policy served live&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#e4f4ec;strokeColor=#1e6b3c;strokeWidth=3;fontColor=#1e6b3c;fontSize=13;fontStyle=1;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="440" y="270" width="240" height="90" as="geometry" />
+    </mxCell>
+
+    <mxCell id="persist" value="Session &amp;amp; Logs&lt;br&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#c9973e&quot;&gt;chat history, preferences, RL logs&lt;/font&gt;" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#f7f4ef;strokeColor=#b7770d;fontColor=#b7770d;fontSize=13;fontStyle=1;shadow=1;size=15;" vertex="1" parent="1">
+      <mxGeometry x="60" y="275" width="200" height="90" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e1" value="speech / text" style="html=1;endArrow=block;endFill=1;rounded=1;strokeColor=#33475b;fontColor=#33475b;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="input" target="parser">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e2" value="command dict" style="html=1;endArrow=block;endFill=1;rounded=1;strokeColor=#33475b;fontColor=#33475b;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="parser" target="cmdlayer">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e3" value="TF params + camera" style="html=1;endArrow=block;endFill=1;rounded=1;strokeColor=#33475b;fontColor=#33475b;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="cmdlayer" target="render">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e4" value="rendered frame" style="html=1;endArrow=block;endFill=1;rounded=1;strokeColor=#33475b;fontColor=#33475b;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="render" target="searcheval">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e5" value="accept/reject, next step" style="html=1;endArrow=block;endFill=1;rounded=1;strokeColor=#33475b;fontColor=#33475b;fontSize=10;labelBackgroundColor=#ffffff;exitX=0;exitY=0.3;exitDx=0;exitDy=0;entryX=0.85;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="searcheval" target="cmdlayer">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="960" y="200" />
+          <mxPoint x="746" y="200" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="e6" value="trained policy live;&#10;shared baseline offline" style="html=1;endArrow=block;endFill=1;startArrow=block;startFill=1;rounded=1;strokeColor=#3e8a5f;fontColor=#3e8a5f;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="rl" target="searcheval">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e7" value="every step" style="html=1;endArrow=block;endFill=1;rounded=1;dashed=1;strokeColor=#a08040;fontColor=#a08040;fontSize=10;labelBackgroundColor=#ffffff;exitX=0.15;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="cmdlayer" target="persist">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="593" y="230" />
+          <mxPoint x="160" y="230" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="e8" value="images" style="html=1;endArrow=block;endFill=1;rounded=1;dashed=1;strokeColor=#a08040;fontColor=#a08040;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="render" target="persist">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="960" y="410" />
+          <mxPoint x="160" y="410" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+  </root>
+</mxGraphModel>
