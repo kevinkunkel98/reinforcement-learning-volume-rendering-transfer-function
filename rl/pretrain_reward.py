@@ -122,6 +122,10 @@ def pretrain(pair_count: int = DEFAULT_PAIR_COUNT, *, epochs: int = 200, seed: i
              output_path="out/rl_models/reward_pretrained.pt", renderer=None,
              render_features_fn=None) -> list[Path]:
     """Train seeded ensemble and save member plus aggregate artifacts."""
+    if epochs < 1:
+        raise ValueError("epochs must be positive")
+    if learning_rate <= 0:
+        raise ValueError("learning_rate must be positive")
     if members < 1:
         raise ValueError("members must be positive")
     output = Path(output_path)

@@ -68,6 +68,17 @@ def test_extracts_recoverable_branches_and_trajectory_pairs(tmp_path):
     assert stats["branch"] == 1
 
 
+def test_rejects_symlinked_input_output_collision(tmp_path):
+    log = tmp_path / "log.jsonl"
+    output = tmp_path / "pairs.jsonl"
+    alias = tmp_path / "alias.jsonl"
+    write_jsonl(log, [])
+    alias.symlink_to(log)
+
+    with pytest.raises(ValueError, match="collide"):
+        extract_pairs(log_path=alias, out_path=log)
+
+
 def test_branch_requires_explicit_recoverable_metadata_and_gap_is_two(tmp_path):
     log = tmp_path / "log.jsonl"
     out = tmp_path / "pairs.jsonl"

@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from collections import Counter, defaultdict
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -134,9 +135,9 @@ def _with_step(observation, row):
 
 
 def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK, out_path=DEFAULT_OUT):
-    output = os.path.abspath(os.fspath(out_path))
+    output = Path(out_path).resolve()
     inputs = [path for path in (log_path, feedback_path) if path]
-    if any(output == os.path.abspath(os.fspath(path)) for path in inputs):
+    if any(output == Path(path).resolve() for path in inputs):
         raise ValueError("input and output paths collide")
     raw_logs = _read_jsonl(log_path)
     feedback = _read_jsonl(feedback_path)

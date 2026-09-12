@@ -25,7 +25,9 @@ def split_pairs(records: list[dict], *, seed: int = 0,
         raise ValueError("preference records cannot be empty")
     if not 0.0 < test_fraction < 1.0:
         raise ValueError("test_fraction must be between 0 and 1")
-    test_count = max(1, int(round(len(records) * test_fraction)))
+    test_count = int(round(len(records) * test_fraction))
+    if test_count < 1 or test_count >= len(records):
+        raise ValueError("split would leave an empty train or test partition")
     indices = np.random.default_rng(seed).permutation(len(records))
     test_indices = set(int(index) for index in indices[:test_count])
     train = [record for index, record in enumerate(records) if index not in test_indices]
@@ -52,7 +54,7 @@ def _resolve_member_path(member_name: str, pretrained: Path) -> Path:
     member_path = Path(member_name)
     if member_path.is_absolute():
         return member_path
-    candidates = (Path.cwd() / member_path, pretrained.parent / member_path)
+    candidates = (pretrained.parent / member_path, Path.cwd() / member_path)
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -106,41 +108,52 @@ def finetune(preferences_path, pretrained_path, *, output_path=DEFAULT_OUTPUT,
         raise ValueError("pretrained checkpoint missing member_paths or seeds")
     member_paths = [output.with_name(f"{output.stem}_member{index}{output.suffix}")
                     for index in range(len(member_names))]
+    temporary_paths = [path.with_name(f".{path.name}.tmp") for path in member_paths]
+    temporary_output = output.with_name(f".{output.name}.tmp")
     if output.resolve() == pretrained.resolve() or any(
             path.resolve() == pretrained.resolve() for path in member_paths):
         raise ValueError("fine-tuned artifacts must not overwrite pretrained artifacts")
-    if output.exists() or any(path.exists() for path in member_paths):
+    if (output.exists() or any(path.exists() for path in member_paths) or
+            temporary_output.exists() or any(path.exists() for path in temporary_paths)):
         raise FileExistsError(f"fine-tuning artifact already exists: {output}")
 
     learning_rate = pretrain_lr / 10.0
-    for index, member_name in enumerate(member_names):
-        member_path = _resolve_member_path(member_name, pretrained)
-        model = load_reward_model(member_path)
-        model = _train_member(model, train_records, seed=int(seeds[index]),
-                              epochs=epochs, learning_rate=learning_rate)
-        save_reward_model(model, member_paths[index])
+    try:
+        for index, member_name in enumerate(member_names):
+            member_path = _resolve_member_path(member_name, pretrained)
+            model = load_reward_model(member_path)
+            model = _train_member(model, train_records, seed=int(seeds[index]),
+                                  epochs=epochs, learning_rate=learning_rate)
+            save_reward_model(model, temporary_paths[index])
 
-    train_ids = [record["id"] for record in train_records if "id" in record]
-    test_ids = [record["id"] for record in test_records if "id" in record]
-    metadata = {
-        "seed": int(seeds[0]),
-        "split_seed": split_seed,
-        "train_count": len(train_records),
-        "test_count": len(test_records),
-        "test_fraction": test_fraction,
-        "train_ids": train_ids,
-        "test_ids": test_ids,
-        "train_row_hashes": _hash_subset(preferences, train_records),
-        "test_row_hashes": _hash_subset(preferences, test_records),
-        "learning_rate": learning_rate,
-    }
-    output.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({
-        "member_paths": [str(path) for path in member_paths],
-        "seeds": [int(seed) for seed in seeds],
-        "pretrained_path": str(pretrained),
-        "metadata": metadata,
-    }, output)
+        train_ids = [record["id"] for record in train_records if "id" in record]
+        test_ids = [record["id"] for record in test_records if "id" in record]
+        metadata = {
+            "seed": int(seeds[0]),
+            "split_seed": split_seed,
+            "train_count": len(train_records),
+            "test_count": len(test_records),
+            "test_fraction": test_fraction,
+            "train_ids": train_ids,
+            "test_ids": test_ids,
+            "train_row_hashes": _hash_subset(preferences, train_records),
+            "test_row_hashes": _hash_subset(preferences, test_records),
+            "learning_rate": learning_rate,
+        }
+        output.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({
+            "member_paths": [str(path) for path in member_paths],
+            "seeds": [int(seed) for seed in seeds],
+            "pretrained_path": str(pretrained),
+            "metadata": metadata,
+        }, temporary_output)
+        for temporary, final in zip(temporary_paths, member_paths):
+            temporary.replace(final)
+        temporary_output.replace(output)
+    except Exception:
+        for path in [temporary_output, *temporary_paths, output, *member_paths]:
+            path.unlink(missing_ok=True)
+        raise
     return member_paths
 
 

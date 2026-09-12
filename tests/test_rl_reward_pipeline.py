@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import numpy as np
 import pytest
 import torch
@@ -174,6 +175,23 @@ def test_fixed_split_is_seeded_and_disjoint():
     assert sorted(row["id"] for row in first[0] + first[1]) == list(range(10))
 
 
+@pytest.mark.parametrize("records,test_fraction", [([{"id": 1}], 0.2), ([{"id": i} for i in range(4)], 0.99)])
+def test_fixed_split_rejects_empty_partition(records, test_fraction):
+    with pytest.raises(ValueError, match="empty"):
+        finetune_reward.split_pairs(records, seed=0, test_fraction=test_fraction)
+
+
+def test_pretrain_rejects_invalid_epochs_and_learning_rate(tmp_path):
+    for kwargs in ({"epochs": 0}, {"learning_rate": 0}, {"learning_rate": -1}):
+        with pytest.raises(ValueError):
+            pretrain_reward.pretrain(
+                pair_count=1, members=1, output_path=tmp_path / f"{len(kwargs)}.pt",
+                renderer=lambda params: params,
+                render_features_fn=lambda renderer, params: FEATURES,
+                **kwargs,
+            )
+
+
 def test_finetune_saves_separate_members_and_split_metadata(tmp_path):
     pretrained = tmp_path / "reward_pretrained.pt"
     pretrain_reward.pretrain(
@@ -283,3 +301,57 @@ def test_finetune_resolves_default_relative_member_paths_and_hashes_rows(tmp_pat
     assert len(metadata["test_row_hashes"]) == metadata["test_count"]
     assert set(metadata["train_row_hashes"]).isdisjoint(metadata["test_row_hashes"])
     assert all(len(row_hash) == 64 for row_hash in metadata["train_row_hashes"] + metadata["test_row_hashes"])
+
+
+def test_finetune_does_not_publish_partial_artifacts(tmp_path, monkeypatch):
+    pretrained = tmp_path / "reward_pretrained.pt"
+    pretrain_reward.pretrain(
+        pair_count=4, epochs=1, seed=7, members=2, learning_rate=1e-3,
+        output_path=pretrained, renderer=lambda params: params,
+        render_features_fn=lambda renderer, params: FEATURES,
+    )
+    preferences = tmp_path / "pairs.jsonl"
+    records = [{
+        "target_tissue": "bone", "direction": "increase", "label": 1,
+        "observation_a": {"before_features": FEATURES, "after_features": FEATURES},
+        "observation_b": {"before_features": FEATURES, "after_features": FEATURES},
+    } for _ in range(4)]
+    preferences.write_text("".join(f"{json.dumps(row)}\n" for row in records))
+    monkeypatch.setattr(finetune_reward, "save_reward_model", lambda *args: (_ for _ in ()).throw(RuntimeError("save failed")))
+
+    output = tmp_path / "reward_finetuned.pt"
+    with pytest.raises(RuntimeError, match="save failed"):
+        finetune_reward.finetune(preferences, pretrained, output_path=output, epochs=1)
+
+    assert not output.exists()
+    assert not list(tmp_path.glob("reward_finetuned_member*.pt"))
+
+
+def test_finetune_cleans_published_members_if_aggregate_publish_fails(tmp_path, monkeypatch):
+    pretrained = tmp_path / "reward_pretrained.pt"
+    pretrain_reward.pretrain(
+        pair_count=4, epochs=1, seed=7, members=2, learning_rate=1e-3,
+        output_path=pretrained, renderer=lambda params: params,
+        render_features_fn=lambda renderer, params: FEATURES,
+    )
+    preferences = tmp_path / "pairs.jsonl"
+    record = {
+        "target_tissue": "bone", "direction": "increase", "label": 1,
+        "observation_a": {"before_features": FEATURES, "after_features": FEATURES},
+        "observation_b": {"before_features": FEATURES, "after_features": FEATURES},
+    }
+    preferences.write_text("".join(f"{json.dumps(record)}\n" for _ in range(4)))
+    original_replace = finetune_reward.Path.replace
+
+    def fail_aggregate_replace(path, target):
+        if Path(target).name == "reward_finetuned.pt":
+            raise RuntimeError("publish failed")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(finetune_reward.Path, "replace", fail_aggregate_replace)
+    output = tmp_path / "reward_finetuned.pt"
+    with pytest.raises(RuntimeError, match="publish failed"):
+        finetune_reward.finetune(preferences, pretrained, output_path=output, epochs=1)
+
+    assert not output.exists()
+    assert not list(tmp_path.glob("reward_finetuned_member*.pt"))
