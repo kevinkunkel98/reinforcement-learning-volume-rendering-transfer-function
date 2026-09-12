@@ -65,7 +65,36 @@ def _make_mapper(vtk_image):
     return mapper
 
 
-def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), camera: dict | None = None) -> vtk.vtkRenderWindow:
+_PIPELINE_CACHE = None  # (key, prop, renderer, win) -- see _get_pipeline
+
+
+def _get_pipeline(volume: np.ndarray, spacing):
+    """Build (or reuse) the offscreen render pipeline for `volume`.
+
+    Every vtkRenderWindow.Render() call re-binds a native offscreen GL
+    surface via a macOS WindowServer/IOKit round trip (vtkCocoaRenderWindow
+    ::Start() -> -[NSOpenGLContext update] -> IOAccelCreateSurface). That
+    round trip is fine occasionally, but a process that creates a *new*
+    vtkRenderWindow for every render (the old behavior here) issues a fresh
+    surface-bind request every single call -- and after roughly a minute of
+    sustained requests from one non-windowed process, IOAccelCreateSurface
+    stops responding and the next Render() blocks forever (confirmed via
+    `sample` on the hung process: stuck in mach_msg2_trap inside
+    IOServiceOpen). Reusing one window/renderer/mapper per volume avoids
+    creating new surfaces at all after the first render, which also makes
+    each subsequent render ~150x faster (no context-creation overhead).
+
+    Keyed on `id(volume)`: every hot-loop caller in this codebase holds one
+    volume array alive for the caller's entire lifetime, so identity is a
+    safe, cheap cache key here -- it is not a general-purpose memoization.
+    """
+    global _PIPELINE_CACHE
+    key = (id(volume), tuple(spacing))
+    if _PIPELINE_CACHE is not None and _PIPELINE_CACHE[0] == key:
+        return _PIPELINE_CACHE[1:]
+    if _PIPELINE_CACHE is not None:
+        _PIPELINE_CACHE[3].Finalize()
+
     dx, dy, dz = volume.shape
     flat = np.ascontiguousarray(volume.ravel(order="F"))
     vtk_arr = numpy_to_vtk(flat, deep=True, array_type=vtk.VTK_FLOAT)
@@ -79,8 +108,9 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), came
     # passed straight through the transfer function -- not a sampling
     # artifact, so no amount of ray-sampling quality fixes it. A light
     # Gaussian smooth of the volume itself does: measured negligible cost on
-    # the synthetic phantom (96^3, ~2ms) and ~115ms on real CT (512x512x139),
-    # re-paid on every render since nothing here is cached across calls.
+    # the synthetic phantom (96^3, ~2ms) and ~115ms on real CT (512x512x139).
+    # Done once per volume here, not per render, since it doesn't depend on
+    # the transfer function.
     smoother = vtk.vtkImageGaussianSmooth()
     smoother.SetInputData(image)
     smoother.SetStandardDeviations(1.0, 1.0, 1.0)
@@ -88,17 +118,14 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), came
     smoother.Update()
     image = smoother.GetOutput()
 
-    ctf, otf = vector_to_vtk(params)
     prop = vtk.vtkVolumeProperty()
-    prop.SetColor(ctf)
-    prop.SetScalarOpacity(otf)
     prop.ShadeOn()
     prop.SetInterpolationTypeToLinear()
 
     mapper = _make_mapper(image)
-    # This render is one-shot and offscreen, not an interactive loop -- there's
-    # no reason to let VTK trade sampling quality for frame rate the way it
-    # does by default for interactive rendering.
+    # This render is offscreen batch rendering, not an interactive loop --
+    # there's no reason to let VTK trade sampling quality for frame rate the
+    # way it does by default for interactive rendering.
     mapper.AutoAdjustSampleDistancesOff()
     mapper.SetSampleDistance(min(spacing) / 2.0)
     volume_actor = vtk.vtkVolume()
@@ -113,6 +140,17 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), came
     win.SetOffScreenRendering(1)
     win.AddRenderer(renderer)
     win.SetSize(WIDTH, HEIGHT)
+
+    _PIPELINE_CACHE = (key, prop, renderer, win)
+    return prop, renderer, win
+
+
+def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), camera: dict | None = None) -> vtk.vtkRenderWindow:
+    prop, renderer, win = _get_pipeline(volume, spacing)
+
+    ctf, otf = vector_to_vtk(params)
+    prop.SetColor(ctf)
+    prop.SetScalarOpacity(otf)
 
     bounds = _visible_bounds(volume, params, spacing)
     if bounds is not None:

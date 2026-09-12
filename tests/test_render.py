@@ -31,12 +31,13 @@ def test_features_keys_and_ranges():
 
 
 def test_render_accepts_custom_camera_and_defaults_match_old_behavior():
+    # render() reuses one render window per volume (see render._get_pipeline),
+    # so each render() call must be grab()bed before the next render() call
+    # on the same volume -- the window is a mutable, reused resource now,
+    # not an independent snapshot.
     volume = build_phantom(size=48)
     params = default_params()
 
-    win_default = render(volume, params)
-    win_custom = render(volume, params, camera={"azimuth": 90.0, "elevation": 0.0, "zoom": 1.0})
-
-    img_default = grab(win_default)
-    img_custom = grab(win_custom)
+    img_default = grab(render(volume, params))
+    img_custom = grab(render(volume, params, camera={"azimuth": 90.0, "elevation": 0.0, "zoom": 1.0}))
     assert not np.array_equal(img_default, img_custom)
