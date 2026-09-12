@@ -1,8 +1,10 @@
+import json
 import numpy as np
 import pytest
 import torch
 
 from rl import pretrain_reward
+from rl import finetune_reward
 from rl.env import TISSUES
 
 
@@ -159,3 +161,71 @@ def test_generate_pairs_resamples_duplicates_and_ties(monkeypatch):
 
     assert len(rows) == 1
     assert rows[0]["objective_a"] != rows[0]["objective_b"]
+
+
+def test_fixed_split_is_seeded_and_disjoint():
+    rows = [{"id": i} for i in range(10)]
+
+    first = finetune_reward.split_pairs(rows, seed=11, test_fraction=0.2)
+    second = finetune_reward.split_pairs(rows, seed=11, test_fraction=0.2)
+
+    assert first == second
+    assert {row["id"] for row in first[0]}.isdisjoint({row["id"] for row in first[1]})
+    assert sorted(row["id"] for row in first[0] + first[1]) == list(range(10))
+
+
+def test_finetune_saves_separate_members_and_split_metadata(tmp_path):
+    pretrained = tmp_path / "reward_pretrained.pt"
+    pretrain_reward.pretrain(
+        pair_count=4,
+        epochs=1,
+        seed=7,
+        members=2,
+        learning_rate=1e-3,
+        output_path=pretrained,
+        renderer=lambda params: params,
+        render_features_fn=lambda renderer, params: FEATURES,
+    )
+    preferences = tmp_path / "pairs.jsonl"
+    records = [
+        {
+            "id": index,
+            "source": "human",
+            "target_tissue": "bone",
+            "direction": "increase",
+            "label": 1,
+            "weight": 1.0,
+            "observation_a": {"before_features": FEATURES, "after_features": FEATURES},
+            "observation_b": {"before_features": FEATURES, "after_features": FEATURES},
+        }
+        for index in range(6)
+    ]
+    preferences.write_text("".join(f"{json.dumps(row)}\n" for row in records))
+
+    output = tmp_path / "reward_finetuned.pt"
+    paths = finetune_reward.finetune(
+        preferences,
+        pretrained,
+        output_path=output,
+        epochs=1,
+        split_seed=11,
+        test_fraction=1 / 3,
+        pretrain_lr=1e-3,
+    )
+
+    assert output.exists()
+    assert len(paths) == 2
+    assert all(path.exists() for path in paths)
+    assert pretrained not in [output, *paths]
+    checkpoint = torch.load(output, map_location="cpu")
+    assert checkpoint["member_paths"] == [str(path) for path in paths]
+    assert checkpoint["metadata"] == {
+        "seed": 7,
+        "split_seed": 11,
+        "train_count": 4,
+        "test_count": 2,
+        "train_ids": [0, 2, 4, 5],
+        "test_ids": [1, 3],
+        "learning_rate": 1e-4,
+    }
+    assert checkpoint["pretrained_path"] == str(pretrained)
