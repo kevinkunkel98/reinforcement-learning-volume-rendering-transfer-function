@@ -76,13 +76,26 @@ def _record_features(record: dict, prefix: str):
     return observation
 
 
+def _pair_observation_features(observation: dict, target: str, direction: str):
+    before = observation.get("before_features", observation.get("before"))
+    after = observation.get("after_features", observation.get("after"))
+    return featurize(before, after, target, direction)
+
+
 def _pair_arrays(records):
     preferred, other, weights = [], [], []
     for record in records:
         target = record.get("target_tissue", record.get("target"))
         direction = record["direction"]
         weight = float(record.get("weight", 1.0))
-        if "preferred" in record or "chosen" in record:
+        if "observation_a" in record and "observation_b" in record:
+            first = _pair_observation_features(record["observation_a"], target, direction)
+            second = _pair_observation_features(record["observation_b"], target, direction)
+            if record.get("label") == -1:
+                first, second = second, first
+            preferred.append(first)
+            other.append(second)
+        elif "preferred" in record or "chosen" in record:
             left = record.get("preferred", record.get("chosen"))
             right = record.get("rejected", record.get("other"))
             left_before = left.get("before_features", left.get("before"))

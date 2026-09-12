@@ -18,6 +18,7 @@ from rl.reward_model import (
     predict_reward,
     save_reward_model,
     train_reward_model,
+    _pair_arrays,
 )
 
 
@@ -58,6 +59,25 @@ def test_weighted_bradley_terry_loss_scales_examples():
     low = bradley_terry_loss(preferred, other, torch.tensor([1.0, 1.0]))
     high = bradley_terry_loss(preferred, other, torch.tensor([1.0, 3.0]))
     assert high > low
+
+
+def test_pair_arrays_parses_canonical_observations_and_swaps_negative_label():
+    before = {"mean": 10.0, "std": 1.0, "coverage": 0.1, "entropy": 0.2}
+    after_a = {"mean": 20.0, "std": 2.0, "coverage": 0.2, "entropy": 0.3}
+    after_b = {"mean": 30.0, "std": 3.0, "coverage": 0.3, "entropy": 0.4}
+    record = {
+        "target_tissue": "bone",
+        "direction": "increase",
+        "observation_a": {"before_features": before, "after_features": after_a},
+        "observation_b": {"before_features": before, "after_features": after_b},
+        "label": -1,
+    }
+
+    preferred, other, weights = _pair_arrays([record])
+
+    np.testing.assert_allclose(preferred[0, :4].numpy(), [30.0, 3.0, 0.3, 0.4])
+    np.testing.assert_allclose(other[0, :4].numpy(), [20.0, 2.0, 0.2, 0.3])
+    np.testing.assert_allclose(weights.numpy(), [1.0])
 
 
 def _make_separable_preferences(path, n=40):
