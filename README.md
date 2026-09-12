@@ -7,7 +7,7 @@ as a research pilot, steered by a reward model learned from human preferences
 instead of a hand-coded metric.
 
 <p align="center">
-  <img src="slides/architecture-highlevel.png" width="85%" alt="Architecture: command layer, transfer-function/render pipeline, RL sub-projects" />
+  <img src="docs/screenshots/architecture-highlevel-dark.png" width="85%" alt="Architecture: command layer, transfer-function/render pipeline, RL sub-projects" />
 </p>
 
 For the full technical writeup (rendering pipeline, command layer,
