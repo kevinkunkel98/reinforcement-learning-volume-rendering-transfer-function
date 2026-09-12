@@ -11,6 +11,83 @@ class _StubRewardModel:
           # this never needs real behavior
 
 
+def _patch_render(monkeypatch, feature_sequence):
+    monkeypatch.setattr(reward_model_env.render, "render", lambda *args: object())
+    monkeypatch.setattr(reward_model_env.render, "grab", lambda win: object())
+    monkeypatch.setattr(
+        reward_model_env.render, "features", lambda rgb: next(feature_sequence)
+    )
+
+
+def _env(monkeypatch, features, **kwargs):
+    _patch_render(monkeypatch, iter(features))
+    return RewardModelTFEnv(
+        volume=np.zeros((4, 4, 4)),
+        spacing=(1.0, 1.0, 1.0),
+        reward_model=kwargs.pop("reward_model", _StubRewardModel()),
+        seed=0,
+        **kwargs,
+    )
+
+
+def _features(mean=0.0, coverage=0.5):
+    return {"mean": mean, "std": 0.0, "coverage": coverage, "entropy": 0.0}
+
+
+def test_alpha_one_uses_ensemble_mean_minus_std(monkeypatch):
+    predictions = iter([0.8, 0.4])
+    monkeypatch.setattr(reward_model_env, "predict_reward", lambda *args: next(predictions))
+    env = _env(monkeypatch, [_features(), _features()], reward_model=[object(), object()], alpha=1.0)
+
+    env.reset()
+    _, reward, _, _, _ = env.step([0.3])
+
+    assert reward == pytest.approx(0.4)
+
+
+def test_alpha_must_be_between_zero_and_one():
+    with pytest.raises(ValueError, match="alpha"):
+        RewardModelTFEnv(np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), _StubRewardModel(), alpha=-0.1)
+
+
+def test_alpha_zero_uses_signed_objective_anchor(monkeypatch):
+    monkeypatch.setattr(reward_model_env, "predict_reward", lambda *args: 0.9)
+    env = _env(monkeypatch, [_features(), _features()], alpha=0.0)
+    env.direction = "increase"
+    monkeypatch.setattr(
+        reward_model_env.TFEnv,
+        "step",
+        lambda self, action: (np.zeros(1), 0.5, False, False, {}),
+    )
+
+    env.reset()
+    _, reward, _, _, _ = env.step([0.3])
+
+    assert reward == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    "features",
+    [[_features(mean=0.0, coverage=0.01), _features(mean=0.0, coverage=0.01)],
+     [_features(mean=1.0, coverage=0.5), _features(mean=1.0, coverage=0.5)]],
+)
+def test_degenerate_render_receives_independent_hard_penalty(monkeypatch, features):
+    monkeypatch.setattr(reward_model_env, "predict_reward", lambda *args: 0.0)
+    env = _env(
+        monkeypatch,
+        features,
+        alpha=1.0,
+        coverage_threshold=0.05,
+        mean_opacity_threshold=0.95,
+        hard_penalty=-2.0,
+    )
+
+    env.reset()
+    _, reward, _, _, _ = env.step([0.3])
+
+    assert reward == pytest.approx(-2.0)
+
+
 def test_step_caches_previous_after_as_next_before(monkeypatch):
     render_calls = []
 
