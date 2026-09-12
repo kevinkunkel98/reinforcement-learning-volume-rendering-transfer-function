@@ -81,7 +81,10 @@ def find_disagreements(
     disagreements = []
     for index, row in enumerate(rows):
         human = int(human_predictor(row))
-        objective = int(objective_predictor(row))
+        objective_value = objective_predictor(row)
+        if objective_value is None:
+            continue
+        objective = int(objective_value)
         if human == objective:
             continue
         def images(observation):
@@ -264,7 +267,10 @@ def evaluate_files(preferences_path, pretrained_path, finetuned_path, *, test_ro
     finetuned = _model_predictor(_load_members(finetuned_path))
     result = evaluate_reward_only(rows=test_rows, pretrained_predictor=pretrained,
                                   finetuned_predictor=finetuned)
-    objective = lambda row: _label_from_scores(row["objective_a"], row["objective_b"])
+    def objective(row):
+        if "objective_a" not in row or "objective_b" not in row:
+            return None
+        return _label_from_scores(row["objective_a"], row["objective_b"])
     disagreements = find_disagreements(test_rows, human_predictor=lambda row: row["label"],
                                        objective_predictor=objective)
     result["disagreement_count"] = len(disagreements)

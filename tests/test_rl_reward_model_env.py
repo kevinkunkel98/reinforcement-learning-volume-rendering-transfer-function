@@ -96,6 +96,11 @@ def test_alpha_zero_uses_signed_objective_anchor(monkeypatch):
 )
 def test_degenerate_render_receives_independent_hard_penalty(monkeypatch, features):
     monkeypatch.setattr(reward_model_env, "predict_reward", lambda *args: 0.0)
+    monkeypatch.setattr(
+        reward_model_env,
+        "opacity_statistic",
+        lambda params: 1.0 if features[0]["mean"] > 0.5 else 0.0,
+    )
     env = _env(
         monkeypatch,
         features,
@@ -109,6 +114,23 @@ def test_degenerate_render_receives_independent_hard_penalty(monkeypatch, featur
     _, reward, _, _, _ = env.step([0.3])
 
     assert reward == pytest.approx(-2.0)
+
+
+def test_hard_penalty_uses_opacity_statistic_not_grayscale_mean(monkeypatch):
+    monkeypatch.setattr(reward_model_env, "opacity_statistic", lambda params: 0.9)
+    monkeypatch.setattr(reward_model_env, "predict_reward", lambda *args: 0.0)
+    env = _env(
+        monkeypatch,
+        [_features(mean=1.0, coverage=0.5), _features(mean=1.0, coverage=0.5)],
+        alpha=1.0,
+        mean_opacity_threshold=0.95,
+        hard_penalty=-2.0,
+    )
+
+    env.reset()
+    _, reward, _, _, _ = env.step([0.3])
+
+    assert reward == pytest.approx(0.0)
 
 
 def test_step_caches_previous_after_as_next_before(monkeypatch):

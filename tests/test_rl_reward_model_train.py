@@ -49,3 +49,10 @@ def test_reward_model_train_writes_eval_log_and_gallery(tmp_path, monkeypatch):
     assert os.path.exists(os.path.join(gallery_dir, "0_after.png"))
 
     assert os.path.exists("out/rl_models/test_reward_model_agent.zip")
+
+
+def test_model_parent_dir_is_optional(tmp_path):
+    from rl.reward_model_train import _ensure_parent_dir
+
+    _ensure_parent_dir("agent.zip")
+    _ensure_parent_dir(str(tmp_path / "nested" / "agent.zip"))

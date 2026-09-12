@@ -7,6 +7,7 @@ import math
 from camera import DEFAULT_CAMERA
 from rl.env import TFEnv
 from rl.reward_model import ensemble_reward, predict_reward
+from transfer import CENTER_RANGE, opacity_mass
 
 import render
 
@@ -14,6 +15,12 @@ import render
 DEFAULT_COVERAGE_THRESHOLD = 0.01
 DEFAULT_MEAN_OPACITY_THRESHOLD = 250.0
 DEFAULT_HARD_PENALTY = -1.0
+
+
+def opacity_statistic(params) -> float:
+    """Mean transfer-function opacity over the rendered HU domain."""
+    lo, hi = CENTER_RANGE
+    return opacity_mass(params, lo, hi) / (hi - lo)
 
 
 class RewardModelTFEnv(TFEnv):
@@ -69,7 +76,7 @@ class RewardModelTFEnv(TFEnv):
             model_reward = ensemble_reward(model_rewards)
             reward = self.alpha * model_reward + (1.0 - self.alpha) * automatic_reward
         if (after_features["coverage"] < self.coverage_threshold or
-                after_features["mean"] > self.mean_opacity_threshold):
+                opacity_statistic(self.params) > self.mean_opacity_threshold):
             reward += self.hard_penalty
         self._prev_features = after_features
         info["automatic_mass_fraction_reward"] = automatic_reward

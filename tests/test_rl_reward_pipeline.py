@@ -443,6 +443,19 @@ def test_disagreements_preserve_audit_images_and_goal_context():
     }]
 
 
+def test_missing_objective_labels_are_excluded_from_disagreements():
+    row = _evaluation_row(8, "episode", label=1)
+    row.pop("objective_a")
+    row.pop("objective_b")
+
+    records = eval_reward.find_disagreements(
+        [row], human_predictor=lambda item: item["label"],
+        objective_predictor=lambda item: None,
+    )
+
+    assert records == []
+
+
 def test_policy_sanity_check_compares_objective_finals_without_rendering():
     episodes = [{"id": 1}, {"id": 2}]
     result = eval_reward.policy_objective_sanity_check(
@@ -503,6 +516,20 @@ def test_evaluation_resolves_member_paths_from_default_artifact_layout(tmp_path)
     member.write_bytes(b"member")
 
     resolved = eval_reward._resolve_member_path(
+        "out/rl_models/reward_pretrained_member0.pt", aggregate
+    )
+
+    assert resolved == member
+
+
+def test_finetune_resolves_stored_out_path_outside_original_cwd(tmp_path):
+    project = tmp_path / "project"
+    aggregate = project / "out" / "rl_models" / "reward_pretrained.pt"
+    member = aggregate.with_name("reward_pretrained_member0.pt")
+    member.parent.mkdir(parents=True)
+    member.write_bytes(b"member")
+
+    resolved = finetune_reward._resolve_member_path(
         "out/rl_models/reward_pretrained_member0.pt", aggregate
     )
 
