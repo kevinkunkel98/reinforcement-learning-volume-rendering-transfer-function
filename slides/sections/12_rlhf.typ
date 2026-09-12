@@ -6,10 +6,8 @@
 == RLHF: Lernen aus menschlichem Feedback
 
 #v(0.05em)
-`mass_fraction` misst nur, ob sich die TF-Kurve wie gewünscht bewegt hat — nie,
-ob das gerenderte Bild tatsächlich gut aussieht. Fünf neue Module schließen
-diese Lücke @scurto2021designing: ein kleines Reward-Modell, gelernt aus
-menschlichen Besser/Schlechter-Urteilen über gerenderte Bildpaare.
+`mass_fraction` misst nur Kurvenbewegung, nie Bildqualität — Reward-Modell aus
+menschlichen Urteilen schließt die Lücke @scurto2021designing.
 
 #v(0.25em)
 #align(center)[
@@ -35,8 +33,7 @@ menschlichen Besser/Schlechter-Urteilen über gerenderte Bildpaare.
 
 #v(0.3em)
 #remark[
-  Passive Datensammlung (`ingest_feedback.py`) statt dedizierter Session war die
-  bessere Idee: nutzt Features, die `server.py` beim normalen Rendern ohnehin
-  schon loggt — skaliert mit echter Nutzung statt einer Sondersitzung. n=15 ist
-  ein Pilot, kein belastbares Ergebnis — bewusst so kommuniziert.
+  - Passive Sammlung (`ingest_feedback.py`) statt dedizierter Session war die bessere Idee
+  - Nutzt Features, die `server.py` ohnehin schon loggt — skaliert mit echter Nutzung
+  - n=15 ist ein Pilot, kein belastbares Ergebnis — bewusst so kommuniziert
 ]

@@ -24,12 +24,11 @@
   gutter: 1.5em,
   align: (left + horizon, right + horizon),
   [
-    *Testset:* 20 freie Formulierungen, die der Regelparser *per Design* nicht
-    versteht (z. B. _"make the skeleton pop"_, _"the spongy core is barely there"_).
-    #v(0.3em)
-    Der LLM-Parser bekommt dieselbe Synonymtabelle wie der Regelparser im
-    Systemprompt — das behebt einen systematischen Fehler (Spongiosa $arrow.r$
-    generisches "Bone").
+    *Testset*
+    - 20 freie Formulierungen — Regelparser versteht sie *per Design* nicht
+    - z. B. _"make the skeleton pop"_, _"the spongy core is barely there"_
+    - LLM bekommt dieselbe Synonymtabelle wie der Regelparser
+    - Behebt systematischen Fehler: Spongiosa $arrow.r$ generisches "Bone"
   ],
   table(
     columns: 2,

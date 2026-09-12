@@ -6,8 +6,8 @@
 == Motivation
 
 #v(0.05em)
-Direct Volume Rendering macht volumetrische Daten (CT, MRT, Simulationen) über
-eine #text(fill: navy, weight: "bold")[Transferfunktion] sichtbar.
+Direct Volume Rendering: volumetrische Daten (CT, MRT, Simulationen) sichtbar
+über eine #text(fill: navy, weight: "bold")[Transferfunktion].
 
 #v(0.35em)
 #definition([Transferfunktion], [

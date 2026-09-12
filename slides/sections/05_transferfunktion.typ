@@ -21,13 +21,13 @@
   columns: (1fr, 1fr),
   gutter: 1.2em,
   [
-    *Design-Entscheidung:* Zentren $c_i$ und Breiten $w_i$ liegen in echten
-    #text(fill: navy, weight: "bold")[Hounsfield-Einheiten] (HU) — nicht in
-    $[0, 255]$ wie bei den meisten TF-Editoren.
+    *Design-Entscheidung*
+    - $c_i, w_i$ in echten #text(fill: navy, weight: "bold")[Hounsfield-Einheiten] (HU)
+    - nicht $[0, 255]$ wie bei den meisten TF-Editoren
   ],
   [
-    *Konsequenz:* Dieselbe Gewebetabelle (Luft, Fett, Weichgewebe, Spongiosa,
-    Kortikalis) funktioniert unverändert auf synthetischem, CT- *und*
-    MRT-Material (linear auf denselben HU-Bereich reskaliert).
+    *Konsequenz*
+    - Eine Gewebetabelle (Luft … Kortikalis)
+    - Funktioniert unverändert auf synthetisch, CT *und* MRT (reskaliert)
   ],
 )

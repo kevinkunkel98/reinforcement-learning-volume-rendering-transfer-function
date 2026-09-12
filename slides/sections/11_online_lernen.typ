@@ -6,9 +6,8 @@
 == Kontinuierliches Online-Lernen
 
 #v(0.05em)
-Statt eines einzigen 200k-Batch-Trainings: ein frischer Agent lernt fortlaufend
-auf einer einzelnen Umgebung, alle 5000 Schritte gegen dieselben 20 Test-Episoden
-neu bewertet (`rl/online_train.py`).
+Statt 200k-Batch: fortlaufendes Training auf einer Umgebung, alle 5000
+Schritte gegen dieselben 20 Test-Episoden neu bewertet (`rl/online_train.py`).
 
 #v(0.3em)
 #table(
@@ -23,11 +22,9 @@ neu bewertet (`rl/online_train.py`).
   [*Budget-Anteil*], [nur 25 % der Umgebungsschritte des Offline-Laufs (200k)],
 )
 
-#v(0.35em)
+#v(0.3em)
 #remark[
-  Landet mit nur einem Viertel des Offline-Budgets fast exakt zwischen Policy-
-  (0.344) und Hill-Climb-Baseline (0.347) — die Lernkurve konvergiert klar,
-  nicht nur zufällig. Zeigt: dasselbe SAC-Setup lernt auch als fortlaufender
-  Prozess, nicht nur als einmaliger Batch-Lauf — Voraussetzung für Nachlernen
-  aus echtem Feedback (nächste Folie).
+  - Mit ¼ des Offline-Budgets fast exakt zwischen Policy (0.344) und Hill-Climb (0.347)
+  - Klare Konvergenz, kein Zufall — dasselbe SAC lernt auch fortlaufend, nicht nur im Batch
+  - Voraussetzung für Nachlernen aus echtem Feedback (nächste Folie)
 ]

@@ -6,7 +6,8 @@
 == Vom Hill-Climbing zum SAC-Agenten
 
 #v(0.05em)
-Der SAC-Agent (`stable-baselines3`) ist implementiert, trainiert und gegen die Baseline evaluiert — online gegen `opacity_mass`, ganz ohne menschliche Trainingsdaten.
+SAC (`stable-baselines3`), trainiert & evaluiert gegen `opacity_mass` — ganz
+ohne menschliche Trainingsdaten.
 
 #v(0.2em)
 #table(
@@ -21,11 +22,9 @@ Der SAC-Agent (`stable-baselines3`) ist implementiert, trainiert und gegen die B
   [*Ergebnis*], [*0.344* vs. *0.347* (Baseline) `mass_fraction`, 20 Test-Episoden],
 )
 
-#v(0.35em)
+#v(0.3em)
 #remark[
-  Nahezu gleichauf mit dem Hill-Climber, aber langsamer konvergent (3.3 vs. 2.7
-  Schritte bis 90 %) — ein optimierter Hand-Regler ist auf diesem niedrigdimensionalen
-  Problem ein starker Gegner @zhao2025natural. Mittlerweile live im Chat-UI nutzbar
-  (`server.py`, `policy`-Toggle) — als eingefrorene Inferenz, noch ohne Nachlernen
-  aus echter Nutzung (siehe nächste Folien).
+  - Nahezu gleichauf mit Hill-Climber, aber langsamer (3.3 vs. 2.7 Schritte bis 90 %)
+  - Guter Hand-Regler ist auf niedrigdimensionalem Problem starker Gegner @zhao2025natural
+  - Live im Chat-UI (`server.py`, `policy`-Toggle) — eingefroren, noch kein Nachlernen
 ]

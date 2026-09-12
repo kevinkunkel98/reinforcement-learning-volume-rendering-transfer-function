@@ -6,26 +6,22 @@
 == Erkenntnisse aus dem Testen
 
 #v(0.15em)
-Drei konkrete Bugs, gefunden durch tatsächliches Testen an echten Daten und
-echter Nutzung — nicht nur durch Unit-Tests:
+Drei Bugs — gefunden durch echtes Testen, nicht durch Unit-Tests:
 
 #v(0.35em)
 #thm-box([Render-Crash], [
-  Rendering nahm implizit einen würfelförmigen Datensatz an — stürzte sofort ab
-  auf echten $512 times 512 times 139$-CT-Daten. Fix: Dimensionen pro Achse statt
-  einer einzigen Kantenlänge.
+  - Annahme: würfelförmiger Datensatz $arrow.r$ Absturz bei echten CT ($512 times 512 times 139$)
+  - *Fix:* Dimensionen pro Achse statt einer Kantenlänge
 ], fill: rgb("#fdeaea"), stroke-color: rgb("#a83232"))
 
 #v(0.3em)
 #thm-box([Sättigungs-Bug], [
-  "increase opacity for bone strongly" erreichte in *einem* Schritt das Maximum —
-  jedes weitere Kommando war ein stiller No-Op. Fix: Schrittweite proportional
-  zur verbleibenden Distanz zum Rand statt fixer Betrag.
+  - "increase opacity strongly" $arrow.r$ Maximum in *einem* Schritt, danach stiller No-Op
+  - *Fix:* Schrittweite proportional zur Restdistanz, nicht fixer Betrag
 ], fill: rgb("#fff3d6"), stroke-color: amber)
 
 #v(0.3em)
 #thm-box([Spracherkennung], [
-  Whisper (small) verhört sich bei "spongy" reproduzierbar — "sponges", "spudgy",
-  "spore G". In 24 echten Sprachkommandos scheiterten 19 (79 %) am Parser, nicht
-  am System.
+  - Whisper verhört "spongy" reproduzierbar: "sponges", "spudgy", "spore G"
+  - 24 echte Sprachkommandos: 19 (79 %) scheitern am Parser, nicht am System
 ], fill: mint, stroke-color: sage)

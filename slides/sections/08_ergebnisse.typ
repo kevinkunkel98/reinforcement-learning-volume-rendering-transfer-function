@@ -6,8 +6,8 @@
 == Ergebnisse an echten CT-Daten
 
 #v(0.1em)
-Reale, de-identifizierte CT-Datensätze (3D Slicer Testdaten) — kein zusätzlicher
-Code für echte Daten nötig, da bereits in HU gearbeitet wird.
+- Reale, de-identifizierte CT-Daten (3D Slicer Testdaten)
+- Kein zusätzlicher Code nötig — bereits in HU gearbeitet
 
 #v(0.4em)
 #grid(
