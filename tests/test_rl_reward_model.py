@@ -4,30 +4,60 @@ import json
 import numpy as np
 import pytest
 
-from rl.reward_model import INPUT_DIM, featurize, load_reward_model, predict_reward, train_reward_model
+import torch
+import torch.nn as nn
+
+from rl.reward_model import (
+    INPUT_DIM,
+    RewardModel,
+    bradley_terry_loss,
+    encode_target,
+    ensemble_reward,
+    featurize,
+    load_reward_model,
+    predict_reward,
+    save_reward_model,
+    train_reward_model,
+)
 
 
-def test_featurize_shape_and_values():
+def test_featurize_contains_after_before_delta_goal_and_direction():
     before = {"mean": 10.0, "std": 5.0, "coverage": 0.2, "entropy": 1.0}
     after = {"mean": 15.0, "std": 5.0, "coverage": 0.3, "entropy": 1.2}
     x = featurize(before, after, "bone", "increase")
-    assert x.shape == (INPUT_DIM,)
+    assert x.shape == (18,)
     assert x.dtype == np.float32
-    assert x[0] == pytest.approx(5.0)
-    assert x[1] == pytest.approx(0.0)
-    assert x[2] == pytest.approx(0.1)
-    assert x[3] == pytest.approx(0.2)
-    # tissue one-hot order is rl.env.TISSUES = ["air", "fat", "soft", "spongy", "bone"]
-    assert list(x[4:9]) == [0.0, 0.0, 0.0, 0.0, 1.0]
-    assert x[9] == 1.0
+    np.testing.assert_allclose(x[:4], [15.0, 5.0, 0.3, 1.2])
+    np.testing.assert_allclose(x[4:8], [10.0, 5.0, 0.2, 1.0])
+    np.testing.assert_allclose(x[8:12], [5.0, 0.0, 0.1, 0.2])
+    np.testing.assert_allclose(x[12:17], [0.0, 0.0, 0.0, 0.0, 1.0])
+    assert x[17] == 1.0
 
 
 def test_featurize_decrease_direction_flag():
     before = {"mean": 0.0, "std": 0.0, "coverage": 0.0, "entropy": 0.0}
     after = {"mean": 0.0, "std": 0.0, "coverage": 0.0, "entropy": 0.0}
     x = featurize(before, after, "air", "decrease")
-    assert x[9] == -1.0
-    assert list(x[4:9]) == [1.0, 0.0, 0.0, 0.0, 0.0]
+    assert x[17] == -1.0
+    assert list(x[12:17]) == [1.0, 0.0, 0.0, 0.0, 0.0]
+
+
+def test_encode_target_accepts_command_dict():
+    np.testing.assert_allclose(encode_target({"target_tissue": "bone", "direction": "increase"}),
+                               [0.0, 0.0, 0.0, 0.0, 1.0, 1.0])
+
+
+def test_reward_model_has_two_hidden_layers():
+    layers = list(RewardModel().net)
+    assert [layer.out_features for layer in layers if isinstance(layer, nn.Linear)] == [64, 32, 1]
+
+
+def test_weighted_bradley_terry_loss_scales_examples():
+    preferred = torch.tensor([2.0, 0.0])
+    other = torch.tensor([0.0, 0.0])
+    low = bradley_terry_loss(preferred, other, torch.tensor([1.0, 1.0]))
+    high = bradley_terry_loss(preferred, other, torch.tensor([1.0, 3.0]))
+    assert high > low
 
 
 def _make_separable_preferences(path, n=40):
@@ -78,3 +108,17 @@ def test_load_reward_model_roundtrip(tmp_path):
                         {"mean": 60.0, "std": 10.0, "coverage": 0.2, "entropy": 1.0},
                         "bone", "increase")
     assert -1.0 <= r <= 1.0
+
+
+def test_checkpoint_round_trip_preserves_prediction(tmp_path):
+    path = tmp_path / "model.pt"
+    model = RewardModel()
+    save_reward_model(model, path)
+    loaded = load_reward_model(str(path))
+    x = torch.zeros(1, INPUT_DIM)
+    assert loaded(x).item() == pytest.approx(model(x).item())
+
+
+def test_ensemble_reward_is_mean_minus_std():
+    values = np.array([[.2, .4], [.6, .2]])
+    assert ensemble_reward(values) == pytest.approx(values.mean() - values.std())
