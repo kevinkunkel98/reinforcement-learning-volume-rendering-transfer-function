@@ -21,7 +21,7 @@ def test_index_keeps_png_fallback_and_loads_local_viewer_module():
 
 def test_index_pins_vtk_js_without_package_manifest():
     html = read("index.html")
-    assert re.search(r"vtk\.js@\d+\.\d+\.\d+", html)
+    assert re.search(r"https://unpkg\.com/vtk\.js@\d+\.\d+\.\d+(?:/vtk\.js)?", html)
 
 
 def test_viewer_fetches_typed_chunks_and_reconstructs_fortran_volume():
@@ -37,6 +37,10 @@ def test_viewer_fetches_typed_chunks_and_reconstructs_fortran_volume():
     assert "validateMetadata" in viewer
     assert "byte_length" in viewer
     assert "chunk.byte_offset" in viewer
+    assert "metadata.name !== name" in viewer
+    assert "metadata.version" in viewer
+    assert "X-Dataset-Version" in viewer
+    assert "little-endian" in viewer
 
 
 def test_viewer_adapts_exactly_24_values_and_exposes_camera_state():
@@ -49,8 +53,11 @@ def test_viewer_adapts_exactly_24_values_and_exposes_camera_state():
     assert "resetCamera" in viewer
     assert "value.zoom" in viewer
     assert "camera.dolly" not in viewer
-    assert "setParallelScale(baseScale / value.zoom)" in viewer
+    assert "setParallelScale(cameraBaseScale / appliedCameraState.zoom)" in viewer
     assert "camera.zoom(" not in viewer
+    assert "toRendererCamera" in viewer
+    assert "fromRendererCamera" in viewer
+    assert "position" in viewer and "focal_point" in viewer and "view_up" in viewer
 
 
 def test_viewer_cancels_and_ignores_stale_dataset_loads():
@@ -74,6 +81,13 @@ def test_app_integrates_viewer_with_state_and_dataset_changes():
     assert "window.volumeViewer" in app or "volumeViewer" in app
     assert "load" in app
     assert "chooseDataset" in app
+    assert "/api/scenes/transition" in app
+    assert "parent_scene_id" in app
+    assert "goal" in app
+    assert "dataset_version" in app
+    assert "postSceneTransition" in app
+    assert "client_metadata" in app
+    assert "session_id" in app
 
 
 def test_styles_cover_viewer_loading_error_and_fallback_states():

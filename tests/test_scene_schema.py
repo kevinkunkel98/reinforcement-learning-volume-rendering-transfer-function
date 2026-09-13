@@ -240,8 +240,6 @@ def test_scene_transition_rejects_mismatched_parent():
     [
         {"session_id": "other"},
         {"client": "vrui"},
-        {"dataset": "other"},
-        {"dataset_version": "sha256:other"},
         {"scene_id": "s:0"},
     ],
 )
@@ -253,7 +251,7 @@ def test_scene_transition_rejects_incompatible_or_duplicate_scene(change):
         scene_transition(before, after)
 
 
-def test_scene_transition_rejects_volume_metadata_changes_but_allows_goal_changes():
+def test_scene_transition_allows_dataset_volume_changes_and_goal_changes():
     before = normalize_scene(valid_scene(scene_id="s:0", parent_scene_id=None))
     after = valid_scene(
         scene_id="s:1",
@@ -262,12 +260,9 @@ def test_scene_transition_rejects_volume_metadata_changes_but_allows_goal_change
         volume={**valid_scene()["volume"], "spacing": [0.8, 0.7, 1.0]},
     )
 
-    with pytest.raises(ValueError):
-        scene_transition(before, after)
-
-    after["volume"] = before["volume"]
     transition = scene_transition(before, after)
     assert transition["goal"] == {"target": "fat", "direction": "decrease"}
+    assert transition["volume"]["spacing"] == [0.8, 0.7, 1.0]
 
 
 def test_scene_transition_accepts_camera_only_after_opacity_scene():

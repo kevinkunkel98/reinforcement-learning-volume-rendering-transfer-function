@@ -28,7 +28,7 @@ from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from rl.serve import run_policy
-from datasets import dataset_metadata, get_volume_chunk, list_datasets, load_dataset
+from datasets import _dataset_version, dataset_metadata, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import render as render_module
 from render import features, grab, render
@@ -175,12 +175,14 @@ class Session:
             "current": self.history[self.cursor],
             "pending": _pending_public(self.pending),
             "dataset": _dataset_name,
+            "session_id": self.session_id,
             "render_info": {
                 "width": render_module.WIDTH,
                 "height": render_module.HEIGHT,
                 "mapper": render_module.MAPPER_NAME,
                 "volume_shape": list(volume.shape),
                 "spacing": list(spacing),
+                "dataset_version": _dataset_version(_dataset_name),
             },
         }
 
@@ -412,7 +414,11 @@ async def dataset_chunk(name: str, index: str):
         raise HTTPException(status_code=422, detail=str(exc))
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    return Response(content=chunk, media_type="application/octet-stream")
+    return Response(
+        content=chunk,
+        media_type="application/octet-stream",
+        headers={"X-Dataset-Version": _dataset_version(name)},
+    )
 
 
 @app.get("/api/commands")

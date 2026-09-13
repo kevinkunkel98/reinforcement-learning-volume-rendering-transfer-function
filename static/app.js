@@ -11,6 +11,58 @@ const messagesEl = el("messages");
 const emptyState = el("empty-state");
 const textInput = el("text-input");
 const sendBtn = el("send-btn");
+let sceneSnapshot = null;
+let sceneSequence = 0;
+
+function cameraForScene(current) {
+  return window.volumeViewer?.getCamera() || {
+    position: [0, 0, 1], focal_point: [0, 0, 0], view_up: [0, 1, 0],
+    zoom: current.camera?.zoom || 1,
+  };
+}
+
+function sceneFromState(data, parentSceneId = null) {
+  const current = data.current;
+  const command = current.cmd_dict?.camera
+    ? { attribute: "camera" }
+    : { attribute: "opacity", target: current.cmd_dict?.target || "soft", direction: current.cmd_dict?.direction || "increase" };
+  const scene = {
+    scene_id: `web:${data.dataset}:${Date.now()}:${sceneSequence++}`,
+    parent_scene_id: parentSceneId,
+    session_id: data.session_id || "web-session",
+    client: "web",
+    dataset: data.dataset,
+    dataset_version: data.render_info?.dataset_version || `${data.dataset}-unknown`,
+    volume: {
+      dimensions: data.render_info?.volume_shape || [1, 1, 1],
+      spacing: data.render_info?.spacing || [1, 1, 1],
+      scalar_type: "float32",
+      orientation: "dataset-normalized",
+    },
+    transfer_function: current.params,
+    camera: cameraForScene(current),
+    command,
+    client_metadata: { source: "static-app", cursor: data.cursor, total: data.total },
+  };
+  if (command.attribute === "opacity") {
+    scene.goal = { target: command.target, direction: command.direction };
+  }
+  return scene;
+}
+
+async function postSceneTransition(data) {
+  if (!sceneSnapshot) {
+    sceneSnapshot = sceneFromState(data, null);
+    sceneSnapshot.scene_id = `web:root:${Date.now()}:${sceneSequence++}`;
+  }
+  const after = sceneFromState(data, sceneSnapshot.scene_id);
+  const response = await fetch("/api/scenes/transition", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ before: sceneSnapshot, after }),
+  });
+  if (response.ok) sceneSnapshot = await response.json();
+}
 
 async function refresh(data) {
   state.current = data.current;
@@ -37,7 +89,7 @@ async function refresh(data) {
     judgeView.hidden = true;
     el("current-image").src = `data:image/png;base64,${state.current.image_b64}`;
     if (window.volumeViewer && state.dataset && state.current) {
-      window.volumeViewer.load(state.dataset, state.current.params, state.current.camera);
+      await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera);
     }
   }
 
@@ -157,6 +209,7 @@ async function sendCommand(text) {
   }
   const data = await r.json();
   await refresh(data);
+  await postSceneTransition(data);
   if (!data.pending) appendMessage(data.current);
 }
 
@@ -168,6 +221,7 @@ async function judge(verdict) {
   });
   const data = await r.json();
   await refresh(data);
+  if (!data.pending) await postSceneTransition(data);
   if (!data.pending) appendMessage(data.current);
 }
 
@@ -198,8 +252,14 @@ textInput.addEventListener("keydown", (e) => {
   }
 });
 
-el("back-btn").addEventListener("click", async () => refresh(await (await fetch("/api/back", { method: "POST" })).json()));
-el("forward-btn").addEventListener("click", async () => refresh(await (await fetch("/api/forward", { method: "POST" })).json()));
+async function navigate(path) {
+  const data = await (await fetch(path, { method: "POST" })).json();
+  await refresh(data);
+  await postSceneTransition(data);
+}
+
+el("back-btn").addEventListener("click", () => navigate("/api/back"));
+el("forward-btn").addEventListener("click", () => navigate("/api/forward"));
 el("reset-btn").addEventListener("click", () => sendCommand("reset"));
 el("better-btn").addEventListener("click", () => judge("better"));
 el("worse-btn").addEventListener("click", () => judge("worse"));
@@ -392,6 +452,7 @@ async function chooseDataset(name) {
   messagesEl.innerHTML = "";
   messagesEl.appendChild(emptyState);
   await refresh(data);
+  await postSceneTransition(data);
 }
 
 async function loadDatasets() {

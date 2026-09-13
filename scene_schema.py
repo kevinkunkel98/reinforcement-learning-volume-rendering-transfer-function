@@ -230,7 +230,7 @@ def scene_transition(
         raise ValueError("after.parent_scene_id must equal before.scene_id")
     if after_scene["scene_id"] == before_scene["scene_id"]:
         raise ValueError("scene IDs must be distinct")
-    for field in ("session_id", "client", "dataset", "dataset_version", "volume"):
+    for field in ("session_id", "client"):
         if after_scene[field] != before_scene[field]:
             raise ValueError(f"transition {field} must not change")
     transition = after_scene

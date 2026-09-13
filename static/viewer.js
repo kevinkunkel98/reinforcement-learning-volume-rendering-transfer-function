@@ -18,6 +18,7 @@
   let loadGeneration = 0;
   let loadController;
   let appliedCameraState = null;
+  let cameraBaseScale = 1;
 
   function setStatus(message, error = false) {
     statusEl.textContent = message;
@@ -59,9 +60,14 @@
     const metadataResponse = await fetch(`/api/datasets/${encodeURIComponent(name)}/metadata`, { signal });
     if (!metadataResponse.ok) throw new Error(`volume metadata request failed (${metadataResponse.status})`);
     const metadata = validateMetadata(await metadataResponse.json());
+    if (metadata.name !== name) throw new Error("volume metadata dataset mismatch");
+    if (metadata.byte_order !== "little") throw new Error("unsupported non-little-endian volume");
     const chunks = await Promise.all(metadata.chunks.map(async (chunk) => {
       const response = await fetch(`/api/datasets/${encodeURIComponent(name)}/chunks/${chunk.index}`, { signal });
       if (!response.ok) throw new Error(`volume chunk ${chunk.index} request failed (${response.status})`);
+      if (response.headers.get("X-Dataset-Version") !== metadata.version) {
+        throw new Error(`volume chunk ${chunk.index} has mismatched dataset version`);
+      }
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.byteLength !== chunk.byte_length) throw new Error(`volume chunk ${chunk.index} has invalid length`);
       return { ...chunk, bytes };
@@ -69,11 +75,12 @@
     if (!isCurrentLoad(generation)) throw new DOMException("stale volume load", "AbortError");
     const raw = new Uint8Array(metadata.total_bytes);
     chunks.forEach(({ byte_offset: offset, bytes }) => raw.set(bytes, offset));
-    if (metadata.byte_order !== "little" || metadata.scalar_type !== "float32") {
-      throw new Error("unsupported volume scalar format");
-    }
+    if (metadata.scalar_type !== "float32") throw new Error("unsupported volume scalar format");
     if (metadata.order !== "F") throw new Error("unsupported volume storage order");
-    return { metadata, values: new Float32Array(raw.buffer) };
+    const values = new Float32Array(metadata.total_bytes / 4);
+    const dataView = new DataView(raw.buffer);
+    for (let index = 0; index < values.length; index += 1) values[index] = dataView.getFloat32(index * 4, true);
+    return { metadata, values };
   }
 
   function buildImageData(metadata, values) {
@@ -127,21 +134,43 @@
   }
 
   function getCamera() {
-    return appliedCameraState ? { ...appliedCameraState } : null;
+    if (!camera) return appliedCameraState ? { ...appliedCameraState } : null;
+    return {
+      position: camera.getPosition().slice(),
+      focal_point: camera.getFocalPoint().slice(),
+      view_up: camera.getViewUp().slice(),
+      zoom: cameraBaseScale / camera.getParallelScale(),
+    };
+  }
+
+  function toRendererCamera(value) {
+    if (!value) return null;
+    if (value.azimuth === undefined && value.elevation === undefined) return { ...value };
+    renderer.resetCamera();
+    if (value.azimuth) camera.azimuth(value.azimuth);
+    if (value.elevation) camera.elevation(value.elevation);
+    if (value.zoom) camera.setParallelScale(camera.getParallelScale() / value.zoom);
+    return { ...fromRendererCamera(), zoom: value.zoom || 1 };
+  }
+
+  function fromRendererCamera() {
+    return {
+      position: camera.getPosition().slice(),
+      focal_point: camera.getFocalPoint().slice(),
+      view_up: camera.getViewUp().slice(),
+      zoom: 1,
+    };
   }
 
   function setCamera(value) {
     if (!camera || !value) return;
-    appliedCameraState = { ...value };
+    appliedCameraState = toRendererCamera(value);
     renderer.resetCamera();
-    const baseScale = camera.getParallelScale();
-    if (value.position) camera.setPosition(...value.position);
-    if (value.focal_point) camera.setFocalPoint(...value.focal_point);
-    if (value.view_up) camera.setViewUp(...value.view_up);
-    if (value.parallel_scale) camera.setParallelScale(value.parallel_scale);
-    if (value.azimuth) camera.azimuth(value.azimuth);
-    if (value.elevation) camera.elevation(value.elevation);
-    if (value.zoom) camera.setParallelScale(baseScale / value.zoom);
+    cameraBaseScale = camera.getParallelScale();
+    if (appliedCameraState.position) camera.setPosition(...appliedCameraState.position);
+    if (appliedCameraState.focal_point) camera.setFocalPoint(...appliedCameraState.focal_point);
+    if (appliedCameraState.view_up) camera.setViewUp(...appliedCameraState.view_up);
+    if (appliedCameraState.zoom) camera.setParallelScale(cameraBaseScale / appliedCameraState.zoom);
     renderWindow.render();
   }
 
