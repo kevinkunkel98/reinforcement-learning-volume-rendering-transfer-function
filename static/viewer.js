@@ -247,8 +247,18 @@
       buildImageData(loaded.metadata, loaded.values);
       mapper = vtk.Rendering.Core.vtkVolumeMapper.newInstance();
       mapper.setInputData(imageData);
+      // Match render.py's server-side quality settings -- vtk.js's defaults
+      // (no shading, auto-adjusted/coarser sampling) are what made this
+      // viewer look flat and "hologram"-like next to the reference PNGs.
+      mapper.setAutoAdjustSampleDistances(false);
+      mapper.setSampleDistance(Math.min(...loaded.metadata.spacing) / 2.0);
       volume = vtk.Rendering.Core.vtkVolume.newInstance();
       volume.setMapper(mapper);
+      volume.getProperty().setShade(true);
+      volume.getProperty().setInterpolationTypeToLinear();
+      volume.getProperty().setAmbient(0.1);
+      volume.getProperty().setDiffuse(0.7);
+      volume.getProperty().setSpecular(0.2);
       renderer.removeAllVolumes();
       renderer.addVolume(volume);
       renderer.resetCamera();
