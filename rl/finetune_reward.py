@@ -54,9 +54,9 @@ def _resolve_member_path(member_name: str, pretrained: Path) -> Path:
     member_path = Path(member_name)
     if member_path.is_absolute():
         return member_path
-    candidates = [pretrained.parent / member_path, Path.cwd() / member_path]
-    candidates.extend(parent / member_path for parent in pretrained.parents)
-    candidates.append(pretrained.parent / member_path.name)
+    candidates = list(parent / member_path for parent in pretrained.parents)
+    candidates.extend((pretrained.parent / member_path.name,
+                       Path.cwd() / member_path, member_path))
     for candidate in candidates:
         if candidate.exists():
             return candidate

@@ -197,7 +197,7 @@ def _load_members(aggregate_path) -> list:
 
 
 def _resolve_member_path(member_name, aggregate_path) -> Path:
-    """Resolve stored member paths from absolute, cwd, or artifact layouts."""
+    """Resolve stored member paths relative to their aggregate artifact first."""
     member = Path(member_name)
     if member.is_absolute() and member.exists():
         return member
@@ -206,9 +206,9 @@ def _resolve_member_path(member_name, aggregate_path) -> Path:
     if member.is_absolute():
         candidates.append(member)
     else:
-        candidates.extend((member, Path.cwd() / member,
-                           aggregate.parent / member,
-                           aggregate.parent / member.name))
+        candidates.extend(parent / member for parent in aggregate.parents)
+        candidates.extend((aggregate.parent / member.name, Path.cwd() / member,
+                           member))
     for candidate in candidates:
         if candidate.exists():
             return candidate

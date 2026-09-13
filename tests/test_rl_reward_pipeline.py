@@ -552,12 +552,52 @@ def test_evaluation_resolves_member_paths_from_default_artifact_layout(tmp_path)
     assert resolved == member
 
 
+def test_evaluation_prefers_aggregate_project_over_unrelated_cwd_member(
+    tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    aggregate = project / "out" / "rl_models" / "reward_pretrained.pt"
+    member = aggregate.with_name("reward_pretrained_member0.pt")
+    member.parent.mkdir(parents=True)
+    member.write_bytes(b"project member")
+    unrelated = tmp_path / "cwd" / "out" / "rl_models" / member.name
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_bytes(b"unrelated member")
+    monkeypatch.chdir(tmp_path / "cwd")
+
+    resolved = eval_reward._resolve_member_path(
+        "out/rl_models/reward_pretrained_member0.pt", aggregate
+    )
+
+    assert resolved == member
+
+
 def test_finetune_resolves_stored_out_path_outside_original_cwd(tmp_path):
     project = tmp_path / "project"
     aggregate = project / "out" / "rl_models" / "reward_pretrained.pt"
     member = aggregate.with_name("reward_pretrained_member0.pt")
     member.parent.mkdir(parents=True)
     member.write_bytes(b"member")
+
+    resolved = finetune_reward._resolve_member_path(
+        "out/rl_models/reward_pretrained_member0.pt", aggregate
+    )
+
+    assert resolved == member
+
+
+def test_finetune_prefers_aggregate_project_over_unrelated_cwd_member(
+    tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    aggregate = project / "out" / "rl_models" / "reward_pretrained.pt"
+    member = aggregate.with_name("reward_pretrained_member0.pt")
+    member.parent.mkdir(parents=True)
+    member.write_bytes(b"project member")
+    unrelated = tmp_path / "cwd" / "out" / "rl_models" / member.name
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_bytes(b"unrelated member")
+    monkeypatch.chdir(tmp_path / "cwd")
 
     resolved = finetune_reward._resolve_member_path(
         "out/rl_models/reward_pretrained_member0.pt", aggregate
