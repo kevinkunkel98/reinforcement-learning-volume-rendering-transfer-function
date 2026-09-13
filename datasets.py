@@ -18,6 +18,7 @@ command mechanically works and the render looks correct -- but the tissue
 dataset, since that would require real MRI tissue segmentation, not a
 one-line rescale. This is a known, deliberate approximation, not a bug.
 """
+import functools
 import hashlib
 import math
 import os
@@ -136,8 +137,19 @@ def _rescale_intensity_to_hu_range(arr: np.ndarray, lo_percentile: float = 0.5,
     return (normalized * (CENTER_RANGE[1] - CENTER_RANGE[0]) + CENTER_RANGE[0]).astype(np.float32)
 
 
+@functools.lru_cache(maxsize=None)
 def load_dataset(name: str = "synthetic"):
-    """Returns (volume: np.ndarray HU, spacing: (float, float, float))."""
+    """Returns (volume: np.ndarray HU, spacing: (float, float, float)).
+
+    Cached per name: the viewer's chunked-transfer endpoints
+    (dataset_metadata/get_volume_chunk in server.py) call this once per
+    HTTP request, and a real CT/MRI volume re-reads + re-parses an NRRD
+    file from disk plus a flip/rescale pass every call. Serving a real
+    dataset's ~18 chunks uncached took ~6.5s of server time alone (each
+    chunk request reloading the whole volume from scratch); no caller
+    anywhere mutates the returned array in place, so caching by name is
+    safe.
+    """
     if name == "synthetic":
         return build_phantom(), (1.0, 1.0, 1.0)
     if name not in DATASETS:

@@ -99,9 +99,14 @@
     chunks.forEach(({ byte_offset: offset, bytes }) => raw.set(bytes, offset));
     if (metadata.scalar_type !== "float32") throw new Error("unsupported volume scalar format");
     if (metadata.order !== "F") throw new Error("unsupported volume storage order");
-    const values = new Float32Array(metadata.total_bytes / 4);
-    const dataView = new DataView(raw.buffer);
-    for (let index = 0; index < values.length; index += 1) values[index] = dataView.getFloat32(index * 4, true);
+    // metadata.byte_order is validated "little" above, and every JS engine
+    // that runs a browser is little-endian natively, so reinterpreting the
+    // buffer directly is equivalent to (and vastly faster than) reading it
+    // one float at a time through a DataView -- the latter took ~15s+ for
+    // a 145MB real CT volume (ct_chest), long enough that switching
+    // datasets looked broken: the previous dataset's stale canvas frame
+    // stayed visible the whole time this loop ran.
+    const values = new Float32Array(raw.buffer);
     return { metadata, values };
   }
 
