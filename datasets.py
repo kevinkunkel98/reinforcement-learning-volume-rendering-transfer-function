@@ -30,6 +30,7 @@ from phantom import build_phantom
 from transfer import CENTER_RANGE
 
 DATA_DIR = "data"
+DEFAULT_CHUNK_BYTES = 8 * 1024 * 1024
 
 DATASETS = {
     "ct_chest": {
@@ -150,3 +151,84 @@ def load_dataset(name: str = "synthetic"):
 
 def list_datasets() -> list:
     return ["synthetic"] + list(DATASETS.keys())
+
+
+def _dataset_version(name: str) -> str:
+    if name == "synthetic":
+        return "synthetic-v1"
+    return f"sha256:{DATASETS[name]['sha256']}"
+
+
+def _validate_chunk_bytes(chunk_bytes: int) -> None:
+    if isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int) or chunk_bytes <= 0:
+        raise ValueError("chunk_bytes must be a positive integer")
+    if chunk_bytes % np.dtype(np.float32).itemsize:
+        raise ValueError("chunk_bytes must be a multiple of float32 item size")
+
+
+def _validated_volume(volume: np.ndarray) -> np.ndarray:
+    volume = np.asarray(volume)
+    if volume.dtype != np.dtype(np.float32):
+        raise ValueError("volume must have dtype float32")
+    if volume.ndim != 3:
+        raise ValueError("volume must have three dimensions")
+    if volume.size == 0 or not np.isfinite(volume).all():
+        raise ValueError("volume values must be finite and non-empty")
+    return np.ascontiguousarray(volume, dtype=np.float32)
+
+
+def iter_volume_chunks(volume: np.ndarray, chunk_bytes: int = DEFAULT_CHUNK_BYTES):
+    """Yield deterministic C-order float32 byte chunks for a 3D volume."""
+    _validate_chunk_bytes(chunk_bytes)
+    volume = _validated_volume(volume)
+    raw = memoryview(volume).cast("B")
+    for offset in range(0, raw.nbytes, chunk_bytes):
+        yield raw[offset:offset + chunk_bytes].tobytes()
+
+
+def dataset_metadata(name: str) -> dict:
+    """Return transport metadata for the normalized volume loaded by ``name``."""
+    if name not in list_datasets():
+        raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
+    volume, spacing = load_dataset(name)
+    volume = _validated_volume(volume)
+    spacing = tuple(float(value) for value in spacing)
+    if len(spacing) != 3 or not all(np.isfinite(value) and value > 0 for value in spacing):
+        raise ValueError("spacing must contain three positive finite values")
+
+    total_bytes = volume.nbytes
+    chunks = list(iter_volume_chunks(volume))
+    descriptors = []
+    offset = 0
+    for index, chunk in enumerate(chunks):
+        descriptors.append({
+            "index": index,
+            "byte_offset": offset,
+            "byte_length": len(chunk),
+        })
+        offset += len(chunk)
+    return {
+        "name": name,
+        "version": _dataset_version(name),
+        "dimensions": list(volume.shape),
+        "spacing": list(spacing),
+        "scalar_type": "float32",
+        "byte_order": "little",
+        "orientation": "dataset-normalized",
+        "intensity_range": [float(volume.min()), float(volume.max())],
+        "chunk_bytes": DEFAULT_CHUNK_BYTES,
+        "total_bytes": total_bytes,
+        "chunk_count": len(descriptors),
+        "chunks": descriptors,
+    }
+
+
+def get_volume_chunk(name: str, index: int) -> bytes:
+    """Return one normalized volume chunk by dataset name and zero-based index."""
+    metadata = dataset_metadata(name)
+    if isinstance(index, bool) or not isinstance(index, int):
+        raise IndexError("chunk index must be an integer")
+    if index < 0 or index >= metadata["chunk_count"]:
+        raise IndexError(f"chunk index out of range: {index}")
+    volume, _ = load_dataset(name)
+    return list(iter_volume_chunks(volume, metadata["chunk_bytes"]))[index]

@@ -2,6 +2,7 @@ import hashlib
 import os
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 import datasets
@@ -49,3 +50,62 @@ def test_ensure_downloaded_raises_and_cleans_up_on_checksum_mismatch(tmp_path, m
         with pytest.raises(ValueError, match="checksum mismatch"):
             datasets._ensure_downloaded("fake")
     assert not os.path.exists("data/fake.nrrd")
+
+
+def test_dataset_metadata_matches_loaded_volume(monkeypatch):
+    volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    monkeypatch.setattr(datasets, "load_dataset", lambda name: (volume, (0.5, 0.6, 0.7)))
+
+    metadata = datasets.dataset_metadata("synthetic")
+
+    assert metadata["name"] == "synthetic"
+    assert metadata["version"] == "synthetic-v1"
+    assert metadata["dimensions"] == [2, 3, 4]
+    assert metadata["spacing"] == [0.5, 0.6, 0.7]
+    assert metadata["scalar_type"] == "float32"
+    assert metadata["orientation"] == "dataset-normalized"
+    assert metadata["intensity_range"] == [0.0, 23.0]
+    assert metadata["total_bytes"] == 24 * 4
+    assert metadata["chunks"]
+
+
+def test_chunk_round_trip_reconstructs_float32_c_order_volume():
+    volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+
+    chunks = list(datasets.iter_volume_chunks(volume, chunk_bytes=16))
+    restored = np.frombuffer(b"".join(chunks), dtype=np.float32).reshape(volume.shape, order="C")
+
+    np.testing.assert_array_equal(restored, volume)
+    assert [len(chunk) for chunk in chunks] == [16, 16, 16, 16, 16, 16]
+
+
+def test_get_volume_chunk_uses_metadata_chunk_descriptors(monkeypatch):
+    volume = np.arange(12, dtype=np.float32).reshape(2, 2, 3)
+    monkeypatch.setattr(datasets, "load_dataset", lambda name: (volume, (1.0, 1.0, 1.0)))
+
+    metadata = datasets.dataset_metadata("synthetic")
+    chunk = datasets.get_volume_chunk("synthetic", 0)
+
+    assert metadata["chunks"][0]["index"] == 0
+    assert len(chunk) == metadata["chunks"][0]["byte_length"]
+    assert chunk == volume.tobytes(order="C")[: len(chunk)]
+
+
+@pytest.mark.parametrize(
+    "volume, error",
+    [
+        (np.arange(8, dtype=np.float64).reshape(2, 2, 2), "float32"),
+        (np.array([[[0.0, np.nan]]], dtype=np.float32), "finite"),
+    ],
+)
+def test_iter_volume_chunks_rejects_invalid_volume(volume, error):
+    with pytest.raises(ValueError, match=error):
+        list(datasets.iter_volume_chunks(volume, chunk_bytes=16))
+
+
+def test_get_volume_chunk_rejects_invalid_index(monkeypatch):
+    volume = np.zeros((2, 2, 2), dtype=np.float32)
+    monkeypatch.setattr(datasets, "load_dataset", lambda name: (volume, (1.0, 1.0, 1.0)))
+
+    with pytest.raises(IndexError):
+        datasets.get_volume_chunk("synthetic", 1)
