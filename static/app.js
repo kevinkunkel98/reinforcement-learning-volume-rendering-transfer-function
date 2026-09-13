@@ -36,6 +36,9 @@ async function refresh(data) {
     singleView.hidden = false;
     judgeView.hidden = true;
     el("current-image").src = `data:image/png;base64,${state.current.image_b64}`;
+    if (window.volumeViewer && state.dataset && state.current) {
+      window.volumeViewer.load(state.dataset, state.current.params, state.current.camera);
+    }
   }
 
   updateTelemetry(state.current.masses);
