@@ -19,7 +19,9 @@ dataset, since that would require real MRI tissue segmentation, not a
 one-line rescale. This is a known, deliberate approximation, not a bug.
 """
 import hashlib
+import math
 import os
+import sys
 import urllib.request
 
 import numpy as np
@@ -30,6 +32,7 @@ from phantom import build_phantom
 from transfer import CENTER_RANGE
 
 DATA_DIR = "data"
+DEFAULT_CHUNK_BYTES = 8 * 1024 * 1024
 
 DATASETS = {
     "ct_chest": {
@@ -150,3 +153,94 @@ def load_dataset(name: str = "synthetic"):
 
 def list_datasets() -> list:
     return ["synthetic"] + list(DATASETS.keys())
+
+
+def _dataset_version(name: str) -> str:
+    if name == "synthetic":
+        return "synthetic-v1"
+    return f"sha256:{DATASETS[name]['sha256']}"
+
+
+def _validate_chunk_bytes(chunk_bytes: int) -> None:
+    if isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int) or chunk_bytes <= 0:
+        raise ValueError("chunk_bytes must be a positive integer")
+    if chunk_bytes % np.dtype(np.float32).itemsize:
+        raise ValueError("chunk_bytes must be a multiple of float32 item size")
+
+
+def _validated_volume(volume: np.ndarray) -> np.ndarray:
+    volume = np.asarray(volume)
+    if volume.dtype.kind != "f" or volume.dtype.itemsize != 4:
+        raise ValueError("volume must have dtype float32")
+    if volume.dtype.byteorder == ">" or (
+        volume.dtype.byteorder == "=" and sys.byteorder != "little"
+    ):
+        raise ValueError("volume must use little-endian float32")
+    if volume.ndim != 3:
+        raise ValueError("volume must have three dimensions")
+    if volume.size == 0 or not np.isfinite(volume).all():
+        raise ValueError("volume values must be finite and non-empty")
+    return np.asfortranarray(volume, dtype=np.dtype("<f4"))
+
+
+def iter_volume_chunks(volume: np.ndarray, chunk_bytes: int = DEFAULT_CHUNK_BYTES):
+    """Yield little-endian float32 chunks in render.py's Fortran order."""
+    _validate_chunk_bytes(chunk_bytes)
+    volume = _validated_volume(volume)
+    raw = memoryview(volume.ravel(order="F")).cast("B")
+    for offset in range(0, raw.nbytes, chunk_bytes):
+        yield raw[offset:offset + chunk_bytes].tobytes()
+
+
+def dataset_metadata(name: str) -> dict:
+    """Return transport metadata for the normalized volume loaded by ``name``."""
+    if name not in list_datasets():
+        raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
+    volume, spacing = load_dataset(name)
+    volume = _validated_volume(volume)
+    spacing = tuple(float(value) for value in spacing)
+    if len(spacing) != 3 or not all(np.isfinite(value) and value > 0 for value in spacing):
+        raise ValueError("spacing must contain three positive finite values")
+
+    total_bytes = volume.nbytes
+    chunk_count = math.ceil(total_bytes / DEFAULT_CHUNK_BYTES)
+    descriptors = []
+    for index in range(chunk_count):
+        offset = index * DEFAULT_CHUNK_BYTES
+        descriptors.append({
+            "index": index,
+            "byte_offset": offset,
+            "byte_length": min(DEFAULT_CHUNK_BYTES, total_bytes - offset),
+        })
+    return {
+        "name": name,
+        "version": _dataset_version(name),
+        "dimensions": list(volume.shape),
+        "spacing": list(spacing),
+        "scalar_type": "float32",
+        "byte_order": "little",
+        "order": "F",
+        "axis_mapping": "numpy axis0 -> VTK X; axis1 -> VTK Y; axis2 -> VTK Z",
+        "orientation": "dataset-normalized",
+        "intensity_range": [float(volume.min()), float(volume.max())],
+        "chunk_bytes": DEFAULT_CHUNK_BYTES,
+        "total_bytes": total_bytes,
+        "chunk_count": chunk_count,
+        "chunks": descriptors,
+    }
+
+
+def get_volume_chunk(name: str, index: int) -> bytes:
+    """Return one normalized volume chunk by dataset name and zero-based index."""
+    if name not in list_datasets():
+        raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
+    if isinstance(index, bool) or not isinstance(index, int):
+        raise IndexError("chunk index must be an integer")
+    volume, _ = load_dataset(name)
+    volume = _validated_volume(volume)
+    chunk_count = math.ceil(volume.nbytes / DEFAULT_CHUNK_BYTES)
+    if index < 0 or index >= chunk_count:
+        raise IndexError(f"chunk index out of range: {index}")
+    offset = index * DEFAULT_CHUNK_BYTES
+    raw = memoryview(volume.ravel(order="F")).cast("B")
+    return raw[offset:offset + DEFAULT_CHUNK_BYTES].tobytes()

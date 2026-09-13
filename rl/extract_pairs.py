@@ -15,6 +15,7 @@ import render
 DEFAULT_LOG = "out/log.jsonl"
 DEFAULT_FEEDBACK = "out/feedback.jsonl"
 DEFAULT_PREFERENCES = "out/rlhf_preferences.jsonl"
+DEFAULT_SCENES = "out/scene_transitions.jsonl"
 DEFAULT_OUT = "out/pairs.jsonl"
 WEIGHTS = {"branch": 1.0, "trajectory": 0.7, "thumbs": 0.4}
 RATING_LABELS = {"up": 1, "down": -1, "positive": 1, "negative": -1}
@@ -32,6 +33,23 @@ def _read_jsonl(path):
     return rows
 
 
+def _scene_rows(path):
+    rows = {}
+    for event in _read_jsonl(path):
+        if "before_scene" in event and "after_scene" in event:
+            if event["before_scene"] is not None:
+                before = dict(event["before_scene"])
+                before.setdefault("event_id", event.get("event_id"))
+                before["_state_features"] = before.get("features_after")
+                rows[before["scene_id"]] = before
+            after = dict(event["after_scene"])
+            after.setdefault("event_id", event.get("event_id"))
+            after["_state_features"] = after.get("features_after")
+            after["_transition_before_features"] = after.get("features_before")
+            rows[after["scene_id"]] = after
+    return list(rows.values())
+
+
 def _command(row):
     command = row.get("command") or row.get("cmd_dict") or {}
     if not command and row.get("target_tissue") is not None:
@@ -45,7 +63,7 @@ def _command(row):
     target = command.get("target_tissue", command.get("target"))
     direction = command.get("direction")
     attribute = command.get("attribute", "opacity")
-    if attribute != "opacity":
+    if attribute != "opacity" or command.get("kind") == "non_extractable":
         return None
     if not isinstance(target, str):
         # Multi-target commands (e.g. "show only bone and fat") carry a list;
@@ -118,9 +136,9 @@ def _metadata(row):
             row.get("step_id"))
 
 
-def _pair(a, b, command, source, label, metadata):
+def _pair(a, b, command, source, label, metadata, context=None):
     session, episode, a_step = metadata
-    return {
+    pair = {
         "observation_a": a,
         "observation_b": b,
         "command": command,
@@ -133,6 +151,13 @@ def _pair(a, b, command, source, label, metadata):
         "episode_id": episode,
         "step_id": a_step,
     }
+    if context:
+        for field in ("scene_id", "parent_scene_id", "dataset", "dataset_version", "camera", "goal",
+                      "client", "parent_step_id", "carried_forward", "accepted", "ended",
+                      "event_id", "dedupe_key"):
+            if field in context:
+                pair[field] = context[field]
+    return pair
 
 
 def _pair_key(source, a, b, command, metadata):
@@ -190,15 +215,36 @@ def _with_step(observation, row):
     return result
 
 
+def _preferred_observation(item):
+    row = item["row"]
+    if row.get("_state_features") is not None:
+        return _state_observation(
+            {"after_features": row["_state_features"], "after_image": row.get("after_image")},
+            "after", row.get("step_id"),
+        )
+    return _with_step(item["observation"], row)
+
+
+def _transition_before_observation(item):
+    row = item["row"]
+    features = row.get("_transition_before_features")
+    if features is not None:
+        return _state_observation(
+            {"after_features": features, "after_image": row.get("before_image")},
+            "after", row.get("parent_step_id"),
+        )
+    return _preferred_observation(item)
+
+
 def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
-                  out_path=DEFAULT_OUT, preferences_path=None):
+                  out_path=DEFAULT_OUT, preferences_path=None, scenes_path=DEFAULT_SCENES):
     if preferences_path is None:
         preferences_path = DEFAULT_PREFERENCES
     output = Path(out_path).resolve()
-    inputs = [path for path in (log_path, feedback_path, preferences_path) if path]
+    inputs = [path for path in (log_path, feedback_path, preferences_path, scenes_path) if path]
     if any(output == Path(path).resolve() for path in inputs):
         raise ValueError("input and output paths collide")
-    log_rows = _read_jsonl(log_path)
+    log_rows = [*_read_jsonl(log_path), *_scene_rows(scenes_path)]
     feedback_rows = _read_jsonl(feedback_path)
     preference_rows = _read_jsonl(preferences_path)
     canonical_pairs = []
@@ -231,12 +277,12 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
     seen = set()
     stats = Counter({"branch": 0, "trajectory": 0, "thumbs": 0, "skipped": skipped})
 
-    def add(source, first, second, command, label, metadata):
+    def add(source, first, second, command, label, metadata, context=None):
         key = _pair_key(source, first, second, command, metadata)
         if key in seen:
             return
         seen.add(key)
-        pairs.append(_pair(first, second, command, source, label, metadata))
+        pairs.append(_pair(first, second, command, source, label, metadata, context))
         stats[source] += 1
 
     for pair in canonical_pairs:
@@ -267,9 +313,9 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
                            candidate["command"] == item["command"] and
                            candidate["row"].get("step_id") == row["parent_step_id"]), None)
             if parent and (row.get("accepted") is True or row.get("ended") is True):
-                add("branch", _with_step(item["observation"], row),
-                    _with_step(parent["observation"], parent["row"]), item["command"], 1,
-                    (session, episode, step_id))
+                add("branch", _preferred_observation(item),
+                    _transition_before_observation(item), item["command"], 1,
+                    (session, episode, step_id), row)
 
     for items in by_episode.values():
         items.sort(key=lambda item: item["row"].get("step_id", 0))
@@ -283,7 +329,7 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
                 if isinstance(current_step, int) and isinstance(earlier_step, int) and current_step - earlier_step >= 2:
                     add("trajectory", _with_step(current["observation"], current_row),
                         _with_step(earlier["observation"], earlier["row"]), current["command"], 1,
-                        _metadata(current_row))
+                         _metadata(current_row), current_row)
 
     by_step = {(row["row"].get("session_id"), row["row"].get("step_id")): row for row in logs}
     by_params = defaultdict(list)
@@ -316,7 +362,7 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
         step_id = row.get("step_id")
         add("thumbs", _state_observation(item["observation"], "after", step_id),
             _state_observation(item["observation"], "before", step_id), command, label,
-            _metadata(row))
+             _metadata(row), row)
 
     out_dir = os.path.dirname(output)
     if out_dir:
@@ -334,9 +380,10 @@ def main():
     parser.add_argument("--log", default=DEFAULT_LOG)
     parser.add_argument("--feedback", default=DEFAULT_FEEDBACK)
     parser.add_argument("--preferences", default=DEFAULT_PREFERENCES)
+    parser.add_argument("--scenes", default=DEFAULT_SCENES)
     parser.add_argument("--out", default=DEFAULT_OUT)
     args = parser.parse_args()
-    rows, stats = extract_pairs(args.log, args.feedback, args.out, args.preferences)
+    rows, stats = extract_pairs(args.log, args.feedback, args.out, args.preferences, args.scenes)
     sources = ",".join(f"{name}={stats.get(name, 0)}" for name in WEIGHTS)
     targets = Counter(row["target_tissue"] for row in rows)
     target_summary = ",".join(f"{name}={count}" for name, count in sorted(targets.items())) or "none=0"

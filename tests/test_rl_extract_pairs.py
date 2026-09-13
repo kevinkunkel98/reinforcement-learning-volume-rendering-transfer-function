@@ -78,6 +78,83 @@ def test_extracts_recoverable_branches_and_trajectory_pairs(tmp_path):
     assert stats["branch"] == 1
 
 
+def test_extracts_scene_transitions_and_preserves_scene_state_metadata(tmp_path):
+    log = tmp_path / "scene_transitions.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    base = {
+        "session_id": "web-session", "episode_id": "web-session",
+        "dataset": "synthetic", "dataset_version": "synthetic-v1",
+        "camera": {"position": [1, 2, 3], "focal_point": [0, 0, 0],
+                   "view_up": [0, 1, 0], "zoom": 1},
+        "goal": {"target": "bone", "direction": "increase"},
+        "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
+    }
+    write_jsonl(log, [
+        {**base, "scene_id": "scene-0", "parent_scene_id": None, "step_id": 0,
+         "features_before": FEATURES, "features_after": FEATURES},
+        {**base, "scene_id": "scene-1", "parent_scene_id": "scene-0", "step_id": 1,
+         "parent_step_id": 0, "carried_forward": True, "accepted": True,
+         "features_before": FEATURES, "features_after": {**FEATURES, "mean": 2}},
+    ])
+
+    pairs, _ = extract_pairs(log_path=log, out_path=out)
+
+    branch = next(pair for pair in pairs if pair["source"] == "branch")
+    assert branch["dataset"] == "synthetic"
+    assert branch["dataset_version"] == "synthetic-v1"
+    assert branch["camera"]["position"] == [1, 2, 3]
+    assert branch["goal"] == base["goal"]
+    assert branch["parent_scene_id"] == "scene-0"
+
+
+def test_default_extractor_reads_scene_transition_wrappers(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    scene_dir = tmp_path / "out"
+    scene_dir.mkdir()
+    before = {
+        "scene_id": "scene-0", "parent_scene_id": None, "session_id": "web",
+        "client": "web", "dataset": "synthetic", "dataset_version": "v1",
+        "camera": {"position": [0, 0, 1], "focal_point": [0, 0, 0], "view_up": [0, 1, 0], "zoom": 1},
+        "goal": {"target": "bone", "direction": "increase"},
+        "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
+        "transfer_function": [0] * 24, "volume": {"dimensions": [1, 1, 1], "spacing": [1, 1, 1], "scalar_type": "float32", "orientation": "normalized"},
+        "step_id": 0, "features_before": FEATURES, "features_after": FEATURES,
+    }
+    after = {**before, "scene_id": "scene-1", "parent_scene_id": "scene-0", "step_id": 1,
+             "parent_step_id": 0, "carried_forward": True, "accepted": True,
+             "camera": {**before["camera"], "position": [1, 0, 1]},
+             "features_before": {**FEATURES, "mean": 1},
+             "features_after": {**FEATURES, "mean": 2}}
+    (scene_dir / "scene_transitions.jsonl").write_text(json.dumps({
+        "event_id": "event-1", "dedupe_key": "dedupe-1",
+        "before_scene": before, "after_scene": after,
+    }) + "\n")
+
+    pairs, _ = extract_pairs(out_path=tmp_path / "pairs.jsonl")
+
+    branch = next(pair for pair in pairs if pair["source"] == "branch")
+    assert branch["observation_a"]["before_features"]["mean"] == 2
+    assert branch["observation_b"]["before_features"]["mean"] == 1
+    assert branch["observation_a"]["after_features"]["mean"] == 2
+    assert branch["observation_b"]["after_features"]["mean"] == 1
+    assert branch["camera"]["position"] == [1, 0, 1]
+    assert branch["dataset"] == "synthetic"
+
+
+def test_extractor_reads_legacy_direct_scene_transition_records(tmp_path):
+    log = tmp_path / "scene.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    first = step("s", "e", 1, seed=1)
+    second = step("s", "e", 2, accepted=True, parent=1, carried=True, seed=2)
+    second.update({"scene_id": "scene-2", "parent_scene_id": "scene-1", "dataset": "synthetic"})
+    first.update({"scene_id": "scene-1", "parent_scene_id": None, "dataset": "synthetic"})
+    write_jsonl(log, [first, second])
+
+    pairs, _ = extract_pairs(log_path=log, scenes_path=None, out_path=out)
+
+    assert any(pair["source"] == "branch" for pair in pairs)
+
+
 def test_rejects_symlinked_input_output_collision(tmp_path):
     log = tmp_path / "log.jsonl"
     output = tmp_path / "pairs.jsonl"
@@ -335,6 +412,38 @@ def test_multi_target_list_commands_are_skipped_not_crashed(tmp_path):
     out = tmp_path / "pairs.jsonl"
     row = step("s", "e", 1, seed=1)
     row["command"]["target"] = ["spongy", "bone"]
+    write_jsonl(log, [row])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert pairs == []
+    assert stats["skipped"] == 1
+
+
+def test_non_extractable_scene_commands_are_skipped(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 1, seed=1)
+    row["command"] = {"attribute": "neutral", "kind": "non_extractable"}
+    row.pop("goal", None)
+    write_jsonl(log, [row])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert pairs == []
+    assert stats["skipped"] == 1
+
+
+@pytest.mark.parametrize("original_command", [
+    {"target": None, "attribute": None, "direction": "reset"},
+    {"compound": [{"target": "bone", "attribute": "opacity", "direction": "set"}]},
+])
+def test_original_non_opacity_commands_do_not_become_training_goals(tmp_path, original_command):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 1, seed=1)
+    row["command"] = {"attribute": "neutral", "kind": "non_extractable"}
+    row["client_metadata"] = {"original_command": original_command}
     write_jsonl(log, [row])
 
     pairs, stats = extract_pairs(log_path=log, out_path=out)

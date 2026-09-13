@@ -7,10 +7,16 @@ dependency, so calling it directly sidesteps that entirely; the HTTP routing lay
 itself is thin enough to verify by running the real server (see the plan's Task 6).
 """
 import os
+import asyncio
+import json
 
 import numpy as np
 import pytest
 
+from fastapi import HTTPException
+from fastapi.responses import Response
+
+import server
 from server import Session
 
 TEST_SESSION_PATH = "/tmp/test_ui_session.json"
@@ -28,6 +34,230 @@ def _fresh_session():
     if os.path.exists(TEST_SESSION_PATH):
         os.remove(TEST_SESSION_PATH)
     return Session(TEST_SESSION_PATH)
+
+
+def _scene(scene_id, parent_scene_id):
+    return {
+        "scene_id": scene_id,
+        "parent_scene_id": parent_scene_id,
+        "session_id": "session-1",
+        "client": "web",
+        "dataset": "synthetic",
+        "dataset_version": "synthetic-v1",
+        "volume": {
+            "dimensions": [2, 2, 2],
+            "spacing": [1, 1, 1],
+            "scalar_type": "float32",
+            "orientation": "dataset-normalized",
+        },
+        "transfer_function": [0] * 24,
+        "camera": {
+            "position": [0, 0, 1],
+            "focal_point": [0, 0, 0],
+            "view_up": [0, 1, 0],
+            "zoom": 1,
+        },
+        "command": {"attribute": "camera"},
+    }
+
+
+def test_dataset_metadata_route_returns_transport_metadata(monkeypatch):
+    metadata = {
+        "name": "synthetic",
+        "version": "synthetic-v1",
+        "dimensions": [2, 2, 2],
+        "spacing": [1.0, 1.0, 1.0],
+        "scalar_type": "float32",
+        "chunk_count": 1,
+        "chunks": [{"index": 0, "byte_length": 32}],
+    }
+    monkeypatch.setattr(server, "dataset_metadata", lambda name: metadata)
+
+    result = asyncio.run(server.dataset_metadata_route("synthetic"))
+
+    assert result == metadata
+
+
+def test_dataset_metadata_route_maps_unknown_dataset_to_404(monkeypatch):
+    def unknown(name):
+        raise ValueError("unknown dataset 'missing'")
+
+    monkeypatch.setattr(server, "dataset_metadata", unknown)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_metadata_route("missing"))
+    assert exc.value.status_code == 404
+    assert "unknown dataset" in exc.value.detail
+
+
+def test_dataset_metadata_route_maps_existing_dataset_validation_to_422(monkeypatch):
+    monkeypatch.setattr(server, "list_datasets", lambda: ["synthetic"])
+    monkeypatch.setattr(server, "dataset_metadata", lambda name: (_ for _ in ()).throw(
+        ValueError("spacing must contain three positive finite values")))
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_metadata_route("synthetic"))
+    assert exc.value.status_code == 422
+    assert "spacing" in exc.value.detail
+
+
+def test_dataset_metadata_route_maps_loader_failure_to_500(monkeypatch):
+    monkeypatch.setattr(server, "list_datasets", lambda: ["synthetic"])
+    monkeypatch.setattr(server, "dataset_metadata", lambda name: (_ for _ in ()).throw(
+        OSError("dataset file is unreadable")))
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_metadata_route("synthetic"))
+    assert exc.value.status_code == 500
+    assert "unreadable" in exc.value.detail
+
+
+def test_dataset_chunk_route_returns_binary_response(monkeypatch):
+    monkeypatch.setattr(server, "get_volume_chunk", lambda name, index: b"\x00\x01")
+
+    result = asyncio.run(server.dataset_chunk("synthetic", 0))
+
+    assert isinstance(result, Response)
+    assert result.media_type == "application/octet-stream"
+    assert result.body == b"\x00\x01"
+    assert result.headers["content-type"] == "application/octet-stream"
+    assert result.headers["content-length"] == "2"
+
+
+def test_dataset_chunk_route_maps_bad_index_to_400(monkeypatch):
+    def bad_index(name, index):
+        raise IndexError("chunk index out of range: 3")
+
+    monkeypatch.setattr(server, "get_volume_chunk", bad_index)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_chunk("synthetic", 3))
+    assert exc.value.status_code == 422
+    assert "out of range" in exc.value.detail
+
+
+def test_dataset_chunk_route_maps_non_integer_index_to_400():
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_chunk("synthetic", "not-an-index"))
+    assert exc.value.status_code == 422
+    assert "integer" in exc.value.detail
+
+
+def test_scene_transition_route_normalizes_and_appends_jsonl(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    after = _scene("scene-1", "scene-0")
+
+    result = asyncio.run(server.scene_transition_route({"before": before, "after": after}))
+
+    assert result["scene_id"] == "scene-1"
+    assert result["parent_scene_id"] == "scene-0"
+    lines = (tmp_path / "out" / "scene_transitions.jsonl").read_text().splitlines()
+    assert len(lines) == 1
+    logged = json.loads(lines[0])
+    assert logged["after_scene"] == result
+    assert logged["before_scene"] == before
+    assert logged["event_id"]
+    assert logged["dedupe_key"]
+
+
+def test_scene_transition_route_is_idempotent_by_event_id(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    after = _scene("scene-1", "scene-0")
+    payload = {"before": before, "after": after, "event_id": "event-1", "dedupe_key": "dedupe-1"}
+
+    first = asyncio.run(server.scene_transition_route(payload))
+    second = asyncio.run(server.scene_transition_route(payload))
+
+    assert first == second
+    assert len((tmp_path / "out" / "scene_transitions.jsonl").read_text().splitlines()) == 1
+
+
+def test_scene_transition_route_rejects_conflicting_event_id_payload(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    after = _scene("scene-1", "scene-0")
+    asyncio.run(server.scene_transition_route({"before": before, "after": after, "event_id": "event-1"}))
+
+    conflicting = _scene("scene-2", "scene-0")
+    with pytest.raises(HTTPException, match="event_id"):
+        asyncio.run(server.scene_transition_route({"before": before, "after": conflicting, "event_id": "event-1"}))
+
+
+@pytest.mark.parametrize("field", ["event_id", "dedupe_key"])
+def test_scene_transition_route_rejects_empty_persistence_keys(tmp_path, monkeypatch, field):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    after = _scene("scene-1", "scene-0")
+
+    with pytest.raises(HTTPException, match=field):
+        asyncio.run(server.scene_transition_route({"before": before, "after": after, field: "  "}))
+
+
+def test_dataset_boundary_requires_root_neutral_scene(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    scene = _scene("dataset-root", "old-scene")
+    scene["command"] = {"attribute": "neutral", "kind": "dataset_boundary"}
+
+    with pytest.raises(HTTPException, match="parent_scene_id"):
+        asyncio.run(server.scene_transition_route({"after": scene, "boundary": True}))
+
+
+def test_dataset_boundary_accepts_neutral_command_in_scene(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    scene = _scene("dataset-root", None)
+    scene["command"] = {"attribute": "neutral", "kind": "dataset_boundary"}
+
+    result = asyncio.run(server.scene_transition_route({"after": scene, "boundary": True,
+                                                        "event_id": "boundary-1", "dedupe_key": "boundary-1"}))
+
+    assert result["command"] == {"attribute": "neutral", "kind": "dataset_boundary"}
+
+
+def test_scene_transition_route_rejects_self_transition(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    scene = _scene("scene-0", None)
+
+    with pytest.raises(HTTPException, match="distinct"):
+        asyncio.run(server.scene_transition_route({"before": scene, "after": scene}))
+
+
+def test_scene_transition_route_adds_extractor_metadata_and_preserves_state(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    before.update({"step_id": 0, "features_after": {"mean": 1, "std": 2, "coverage": 3, "entropy": 4}})
+    after = _scene("scene-1", "scene-0")
+    after.update({
+        "step_id": 1,
+        "parent_step_id": 0,
+        "carried_forward": True,
+        "accepted": True,
+        "ended": False,
+        "features_before": {"mean": 1, "std": 2, "coverage": 3, "entropy": 4},
+        "features_after": {"mean": 5, "std": 6, "coverage": 7, "entropy": 8},
+    })
+
+    result = asyncio.run(server.scene_transition_route({"before": before, "after": after}))
+
+    assert result["dataset"] == "synthetic"
+    assert result["dataset_version"] == "synthetic-v1"
+    assert result["camera"] == after["camera"]
+    assert result["parent_step_id"] == 0
+    assert result["carried_forward"] is True
+    assert result["accepted"] is True
+    assert result["step_id"] == 1
+
+
+def test_scene_transition_route_rejects_mismatched_parent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    after = _scene("scene-1", "other-scene")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.scene_transition_route({"before": before, "after": after}))
+    assert exc.value.status_code == 400
+    assert "parent_scene_id" in exc.value.detail
 
 
 def test_initial_state_has_one_step_at_cursor_zero():
@@ -212,6 +442,18 @@ def test_feedback_sets_step_field_and_logs(tmp_path, monkeypatch):
     assert entry["step_id"] == step_id
     assert entry["cmd_dict"]["target"] == "bone"
     assert entry["session_id"] == s.session_id
+
+
+def test_repeated_feedback_is_idempotent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    s = Session(str(tmp_path / "session.json"))
+    s.command("increase opacity for bone strongly", parser="rule", search=False)
+    step_id = s.state()["current"]["id"]
+
+    s.feedback(step_id, "up")
+    s.feedback(step_id, "up")
+
+    assert len((tmp_path / "out" / "feedback.jsonl").read_text().splitlines()) == 1
 
 
 def test_feedback_invalid_rating_raises():

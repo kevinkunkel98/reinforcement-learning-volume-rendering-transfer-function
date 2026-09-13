@@ -10,16 +10,18 @@ testable in-process without going anywhere near that constraint.
 """
 import base64
 import datetime
+import hashlib
 import io
 import json
 import os
 import sys
+import threading
 import time
 import uuid
 
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
@@ -28,16 +30,19 @@ from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from rl.serve import run_policy
-from datasets import list_datasets, load_dataset
+from datasets import _dataset_version, dataset_metadata, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import render as render_module
 from render import features, grab, render
 from search import propose_step, resize_step
+from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
 from transfer import TISSUE_BANDS, default_params, opacity_mass
 
 LOG_PATH = "out/log.jsonl"
 PREF_PATH = "out/preferences.jsonl"
 FEEDBACK_PATH = "out/feedback.jsonl"
+SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
+_SCENE_WRITE_LOCK = threading.Lock()
 AUDIO_DIR = "out/audio"
 
 
@@ -97,6 +102,13 @@ def _save_image_file(session_id, name, png_bytes):
     with open(path, "wb") as f:
         f.write(png_bytes)
     return path
+
+
+def _scene_event_id(before, after, event_id=None):
+    if event_id:
+        return event_id
+    payload = json.dumps({"before": before, "after": after}, sort_keys=True, separators=(",", ":"))
+    return "scene-event:" + hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
 def _render_step(params, cmd_text, cmd_dict, verdict, search, step_id, session_id, camera):
@@ -173,12 +185,14 @@ class Session:
             "current": self.history[self.cursor],
             "pending": _pending_public(self.pending),
             "dataset": _dataset_name,
+            "session_id": self.session_id,
             "render_info": {
                 "width": render_module.WIDTH,
                 "height": render_module.HEIGHT,
                 "mapper": render_module.MAPPER_NAME,
                 "volume_shape": list(volume.shape),
                 "spacing": list(spacing),
+                "dataset_version": _dataset_version(_dataset_name),
             },
         }
 
@@ -198,6 +212,8 @@ class Session:
         step = next((s for s in self.history if s["id"] == step_id), None)
         if step is None:
             raise ValueError(f"no step with id {step_id}")
+        if step["feedback"] == rating:
+            return self.state()
         step["feedback"] = rating
         jsonl_append(FEEDBACK_PATH, {
             "timestamp": datetime.datetime.now().isoformat(),
@@ -382,6 +398,41 @@ async def datasets_list():
     return {"available": list_datasets(), "current": _dataset_name}
 
 
+@app.get("/api/datasets/{name}/metadata")
+async def dataset_metadata_route(name: str):
+    if name not in list_datasets():
+        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
+    try:
+        return dataset_metadata(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/datasets/{name}/chunks/{index}")
+async def dataset_chunk(name: str, index: str):
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="chunk index must be an integer")
+    if name not in list_datasets():
+        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
+    try:
+        chunk = get_volume_chunk(name, index)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except IndexError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return Response(
+        content=chunk,
+        media_type="application/octet-stream",
+        headers={"X-Dataset-Version": _dataset_version(name)},
+    )
+
+
 @app.get("/api/commands")
 async def commands_reference():
     return {"commands": COMMAND_REFERENCE}
@@ -439,6 +490,50 @@ async def judge(req: JudgeRequest):
         return session.judge(req.verdict)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/scenes/transition")
+async def scene_transition_route(payload: dict):
+    try:
+        for field in ("event_id", "dedupe_key"):
+            if field in payload and (not isinstance(payload[field], str) or not payload[field].strip()):
+                raise ValueError(f"{field} must be a non-empty string")
+        after = payload["after"]
+        if payload.get("boundary"):
+            transition = normalize_scene(after)
+            before = None
+            if transition["parent_scene_id"] is not None or transition["command"] != {"attribute": "neutral", "kind": "dataset_boundary"}:
+                raise ValueError("boundary event must be a root dataset_boundary scene")
+        else:
+            before = normalize_scene(payload["before"])
+            transition = normalize_scene_transition(
+                before,
+                after,
+                verdict=payload.get("verdict"),
+                accepted=payload.get("accepted"),
+                ended=payload.get("ended"),
+            )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    event_id = _scene_event_id(before, transition, payload.get("event_id"))
+    dedupe_key = payload.get("dedupe_key") or event_id
+    event = {"event_id": event_id, "dedupe_key": dedupe_key,
+             "before_scene": before, "after_scene": transition}
+    os.makedirs(os.path.dirname(SCENE_TRANSITIONS_PATH) or ".", exist_ok=True)
+    with _SCENE_WRITE_LOCK:
+        if os.path.exists(SCENE_TRANSITIONS_PATH):
+            with open(SCENE_TRANSITIONS_PATH) as stream:
+                for line in stream:
+                    if not line.strip():
+                        continue
+                    existing = json.loads(line)
+                    if existing.get("event_id") == event_id or existing.get("dedupe_key") == dedupe_key:
+                        if existing.get("after_scene") != transition or existing.get("before_scene") != before:
+                            raise HTTPException(status_code=409, detail="event_id conflicts with existing scene transition")
+                        return existing["after_scene"]
+        jsonl_append(SCENE_TRANSITIONS_PATH, event)
+    return transition
 
 
 @app.post("/api/transcribe")

@@ -38,6 +38,9 @@
         <div id="viewport">
           <div id="single-view">
             <div id="viewport-frame">
+              <div id="vtk-viewer" aria-label="interactive local volume viewer"></div>
+              <div id="viewer-status" role="status" aria-live="polite">Loading local volume...</div>
+              <div id="viewer-error" role="alert" hidden></div>
               <img id="current-image" alt="rendered volume" />
             </div>
             <div id="nav">
@@ -128,6 +131,8 @@
 
     <div id="toast-viewport" role="region" aria-live="polite" aria-label="Notifications"></div>
   </div>
+  <script src="https://unpkg.com/vtk.js@25.11.0"></script>
+  <script src="/static/viewer.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
