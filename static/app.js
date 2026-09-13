@@ -50,18 +50,25 @@ function sceneFromState(data, parentSceneId = null) {
   return scene;
 }
 
+function captureSceneRoot(data) {
+  sceneSnapshot = sceneFromState(data, null);
+  sceneSnapshot.scene_id = `web:root:${Date.now()}:${sceneSequence++}`;
+}
+
 async function postSceneTransition(data) {
-  if (!sceneSnapshot) {
-    sceneSnapshot = sceneFromState(data, null);
-    sceneSnapshot.scene_id = `web:root:${Date.now()}:${sceneSequence++}`;
-  }
+  if (!sceneSnapshot) captureSceneRoot(data);
   const after = sceneFromState(data, sceneSnapshot.scene_id);
   const response = await fetch("/api/scenes/transition", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ before: sceneSnapshot, after }),
   });
-  if (response.ok) sceneSnapshot = await response.json();
+  if (!response.ok) {
+    const detail = await response.text();
+    showToast(`Scene transition failed (${response.status}): ${detail || "server rejected record"}`, "destructive");
+    return;
+  }
+  sceneSnapshot = await response.json();
 }
 
 async function refresh(data) {
@@ -180,6 +187,7 @@ async function loadState() {
   const r = await fetch("/api/state");
   const data = await r.json();
   await refresh(data);
+  captureSceneRoot(data);
   // Full history isn't in /api/state (only the current step), so rebuild the
   // thread by walking back/forward would be wasteful; instead the server's
   // current step is enough to seed the empty state on first load.
@@ -448,6 +456,7 @@ async function chooseDataset(name) {
   }
   const data = await r.json();
   setSelectValue(name);
+  sceneSnapshot = null;
   closeSelect();
   messagesEl.innerHTML = "";
   messagesEl.appendChild(emptyState);

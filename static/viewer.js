@@ -146,10 +146,14 @@
   function toRendererCamera(value) {
     if (!value) return null;
     if (value.azimuth === undefined && value.elevation === undefined) return { ...value };
+    if (!Number.isFinite(value.azimuth) || !Number.isFinite(value.elevation) || !Number.isFinite(value.zoom)) {
+      throw new Error("legacy camera values must be finite");
+    }
+    if (value.zoom <= 0) throw new Error("legacy camera zoom must be positive");
     renderer.resetCamera();
-    if (value.azimuth) camera.azimuth(value.azimuth);
-    if (value.elevation) camera.elevation(value.elevation);
-    if (value.zoom) camera.setParallelScale(camera.getParallelScale() / value.zoom);
+    if (value.azimuth !== 0) camera.azimuth(value.azimuth);
+    if (value.elevation !== 0) camera.elevation(value.elevation);
+    if (value.zoom !== 1) camera.setParallelScale(camera.getParallelScale() / value.zoom);
     return { ...fromRendererCamera(), zoom: value.zoom || 1 };
   }
 

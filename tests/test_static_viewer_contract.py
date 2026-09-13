@@ -58,6 +58,11 @@ def test_viewer_adapts_exactly_24_values_and_exposes_camera_state():
     assert "toRendererCamera" in viewer
     assert "fromRendererCamera" in viewer
     assert "position" in viewer and "focal_point" in viewer and "view_up" in viewer
+    assert "Number.isFinite(value.azimuth)" in viewer
+    assert "Number.isFinite(value.elevation)" in viewer
+    assert "Number.isFinite(value.zoom)" in viewer
+    assert "value.azimuth !== 0" in viewer
+    assert "value.elevation !== 0" in viewer
 
 
 def test_viewer_cancels_and_ignores_stale_dataset_loads():
@@ -88,6 +93,9 @@ def test_app_integrates_viewer_with_state_and_dataset_changes():
     assert "postSceneTransition" in app
     assert "client_metadata" in app
     assert "session_id" in app
+    assert "captureSceneRoot" in app
+    assert "sceneSnapshot = null" in app
+    assert "showToast(`Scene transition failed" in app
 
 
 def test_styles_cover_viewer_loading_error_and_fallback_states():
