@@ -19,7 +19,7 @@ import uuid
 
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
@@ -28,16 +28,18 @@ from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from rl.serve import run_policy
-from datasets import list_datasets, load_dataset
+from datasets import dataset_metadata, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import render as render_module
 from render import features, grab, render
 from search import propose_step, resize_step
+from scene_schema import scene_transition as normalize_scene_transition
 from transfer import TISSUE_BANDS, default_params, opacity_mass
 
 LOG_PATH = "out/log.jsonl"
 PREF_PATH = "out/preferences.jsonl"
 FEEDBACK_PATH = "out/feedback.jsonl"
+SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
 AUDIO_DIR = "out/audio"
 
 
@@ -382,6 +384,29 @@ async def datasets_list():
     return {"available": list_datasets(), "current": _dataset_name}
 
 
+@app.get("/api/datasets/{name}/metadata")
+async def dataset_metadata_route(name: str):
+    try:
+        return dataset_metadata(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/api/datasets/{name}/chunks/{index}")
+async def dataset_chunk(name: str, index: str):
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="chunk index must be an integer")
+    try:
+        chunk = get_volume_chunk(name, index)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except IndexError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return Response(content=chunk, media_type="application/octet-stream")
+
+
 @app.get("/api/commands")
 async def commands_reference():
     return {"commands": COMMAND_REFERENCE}
@@ -439,6 +464,26 @@ async def judge(req: JudgeRequest):
         return session.judge(req.verdict)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/scenes/transition")
+async def scene_transition_route(payload: dict):
+    try:
+        before = payload["before"]
+        after = payload["after"]
+        transition = normalize_scene_transition(
+            before,
+            after,
+            verdict=payload.get("verdict"),
+            accepted=payload.get("accepted"),
+            ended=payload.get("ended"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    os.makedirs(os.path.dirname(SCENE_TRANSITIONS_PATH) or ".", exist_ok=True)
+    jsonl_append(SCENE_TRANSITIONS_PATH, transition)
+    return transition
 
 
 @app.post("/api/transcribe")

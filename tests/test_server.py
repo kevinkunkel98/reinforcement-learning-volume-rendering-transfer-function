@@ -7,10 +7,16 @@ dependency, so calling it directly sidesteps that entirely; the HTTP routing lay
 itself is thin enough to verify by running the real server (see the plan's Task 6).
 """
 import os
+import asyncio
+import json
 
 import numpy as np
 import pytest
 
+from fastapi import HTTPException
+from fastapi.responses import Response
+
+import server
 from server import Session
 
 TEST_SESSION_PATH = "/tmp/test_ui_session.json"
@@ -28,6 +34,114 @@ def _fresh_session():
     if os.path.exists(TEST_SESSION_PATH):
         os.remove(TEST_SESSION_PATH)
     return Session(TEST_SESSION_PATH)
+
+
+def _scene(scene_id, parent_scene_id):
+    return {
+        "scene_id": scene_id,
+        "parent_scene_id": parent_scene_id,
+        "session_id": "session-1",
+        "client": "web",
+        "dataset": "synthetic",
+        "dataset_version": "synthetic-v1",
+        "volume": {
+            "dimensions": [2, 2, 2],
+            "spacing": [1, 1, 1],
+            "scalar_type": "float32",
+            "orientation": "dataset-normalized",
+        },
+        "transfer_function": [0] * 24,
+        "camera": {
+            "position": [0, 0, 1],
+            "focal_point": [0, 0, 0],
+            "view_up": [0, 1, 0],
+            "zoom": 1,
+        },
+        "command": {"attribute": "camera"},
+    }
+
+
+def test_dataset_metadata_route_returns_transport_metadata(monkeypatch):
+    metadata = {
+        "name": "synthetic",
+        "version": "synthetic-v1",
+        "dimensions": [2, 2, 2],
+        "spacing": [1.0, 1.0, 1.0],
+        "scalar_type": "float32",
+        "chunk_count": 1,
+        "chunks": [{"index": 0, "byte_length": 32}],
+    }
+    monkeypatch.setattr(server, "dataset_metadata", lambda name: metadata)
+
+    result = asyncio.run(server.dataset_metadata_route("synthetic"))
+
+    assert result == metadata
+
+
+def test_dataset_metadata_route_maps_unknown_dataset_to_404(monkeypatch):
+    def unknown(name):
+        raise ValueError("unknown dataset 'missing'")
+
+    monkeypatch.setattr(server, "dataset_metadata", unknown)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_metadata_route("missing"))
+    assert exc.value.status_code == 404
+    assert "unknown dataset" in exc.value.detail
+
+
+def test_dataset_chunk_route_returns_binary_response(monkeypatch):
+    monkeypatch.setattr(server, "get_volume_chunk", lambda name, index: b"\x00\x01")
+
+    result = asyncio.run(server.dataset_chunk("synthetic", 0))
+
+    assert isinstance(result, Response)
+    assert result.media_type == "application/octet-stream"
+    assert result.body == b"\x00\x01"
+
+
+def test_dataset_chunk_route_maps_bad_index_to_400(monkeypatch):
+    def bad_index(name, index):
+        raise IndexError("chunk index out of range: 3")
+
+    monkeypatch.setattr(server, "get_volume_chunk", bad_index)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_chunk("synthetic", 3))
+    assert exc.value.status_code == 400
+    assert "out of range" in exc.value.detail
+
+
+def test_dataset_chunk_route_maps_non_integer_index_to_400():
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_chunk("synthetic", "not-an-index"))
+    assert exc.value.status_code == 400
+    assert "integer" in exc.value.detail
+
+
+def test_scene_transition_route_normalizes_and_appends_jsonl(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    after = _scene("scene-1", "scene-0")
+
+    result = asyncio.run(server.scene_transition_route({"before": before, "after": after}))
+
+    assert result["scene_id"] == "scene-1"
+    assert result["parent_scene_id"] == "scene-0"
+    lines = (tmp_path / "out" / "scene_transitions.jsonl").read_text().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == result
+
+
+def test_scene_transition_route_rejects_mismatched_parent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    after = _scene("scene-1", "other-scene")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.scene_transition_route({"before": before, "after": after}))
+    assert exc.value.status_code == 400
+    assert "parent_scene_id" in exc.value.detail
 
 
 def test_initial_state_has_one_step_at_cursor_zero():
