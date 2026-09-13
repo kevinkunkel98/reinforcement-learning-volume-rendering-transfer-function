@@ -30,7 +30,7 @@ def test_viewer_fetches_typed_chunks_and_reconstructs_fortran_volume():
     assert "/metadata" in viewer
     assert "/chunks/" in viewer
     assert "Float32Array" in viewer
-    assert "byteOffset" in viewer
+    assert "byte_offset" in viewer
     assert "dimensions" in viewer
     assert "spacing" in viewer
     assert re.search(r"order\s*===?\s*[\"']F[\"']|order.*F", viewer)
