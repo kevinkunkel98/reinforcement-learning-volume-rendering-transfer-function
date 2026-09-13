@@ -69,8 +69,27 @@ def test_dataset_metadata_matches_loaded_volume(monkeypatch):
     assert metadata["chunks"]
 
 
+def test_metadata_chunk_descriptors_use_arithmetic_offsets(monkeypatch):
+    volume = np.arange(10, dtype=np.float32).reshape(1, 2, 5)
+    monkeypatch.setattr(datasets, "load_dataset", lambda name: (volume, (1.0, 1.0, 1.0)))
+
+    metadata = datasets.dataset_metadata("synthetic")
+
+    assert metadata["chunk_count"] == 1
+    assert metadata["chunks"] == [{"index": 0, "byte_offset": 0, "byte_length": 40}]
+
+    volume = np.arange(10, dtype=np.float32).reshape(1, 2, 5)
+    monkeypatch.setattr(datasets, "DEFAULT_CHUNK_BYTES", 16)
+    metadata = datasets.dataset_metadata("synthetic")
+    assert metadata["chunks"] == [
+        {"index": 0, "byte_offset": 0, "byte_length": 16},
+        {"index": 1, "byte_offset": 16, "byte_length": 16},
+        {"index": 2, "byte_offset": 32, "byte_length": 8},
+    ]
+
+
 def test_chunk_round_trip_reconstructs_float32_c_order_volume():
-    volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)[:, :, ::-1]
 
     chunks = list(datasets.iter_volume_chunks(volume, chunk_bytes=16))
     restored = np.frombuffer(b"".join(chunks), dtype=np.float32).reshape(volume.shape, order="C")
@@ -80,15 +99,29 @@ def test_chunk_round_trip_reconstructs_float32_c_order_volume():
 
 
 def test_get_volume_chunk_uses_metadata_chunk_descriptors(monkeypatch):
-    volume = np.arange(12, dtype=np.float32).reshape(2, 2, 3)
-    monkeypatch.setattr(datasets, "load_dataset", lambda name: (volume, (1.0, 1.0, 1.0)))
+    volume = np.arange(12, dtype=np.float32).reshape(2, 2, 3)[:, ::-1, :]
+    load_calls = 0
 
-    metadata = datasets.dataset_metadata("synthetic")
-    chunk = datasets.get_volume_chunk("synthetic", 0)
+    def load_once(name):
+        nonlocal load_calls
+        load_calls += 1
+        return volume, (1.0, 1.0, 1.0)
 
-    assert metadata["chunks"][0]["index"] == 0
-    assert len(chunk) == metadata["chunks"][0]["byte_length"]
-    assert chunk == volume.tobytes(order="C")[: len(chunk)]
+    monkeypatch.setattr(datasets, "load_dataset", load_once)
+    monkeypatch.setattr(datasets, "DEFAULT_CHUNK_BYTES", 16)
+
+    chunk = datasets.get_volume_chunk("synthetic", 1)
+
+    expected = np.ascontiguousarray(volume, dtype=np.dtype("<f4")).tobytes(order="C")
+    assert load_calls == 1
+    assert chunk == expected[16:32]
+
+
+def test_iter_volume_chunks_rejects_big_endian_float32():
+    volume = np.arange(8, dtype=np.dtype(">f4")).reshape(2, 2, 2)
+
+    with pytest.raises(ValueError, match="little-endian"):
+        list(datasets.iter_volume_chunks(volume, chunk_bytes=16))
 
 
 @pytest.mark.parametrize(
@@ -109,3 +142,11 @@ def test_get_volume_chunk_rejects_invalid_index(monkeypatch):
 
     with pytest.raises(IndexError):
         datasets.get_volume_chunk("synthetic", 1)
+
+
+@pytest.mark.parametrize("chunk_bytes", [0, -4, 3, 1.5, True])
+def test_iter_volume_chunks_rejects_invalid_chunk_size(chunk_bytes):
+    volume = np.zeros((1, 1, 1), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="chunk_bytes"):
+        list(datasets.iter_volume_chunks(volume, chunk_bytes=chunk_bytes))
