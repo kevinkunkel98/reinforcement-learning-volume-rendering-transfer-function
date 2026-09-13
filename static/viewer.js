@@ -212,6 +212,8 @@
       if (volume && datasetName === name) {
         setCamera(cameraState);
         setTransferFunction(params);
+        fallbackEl.hidden = true;
+        setStatus(`Local ${datasetName} volume`);
         return true;
       }
       const loaded = await fetchVolume(name, loadController.signal, generation);

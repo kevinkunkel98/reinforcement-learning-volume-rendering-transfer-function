@@ -275,7 +275,8 @@ select:focus-visible {
 
 #vtk-viewer[hidden],
 #viewer-status[hidden],
-#viewer-error[hidden] { display: none; }
+#viewer-error[hidden],
+#current-image[hidden] { display: none; }
 
 #current-image {
   max-width: 100%;
