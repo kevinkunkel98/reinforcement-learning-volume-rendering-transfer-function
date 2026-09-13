@@ -15,6 +15,9 @@
   let camera;
   let datasetName;
   let transferFunction;
+  let loadGeneration = 0;
+  let loadController;
+  let appliedCameraState = null;
 
   function setStatus(message, error = false) {
     statusEl.textContent = message;
@@ -23,17 +26,47 @@
     errorEl.hidden = !error;
   }
 
-  async function fetchVolume(name) {
-    const metadataResponse = await fetch(`/api/datasets/${encodeURIComponent(name)}/metadata`);
+  function validateMetadata(metadata) {
+    if (!metadata || !Array.isArray(metadata.dimensions) || metadata.dimensions.length !== 3 ||
+        metadata.dimensions.some((value) => !Number.isInteger(value) || value <= 0)) {
+      throw new Error("invalid volume dimensions");
+    }
+    const expectedBytes = metadata.dimensions.reduce((product, value) => product * value, 1) * 4;
+    if (!Number.isSafeInteger(expectedBytes) || metadata.total_bytes !== expectedBytes) {
+      throw new Error("volume byte count does not match dimensions");
+    }
+    if (!Array.isArray(metadata.chunks) || metadata.chunks.length === 0) {
+      throw new Error("volume has no chunks");
+    }
+    let offset = 0;
+    metadata.chunks.forEach((chunk, index) => {
+      if (chunk.index !== index || chunk.byte_offset !== offset ||
+          !Number.isInteger(chunk.byte_length) || chunk.byte_length <= 0 ||
+          chunk.byte_offset < 0 || chunk.byte_offset + chunk.byte_length > metadata.total_bytes) {
+        throw new Error("invalid volume chunk descriptors");
+      }
+      offset += chunk.byte_length;
+    });
+    if (offset !== metadata.total_bytes) throw new Error("volume chunks do not cover payload");
+    return metadata;
+  }
+
+  function isCurrentLoad(generation) {
+    return generation === loadGeneration;
+  }
+
+  async function fetchVolume(name, signal, generation) {
+    const metadataResponse = await fetch(`/api/datasets/${encodeURIComponent(name)}/metadata`, { signal });
     if (!metadataResponse.ok) throw new Error(`volume metadata request failed (${metadataResponse.status})`);
-    const metadata = await metadataResponse.json();
+    const metadata = validateMetadata(await metadataResponse.json());
     const chunks = await Promise.all(metadata.chunks.map(async (chunk) => {
-      const response = await fetch(`/api/datasets/${encodeURIComponent(name)}/chunks/${chunk.index}`);
+      const response = await fetch(`/api/datasets/${encodeURIComponent(name)}/chunks/${chunk.index}`, { signal });
       if (!response.ok) throw new Error(`volume chunk ${chunk.index} request failed (${response.status})`);
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.byteLength !== chunk.byte_length) throw new Error(`volume chunk ${chunk.index} has invalid length`);
       return { ...chunk, bytes };
     }));
+    if (!isCurrentLoad(generation)) throw new DOMException("stale volume load", "AbortError");
     const raw = new Uint8Array(metadata.total_bytes);
     chunks.forEach(({ byte_offset: offset, bytes }) => raw.set(bytes, offset));
     if (metadata.byte_order !== "little" || metadata.scalar_type !== "float32") {
@@ -94,39 +127,41 @@
   }
 
   function getCamera() {
-    return camera ? {
-      position: camera.getPosition().slice(),
-      focal_point: camera.getFocalPoint().slice(),
-      view_up: camera.getViewUp().slice(),
-      zoom: camera.getParallelScale(),
-    } : null;
+    return appliedCameraState ? { ...appliedCameraState } : null;
   }
 
   function setCamera(value) {
     if (!camera || !value) return;
+    appliedCameraState = { ...value };
+    renderer.resetCamera();
+    const baseScale = camera.getParallelScale();
     if (value.position) camera.setPosition(...value.position);
     if (value.focal_point) camera.setFocalPoint(...value.focal_point);
     if (value.view_up) camera.setViewUp(...value.view_up);
     if (value.parallel_scale) camera.setParallelScale(value.parallel_scale);
-    if (value.zoom && value.zoom !== 1) camera.dolly(value.zoom);
     if (value.azimuth) camera.azimuth(value.azimuth);
     if (value.elevation) camera.elevation(value.elevation);
+    if (value.zoom) camera.setParallelScale(baseScale / value.zoom);
     renderWindow.render();
   }
 
   async function load(name, params, cameraState) {
-    if (!window.vtk) throw new Error("vtk.js unavailable");
-    if (volume && datasetName === name) {
-      setCamera(cameraState);
-      setTransferFunction(params);
-      return true;
-    }
-    datasetName = name;
+    const generation = ++loadGeneration;
+    loadController?.abort();
+    loadController = new AbortController();
     viewerEl.hidden = false;
     fallbackEl.hidden = false;
     setStatus("Loading local volume...");
     try {
-      const loaded = await fetchVolume(name);
+      if (!window.vtk) throw new Error("vtk.js unavailable");
+      if (volume && datasetName === name) {
+        setCamera(cameraState);
+        setTransferFunction(params);
+        return true;
+      }
+      const loaded = await fetchVolume(name, loadController.signal, generation);
+      if (!isCurrentLoad(generation)) return false;
+      datasetName = name;
       if (!renderer) {
         const openGLRenderWindow = vtk.Rendering.OpenGL.vtkRenderWindow.newInstance();
         renderer = vtk.Rendering.Core.vtkRenderer.newInstance({ background: [0, 0, 0] });
@@ -151,6 +186,7 @@
       setStatus(`Local ${datasetName} volume`);
       return true;
     } catch (error) {
+      if (!isCurrentLoad(generation) || error.name === "AbortError") return false;
       viewerEl.hidden = true;
       fallbackEl.hidden = false;
       setStatus(`Local viewer unavailable: ${error.message}`, true);

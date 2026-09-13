@@ -34,6 +34,9 @@ def test_viewer_fetches_typed_chunks_and_reconstructs_fortran_volume():
     assert "dimensions" in viewer
     assert "spacing" in viewer
     assert re.search(r"order\s*===?\s*[\"']F[\"']|order.*F", viewer)
+    assert "validateMetadata" in viewer
+    assert "byte_length" in viewer
+    assert "chunk.byte_offset" in viewer
 
 
 def test_viewer_adapts_exactly_24_values_and_exposes_camera_state():
@@ -43,6 +46,19 @@ def test_viewer_adapts_exactly_24_values_and_exposes_camera_state():
     assert "getCamera" in viewer
     assert "setCamera" in viewer
     assert "render" in viewer
+    assert "resetCamera" in viewer
+    assert "value.zoom" in viewer
+    assert "camera.dolly" not in viewer
+    assert "setParallelScale(baseScale / value.zoom)" in viewer
+    assert "camera.zoom(" not in viewer
+
+
+def test_viewer_cancels_and_ignores_stale_dataset_loads():
+    viewer = read("viewer.js")
+    assert "AbortController" in viewer
+    assert "loadGeneration" in viewer
+    assert "signal" in viewer
+    assert "isCurrentLoad" in viewer
 
 
 def test_viewer_renders_locally_and_does_not_request_png_frames():
@@ -64,3 +80,5 @@ def test_styles_cover_viewer_loading_error_and_fallback_states():
     css = read("style.css")
     for selector in ("#vtk-viewer", "#viewer-status", "#viewer-error", "#current-image"):
         assert selector in css
+    assert "@media (max-width: 444px)" in css
+    assert "min-width: 0" in css
