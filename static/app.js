@@ -60,6 +60,8 @@ function sceneFromState(data, parentSceneId = null) {
 
 function captureSceneRoot(data) {
   sceneSnapshot = sceneFromState(data, null);
+  sceneSnapshot.command = { attribute: "neutral", kind: "root" };
+  delete sceneSnapshot.goal;
   sceneSnapshot.scene_id = `web:${data.session_id || "web-session"}:root`;
   lastState = data;
 }
@@ -71,7 +73,7 @@ async function postSceneTransition(data, metadata = {}) {
   if (metadata.verdict) {
     after.scene_id = `${after.scene_id}:feedback:${metadata.verdict}`;
   }
-  const eventId = `web:${data.session_id}:${after.step_id}:${metadata.verdict || "state"}:${after.scene_id}`;
+  const eventId = `web:${data.session_id}:${before.scene_id}:${after.scene_id}:${metadata.verdict || "state"}`;
   const response = await fetch("/api/scenes/transition", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -211,6 +213,7 @@ async function loadState() {
   const data = await r.json();
   await refresh(data);
   captureSceneRoot(data);
+  sceneSnapshot.command = { attribute: "neutral", kind: "dataset_boundary" };
   // Full history isn't in /api/state (only the current step), so rebuild the
   // thread by walking back/forward would be wasteful; instead the server's
   // current step is enough to seed the empty state on first load.
@@ -497,6 +500,7 @@ async function chooseDataset(name) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       after: sceneSnapshot,
+      command: { attribute: "neutral", kind: "dataset_boundary" },
       boundary: true,
       event_id: `web:${data.session_id}:dataset:${data.dataset}`,
       dedupe_key: `dataset:${data.dataset}:${data.render_info.dataset_version}`,

@@ -94,6 +94,8 @@ def test_app_integrates_viewer_with_state_and_dataset_changes():
     assert "client_metadata" in app
     assert "session_id" in app
     assert "captureSceneRoot" in app
+    assert "before.scene_id" in app
+    assert 'attribute: "neutral"' in app
     assert "sceneSnapshot = null" in app
     assert "showToast(`Scene transition failed" in app
 

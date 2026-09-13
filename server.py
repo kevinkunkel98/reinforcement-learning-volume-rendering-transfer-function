@@ -15,6 +15,7 @@ import io
 import json
 import os
 import sys
+import threading
 import time
 import uuid
 
@@ -41,6 +42,7 @@ LOG_PATH = "out/log.jsonl"
 PREF_PATH = "out/preferences.jsonl"
 FEEDBACK_PATH = "out/feedback.jsonl"
 SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
+_SCENE_WRITE_LOCK = threading.Lock()
 AUDIO_DIR = "out/audio"
 
 
@@ -497,6 +499,8 @@ async def scene_transition_route(payload: dict):
         if payload.get("boundary"):
             transition = normalize_scene(after)
             before = None
+            if transition["parent_scene_id"] is not None or transition["command"] != {"attribute": "neutral", "kind": "dataset_boundary"}:
+                raise ValueError("boundary event must be a root dataset_boundary scene")
         else:
             before = normalize_scene(payload["before"])
             transition = normalize_scene_transition(
@@ -514,15 +518,18 @@ async def scene_transition_route(payload: dict):
     event = {"event_id": event_id, "dedupe_key": dedupe_key,
              "before_scene": before, "after_scene": transition}
     os.makedirs(os.path.dirname(SCENE_TRANSITIONS_PATH) or ".", exist_ok=True)
-    if os.path.exists(SCENE_TRANSITIONS_PATH):
-        with open(SCENE_TRANSITIONS_PATH) as stream:
-            for line in stream:
-                if not line.strip():
-                    continue
-                existing = json.loads(line)
-                if existing.get("event_id") == event_id or existing.get("dedupe_key") == dedupe_key:
-                    return existing["after_scene"]
-    jsonl_append(SCENE_TRANSITIONS_PATH, event)
+    with _SCENE_WRITE_LOCK:
+        if os.path.exists(SCENE_TRANSITIONS_PATH):
+            with open(SCENE_TRANSITIONS_PATH) as stream:
+                for line in stream:
+                    if not line.strip():
+                        continue
+                    existing = json.loads(line)
+                    if existing.get("event_id") == event_id or existing.get("dedupe_key") == dedupe_key:
+                        if existing.get("after_scene") != transition or existing.get("before_scene") != before:
+                            raise HTTPException(status_code=409, detail="event_id conflicts with existing scene transition")
+                        return existing["after_scene"]
+        jsonl_append(SCENE_TRANSITIONS_PATH, event)
     return transition
 
 

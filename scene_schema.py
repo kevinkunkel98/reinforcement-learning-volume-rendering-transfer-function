@@ -171,7 +171,19 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
     attribute = command.get("attribute")
     if attribute == "camera":
         command = _fixed_mapping(command, "command", {"attribute"})
+        if "goal" in record:
+            raise ValueError("camera command cannot have a goal")
         scene["command"] = {"attribute": "camera"}
+    elif attribute == "neutral":
+        command = _fixed_mapping(command, "command", {"attribute", "kind"})
+        kind = _text_value(command.get("kind"), "command.kind")
+        if kind not in ("root", "dataset_boundary"):
+            raise ValueError("neutral command kind must be 'root' or 'dataset_boundary'")
+        if "goal" in record:
+            raise ValueError("neutral command cannot have a goal")
+        if record["parent_scene_id"] is not None:
+            raise ValueError("neutral root/boundary scene must not have a parent")
+        scene["command"] = {"attribute": "neutral", "kind": kind}
     elif attribute == "opacity":
         command = _fixed_mapping(command, "command", {"attribute", "target", "direction"})
         command_target = _text_value(command.get("target"), "command.target")
@@ -233,6 +245,8 @@ def scene_transition(
     """Normalize a transition and require an explicit parent scene link."""
     before_scene = normalize_scene(before)
     after_scene = normalize_scene(after)
+    if before_scene["dataset"] != after_scene["dataset"] or before_scene["dataset_version"] != after_scene["dataset_version"]:
+        raise ValueError("dataset changes require a boundary root event")
     if after_scene["parent_scene_id"] != before_scene["scene_id"]:
         raise ValueError("after.parent_scene_id must equal before.scene_id")
     if after_scene["scene_id"] == before_scene["scene_id"]:

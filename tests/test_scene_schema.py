@@ -188,6 +188,31 @@ def test_normalize_scene_accepts_camera_only_scene_without_goal():
     assert normalized["command"] == {"attribute": "camera"}
 
 
+@pytest.mark.parametrize("kind", ["root", "dataset_boundary"])
+def test_normalize_scene_accepts_explicit_neutral_commands_without_goal(kind):
+    scene = valid_scene(parent_scene_id=None, command={"attribute": "neutral", "kind": kind})
+    scene.pop("goal")
+
+    normalized = normalize_scene(scene)
+
+    assert normalized["command"] == {"attribute": "neutral", "kind": kind}
+
+
+def test_normalize_scene_rejects_neutral_command_with_opacity_goal():
+    scene = valid_scene(command={"attribute": "neutral", "kind": "root"})
+
+    with pytest.raises(ValueError):
+        normalize_scene(scene)
+
+
+def test_scene_transition_rejects_dataset_changes_without_boundary():
+    before = normalize_scene(valid_scene(scene_id="s:0", parent_scene_id=None))
+    after = valid_scene(scene_id="s:1", parent_scene_id="s:0", dataset="other")
+
+    with pytest.raises(ValueError, match="boundary"):
+        scene_transition(before, after)
+
+
 def test_normalize_scene_preserves_extractor_compatibility_mapping():
     scene = normalize_scene(valid_scene(parent_step_id=7, carried_forward=True, step_id=8,
                                         features_before={"mean": 1}, features_after={"mean": 2}))
