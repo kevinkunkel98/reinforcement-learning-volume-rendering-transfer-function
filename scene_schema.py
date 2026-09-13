@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import math
 from numbers import Real
 from typing import Any, Mapping
@@ -22,6 +21,20 @@ _REQUIRED_SCENE_FIELDS = (
     "command",
 )
 _OPTIONAL_TRANSITION_FIELDS = ("verdict", "accepted", "ended")
+_OPTIONAL_SCENE_FIELDS = {
+    "timestamp",
+    "features_before",
+    "features_after",
+    "before_image",
+    "after_image",
+    "client_metadata",
+    "parent_step_id",
+    "carried_forward",
+    *_OPTIONAL_TRANSITION_FIELDS,
+}
+_TISSUES = {"air", "fat", "soft", "spongy", "bone"}
+_DIRECTIONS = {"increase", "decrease"}
+_VERDICTS = {"better", "worse", "tie", "A", "B"}
 
 
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:
@@ -78,6 +91,23 @@ def _text_value(value: Any, field: str) -> str:
     return value
 
 
+def _json_safe(value: Any, field: str) -> Any:
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{field} must contain finite numbers")
+        return value
+    if isinstance(value, list):
+        return [_json_safe(item, f"{field}[{index}]") for index, item in enumerate(value)]
+    if isinstance(value, Mapping):
+        return {
+            _text_value(key, f"{field} key"): _json_safe(item, f"{field}.{key}")
+            for key, item in value.items()
+        }
+    raise ValueError(f"{field} must contain JSON values")
+
+
 def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
     """Validate a scene and return an independent JSON-serializable copy."""
     record = _mapping(record, "scene")
@@ -128,32 +158,51 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
     goal = _mapping(record["goal"], "goal")
+    goal_target = _text_value(goal.get("target"), "goal.target")
+    goal_direction = _text_value(goal.get("direction"), "goal.direction")
+    if goal_target not in _TISSUES or goal_direction not in _DIRECTIONS:
+        raise ValueError("goal target or direction is not canonical")
     scene["goal"] = {
-        "target": _text_value(goal.get("target"), "goal.target"),
-        "direction": _text_value(goal.get("direction"), "goal.direction"),
+        "target": goal_target,
+        "direction": goal_direction,
     }
 
     command = _mapping(record["command"], "command")
     if command.get("attribute") != "opacity":
         raise ValueError("command.attribute must be 'opacity'")
+    command_target = _text_value(command.get("target"), "command.target")
+    command_direction = _text_value(command.get("direction"), "command.direction")
+    if command_target not in _TISSUES or command_direction not in _DIRECTIONS:
+        raise ValueError("command target or direction is not canonical")
     scene["command"] = {
         "attribute": "opacity",
-        "target": _text_value(command.get("target"), "command.target"),
-        "direction": _text_value(command.get("direction"), "command.direction"),
+        "target": command_target,
+        "direction": command_direction,
     }
 
     for field in _OPTIONAL_TRANSITION_FIELDS:
         if field in record:
             value = record[field]
-            if field == "verdict" and value is not None and not isinstance(value, str):
-                raise ValueError("verdict must be a string or null")
+            if field == "verdict" and value is not None and value not in _VERDICTS:
+                raise ValueError("verdict is not approved")
             if field in ("accepted", "ended") and value is not None and not isinstance(value, bool):
                 raise ValueError(f"{field} must be boolean or null")
             scene[field] = value
 
     for field, value in record.items():
         if field not in scene:
-            scene[field] = copy.deepcopy(value)
+            if field not in _OPTIONAL_SCENE_FIELDS:
+                raise ValueError(f"unknown scene field: {field}")
+            if field == "parent_step_id":
+                if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                    raise ValueError("parent_step_id must be a non-negative integer or null")
+                scene[field] = value
+            elif field == "carried_forward":
+                if not isinstance(value, bool):
+                    raise ValueError("carried_forward must be boolean")
+                scene[field] = value
+            else:
+                scene[field] = _json_safe(value, field)
     return scene
 
 
@@ -170,6 +219,11 @@ def scene_transition(
     after_scene = normalize_scene(after)
     if after_scene["parent_scene_id"] != before_scene["scene_id"]:
         raise ValueError("after.parent_scene_id must equal before.scene_id")
+    if after_scene["scene_id"] == before_scene["scene_id"]:
+        raise ValueError("scene IDs must be distinct")
+    for field in ("session_id", "client", "dataset", "dataset_version"):
+        if after_scene[field] != before_scene[field]:
+            raise ValueError(f"transition {field} must not change")
     transition = after_scene
     if verdict is not None:
         transition["verdict"] = verdict

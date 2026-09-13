@@ -1,4 +1,6 @@
 import copy
+import json
+from pathlib import Path
 
 import pytest
 
@@ -107,6 +109,71 @@ def test_normalize_scene_rejects_non_json_numbers_and_wrong_shapes():
             normalize_scene(scene)
 
 
+@pytest.mark.parametrize("target", ["air", "fat", "soft", "spongy", "bone"])
+@pytest.mark.parametrize("direction", ["increase", "decrease"])
+def test_normalize_scene_accepts_canonical_tissues_and_directions(target, direction):
+    scene = valid_scene(
+        goal={"target": target, "direction": direction},
+        command={"attribute": "opacity", "target": target, "direction": direction},
+    )
+
+    normalized = normalize_scene(scene)
+
+    assert normalized["goal"] == {"target": target, "direction": direction}
+    assert normalized["command"]["target"] == target
+
+
+@pytest.mark.parametrize("field,value", [("goal", {"target": "bones", "direction": "increase"}),
+                                          ("goal", {"target": "bone", "direction": "up"}),
+                                          ("command", {"attribute": "opacity", "target": "marrow", "direction": "increase"}),
+                                          ("command", {"attribute": "opacity", "target": "bone", "direction": "up"})])
+def test_normalize_scene_rejects_noncanonical_tissues_and_directions(field, value):
+    scene = valid_scene(**{field: value})
+
+    with pytest.raises(ValueError):
+        normalize_scene(scene)
+
+
+@pytest.mark.parametrize("verdict", ["better", "worse", "tie", "A", "B"])
+def test_normalize_scene_accepts_approved_verdicts(verdict):
+    scene = normalize_scene(valid_scene(verdict=verdict))
+
+    assert scene["verdict"] == verdict
+
+
+@pytest.mark.parametrize("verdict", ["accepted", "maybe", 1, True])
+def test_normalize_scene_rejects_unapproved_verdicts(verdict):
+    with pytest.raises(ValueError):
+        normalize_scene(valid_scene(verdict=verdict))
+
+
+def test_normalize_scene_rejects_nonfinite_nested_optional_fields_and_unknown_fields():
+    with pytest.raises(ValueError):
+        normalize_scene(valid_scene(client_metadata={"render": {"samples": float("inf")}}))
+    with pytest.raises(ValueError):
+        normalize_scene(valid_scene(unexpected_field={"ok": True}))
+
+
+def test_normalize_scene_preserves_extractor_compatibility_mapping():
+    scene = normalize_scene(valid_scene(parent_step_id=7, carried_forward=True))
+
+    assert scene["parent_step_id"] == 7
+    assert scene["carried_forward"] is True
+
+
+def test_scene_fixture_documents_current_extractor_gap():
+    fixture_path = Path(__file__).parent / "fixtures" / "scene_transition.json"
+    records = json.loads(fixture_path.read_text())
+
+    normalized = [normalize_scene(record) for record in records]
+
+    assert normalized[1]["parent_scene_id"] == normalized[0]["scene_id"]
+    assert normalized[1]["parent_step_id"] == 1
+    assert normalized[1]["carried_forward"] is True
+    # rl.extract_pairs still consumes step_id/parent_step_id rows, not scene IDs.
+    assert "step_id" not in normalized[1]
+
+
 def test_scene_transition_requires_parent_and_preserves_optional_verdict_fields():
     before = normalize_scene(valid_scene(scene_id="s:0", parent_scene_id=None))
     after = valid_scene(scene_id="s:1", parent_scene_id="s:0")
@@ -129,6 +196,24 @@ def test_scene_transition_requires_parent_and_preserves_optional_verdict_fields(
 def test_scene_transition_rejects_mismatched_parent():
     before = normalize_scene(valid_scene(scene_id="s:0", parent_scene_id=None))
     after = valid_scene(scene_id="s:1", parent_scene_id="other")
+
+    with pytest.raises(ValueError):
+        scene_transition(before, after)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"session_id": "other"},
+        {"client": "vrui"},
+        {"dataset": "other"},
+        {"dataset_version": "sha256:other"},
+        {"scene_id": "s:0"},
+    ],
+)
+def test_scene_transition_rejects_incompatible_or_duplicate_scene(change):
+    before = normalize_scene(valid_scene(scene_id="s:0", parent_scene_id=None))
+    after = valid_scene(scene_id="s:1", parent_scene_id="s:0", **change)
 
     with pytest.raises(ValueError):
         scene_transition(before, after)
