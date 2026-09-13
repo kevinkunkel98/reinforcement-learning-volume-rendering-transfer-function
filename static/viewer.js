@@ -9,6 +9,9 @@
   const fallbackEl = document.getElementById("current-image");
   let renderer;
   let renderWindow;
+  let openGLRenderWindow;
+  let interactor;
+  let interactorBound = false;
   let volume;
   let mapper;
   let imageData;
@@ -19,6 +22,25 @@
   let loadController;
   let appliedCameraState = null;
   let cameraBaseScale = 1;
+
+  function destroyViewer() {
+    if (interactor) {
+      if (interactorBound) interactor.unbindEvents();
+      interactor.delete();
+    }
+    if (openGLRenderWindow) openGLRenderWindow.delete();
+    if (renderWindow) renderWindow.delete();
+    if (renderer) renderer.delete();
+    interactor = undefined;
+    interactorBound = false;
+    openGLRenderWindow = undefined;
+    renderWindow = undefined;
+    renderer = undefined;
+    camera = undefined;
+    volume = undefined;
+    mapper = undefined;
+    imageData = undefined;
+  }
 
   function setStatus(message, error = false) {
     statusEl.textContent = message;
@@ -196,13 +218,19 @@
       if (!isCurrentLoad(generation)) return false;
       datasetName = name;
       if (!renderer) {
-        const openGLRenderWindow = vtk.Rendering.OpenGL.vtkRenderWindow.newInstance();
+        openGLRenderWindow = vtk.Rendering.OpenGL.vtkRenderWindow.newInstance();
         renderer = vtk.Rendering.Core.vtkRenderer.newInstance({ background: [0, 0, 0] });
         renderWindow = vtk.Rendering.Core.vtkRenderWindow.newInstance();
+        interactor = vtk.Rendering.Core.vtkRenderWindowInteractor.newInstance();
         renderWindow.addRenderer(renderer);
         renderWindow.addView(openGLRenderWindow);
+        renderWindow.setInteractor(interactor);
+        interactor.setView(openGLRenderWindow);
         openGLRenderWindow.setContainer(viewerEl);
         openGLRenderWindow.setSize(viewerEl.clientWidth || 640, viewerEl.clientHeight || 480);
+        interactor.initialize();
+        interactor.bindEvents(viewerEl);
+        interactorBound = true;
         camera = renderer.getActiveCamera();
       }
       buildImageData(loaded.metadata, loaded.values);
@@ -220,6 +248,7 @@
       return true;
     } catch (error) {
       if (!isCurrentLoad(generation) || error.name === "AbortError") return false;
+      destroyViewer();
       viewerEl.hidden = true;
       fallbackEl.hidden = false;
       setStatus(`Local viewer unavailable: ${error.message}`, true);

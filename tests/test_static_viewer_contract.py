@@ -81,6 +81,24 @@ def test_viewer_renders_locally_and_does_not_request_png_frames():
     assert "vtk-viewer" in viewer
 
 
+def test_viewer_wires_and_initializes_render_window_interactor():
+    viewer = read("viewer.js")
+    assert "vtkRenderWindowInteractor.newInstance()" in viewer
+    assert "interactor.setView(openGLRenderWindow)" in viewer
+    assert "renderWindow.setInteractor(interactor)" in viewer
+    assert "interactor.initialize()" in viewer
+    assert "interactor.bindEvents(viewerEl)" in viewer
+
+
+def test_viewer_tears_down_partial_vtk_setup_on_initialization_failure():
+    viewer = read("viewer.js")
+    assert "interactor.unbindEvents()" in viewer
+    assert "openGLRenderWindow.delete()" in viewer
+    assert "renderWindow.delete()" in viewer
+    assert "renderer.delete()" in viewer
+    assert "fallbackEl.hidden = false" in viewer
+
+
 def test_app_integrates_viewer_with_state_and_dataset_changes():
     app = read("app.js")
     assert "window.volumeViewer" in app or "volumeViewer" in app
