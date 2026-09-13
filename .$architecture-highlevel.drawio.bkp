@@ -17,7 +17,7 @@
           <mxGeometry height="70" width="200" x="860" y="55" as="geometry" />
         </mxCell>
         <mxCell id="searcheval" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1a4f8a;fontColor=#1a4f8a;fontSize=13;fontStyle=1;shadow=1;" value="Search &amp;amp; Evaluation&lt;br&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#5a7a9a&quot;&gt;hill-climbing baseline + evaluators&lt;/font&gt;" vertex="1">
-          <mxGeometry height="70" width="200" x="960" y="290" as="geometry" />
+          <mxGeometry height="70" width="200" x="860" y="280" as="geometry" />
         </mxCell>
         <mxCell id="rl" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#e4f4ec;strokeColor=#1e6b3c;strokeWidth=3;fontColor=#1e6b3c;fontSize=13;fontStyle=1;shadow=1;" value="Reinforcement Learning&lt;br&gt;&lt;font style=&quot;font-size: 10px&quot; color=&quot;#3e8a5f&quot;&gt;offline train/eval, online learning,&lt;br&gt;RLHF — opacity policy served live&lt;/font&gt;" vertex="1">
           <mxGeometry height="90" width="240" x="440" y="270" as="geometry" />
