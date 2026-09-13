@@ -287,7 +287,9 @@ def test_scene_transition_rejects_mismatched_parent():
 )
 def test_scene_transition_rejects_incompatible_or_duplicate_scene(change):
     before = normalize_scene(valid_scene(scene_id="s:0", parent_scene_id=None))
-    after = valid_scene(scene_id="s:1", parent_scene_id="s:0", **change)
+    after_overrides = {"scene_id": "s:1", "parent_scene_id": "s:0"}
+    after_overrides.update(change)
+    after = valid_scene(**after_overrides)
 
     with pytest.raises(ValueError):
         scene_transition(before, after)

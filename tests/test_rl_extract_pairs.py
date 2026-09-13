@@ -135,6 +135,8 @@ def test_default_extractor_reads_scene_transition_wrappers(tmp_path, monkeypatch
     branch = next(pair for pair in pairs if pair["source"] == "branch")
     assert branch["observation_a"]["before_features"]["mean"] == 2
     assert branch["observation_b"]["before_features"]["mean"] == 1
+    assert branch["observation_a"]["after_features"]["mean"] == 2
+    assert branch["observation_b"]["after_features"]["mean"] == 1
     assert branch["camera"]["position"] == [1, 0, 1]
     assert branch["dataset"] == "synthetic"
 

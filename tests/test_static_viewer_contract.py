@@ -96,13 +96,13 @@ def test_app_integrates_viewer_with_state_and_dataset_changes():
     assert "captureSceneRoot" in app
     assert "before.scene_id" in app
     assert 'attribute: "neutral"' in app
-    assert "sceneSequence++" in app
+    assert "sceneSequence += 1" in app
     assert "sessionStorage" in app
     assert "sceneNonce" in app
     assert "randomUUID" in app
     assert "setItem(\"localViewerSceneNonce\"" not in app
     assert "sceneSequence" in app
-    assert 'getItem("localViewerSceneSequence")' in app
+    assert "getItem(sceneSequenceKey" in app
     assert "sceneSequenceKey" in app
     assert "setItem(sceneSequenceKey" in app
     assert "transitionIdentity" in app

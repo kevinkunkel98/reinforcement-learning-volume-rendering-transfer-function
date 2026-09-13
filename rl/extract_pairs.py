@@ -40,9 +40,12 @@ def _scene_rows(path):
             if event["before_scene"] is not None:
                 before = dict(event["before_scene"])
                 before.setdefault("event_id", event.get("event_id"))
+                before["_state_features"] = before.get("features_after")
                 rows[before["scene_id"]] = before
             after = dict(event["after_scene"])
             after.setdefault("event_id", event.get("event_id"))
+            after["_state_features"] = after.get("features_after")
+            after["_transition_before_features"] = after.get("features_before")
             rows[after["scene_id"]] = after
     return list(rows.values())
 
@@ -212,6 +215,27 @@ def _with_step(observation, row):
     return result
 
 
+def _preferred_observation(item):
+    row = item["row"]
+    if row.get("_state_features") is not None:
+        return _state_observation(
+            {"after_features": row["_state_features"], "after_image": row.get("after_image")},
+            "after", row.get("step_id"),
+        )
+    return _with_step(item["observation"], row)
+
+
+def _transition_before_observation(item):
+    row = item["row"]
+    features = row.get("_transition_before_features")
+    if features is not None:
+        return _state_observation(
+            {"after_features": features, "after_image": row.get("before_image")},
+            "after", row.get("parent_step_id"),
+        )
+    return _preferred_observation(item)
+
+
 def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
                   out_path=DEFAULT_OUT, preferences_path=None, scenes_path=DEFAULT_SCENES):
     if preferences_path is None:
@@ -289,8 +313,8 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
                            candidate["command"] == item["command"] and
                            candidate["row"].get("step_id") == row["parent_step_id"]), None)
             if parent and (row.get("accepted") is True or row.get("ended") is True):
-                add("branch", _with_step(item["observation"], row),
-                    _with_step(parent["observation"], parent["row"]), item["command"], 1,
+                add("branch", _preferred_observation(item),
+                    _transition_before_observation(item), item["command"], 1,
                     (session, episode, step_id), row)
 
     for items in by_episode.values():
