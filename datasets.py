@@ -43,6 +43,14 @@ DATASETS = {
             "SHA256/4507b664690840abb6cb9af2d919377ffc4ef75b167cb6fd0f747befdb12e38e"
         ),
         "sha256": "4507b664690840abb6cb9af2d919377ffc4ef75b167cb6fd0f747befdb12e38e",
+        # This scan's own axis convention puts the body's long axis on the
+        # default camera's view direction, so azimuth/elevation=(0,0) looks
+        # straight down the body like a stack of axial slices, not at the
+        # torso. elevation=80 (not 90 -- VTK's Azimuth/Elevation hits gimbal
+        # lock exactly at 90, warns and resets the up-vector unpredictably)
+        # tilts to a natural torso-facing view. Found empirically, not
+        # derived from the NRRD header.
+        "default_camera": {"azimuth": 0.0, "elevation": 80.0, "zoom": 1.0},
     },
     "ct_skull": {
         "filename": "CT-brain.nrrd",
@@ -84,6 +92,10 @@ DATASETS = {
         # first and got the axis wrong twice. No axis permutation needed,
         # spacing is unaffected: just this one axis reversed.
         "flip_axis": 1,
+        # The global DEFAULT_CAMERA (camera.DEFAULT_CAMERA, azimuth=30/
+        # elevation=20) is a side profile for this scan's axis convention,
+        # not a face-forward view. Found empirically by sweeping azimuth.
+        "default_camera": {"azimuth": 280.0, "elevation": 0.0, "zoom": 1.0},
     },
 }
 
@@ -165,6 +177,16 @@ def load_dataset(name: str = "synthetic"):
 
 def list_datasets() -> list:
     return ["synthetic"] + list(DATASETS.keys())
+
+
+def default_camera_for(name: str) -> dict:
+    """Starting camera for `name`, overridden per-dataset where the shared
+    camera.DEFAULT_CAMERA doesn't give a natural, face-forward framing for
+    that scan's own axis convention (see DATASETS entries). Always returns
+    a fresh dict -- safe to mutate."""
+    from camera import DEFAULT_CAMERA
+    override = DATASETS.get(name, {}).get("default_camera")
+    return dict(override) if override else dict(DEFAULT_CAMERA)
 
 
 def _dataset_version(name: str) -> str:

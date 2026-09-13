@@ -8,7 +8,7 @@ import uuid
 import numpy as np
 from PIL import Image
 
-from datasets import load_dataset
+from datasets import default_camera_for, load_dataset
 from transfer import default_params, opacity_mass, TISSUE_BANDS
 from render import render, grab, features
 from commands import parse_command, apply_command, STRENGTH_WORDS, _find_or_create_peak
@@ -50,7 +50,7 @@ def load_camera() -> dict:
     if os.path.exists(CAMERA_STATE_PATH):
         with open(CAMERA_STATE_PATH) as f:
             return json.load(f)
-    return dict(DEFAULT_CAMERA)
+    return default_camera_for(_DATASET_NAME)
 
 
 def save_camera(camera: dict) -> None:

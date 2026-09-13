@@ -30,7 +30,7 @@ from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from rl.serve import run_policy
-from datasets import _dataset_version, dataset_metadata, get_volume_chunk, list_datasets, load_dataset
+from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import render as render_module
 from render import features, grab, render
@@ -163,7 +163,7 @@ class Session:
             self.session_id = data.get("session_id") or self._new_session_id()
             return
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, None, False, 0, self.session_id, dict(DEFAULT_CAMERA))
+        step = _render_step(default_params(), None, None, None, False, 0, self.session_id, default_camera_for(_dataset_name))
         self.history = [step]
         self.cursor = 0
         self.save()
@@ -199,7 +199,7 @@ class Session:
     def switch_dataset(self, name: str):
         set_dataset(name)  # raises ValueError for an unknown name
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, None, False, 0, self.session_id, dict(DEFAULT_CAMERA))
+        step = _render_step(default_params(), None, None, None, False, 0, self.session_id, default_camera_for(name))
         self.history = [step]
         self.cursor = 0
         self.pending = None
