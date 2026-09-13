@@ -141,7 +141,11 @@ def test_normalize_scene_accepts_approved_verdicts(verdict):
     assert scene["verdict"] == verdict
 
 
-@pytest.mark.parametrize("verdict", ["accepted", "maybe", 1, True])
+def test_normalize_scene_accepts_accepted_verdict_for_ui_compatibility():
+    assert normalize_scene(valid_scene(verdict="accepted"))["verdict"] == "accepted"
+
+
+@pytest.mark.parametrize("verdict", ["rejected", "maybe", 1, True])
 def test_normalize_scene_rejects_unapproved_verdicts(verdict):
     with pytest.raises(ValueError):
         normalize_scene(valid_scene(verdict=verdict))
@@ -152,6 +156,36 @@ def test_normalize_scene_rejects_nonfinite_nested_optional_fields_and_unknown_fi
         normalize_scene(valid_scene(client_metadata={"render": {"samples": float("inf")}}))
     with pytest.raises(ValueError):
         normalize_scene(valid_scene(unexpected_field={"ok": True}))
+
+
+def test_normalize_scene_rejects_unknown_nested_fixed_object_keys():
+    for field, value in (
+        ("volume", {**valid_scene()["volume"], "extra": True}),
+        ("camera", {**valid_scene()["camera"], "extra": True}),
+        ("goal", {**valid_scene()["goal"], "extra": True}),
+        ("command", {**valid_scene()["command"], "extra": True}),
+    ):
+        with pytest.raises(ValueError):
+            normalize_scene(valid_scene(**{field: value}))
+
+
+def test_normalize_scene_preserves_extensible_client_metadata():
+    metadata = {"renderer": "vtk.js", "settings": {"samples": 32}}
+
+    scene = normalize_scene(valid_scene(client_metadata=metadata))
+
+    assert scene["client_metadata"] == metadata
+
+
+def test_normalize_scene_accepts_camera_only_scene_without_goal():
+    scene = valid_scene()
+    scene.pop("goal")
+    scene["command"] = {"attribute": "camera"}
+
+    normalized = normalize_scene(scene)
+
+    assert "goal" not in normalized
+    assert normalized["command"] == {"attribute": "camera"}
 
 
 def test_normalize_scene_preserves_extractor_compatibility_mapping():
@@ -217,6 +251,35 @@ def test_scene_transition_rejects_incompatible_or_duplicate_scene(change):
 
     with pytest.raises(ValueError):
         scene_transition(before, after)
+
+
+def test_scene_transition_rejects_volume_metadata_changes_but_allows_goal_changes():
+    before = normalize_scene(valid_scene(scene_id="s:0", parent_scene_id=None))
+    after = valid_scene(
+        scene_id="s:1",
+        parent_scene_id="s:0",
+        goal={"target": "fat", "direction": "decrease"},
+        volume={**valid_scene()["volume"], "spacing": [0.8, 0.7, 1.0]},
+    )
+
+    with pytest.raises(ValueError):
+        scene_transition(before, after)
+
+    after["volume"] = before["volume"]
+    transition = scene_transition(before, after)
+    assert transition["goal"] == {"target": "fat", "direction": "decrease"}
+
+
+def test_scene_transition_accepts_camera_only_after_opacity_scene():
+    before = normalize_scene(valid_scene(scene_id="s:0", parent_scene_id=None))
+    after = valid_scene(scene_id="s:1", parent_scene_id="s:0")
+    after.pop("goal")
+    after["command"] = {"attribute": "camera"}
+
+    transition = scene_transition(before, after)
+
+    assert transition["command"] == {"attribute": "camera"}
+    assert "goal" not in transition
 
 
 def test_normalize_scene_does_not_mutate_input():

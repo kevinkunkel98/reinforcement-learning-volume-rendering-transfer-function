@@ -17,7 +17,6 @@ _REQUIRED_SCENE_FIELDS = (
     "volume",
     "transfer_function",
     "camera",
-    "goal",
     "command",
 )
 _OPTIONAL_TRANSITION_FIELDS = ("verdict", "accepted", "ended")
@@ -34,13 +33,21 @@ _OPTIONAL_SCENE_FIELDS = {
 }
 _TISSUES = {"air", "fat", "soft", "spongy", "bone"}
 _DIRECTIONS = {"increase", "decrease"}
-_VERDICTS = {"better", "worse", "tie", "A", "B"}
+_VERDICTS = {"accepted", "better", "worse", "tie", "A", "B"}
 
 
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{field} must be an object")
     return value
+
+
+def _fixed_mapping(value: Any, field: str, keys: set[str]) -> Mapping[str, Any]:
+    mapping = _mapping(value, field)
+    unknown = set(mapping) - keys
+    if unknown:
+        raise ValueError(f"{field} has unknown fields: {', '.join(sorted(unknown))}")
+    return mapping
 
 
 def _identifier(value: Any, field: str, *, allow_none: bool = False) -> str | None:
@@ -126,7 +133,7 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
     if scene["client"] not in ("web", "vrui"):
         raise ValueError("client must be 'web' or 'vrui'")
 
-    volume = _mapping(record["volume"], "volume")
+    volume = _fixed_mapping(record["volume"], "volume", {"dimensions", "spacing", "scalar_type", "orientation"})
     for field in ("dimensions", "spacing", "scalar_type", "orientation"):
         if field not in volume:
             raise ValueError(f"volume missing field: {field}")
@@ -143,7 +150,7 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
     transfer_function = record["transfer_function"]
     scene["transfer_function"] = _vector(transfer_function, "transfer_function", 24)
 
-    camera = _mapping(record["camera"], "camera")
+    camera = _fixed_mapping(record["camera"], "camera", {"position", "focal_point", "view_up", "zoom"})
     for field in ("position", "focal_point", "view_up", "zoom"):
         if field not in camera:
             raise ValueError(f"camera missing field: {field}")
@@ -157,28 +164,30 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
         "zoom": zoom,
     }
 
-    goal = _mapping(record["goal"], "goal")
-    goal_target = _text_value(goal.get("target"), "goal.target")
-    goal_direction = _text_value(goal.get("direction"), "goal.direction")
-    if goal_target not in _TISSUES or goal_direction not in _DIRECTIONS:
-        raise ValueError("goal target or direction is not canonical")
-    scene["goal"] = {
-        "target": goal_target,
-        "direction": goal_direction,
-    }
-
     command = _mapping(record["command"], "command")
-    if command.get("attribute") != "opacity":
-        raise ValueError("command.attribute must be 'opacity'")
-    command_target = _text_value(command.get("target"), "command.target")
-    command_direction = _text_value(command.get("direction"), "command.direction")
-    if command_target not in _TISSUES or command_direction not in _DIRECTIONS:
-        raise ValueError("command target or direction is not canonical")
-    scene["command"] = {
-        "attribute": "opacity",
-        "target": command_target,
-        "direction": command_direction,
-    }
+    attribute = command.get("attribute")
+    if attribute == "camera":
+        command = _fixed_mapping(command, "command", {"attribute"})
+        scene["command"] = {"attribute": "camera"}
+    elif attribute == "opacity":
+        command = _fixed_mapping(command, "command", {"attribute", "target", "direction"})
+        command_target = _text_value(command.get("target"), "command.target")
+        command_direction = _text_value(command.get("direction"), "command.direction")
+        if command_target not in _TISSUES or command_direction not in _DIRECTIONS:
+            raise ValueError("command target or direction is not canonical")
+        scene["command"] = {
+            "attribute": "opacity",
+            "target": command_target,
+            "direction": command_direction,
+        }
+        goal = _fixed_mapping(record.get("goal"), "goal", {"target", "direction"})
+        goal_target = _text_value(goal.get("target"), "goal.target")
+        goal_direction = _text_value(goal.get("direction"), "goal.direction")
+        if goal_target not in _TISSUES or goal_direction not in _DIRECTIONS:
+            raise ValueError("goal target or direction is not canonical")
+        scene["goal"] = {"target": goal_target, "direction": goal_direction}
+    else:
+        raise ValueError("command.attribute must be 'opacity' or 'camera'")
 
     for field in _OPTIONAL_TRANSITION_FIELDS:
         if field in record:
@@ -221,7 +230,7 @@ def scene_transition(
         raise ValueError("after.parent_scene_id must equal before.scene_id")
     if after_scene["scene_id"] == before_scene["scene_id"]:
         raise ValueError("scene IDs must be distinct")
-    for field in ("session_id", "client", "dataset", "dataset_version"):
+    for field in ("session_id", "client", "dataset", "dataset_version", "volume"):
         if after_scene[field] != before_scene[field]:
             raise ValueError(f"transition {field} must not change")
     transition = after_scene
