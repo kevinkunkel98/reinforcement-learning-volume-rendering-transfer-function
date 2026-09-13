@@ -427,9 +427,25 @@ weights, so both can always be compared against each other.
 sampling, same action, same observation shape (still including the free
 $phi$ value) — and overrides only the reward. As before, it caches the
 previous step's rendered features so a rollout of $k$ steps costs $k+1$
-renders, not $2k$; measured on the synthetic phantom: *109 ms per render*,
-the reason this extension's step budgets stay two orders of magnitude
-below the automatic-metric agents'.
+renders, not $2k$.
+
+An earlier version of this document measured *109 ms per render* on the
+synthetic phantom and used that to justify keeping this extension's step
+budgets two orders of magnitude below the automatic-metric agents'. That
+number was almost entirely native offscreen-GL-context creation cost, not
+raycast cost: `render.render()` built a brand-new `vtkRenderWindow` on
+every call, and any loop rendering hundreds of times in one process (this
+extension's training loop, and `rl/pretrain_reward.py`'s synthetic-pair
+generation) reliably hung after roughly a minute of wall-clock time,
+independent of total workload size — root-caused with `sample` on the
+hung process down to a macOS WindowServer/IOKit surface-bind call
+(`IOAccelCreateSurface`) that stops responding after enough repeated
+context-creation requests from one non-windowed process. `render.py` now
+caches and reuses the render pipeline per volume instead of rebuilding it
+every call, which removes the hang entirely and brings steady-state cost
+down to *≈ 7 ms per render* (measured: 400 renders in 2.9 s with one
+reused window) — freeing this extension's step budgets from the
+render-cost constraint that originally motivated them.
 
 The reward itself is no longer the ensemble's raw output. Given $K$ member
 scores $R_(theta_1)(z), dots, R_(theta_K)(z)$ (each already remapped via
@@ -471,6 +487,31 @@ back into training:
   policy produced which image; verdicts are appended only to a separate
   results file.
 
+== Growing the real preference volume
+
+Extraction alone does not create signal that was never recorded — it only
+recovers what is already there. Three ways to add real labeled pairs,
+weakest effort first:
+
++ *Ordinary chat-UI usage* — thumbs up/down while using `server.py`
+  normally. Zero extra effort; joined to rendered steps as `thumbs` pairs
+  (weight $0.4$) by `rl/extract_pairs.py`'s default `--feedback` path.
++ *Human-judged hill-climbing* — `python mvp.py --cmd "..." --learn
+  --human --steps 10` logs every judged step to `out/preferences.jsonl`
+  via `log_preference()` — a *third*, separate file from `extract_pairs`'s
+  three defaults (`out/log.jsonl`, `out/feedback.jsonl`,
+  `out/rlhf_preferences.jsonl`). It must be pointed at explicitly —
+  `rl/extract_pairs.py --preferences out/preferences.jsonl` — or these
+  labels are silently never extracted.
++ *Dedicated labeling* — `python -m rl.collect_preferences --n-pairs 50
+  --rater-id <name>` gets a batch of `thumbs`-weighted pairs in one
+  sitting instead of accumulating incidentally.
+
+None of these raises a pair's *source weight* — a dedicated session still
+produces $0.4$-weight `thumbs` pairs, same as passive usage; only explicit
+branch comparisons reach $1.0$. Growing $n$ is what turns fine-tuned
+accuracy from a plumbing check into an actual result.
+
 #note(title: "Scope", color: rgb("#8a2e2e"))[
   End-to-end mechanics are validated against real data — extraction,
   pretraining, fine-tuning, evaluation, and RL training against the
@@ -481,6 +522,9 @@ back into training:
   crashed it outright. What remains a pilot is *volume*: real usage has
   produced only a handful of extractable pairs so far, so fine-tuned
   accuracy numbers are not yet a generalizable result and are reported
-  honestly as such, per the design's explicit methodological stance.
+  honestly as such, per the design's explicit methodological stance — a
+  real 2000-step RL training run against this pilot-scale fine-tuned
+  model shows an essentially flat learned-reward score across training,
+  the expected signature of too little data, not a training bug.
   Camera-viewpoint RLHF is out of scope for now.
 ]
