@@ -418,6 +418,38 @@ def test_multi_target_list_commands_are_skipped_not_crashed(tmp_path):
     assert stats["skipped"] == 1
 
 
+def test_non_extractable_scene_commands_are_skipped(tmp_path):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 1, seed=1)
+    row["command"] = {"attribute": "neutral", "kind": "non_extractable"}
+    row.pop("goal", None)
+    write_jsonl(log, [row])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert pairs == []
+    assert stats["skipped"] == 1
+
+
+@pytest.mark.parametrize("original_command", [
+    {"target": None, "attribute": None, "direction": "reset"},
+    {"compound": [{"target": "bone", "attribute": "opacity", "direction": "set"}]},
+])
+def test_original_non_opacity_commands_do_not_become_training_goals(tmp_path, original_command):
+    log = tmp_path / "log.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    row = step("s", "e", 1, seed=1)
+    row["command"] = {"attribute": "neutral", "kind": "non_extractable"}
+    row["client_metadata"] = {"original_command": original_command}
+    write_jsonl(log, [row])
+
+    pairs, stats = extract_pairs(log_path=log, out_path=out)
+
+    assert pairs == []
+    assert stats["skipped"] == 1
+
+
 def test_current_log_feedback_schema_remains_supported(tmp_path):
     log = tmp_path / "log.jsonl"
     feedback = tmp_path / "feedback.jsonl"

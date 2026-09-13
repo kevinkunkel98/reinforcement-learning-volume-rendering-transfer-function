@@ -14,10 +14,19 @@ const sendBtn = el("send-btn");
 let sceneSnapshot = null;
 let sceneSequence = 0;
 let lastState = null;
+const sceneNonce = (() => {
+  const key = "localViewerSceneNonce";
+  let value = sessionStorage.getItem(key);
+  if (!value) {
+    value = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    sessionStorage.setItem(key, value);
+  }
+  return value;
+})();
 
 function nextSceneId(data, suffix = "") {
   sceneSequence += 1;
-  return `web:${data.session_id || "web-session"}:scene:${sceneSequence}${suffix}`;
+  return `web:${data.session_id || "web-session"}:${sceneNonce}:scene:${sceneSequence}${suffix}`;
 }
 
 function cameraForScene(current) {
@@ -31,9 +40,15 @@ function cameraForScene(current) {
 
 function sceneFromState(data, parentSceneId = null) {
   const current = data.current;
-  const command = current.cmd_dict?.camera
+  const rawCommand = current.cmd_dict || {};
+  const isOpacity = rawCommand.attribute === "opacity" &&
+    typeof rawCommand.target === "string" &&
+    (rawCommand.direction === "increase" || rawCommand.direction === "decrease");
+  const command = rawCommand.camera
     ? { attribute: "camera" }
-    : { attribute: "opacity", target: current.cmd_dict?.target || "soft", direction: current.cmd_dict?.direction || "increase" };
+    : isOpacity
+      ? { attribute: "opacity", target: rawCommand.target, direction: rawCommand.direction }
+      : { attribute: "neutral", kind: "non_extractable" };
   const scene = {
     scene_id: nextSceneId(data),
     parent_scene_id: parentSceneId,
@@ -53,7 +68,10 @@ function sceneFromState(data, parentSceneId = null) {
     transfer_function: current.params,
     camera: cameraForScene(current),
     command,
-    client_metadata: { source: "static-app", cursor: data.cursor, total: data.total },
+    client_metadata: {
+      source: "static-app", cursor: data.cursor, total: data.total,
+      ...(isOpacity || rawCommand.camera ? {} : { original_command: rawCommand }),
+    },
     features_before: lastState?.current?.features || null,
     features_after: current.features || null,
   };
@@ -67,7 +85,7 @@ function captureSceneRoot(data) {
   sceneSnapshot = sceneFromState(data, null);
   sceneSnapshot.command = { attribute: "neutral", kind: "root" };
   delete sceneSnapshot.goal;
-  sceneSnapshot.scene_id = `web:${data.session_id || "web-session"}:root`;
+  sceneSnapshot.scene_id = `web:${data.session_id || "web-session"}:${sceneNonce}:root`;
   lastState = data;
 }
 

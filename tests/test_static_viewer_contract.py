@@ -97,9 +97,19 @@ def test_app_integrates_viewer_with_state_and_dataset_changes():
     assert "before.scene_id" in app
     assert 'attribute: "neutral"' in app
     assert "sceneSequence++" in app
+    assert "sessionStorage" in app
+    assert "sceneNonce" in app
+    assert "sceneNonce" in app and "sceneSequence" in app
     assert "event_id: eventId" in app
     assert "sceneSnapshot = null" in app
     assert "showToast(`Scene transition failed" in app
+
+
+def test_app_does_not_fabricate_opacity_goals_for_non_opacity_commands():
+    app = read("app.js")
+    assert "non_extractable" in app
+    assert "original_command" in app
+    assert "cmd_dict?.target || \"soft\"" not in app
 
 
 def test_styles_cover_viewer_loading_error_and_fallback_states():

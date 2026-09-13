@@ -60,7 +60,7 @@ def _command(row):
     target = command.get("target_tissue", command.get("target"))
     direction = command.get("direction")
     attribute = command.get("attribute", "opacity")
-    if attribute != "opacity":
+    if attribute != "opacity" or command.get("kind") == "non_extractable":
         return None
     if not isinstance(target, str):
         # Multi-target commands (e.g. "show only bone and fat") carry a list;

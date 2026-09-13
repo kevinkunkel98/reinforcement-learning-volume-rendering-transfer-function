@@ -198,6 +198,20 @@ def test_normalize_scene_accepts_explicit_neutral_commands_without_goal(kind):
     assert normalized["command"] == {"attribute": "neutral", "kind": kind}
 
 
+def test_normalize_scene_accepts_non_extractable_command_with_parent():
+    scene = valid_scene(
+        command={"attribute": "neutral", "kind": "non_extractable"},
+        parent_scene_id="s:0",
+        client_metadata={"original_command": {"direction": "reset"}},
+    )
+    scene.pop("goal")
+
+    normalized = normalize_scene(scene)
+
+    assert normalized["command"] == {"attribute": "neutral", "kind": "non_extractable"}
+    assert normalized["parent_scene_id"] == "s:0"
+
+
 def test_normalize_scene_rejects_neutral_command_with_opacity_goal():
     scene = valid_scene(command={"attribute": "neutral", "kind": "root"})
 

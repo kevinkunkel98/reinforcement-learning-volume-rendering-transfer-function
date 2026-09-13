@@ -187,11 +187,11 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
     elif attribute == "neutral":
         command = _fixed_mapping(command, "command", {"attribute", "kind"})
         kind = _text_value(command.get("kind"), "command.kind")
-        if kind not in ("root", "dataset_boundary"):
-            raise ValueError("neutral command kind must be 'root' or 'dataset_boundary'")
+        if kind not in ("root", "dataset_boundary", "non_extractable"):
+            raise ValueError("neutral command kind is not supported")
         if "goal" in record:
             raise ValueError("neutral command cannot have a goal")
-        if record["parent_scene_id"] is not None:
+        if kind != "non_extractable" and record["parent_scene_id"] is not None:
             raise ValueError("neutral root/boundary scene must not have a parent")
         scene["command"] = {"attribute": "neutral", "kind": kind}
     elif attribute == "opacity":
