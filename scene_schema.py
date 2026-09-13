@@ -192,7 +192,7 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
         if "goal" in record:
             raise ValueError("neutral command cannot have a goal")
         if kind != "non_extractable" and record["parent_scene_id"] is not None:
-            raise ValueError("neutral root/boundary scene must not have a parent")
+            raise ValueError("parent_scene_id must be null for neutral root/boundary scene")
         scene["command"] = {"attribute": "neutral", "kind": kind}
     elif attribute == "opacity":
         command = _fixed_mapping(command, "command", {"attribute", "target", "direction"})
@@ -257,10 +257,10 @@ def scene_transition(
     after_scene = normalize_scene(after)
     if before_scene["dataset"] != after_scene["dataset"] or before_scene["dataset_version"] != after_scene["dataset_version"]:
         raise ValueError("dataset changes require a boundary root event")
+    if after_scene["scene_id"] == before_scene["scene_id"]:
+        raise ValueError("scene_id values must be distinct")
     if after_scene["parent_scene_id"] != before_scene["scene_id"]:
         raise ValueError("after.parent_scene_id must equal before.scene_id")
-    if after_scene["scene_id"] == before_scene["scene_id"]:
-        raise ValueError("scene IDs must be distinct")
     for field in ("session_id", "client"):
         if after_scene[field] != before_scene[field]:
             raise ValueError(f"transition {field} must not change")
