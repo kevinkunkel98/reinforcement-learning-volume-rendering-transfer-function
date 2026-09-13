@@ -180,14 +180,14 @@ def _validated_volume(volume: np.ndarray) -> np.ndarray:
         raise ValueError("volume must have three dimensions")
     if volume.size == 0 or not np.isfinite(volume).all():
         raise ValueError("volume values must be finite and non-empty")
-    return np.ascontiguousarray(volume, dtype=np.dtype("<f4"))
+    return np.asfortranarray(volume, dtype=np.dtype("<f4"))
 
 
 def iter_volume_chunks(volume: np.ndarray, chunk_bytes: int = DEFAULT_CHUNK_BYTES):
-    """Yield deterministic C-order float32 byte chunks for a 3D volume."""
+    """Yield little-endian float32 chunks in render.py's Fortran order."""
     _validate_chunk_bytes(chunk_bytes)
     volume = _validated_volume(volume)
-    raw = memoryview(volume).cast("B")
+    raw = memoryview(volume.ravel(order="F")).cast("B")
     for offset in range(0, raw.nbytes, chunk_bytes):
         yield raw[offset:offset + chunk_bytes].tobytes()
 
@@ -219,6 +219,8 @@ def dataset_metadata(name: str) -> dict:
         "spacing": list(spacing),
         "scalar_type": "float32",
         "byte_order": "little",
+        "order": "F",
+        "axis_mapping": "numpy axis0 -> VTK X; axis1 -> VTK Y; axis2 -> VTK Z",
         "orientation": "dataset-normalized",
         "intensity_range": [float(volume.min()), float(volume.max())],
         "chunk_bytes": DEFAULT_CHUNK_BYTES,
@@ -240,4 +242,5 @@ def get_volume_chunk(name: str, index: int) -> bytes:
     if index < 0 or index >= chunk_count:
         raise IndexError(f"chunk index out of range: {index}")
     offset = index * DEFAULT_CHUNK_BYTES
-    return memoryview(volume).cast("B")[offset:offset + DEFAULT_CHUNK_BYTES].tobytes()
+    raw = memoryview(volume.ravel(order="F")).cast("B")
+    return raw[offset:offset + DEFAULT_CHUNK_BYTES].tobytes()

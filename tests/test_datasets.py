@@ -64,6 +64,8 @@ def test_dataset_metadata_matches_loaded_volume(monkeypatch):
     assert metadata["spacing"] == [0.5, 0.6, 0.7]
     assert metadata["scalar_type"] == "float32"
     assert metadata["orientation"] == "dataset-normalized"
+    assert metadata["order"] == "F"
+    assert metadata["axis_mapping"] == "numpy axis0 -> VTK X; axis1 -> VTK Y; axis2 -> VTK Z"
     assert metadata["intensity_range"] == [0.0, 23.0]
     assert metadata["total_bytes"] == 24 * 4
     assert metadata["chunks"]
@@ -88,11 +90,11 @@ def test_metadata_chunk_descriptors_use_arithmetic_offsets(monkeypatch):
     ]
 
 
-def test_chunk_round_trip_reconstructs_float32_c_order_volume():
+def test_chunk_round_trip_reconstructs_float32_fortran_order_volume():
     volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)[:, :, ::-1]
 
     chunks = list(datasets.iter_volume_chunks(volume, chunk_bytes=16))
-    restored = np.frombuffer(b"".join(chunks), dtype=np.float32).reshape(volume.shape, order="C")
+    restored = np.frombuffer(b"".join(chunks), dtype="<f4").reshape(volume.shape, order="F")
 
     np.testing.assert_array_equal(restored, volume)
     assert [len(chunk) for chunk in chunks] == [16, 16, 16, 16, 16, 16]
@@ -112,7 +114,7 @@ def test_get_volume_chunk_uses_metadata_chunk_descriptors(monkeypatch):
 
     chunk = datasets.get_volume_chunk("synthetic", 1)
 
-    expected = np.ascontiguousarray(volume, dtype=np.dtype("<f4")).tobytes(order="C")
+    expected = np.asfortranarray(volume, dtype=np.dtype("<f4")).tobytes(order="F")
     assert load_calls == 1
     assert chunk == expected[16:32]
 
