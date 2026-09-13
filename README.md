@@ -103,6 +103,101 @@ The web UI supports:
 
 VR and web clients can use the same reward-data contract described below.
 
+## Local 3D Viewer
+
+The web UI uses a local `vtk.js` volume renderer when the local viewer is
+available. Start the server as usual:
+
+```bash
+python server.py
+```
+
+After a dataset is selected, the browser fetches normalized dataset metadata
+from `/api/datasets/<name>/metadata`, then downloads the binary `float32`
+volume from `/api/datasets/<name>/chunks/<index>`. Metadata includes dimensions,
+spacing, intensity range, orientation/version, byte order, storage order, and
+chunk descriptors. The browser validates the descriptors and reconstructs the
+volume before creating vtk.js image data. Existing NRRD files and the Python
+loader remain the source of truth; the transport avoids requiring NRRD parsing
+in the browser and preserves the loader's orientation and MRI rescaling rules.
+
+Camera interaction and transfer-function changes are browser-owned. vtk.js
+renders these changes locally after the initial volume upload; they do not
+request a new server-rendered frame. The transfer function remains the shared
+24-value vector used by the Python renderer and RL pipeline. Camera state uses
+the renderer-neutral form `position`, `focal_point`, `view_up`, and `zoom`.
+
+If metadata or chunk validation fails, or the local viewer is disabled, the UI
+keeps the existing PNG renderer available through its fallback mode. PNG images
+and image features are legacy compatibility, audit, blind-evaluation, and
+recovery fields. They are not the target visual representation for new local
+viewer preference data.
+
+### Scene transitions
+
+Each committed browser state is logged through `POST /api/scenes/transition`
+as renderer-neutral JSON. A transition links `after.parent_scene_id` to the
+previous `before.scene_id`; returning to an earlier state therefore records an
+explicit branch rather than relying on similar parameters. A typical record
+contains:
+
+```json
+{
+  "scene_id": "web:session-123:scene:7",
+  "parent_scene_id": "web:session-123:scene:6",
+  "session_id": "session-123",
+  "client": "web",
+  "dataset": "ct_cardio",
+  "dataset_version": "sha256:...",
+  "volume": {
+    "dimensions": [512, 512, 300],
+    "spacing": [0.7, 0.7, 1.0],
+    "scalar_type": "float32",
+    "orientation": "dataset-normalized"
+  },
+  "transfer_function": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+  "camera": {
+    "position": [0.0, 0.0, 1.0],
+    "focal_point": [0.0, 0.0, 0.0],
+    "view_up": [0.0, 1.0, 0.0],
+    "zoom": 1.0
+  },
+  "goal": {"target": "bone", "direction": "increase"},
+  "command": {"attribute": "opacity", "target": "bone", "direction": "increase"}
+}
+```
+
+The canonical schema accepts `client` values `web` and `vrui`. Both clients
+share dataset/version, volume, camera, transfer-function, goal, command, and
+parent-link fields. Client-specific details belong in `client_metadata`; VR
+hardware integration is not required for the current web viewer. Scene logs
+are written to `out/scene_transitions.jsonl` and do not contain binary volume
+chunks.
+
+### Preference collection
+
+Use the web viewer to issue commands, change the camera, and select Better or
+Worse on resulting states. The UI records scene IDs, parent IDs, dataset and
+camera state, transfer function, goal context, and optional `accepted` or
+`ended` verdicts. The same scene contract can later be submitted by `vrui`, so
+preferences from both clients can enter the same extraction pipeline.
+
+Export preference pairs from the session logs before reward-model training:
+
+```bash
+python -m rl.extract_pairs \
+  --log out/log.jsonl \
+  --feedback out/feedback.jsonl \
+  --preferences out/rlhf_preferences.jsonl \
+  --out out/pairs.jsonl
+```
+
+Branch pairs require explicit parent/child scene metadata; the extractor does
+not infer branches from matching transfer-function values. The resulting JSONL
+keeps scene and audit fields where available and remains compatible with the
+existing scalar feature and PNG fallback rows. Continue with the reward-model
+training and evaluation commands in [Reinforcement Learning](#reinforcement-learning).
+
 ## Reinforcement Learning
 
 The project has three related RL experiments.
