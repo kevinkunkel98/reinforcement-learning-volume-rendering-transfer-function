@@ -57,6 +57,7 @@ def _scene(scene_id, parent_scene_id):
             "view_up": [0, 1, 0],
             "zoom": 1,
         },
+        "goal": {"target": "bone", "direction": "increase"},
         "command": {"attribute": "camera"},
     }
 
@@ -155,6 +156,32 @@ def test_scene_transition_route_normalizes_and_appends_jsonl(tmp_path, monkeypat
     lines = (tmp_path / "out" / "scene_transitions.jsonl").read_text().splitlines()
     assert len(lines) == 1
     assert json.loads(lines[0]) == result
+
+
+def test_scene_transition_route_adds_extractor_metadata_and_preserves_state(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    before.update({"step_id": 0, "features_after": {"mean": 1, "std": 2, "coverage": 3, "entropy": 4}})
+    after = _scene("scene-1", "scene-0")
+    after.update({
+        "step_id": 1,
+        "parent_step_id": 0,
+        "carried_forward": True,
+        "accepted": True,
+        "ended": False,
+        "features_before": {"mean": 1, "std": 2, "coverage": 3, "entropy": 4},
+        "features_after": {"mean": 5, "std": 6, "coverage": 7, "entropy": 8},
+    })
+
+    result = asyncio.run(server.scene_transition_route({"before": before, "after": after}))
+
+    assert result["dataset"] == "synthetic"
+    assert result["dataset_version"] == "synthetic-v1"
+    assert result["camera"] == after["camera"]
+    assert result["parent_step_id"] == 0
+    assert result["carried_forward"] is True
+    assert result["accepted"] is True
+    assert result["step_id"] == 1
 
 
 def test_scene_transition_route_rejects_mismatched_parent(tmp_path, monkeypatch):

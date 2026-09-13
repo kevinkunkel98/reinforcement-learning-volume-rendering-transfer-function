@@ -118,9 +118,9 @@ def _metadata(row):
             row.get("step_id"))
 
 
-def _pair(a, b, command, source, label, metadata):
+def _pair(a, b, command, source, label, metadata, context=None):
     session, episode, a_step = metadata
-    return {
+    pair = {
         "observation_a": a,
         "observation_b": b,
         "command": command,
@@ -133,6 +133,12 @@ def _pair(a, b, command, source, label, metadata):
         "episode_id": episode,
         "step_id": a_step,
     }
+    if context:
+        for field in ("scene_id", "parent_scene_id", "dataset", "dataset_version", "camera", "goal",
+                      "client", "parent_step_id", "carried_forward", "accepted", "ended"):
+            if field in context:
+                pair[field] = context[field]
+    return pair
 
 
 def _pair_key(source, a, b, command, metadata):
@@ -231,12 +237,12 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
     seen = set()
     stats = Counter({"branch": 0, "trajectory": 0, "thumbs": 0, "skipped": skipped})
 
-    def add(source, first, second, command, label, metadata):
+    def add(source, first, second, command, label, metadata, context=None):
         key = _pair_key(source, first, second, command, metadata)
         if key in seen:
             return
         seen.add(key)
-        pairs.append(_pair(first, second, command, source, label, metadata))
+        pairs.append(_pair(first, second, command, source, label, metadata, context))
         stats[source] += 1
 
     for pair in canonical_pairs:
@@ -269,7 +275,7 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
             if parent and (row.get("accepted") is True or row.get("ended") is True):
                 add("branch", _with_step(item["observation"], row),
                     _with_step(parent["observation"], parent["row"]), item["command"], 1,
-                    (session, episode, step_id))
+                    (session, episode, step_id), row)
 
     for items in by_episode.values():
         items.sort(key=lambda item: item["row"].get("step_id", 0))
@@ -283,7 +289,7 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
                 if isinstance(current_step, int) and isinstance(earlier_step, int) and current_step - earlier_step >= 2:
                     add("trajectory", _with_step(current["observation"], current_row),
                         _with_step(earlier["observation"], earlier["row"]), current["command"], 1,
-                        _metadata(current_row))
+                         _metadata(current_row), current_row)
 
     by_step = {(row["row"].get("session_id"), row["row"].get("step_id")): row for row in logs}
     by_params = defaultdict(list)
@@ -316,7 +322,7 @@ def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
         step_id = row.get("step_id")
         add("thumbs", _state_observation(item["observation"], "after", step_id),
             _state_observation(item["observation"], "before", step_id), command, label,
-            _metadata(row))
+             _metadata(row), row)
 
     out_dir = os.path.dirname(output)
     if out_dir:

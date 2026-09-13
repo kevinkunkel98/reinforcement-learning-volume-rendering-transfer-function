@@ -78,6 +78,35 @@ def test_extracts_recoverable_branches_and_trajectory_pairs(tmp_path):
     assert stats["branch"] == 1
 
 
+def test_extracts_scene_transitions_and_preserves_scene_state_metadata(tmp_path):
+    log = tmp_path / "scene_transitions.jsonl"
+    out = tmp_path / "pairs.jsonl"
+    base = {
+        "session_id": "web-session", "episode_id": "web-session",
+        "dataset": "synthetic", "dataset_version": "synthetic-v1",
+        "camera": {"position": [1, 2, 3], "focal_point": [0, 0, 0],
+                   "view_up": [0, 1, 0], "zoom": 1},
+        "goal": {"target": "bone", "direction": "increase"},
+        "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
+    }
+    write_jsonl(log, [
+        {**base, "scene_id": "scene-0", "parent_scene_id": None, "step_id": 0,
+         "features_before": FEATURES, "features_after": FEATURES},
+        {**base, "scene_id": "scene-1", "parent_scene_id": "scene-0", "step_id": 1,
+         "parent_step_id": 0, "carried_forward": True, "accepted": True,
+         "features_before": FEATURES, "features_after": {**FEATURES, "mean": 2}},
+    ])
+
+    pairs, _ = extract_pairs(log_path=log, out_path=out)
+
+    branch = next(pair for pair in pairs if pair["source"] == "branch")
+    assert branch["dataset"] == "synthetic"
+    assert branch["dataset_version"] == "synthetic-v1"
+    assert branch["camera"]["position"] == [1, 2, 3]
+    assert branch["goal"] == base["goal"]
+    assert branch["parent_scene_id"] == "scene-0"
+
+
 def test_rejects_symlinked_input_output_collision(tmp_path):
     log = tmp_path / "log.jsonl"
     output = tmp_path / "pairs.jsonl"

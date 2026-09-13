@@ -189,10 +189,13 @@ def test_normalize_scene_accepts_camera_only_scene_without_goal():
 
 
 def test_normalize_scene_preserves_extractor_compatibility_mapping():
-    scene = normalize_scene(valid_scene(parent_step_id=7, carried_forward=True))
+    scene = normalize_scene(valid_scene(parent_step_id=7, carried_forward=True, step_id=8,
+                                        features_before={"mean": 1}, features_after={"mean": 2}))
 
     assert scene["parent_step_id"] == 7
     assert scene["carried_forward"] is True
+    assert scene["step_id"] == 8
+    assert scene["features_before"] == {"mean": 1}
 
 
 def test_scene_fixture_documents_current_extractor_gap():

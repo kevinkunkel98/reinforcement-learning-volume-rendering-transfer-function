@@ -15,7 +15,9 @@ let sceneSnapshot = null;
 let sceneSequence = 0;
 
 function cameraForScene(current) {
-  return window.volumeViewer?.getCamera() || {
+  const camera = window.volumeViewer?.getCamera();
+  if (camera?.position && camera?.focal_point && camera?.view_up) return camera;
+  return {
     position: [0, 0, 1], focal_point: [0, 0, 0], view_up: [0, 1, 0],
     zoom: current.camera?.zoom || 1,
   };
@@ -29,6 +31,9 @@ function sceneFromState(data, parentSceneId = null) {
   const scene = {
     scene_id: `web:${data.dataset}:${Date.now()}:${sceneSequence++}`,
     parent_scene_id: parentSceneId,
+    step_id: data.current.id,
+    parent_step_id: parentSceneId ? (sceneSnapshot?.step_id ?? null) : null,
+    carried_forward: Boolean(parentSceneId),
     session_id: data.session_id || "web-session",
     client: "web",
     dataset: data.dataset,
@@ -43,6 +48,8 @@ function sceneFromState(data, parentSceneId = null) {
     camera: cameraForScene(current),
     command,
     client_metadata: { source: "static-app", cursor: data.cursor, total: data.total },
+    features_before: current.features || null,
+    features_after: current.features || null,
   };
   if (command.attribute === "opacity") {
     scene.goal = { target: command.target, direction: command.direction };
@@ -55,9 +62,9 @@ function captureSceneRoot(data) {
   sceneSnapshot.scene_id = `web:root:${Date.now()}:${sceneSequence++}`;
 }
 
-async function postSceneTransition(data) {
+async function postSceneTransition(data, metadata = {}) {
   if (!sceneSnapshot) captureSceneRoot(data);
-  const after = sceneFromState(data, sceneSnapshot.scene_id);
+  const after = { ...sceneFromState(data, sceneSnapshot.scene_id), ...metadata };
   const response = await fetch("/api/scenes/transition", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -170,8 +177,14 @@ function buildFeedbackRow(step) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ step_id: step.id, rating }),
       });
-      if (r.status !== 200) return;
-      step.feedback = rating;
+       if (r.status !== 200) return;
+       const data = await r.json();
+       step.feedback = rating;
+       await postSceneTransition(data, {
+         verdict: rating === "up" ? "accepted" : "worse",
+         accepted: rating === "up",
+         ended: true,
+       });
       row.querySelectorAll(".feedback-btn").forEach((b) => b.classList.remove("active", "up", "down"));
       btn.classList.add("active", rating);
     });
@@ -229,7 +242,9 @@ async function judge(verdict) {
   });
   const data = await r.json();
   await refresh(data);
-  if (!data.pending) await postSceneTransition(data);
+  if (!data.pending) await postSceneTransition(data, {
+    verdict, accepted: verdict === "better", ended: true,
+  });
   if (!data.pending) appendMessage(data.current);
 }
 
@@ -263,7 +278,10 @@ textInput.addEventListener("keydown", (e) => {
 async function navigate(path) {
   const data = await (await fetch(path, { method: "POST" })).json();
   await refresh(data);
-  await postSceneTransition(data);
+  await postSceneTransition(data, {
+    carried_forward: true,
+    parent_step_id: sceneSnapshot?.step_id ?? null,
+  });
 }
 
 el("back-btn").addEventListener("click", () => navigate("/api/back"));

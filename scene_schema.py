@@ -28,6 +28,7 @@ _OPTIONAL_SCENE_FIELDS = {
     "after_image",
     "client_metadata",
     "parent_step_id",
+    "step_id",
     "carried_forward",
     *_OPTIONAL_TRANSITION_FIELDS,
 }
@@ -205,6 +206,10 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
             if field == "parent_step_id":
                 if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
                     raise ValueError("parent_step_id must be a non-negative integer or null")
+                scene[field] = value
+            elif field == "step_id":
+                if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                    raise ValueError("step_id must be a non-negative integer or null")
                 scene[field] = value
             elif field == "carried_forward":
                 if not isinstance(value, bool):
