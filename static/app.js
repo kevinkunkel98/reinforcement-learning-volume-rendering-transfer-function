@@ -13,15 +13,7 @@ const textInput = el("text-input");
 const sendBtn = el("send-btn");
 let sceneSnapshot = null;
 let lastState = null;
-const sceneNonce = (() => {
-  const key = "localViewerSceneNonce";
-  let value = sessionStorage.getItem(key);
-  if (!value) {
-    value = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    sessionStorage.setItem(key, value);
-  }
-  return value;
-})();
+const sceneNonce = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const sceneSequenceKey = "localViewerSceneSequence";
 const storedSceneSequence = Number.parseInt(sessionStorage.getItem(sceneSequenceKey) || "0", 10);
 let sceneSequence = Number.isSafeInteger(storedSceneSequence) && storedSceneSequence >= 0
@@ -34,6 +26,19 @@ function nextSceneId(data, suffix = "") {
   return `web:${data.session_id || "web-session"}:${sceneNonce}:scene:${sceneSequence}${suffix}`;
 }
 
+function transitionIdentity(data, before, metadata = {}) {
+  return encodeURIComponent(JSON.stringify({
+    nonce: sceneNonce,
+    session_id: data.session_id,
+    parent_scene_id: before.scene_id,
+    step_id: data.current.id,
+    command: data.current.cmd_dict,
+    params: data.current.params,
+    camera: data.current.camera,
+    metadata,
+  }));
+}
+
 function cameraForScene(current) {
   const camera = window.volumeViewer?.getCamera();
   if (camera?.position && camera?.focal_point && camera?.view_up) return camera;
@@ -43,7 +48,7 @@ function cameraForScene(current) {
   };
 }
 
-function sceneFromState(data, parentSceneId = null) {
+function sceneFromState(data, parentSceneId = null, sceneId = null) {
   const current = data.current;
   const rawCommand = current.cmd_dict || {};
   const isOpacity = rawCommand.attribute === "opacity" &&
@@ -55,7 +60,7 @@ function sceneFromState(data, parentSceneId = null) {
       ? { attribute: "opacity", target: rawCommand.target, direction: rawCommand.direction }
       : { attribute: "neutral", kind: "non_extractable" };
   const scene = {
-    scene_id: nextSceneId(data),
+    scene_id: sceneId || nextSceneId(data),
     parent_scene_id: parentSceneId,
     step_id: data.current.id,
     parent_step_id: parentSceneId ? (sceneSnapshot?.step_id ?? null) : null,
@@ -97,11 +102,12 @@ function captureSceneRoot(data) {
 async function postSceneTransition(data, metadata = {}) {
   if (!sceneSnapshot) captureSceneRoot(data);
   const before = sceneSnapshot;
-  const after = { ...sceneFromState(data, sceneSnapshot.scene_id), ...metadata };
+  const identity = transitionIdentity(data, before, metadata);
+  const after = { ...sceneFromState(data, sceneSnapshot.scene_id, `web:${data.session_id}:${sceneNonce}:transition:${identity}`), ...metadata };
   if (metadata.verdict) {
     after.scene_id = `${after.scene_id}:feedback:${metadata.verdict}`;
   }
-  const eventId = `web:${data.session_id}:${before.scene_id}:${after.scene_id}:${metadata.verdict || "state"}`;
+  const eventId = `web:${data.session_id}:${sceneNonce}:event:${identity}`;
   const response = await fetch("/api/scenes/transition", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -502,6 +508,7 @@ function highlightSelectOption(index) {
 async function chooseDataset(name) {
   if (name === state.dataset) { closeSelect(); return; }
   const previous = state.dataset;
+  const previousSceneId = sceneSnapshot?.scene_id || "none";
   const r = await fetch("/api/dataset", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -523,14 +530,15 @@ async function chooseDataset(name) {
   messagesEl.appendChild(emptyState);
   await refresh(data);
   captureSceneRoot(data);
+  const boundaryEventId = `web:${data.session_id}:${sceneNonce}:boundary:${previousSceneId}:${sceneSnapshot.scene_id}:${data.dataset}:${data.render_info.dataset_version}`;
   const boundaryResponse = await fetch("/api/scenes/transition", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       after: { ...sceneSnapshot, command: { attribute: "neutral", kind: "dataset_boundary" } },
       boundary: true,
-      event_id: `web:${data.session_id}:dataset:${data.dataset}`,
-      dedupe_key: `dataset:${data.dataset}:${data.render_info.dataset_version}`,
+       event_id: boundaryEventId,
+       dedupe_key: boundaryEventId,
     }),
   });
   if (boundaryResponse.ok) sceneSnapshot = await boundaryResponse.json();

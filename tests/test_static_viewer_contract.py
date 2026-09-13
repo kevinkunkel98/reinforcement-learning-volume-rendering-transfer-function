@@ -99,10 +99,14 @@ def test_app_integrates_viewer_with_state_and_dataset_changes():
     assert "sceneSequence++" in app
     assert "sessionStorage" in app
     assert "sceneNonce" in app
+    assert "randomUUID" in app
+    assert "setItem(\"localViewerSceneNonce\"" not in app
     assert "sceneSequence" in app
     assert 'getItem("localViewerSceneSequence")' in app
     assert "sceneSequenceKey" in app
     assert "setItem(sceneSequenceKey" in app
+    assert "transitionIdentity" in app
+    assert "sceneNonce" in app and "before.scene_id" in app
     assert "event_id: eventId" in app
     assert "sceneSnapshot = null" in app
     assert "showToast(`Scene transition failed" in app
@@ -113,6 +117,15 @@ def test_app_does_not_fabricate_opacity_goals_for_non_opacity_commands():
     assert "non_extractable" in app
     assert "original_command" in app
     assert "cmd_dict?.target || \"soft\"" not in app
+
+
+def test_dataset_boundary_identity_includes_document_and_scene_identity():
+    app = read("app.js")
+    assert "boundaryEventId" in app
+    assert "sceneNonce" in app
+    assert "data.session_id" in app
+    assert "sceneSnapshot.scene_id" in app
+    assert "boundaryEventId" in app and "dedupe_key: boundaryEventId" in app
 
 
 def test_styles_cover_viewer_loading_error_and_fallback_states():
