@@ -386,10 +386,14 @@ async def datasets_list():
 
 @app.get("/api/datasets/{name}/metadata")
 async def dataset_metadata_route(name: str):
+    if name not in list_datasets():
+        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
     try:
         return dataset_metadata(name)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/datasets/{name}/chunks/{index}")
@@ -397,13 +401,17 @@ async def dataset_chunk(name: str, index: str):
     try:
         index = int(index)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="chunk index must be an integer")
+        raise HTTPException(status_code=422, detail="chunk index must be an integer")
+    if name not in list_datasets():
+        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
     try:
         chunk = get_volume_chunk(name, index)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc))
     except IndexError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
     return Response(content=chunk, media_type="application/octet-stream")
 
 

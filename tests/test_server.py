@@ -90,6 +90,28 @@ def test_dataset_metadata_route_maps_unknown_dataset_to_404(monkeypatch):
     assert "unknown dataset" in exc.value.detail
 
 
+def test_dataset_metadata_route_maps_existing_dataset_validation_to_422(monkeypatch):
+    monkeypatch.setattr(server, "list_datasets", lambda: ["synthetic"])
+    monkeypatch.setattr(server, "dataset_metadata", lambda name: (_ for _ in ()).throw(
+        ValueError("spacing must contain three positive finite values")))
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_metadata_route("synthetic"))
+    assert exc.value.status_code == 422
+    assert "spacing" in exc.value.detail
+
+
+def test_dataset_metadata_route_maps_loader_failure_to_500(monkeypatch):
+    monkeypatch.setattr(server, "list_datasets", lambda: ["synthetic"])
+    monkeypatch.setattr(server, "dataset_metadata", lambda name: (_ for _ in ()).throw(
+        OSError("dataset file is unreadable")))
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.dataset_metadata_route("synthetic"))
+    assert exc.value.status_code == 500
+    assert "unreadable" in exc.value.detail
+
+
 def test_dataset_chunk_route_returns_binary_response(monkeypatch):
     monkeypatch.setattr(server, "get_volume_chunk", lambda name, index: b"\x00\x01")
 
@@ -98,6 +120,8 @@ def test_dataset_chunk_route_returns_binary_response(monkeypatch):
     assert isinstance(result, Response)
     assert result.media_type == "application/octet-stream"
     assert result.body == b"\x00\x01"
+    assert result.headers["content-type"] == "application/octet-stream"
+    assert result.headers["content-length"] == "2"
 
 
 def test_dataset_chunk_route_maps_bad_index_to_400(monkeypatch):
@@ -108,14 +132,14 @@ def test_dataset_chunk_route_maps_bad_index_to_400(monkeypatch):
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(server.dataset_chunk("synthetic", 3))
-    assert exc.value.status_code == 400
+    assert exc.value.status_code == 422
     assert "out of range" in exc.value.detail
 
 
 def test_dataset_chunk_route_maps_non_integer_index_to_400():
     with pytest.raises(HTTPException) as exc:
         asyncio.run(server.dataset_chunk("synthetic", "not-an-index"))
-    assert exc.value.status_code == 400
+    assert exc.value.status_code == 422
     assert "integer" in exc.value.detail
 
 

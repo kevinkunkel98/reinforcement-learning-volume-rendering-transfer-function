@@ -90,6 +90,23 @@ def test_metadata_chunk_descriptors_use_arithmetic_offsets(monkeypatch):
     ]
 
 
+def test_metadata_descriptors_reconstruct_chunked_volume(monkeypatch):
+    volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)[:, :, ::-1]
+    monkeypatch.setattr(datasets, "load_dataset", lambda name: (volume, (1.0, 1.0, 1.0)))
+    monkeypatch.setattr(datasets, "DEFAULT_CHUNK_BYTES", 16)
+
+    metadata = datasets.dataset_metadata("synthetic")
+    payload = b"".join(
+        datasets.get_volume_chunk("synthetic", descriptor["index"])
+        for descriptor in metadata["chunks"]
+    )
+    restored = np.frombuffer(payload, dtype="<f4").reshape(metadata["dimensions"], order=metadata["order"])
+
+    np.testing.assert_array_equal(restored, volume)
+    assert [len(datasets.get_volume_chunk("synthetic", descriptor["index"]))
+            for descriptor in metadata["chunks"]] == [descriptor["byte_length"] for descriptor in metadata["chunks"]]
+
+
 def test_chunk_round_trip_reconstructs_float32_fortran_order_volume():
     volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)[:, :, ::-1]
 
