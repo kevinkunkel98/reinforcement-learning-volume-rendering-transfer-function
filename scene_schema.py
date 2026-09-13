@@ -29,6 +29,8 @@ _OPTIONAL_SCENE_FIELDS = {
     "client_metadata",
     "parent_step_id",
     "step_id",
+    "event_id",
+    "dedupe_key",
     "carried_forward",
     *_OPTIONAL_TRANSITION_FIELDS,
 }

@@ -13,6 +13,7 @@ const textInput = el("text-input");
 const sendBtn = el("send-btn");
 let sceneSnapshot = null;
 let sceneSequence = 0;
+let lastState = null;
 
 function cameraForScene(current) {
   const camera = window.volumeViewer?.getCamera();
@@ -29,7 +30,7 @@ function sceneFromState(data, parentSceneId = null) {
     ? { attribute: "camera" }
     : { attribute: "opacity", target: current.cmd_dict?.target || "soft", direction: current.cmd_dict?.direction || "increase" };
   const scene = {
-    scene_id: `web:${data.dataset}:${Date.now()}:${sceneSequence++}`,
+    scene_id: `web:${data.session_id || "web-session"}:step:${data.current.id}`,
     parent_scene_id: parentSceneId,
     step_id: data.current.id,
     parent_step_id: parentSceneId ? (sceneSnapshot?.step_id ?? null) : null,
@@ -48,7 +49,7 @@ function sceneFromState(data, parentSceneId = null) {
     camera: cameraForScene(current),
     command,
     client_metadata: { source: "static-app", cursor: data.cursor, total: data.total },
-    features_before: current.features || null,
+    features_before: lastState?.current?.features || null,
     features_after: current.features || null,
   };
   if (command.attribute === "opacity") {
@@ -59,16 +60,22 @@ function sceneFromState(data, parentSceneId = null) {
 
 function captureSceneRoot(data) {
   sceneSnapshot = sceneFromState(data, null);
-  sceneSnapshot.scene_id = `web:root:${Date.now()}:${sceneSequence++}`;
+  sceneSnapshot.scene_id = `web:${data.session_id || "web-session"}:root`;
+  lastState = data;
 }
 
 async function postSceneTransition(data, metadata = {}) {
   if (!sceneSnapshot) captureSceneRoot(data);
+  const before = sceneSnapshot;
   const after = { ...sceneFromState(data, sceneSnapshot.scene_id), ...metadata };
+  if (metadata.verdict) {
+    after.scene_id = `${after.scene_id}:feedback:${metadata.verdict}`;
+  }
+  const eventId = `web:${data.session_id}:${after.step_id}:${metadata.verdict || "state"}:${after.scene_id}`;
   const response = await fetch("/api/scenes/transition", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ before: sceneSnapshot, after }),
+    body: JSON.stringify({ before, after, event_id: eventId, dedupe_key: eventId }),
   });
   if (!response.ok) {
     const detail = await response.text();
@@ -76,6 +83,7 @@ async function postSceneTransition(data, metadata = {}) {
     return;
   }
   sceneSnapshot = await response.json();
+  lastState = data;
 }
 
 async function refresh(data) {
@@ -108,6 +116,7 @@ async function refresh(data) {
   }
 
   updateTelemetry(state.current.masses);
+  return data;
 }
 
 function updateTelemetry(masses) {
@@ -172,6 +181,7 @@ function buildFeedbackRow(step) {
     btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
     if (step.feedback === rating) btn.classList.add("active", rating);
     btn.addEventListener("click", async () => {
+      if (step.feedback === rating) return;
       const r = await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -276,11 +286,12 @@ textInput.addEventListener("keydown", (e) => {
 });
 
 async function navigate(path) {
+  const previous = lastState;
   const data = await (await fetch(path, { method: "POST" })).json();
   await refresh(data);
   await postSceneTransition(data, {
     carried_forward: true,
-    parent_step_id: sceneSnapshot?.step_id ?? null,
+    parent_step_id: previous?.current?.id ?? null,
   });
 }
 
@@ -475,11 +486,22 @@ async function chooseDataset(name) {
   const data = await r.json();
   setSelectValue(name);
   sceneSnapshot = null;
+  lastState = null;
   closeSelect();
   messagesEl.innerHTML = "";
   messagesEl.appendChild(emptyState);
   await refresh(data);
-  await postSceneTransition(data);
+  captureSceneRoot(data);
+  await fetch("/api/scenes/transition", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      after: sceneSnapshot,
+      boundary: true,
+      event_id: `web:${data.session_id}:dataset:${data.dataset}`,
+      dedupe_key: `dataset:${data.dataset}:${data.render_info.dataset_version}`,
+    }),
+  });
 }
 
 async function loadDatasets() {

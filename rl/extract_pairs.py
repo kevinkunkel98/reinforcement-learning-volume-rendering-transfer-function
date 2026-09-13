@@ -15,6 +15,7 @@ import render
 DEFAULT_LOG = "out/log.jsonl"
 DEFAULT_FEEDBACK = "out/feedback.jsonl"
 DEFAULT_PREFERENCES = "out/rlhf_preferences.jsonl"
+DEFAULT_SCENES = "out/scene_transitions.jsonl"
 DEFAULT_OUT = "out/pairs.jsonl"
 WEIGHTS = {"branch": 1.0, "trajectory": 0.7, "thumbs": 0.4}
 RATING_LABELS = {"up": 1, "down": -1, "positive": 1, "negative": -1}
@@ -30,6 +31,20 @@ def _read_jsonl(path):
             if line.strip():
                 rows.append(json.loads(line))
     return rows
+
+
+def _scene_rows(path):
+    rows = {}
+    for event in _read_jsonl(path):
+        if "before_scene" in event and "after_scene" in event:
+            if event["before_scene"] is not None:
+                before = dict(event["before_scene"])
+                before.setdefault("event_id", event.get("event_id"))
+                rows[before["scene_id"]] = before
+            after = dict(event["after_scene"])
+            after.setdefault("event_id", event.get("event_id"))
+            rows[after["scene_id"]] = after
+    return list(rows.values())
 
 
 def _command(row):
@@ -135,7 +150,8 @@ def _pair(a, b, command, source, label, metadata, context=None):
     }
     if context:
         for field in ("scene_id", "parent_scene_id", "dataset", "dataset_version", "camera", "goal",
-                      "client", "parent_step_id", "carried_forward", "accepted", "ended"):
+                      "client", "parent_step_id", "carried_forward", "accepted", "ended",
+                      "event_id", "dedupe_key"):
             if field in context:
                 pair[field] = context[field]
     return pair
@@ -197,14 +213,14 @@ def _with_step(observation, row):
 
 
 def extract_pairs(log_path=DEFAULT_LOG, feedback_path=DEFAULT_FEEDBACK,
-                  out_path=DEFAULT_OUT, preferences_path=None):
+                  out_path=DEFAULT_OUT, preferences_path=None, scenes_path=DEFAULT_SCENES):
     if preferences_path is None:
         preferences_path = DEFAULT_PREFERENCES
     output = Path(out_path).resolve()
-    inputs = [path for path in (log_path, feedback_path, preferences_path) if path]
+    inputs = [path for path in (log_path, feedback_path, preferences_path, scenes_path) if path]
     if any(output == Path(path).resolve() for path in inputs):
         raise ValueError("input and output paths collide")
-    log_rows = _read_jsonl(log_path)
+    log_rows = [*_read_jsonl(log_path), *_scene_rows(scenes_path)]
     feedback_rows = _read_jsonl(feedback_path)
     preference_rows = _read_jsonl(preferences_path)
     canonical_pairs = []
@@ -340,9 +356,10 @@ def main():
     parser.add_argument("--log", default=DEFAULT_LOG)
     parser.add_argument("--feedback", default=DEFAULT_FEEDBACK)
     parser.add_argument("--preferences", default=DEFAULT_PREFERENCES)
+    parser.add_argument("--scenes", default=DEFAULT_SCENES)
     parser.add_argument("--out", default=DEFAULT_OUT)
     args = parser.parse_args()
-    rows, stats = extract_pairs(args.log, args.feedback, args.out, args.preferences)
+    rows, stats = extract_pairs(args.log, args.feedback, args.out, args.preferences, args.scenes)
     sources = ",".join(f"{name}={stats.get(name, 0)}" for name in WEIGHTS)
     targets = Counter(row["target_tissue"] for row in rows)
     target_summary = ",".join(f"{name}={count}" for name, count in sorted(targets.items())) or "none=0"

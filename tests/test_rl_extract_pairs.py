@@ -107,6 +107,38 @@ def test_extracts_scene_transitions_and_preserves_scene_state_metadata(tmp_path)
     assert branch["parent_scene_id"] == "scene-0"
 
 
+def test_default_extractor_reads_scene_transition_wrappers(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    scene_dir = tmp_path / "out"
+    scene_dir.mkdir()
+    before = {
+        "scene_id": "scene-0", "parent_scene_id": None, "session_id": "web",
+        "client": "web", "dataset": "synthetic", "dataset_version": "v1",
+        "camera": {"position": [0, 0, 1], "focal_point": [0, 0, 0], "view_up": [0, 1, 0], "zoom": 1},
+        "goal": {"target": "bone", "direction": "increase"},
+        "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
+        "transfer_function": [0] * 24, "volume": {"dimensions": [1, 1, 1], "spacing": [1, 1, 1], "scalar_type": "float32", "orientation": "normalized"},
+        "step_id": 0, "features_before": FEATURES, "features_after": FEATURES,
+    }
+    after = {**before, "scene_id": "scene-1", "parent_scene_id": "scene-0", "step_id": 1,
+             "parent_step_id": 0, "carried_forward": True, "accepted": True,
+             "camera": {**before["camera"], "position": [1, 0, 1]},
+             "features_before": {**FEATURES, "mean": 1},
+             "features_after": {**FEATURES, "mean": 2}}
+    (scene_dir / "scene_transitions.jsonl").write_text(json.dumps({
+        "event_id": "event-1", "dedupe_key": "dedupe-1",
+        "before_scene": before, "after_scene": after,
+    }) + "\n")
+
+    pairs, _ = extract_pairs(out_path=tmp_path / "pairs.jsonl")
+
+    branch = next(pair for pair in pairs if pair["source"] == "branch")
+    assert branch["observation_a"]["before_features"]["mean"] == 2
+    assert branch["observation_b"]["before_features"]["mean"] == 1
+    assert branch["camera"]["position"] == [1, 0, 1]
+    assert branch["dataset"] == "synthetic"
+
+
 def test_rejects_symlinked_input_output_collision(tmp_path):
     log = tmp_path / "log.jsonl"
     output = tmp_path / "pairs.jsonl"

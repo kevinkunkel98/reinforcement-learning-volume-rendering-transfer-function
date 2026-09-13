@@ -10,6 +10,7 @@ testable in-process without going anywhere near that constraint.
 """
 import base64
 import datetime
+import hashlib
 import io
 import json
 import os
@@ -33,7 +34,7 @@ from evaluate import jsonl_append, objective
 import render as render_module
 from render import features, grab, render
 from search import propose_step, resize_step
-from scene_schema import scene_transition as normalize_scene_transition
+from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
 from transfer import TISSUE_BANDS, default_params, opacity_mass
 
 LOG_PATH = "out/log.jsonl"
@@ -99,6 +100,13 @@ def _save_image_file(session_id, name, png_bytes):
     with open(path, "wb") as f:
         f.write(png_bytes)
     return path
+
+
+def _scene_event_id(before, after, event_id=None):
+    if event_id:
+        return event_id
+    payload = json.dumps({"before": before, "after": after}, sort_keys=True, separators=(",", ":"))
+    return "scene-event:" + hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
 def _render_step(params, cmd_text, cmd_dict, verdict, search, step_id, session_id, camera):
@@ -202,6 +210,8 @@ class Session:
         step = next((s for s in self.history if s["id"] == step_id), None)
         if step is None:
             raise ValueError(f"no step with id {step_id}")
+        if step["feedback"] == rating:
+            return self.state()
         step["feedback"] = rating
         jsonl_append(FEEDBACK_PATH, {
             "timestamp": datetime.datetime.now().isoformat(),
@@ -483,20 +493,36 @@ async def judge(req: JudgeRequest):
 @app.post("/api/scenes/transition")
 async def scene_transition_route(payload: dict):
     try:
-        before = payload["before"]
         after = payload["after"]
-        transition = normalize_scene_transition(
-            before,
-            after,
-            verdict=payload.get("verdict"),
-            accepted=payload.get("accepted"),
-            ended=payload.get("ended"),
-        )
+        if payload.get("boundary"):
+            transition = normalize_scene(after)
+            before = None
+        else:
+            before = normalize_scene(payload["before"])
+            transition = normalize_scene_transition(
+                before,
+                after,
+                verdict=payload.get("verdict"),
+                accepted=payload.get("accepted"),
+                ended=payload.get("ended"),
+            )
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    event_id = _scene_event_id(before, transition, payload.get("event_id"))
+    dedupe_key = payload.get("dedupe_key") or event_id
+    event = {"event_id": event_id, "dedupe_key": dedupe_key,
+             "before_scene": before, "after_scene": transition}
     os.makedirs(os.path.dirname(SCENE_TRANSITIONS_PATH) or ".", exist_ok=True)
-    jsonl_append(SCENE_TRANSITIONS_PATH, transition)
+    if os.path.exists(SCENE_TRANSITIONS_PATH):
+        with open(SCENE_TRANSITIONS_PATH) as stream:
+            for line in stream:
+                if not line.strip():
+                    continue
+                existing = json.loads(line)
+                if existing.get("event_id") == event_id or existing.get("dedupe_key") == dedupe_key:
+                    return existing["after_scene"]
+    jsonl_append(SCENE_TRANSITIONS_PATH, event)
     return transition
 
 

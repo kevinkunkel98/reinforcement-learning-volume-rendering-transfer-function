@@ -57,7 +57,6 @@ def _scene(scene_id, parent_scene_id):
             "view_up": [0, 1, 0],
             "zoom": 1,
         },
-        "goal": {"target": "bone", "direction": "increase"},
         "command": {"attribute": "camera"},
     }
 
@@ -155,7 +154,32 @@ def test_scene_transition_route_normalizes_and_appends_jsonl(tmp_path, monkeypat
     assert result["parent_scene_id"] == "scene-0"
     lines = (tmp_path / "out" / "scene_transitions.jsonl").read_text().splitlines()
     assert len(lines) == 1
-    assert json.loads(lines[0]) == result
+    logged = json.loads(lines[0])
+    assert logged["after_scene"] == result
+    assert logged["before_scene"] == before
+    assert logged["event_id"]
+    assert logged["dedupe_key"]
+
+
+def test_scene_transition_route_is_idempotent_by_event_id(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    after = _scene("scene-1", "scene-0")
+    payload = {"before": before, "after": after, "event_id": "event-1", "dedupe_key": "dedupe-1"}
+
+    first = asyncio.run(server.scene_transition_route(payload))
+    second = asyncio.run(server.scene_transition_route(payload))
+
+    assert first == second
+    assert len((tmp_path / "out" / "scene_transitions.jsonl").read_text().splitlines()) == 1
+
+
+def test_scene_transition_route_rejects_self_transition(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    scene = _scene("scene-0", None)
+
+    with pytest.raises(HTTPException, match="distinct"):
+        asyncio.run(server.scene_transition_route({"before": scene, "after": scene}))
 
 
 def test_scene_transition_route_adds_extractor_metadata_and_preserves_state(tmp_path, monkeypatch):
@@ -377,6 +401,18 @@ def test_feedback_sets_step_field_and_logs(tmp_path, monkeypatch):
     assert entry["step_id"] == step_id
     assert entry["cmd_dict"]["target"] == "bone"
     assert entry["session_id"] == s.session_id
+
+
+def test_repeated_feedback_is_idempotent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    s = Session(str(tmp_path / "session.json"))
+    s.command("increase opacity for bone strongly", parser="rule", search=False)
+    step_id = s.state()["current"]["id"]
+
+    s.feedback(step_id, "up")
+    s.feedback(step_id, "up")
+
+    assert len((tmp_path / "out" / "feedback.jsonl").read_text().splitlines()) == 1
 
 
 def test_feedback_invalid_rating_raises():
