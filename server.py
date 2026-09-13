@@ -495,6 +495,9 @@ async def judge(req: JudgeRequest):
 @app.post("/api/scenes/transition")
 async def scene_transition_route(payload: dict):
     try:
+        for field in ("event_id", "dedupe_key"):
+            if field in payload and (not isinstance(payload[field], str) or not payload[field].strip()):
+                raise ValueError(f"{field} must be a non-empty string")
         after = payload["after"]
         if payload.get("boundary"):
             transition = normalize_scene(after)

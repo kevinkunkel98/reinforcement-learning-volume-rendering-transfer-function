@@ -185,6 +185,16 @@ def test_scene_transition_route_rejects_conflicting_event_id_payload(tmp_path, m
         asyncio.run(server.scene_transition_route({"before": before, "after": conflicting, "event_id": "event-1"}))
 
 
+@pytest.mark.parametrize("field", ["event_id", "dedupe_key"])
+def test_scene_transition_route_rejects_empty_persistence_keys(tmp_path, monkeypatch, field):
+    monkeypatch.chdir(tmp_path)
+    before = _scene("scene-0", None)
+    after = _scene("scene-1", "scene-0")
+
+    with pytest.raises(HTTPException, match=field):
+        asyncio.run(server.scene_transition_route({"before": before, "after": after, field: "  "}))
+
+
 def test_dataset_boundary_requires_root_neutral_scene(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     scene = _scene("dataset-root", "old-scene")
@@ -192,6 +202,17 @@ def test_dataset_boundary_requires_root_neutral_scene(tmp_path, monkeypatch):
 
     with pytest.raises(HTTPException, match="parent_scene_id"):
         asyncio.run(server.scene_transition_route({"after": scene, "boundary": True}))
+
+
+def test_dataset_boundary_accepts_neutral_command_in_scene(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    scene = _scene("dataset-root", None)
+    scene["command"] = {"attribute": "neutral", "kind": "dataset_boundary"}
+
+    result = asyncio.run(server.scene_transition_route({"after": scene, "boundary": True,
+                                                        "event_id": "boundary-1", "dedupe_key": "boundary-1"}))
+
+    assert result["command"] == {"attribute": "neutral", "kind": "dataset_boundary"}
 
 
 def test_scene_transition_route_rejects_self_transition(tmp_path, monkeypatch):

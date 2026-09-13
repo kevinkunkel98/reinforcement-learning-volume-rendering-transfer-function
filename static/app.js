@@ -15,6 +15,11 @@ let sceneSnapshot = null;
 let sceneSequence = 0;
 let lastState = null;
 
+function nextSceneId(data, suffix = "") {
+  sceneSequence += 1;
+  return `web:${data.session_id || "web-session"}:scene:${sceneSequence}${suffix}`;
+}
+
 function cameraForScene(current) {
   const camera = window.volumeViewer?.getCamera();
   if (camera?.position && camera?.focal_point && camera?.view_up) return camera;
@@ -30,7 +35,7 @@ function sceneFromState(data, parentSceneId = null) {
     ? { attribute: "camera" }
     : { attribute: "opacity", target: current.cmd_dict?.target || "soft", direction: current.cmd_dict?.direction || "increase" };
   const scene = {
-    scene_id: `web:${data.session_id || "web-session"}:step:${data.current.id}`,
+    scene_id: nextSceneId(data),
     parent_scene_id: parentSceneId,
     step_id: data.current.id,
     parent_step_id: parentSceneId ? (sceneSnapshot?.step_id ?? null) : null,
@@ -495,17 +500,17 @@ async function chooseDataset(name) {
   messagesEl.appendChild(emptyState);
   await refresh(data);
   captureSceneRoot(data);
-  await fetch("/api/scenes/transition", {
+  const boundaryResponse = await fetch("/api/scenes/transition", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      after: sceneSnapshot,
-      command: { attribute: "neutral", kind: "dataset_boundary" },
+      after: { ...sceneSnapshot, command: { attribute: "neutral", kind: "dataset_boundary" } },
       boundary: true,
       event_id: `web:${data.session_id}:dataset:${data.dataset}`,
       dedupe_key: `dataset:${data.dataset}:${data.render_info.dataset_version}`,
     }),
   });
+  if (boundaryResponse.ok) sceneSnapshot = await boundaryResponse.json();
 }
 
 async function loadDatasets() {

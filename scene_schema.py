@@ -101,6 +101,12 @@ def _text_value(value: Any, field: str) -> str:
     return value
 
 
+def _optional_identifier(record: Mapping[str, Any], field: str) -> str | None:
+    if field not in record:
+        return None
+    return _text_value(record[field], field)
+
+
 def _json_safe(value: Any, field: str) -> Any:
     if value is None or isinstance(value, (str, bool, int)):
         return value
@@ -133,6 +139,10 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
         "dataset": _text_field(record, "dataset"),
         "dataset_version": _text_field(record, "dataset_version"),
     }
+    for field in ("event_id", "dedupe_key"):
+        value = _optional_identifier(record, field)
+        if value is not None:
+            scene[field] = value
     if scene["client"] not in ("web", "vrui"):
         raise ValueError("client must be 'web' or 'vrui'")
 

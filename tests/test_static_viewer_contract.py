@@ -96,6 +96,8 @@ def test_app_integrates_viewer_with_state_and_dataset_changes():
     assert "captureSceneRoot" in app
     assert "before.scene_id" in app
     assert 'attribute: "neutral"' in app
+    assert "sceneSequence++" in app
+    assert "event_id: eventId" in app
     assert "sceneSnapshot = null" in app
     assert "showToast(`Scene transition failed" in app
 
