@@ -228,6 +228,10 @@
         renderWindow.addView(openGLRenderWindow);
         renderWindow.setInteractor(interactor);
         interactor.setView(openGLRenderWindow);
+        // Without an explicit style, the interactor captures mouse/touch
+        // events (bindEvents below) but never turns them into camera
+        // movement -- drag/scroll are silently no-ops otherwise.
+        interactor.setInteractorStyle(vtk.Interaction.Style.vtkInteractorStyleTrackballCamera.newInstance());
         openGLRenderWindow.setContainer(viewerEl);
         openGLRenderWindow.setSize(viewerEl.clientWidth || 640, viewerEl.clientHeight || 480);
         interactor.initialize();
