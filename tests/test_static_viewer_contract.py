@@ -99,7 +99,10 @@ def test_app_integrates_viewer_with_state_and_dataset_changes():
     assert "sceneSequence++" in app
     assert "sessionStorage" in app
     assert "sceneNonce" in app
-    assert "sceneNonce" in app and "sceneSequence" in app
+    assert "sceneSequence" in app
+    assert 'getItem("localViewerSceneSequence")' in app
+    assert "sceneSequenceKey" in app
+    assert "setItem(sceneSequenceKey" in app
     assert "event_id: eventId" in app
     assert "sceneSnapshot = null" in app
     assert "showToast(`Scene transition failed" in app

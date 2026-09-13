@@ -12,7 +12,6 @@ const emptyState = el("empty-state");
 const textInput = el("text-input");
 const sendBtn = el("send-btn");
 let sceneSnapshot = null;
-let sceneSequence = 0;
 let lastState = null;
 const sceneNonce = (() => {
   const key = "localViewerSceneNonce";
@@ -23,9 +22,15 @@ const sceneNonce = (() => {
   }
   return value;
 })();
+const sceneSequenceKey = "localViewerSceneSequence";
+const storedSceneSequence = Number.parseInt(sessionStorage.getItem(sceneSequenceKey) || "0", 10);
+let sceneSequence = Number.isSafeInteger(storedSceneSequence) && storedSceneSequence >= 0
+  ? storedSceneSequence
+  : 0;
 
 function nextSceneId(data, suffix = "") {
   sceneSequence += 1;
+  sessionStorage.setItem(sceneSequenceKey, String(sceneSequence));
   return `web:${data.session_id || "web-session"}:${sceneNonce}:scene:${sceneSequence}${suffix}`;
 }
 
