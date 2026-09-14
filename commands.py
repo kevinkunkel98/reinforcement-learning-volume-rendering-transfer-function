@@ -1,6 +1,7 @@
 """Text -> command dict (two implementations) and command -> params."""
 import datetime as _dt
 import json as _json
+import os
 import re
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -300,7 +301,7 @@ def apply_command(cmd: dict, params: np.ndarray) -> np.ndarray:
     return params
 
 
-OLLAMA_HOST = "http://localhost:11434"
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 VALID_DIRECTIONS = {"increase", "decrease", "show_only", "reset"}
 VALID_STRENGTHS = set(STRENGTH_WORDS) | {None}
 VALID_LEVELS = set(LEVEL_WORDS)
