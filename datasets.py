@@ -45,6 +45,7 @@ import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 
 from phantom import build_phantom
+import totalseg
 from transfer import CENTER_RANGE
 
 DATA_DIR = "data"
@@ -133,6 +134,14 @@ DATASETS = {
     },
 }
 
+# RL v2 evaluates generalization on scans from another source: the four
+# calibrated Slicer CTs, loaded with load_dataset(name, canonical=True).
+OUT_OF_SOURCE_CT = ("ct_chest", "ct_skull", "ct_cardio", "ct_abdomen")
+
+# TotalSegmentator volumes are RAS; this chat-UI camera shows them from the
+# front with superior up (checked by rendering one, 2026-09-15).
+TOTALSEG_DEFAULT_CAMERA = {"azimuth": 0.0, "elevation": 80.0, "zoom": 1.0}
+
 
 def _sha256(path: str) -> str:
     h = hashlib.sha256()
@@ -215,21 +224,27 @@ def _rescale_intensity_to_hu_range(arr: np.ndarray, lo_percentile: float = 0.5,
     return (normalized * (CENTER_RANGE[1] - CENTER_RANGE[0]) + CENTER_RANGE[0]).astype(np.float32)
 
 
-@functools.lru_cache(maxsize=None)
-def load_dataset(name: str = "synthetic"):
+@functools.lru_cache(maxsize=4)
+def load_dataset(name: str = "synthetic", canonical: bool = False):
     """Returns (volume: np.ndarray HU, spacing: (float, float, float)).
 
-    Cached per name: the viewer's chunked-transfer endpoints
-    (dataset_metadata/get_volume_chunk in server.py) call this once per
-    HTTP request, and a real CT/MRI volume re-reads + re-parses an NRRD
-    file from disk plus a flip/rescale pass every call. Serving a real
-    dataset's ~18 chunks uncached took ~6.5s of server time alone (each
-    chunk request reloading the whole volume from scratch); no caller
-    anywhere mutates the returned array in place, so caching by name is
-    safe.
+    canonical=True returns calibrated CT volumes in RAS axis order (numpy
+    axis 0 -> patient right, 1 -> anterior, 2 -> superior), which RL v2
+    relies on. The default keeps each file's own axis order, which the chat
+    UI's per-dataset cameras were tuned for. TotalSegmentator volumes are
+    always RAS; the synthetic phantom is treated as RAS.
+
+    Cached: the viewer's chunked-transfer endpoints (dataset_metadata/
+    get_volume_chunk in server.py) call this once per HTTP request, and a
+    real volume re-reads + re-parses its file every call (~6.5s of server
+    time uncached for one dataset's chunks). Bounded to 4 entries because
+    the RL v2 registry holds ~30 real CT volumes of 50-150 MB each. No
+    caller mutates the returned array in place, so caching is safe.
     """
     if name == "synthetic":
         return build_phantom(), (1.0, 1.0, 1.0)
+    if totalseg.is_totalseg(name):
+        return totalseg.load_volume(name)
     if name not in DATASETS:
         raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
     path = _ensure_downloaded(name)
@@ -250,7 +265,7 @@ def load_dataset(name: str = "synthetic"):
 
 
 def list_datasets() -> list:
-    return ["synthetic"] + list(DATASETS.keys())
+    return ["synthetic"] + list(DATASETS.keys()) + totalseg.available_names()
 
 
 def default_camera_for(name: str) -> dict:
@@ -259,13 +274,25 @@ def default_camera_for(name: str) -> dict:
     that scan's own axis convention (see DATASETS entries). Always returns
     a fresh dict -- safe to mutate."""
     from camera import DEFAULT_CAMERA
+    if totalseg.is_totalseg(name):
+        return dict(TOTALSEG_DEFAULT_CAMERA)
     override = DATASETS.get(name, {}).get("default_camera")
     return dict(override) if override else dict(DEFAULT_CAMERA)
+
+
+def volumes_for_split(split: str) -> list:
+    """RL v2 volume names: TotalSegmentator "train" / "val" / "test" subjects,
+    or the Slicer CTs as the "out_of_source" test set."""
+    if split == "out_of_source":
+        return list(OUT_OF_SOURCE_CT)
+    return totalseg.split_names(split)
 
 
 def _dataset_version(name: str) -> str:
     if name == "synthetic":
         return "synthetic-v1"
+    if totalseg.is_totalseg(name):
+        return totalseg.version(name)
     return f"sha256:{DATASETS[name]['sha256']}"
 
 
@@ -329,7 +356,7 @@ def dataset_metadata(name: str) -> dict:
         "byte_order": "little",
         "order": "F",
         "axis_mapping": "numpy axis0 -> VTK X; axis1 -> VTK Y; axis2 -> VTK Z",
-        "orientation": "dataset-normalized",
+        "orientation": "RAS" if totalseg.is_totalseg(name) else "dataset-normalized",
         "intensity_range": [float(volume.min()), float(volume.max())],
         "chunk_bytes": DEFAULT_CHUNK_BYTES,
         "total_bytes": total_bytes,

@@ -169,3 +169,60 @@ def test_iter_volume_chunks_rejects_invalid_chunk_size(chunk_bytes):
 
     with pytest.raises(ValueError, match="chunk_bytes"):
         list(datasets.iter_volume_chunks(volume, chunk_bytes=chunk_bytes))
+
+
+import json
+
+import nibabel as nib
+
+import totalseg
+
+
+@pytest.fixture
+def ts_volume(tmp_path, monkeypatch):
+    path = tmp_path / "s0001" / "ct.nii.gz"
+    path.parent.mkdir()
+    data = np.arange(24, dtype=np.int16).reshape(2, 3, 4)
+    nib.save(nib.Nifti1Image(data, np.diag([1.5, 1.5, 1.5, 1.0])), str(path))
+    entry = {"id": "s0001", "name": "ts_s0001", "split": "train", "region": "thorax",
+             "study_type": "ct thorax", "shape": [2, 3, 4], "spacing": [1.5, 1.5, 1.5],
+             "path": str(path), "sha256": "cd" * 32}
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"subjects": [entry]}))
+    monkeypatch.setattr(totalseg, "MANIFEST_PATH", str(manifest))
+    datasets.load_dataset.cache_clear()
+    yield "ts_s0001"
+    datasets.load_dataset.cache_clear()
+
+
+def test_list_datasets_includes_available_totalseg_volumes(ts_volume):
+    assert ts_volume in datasets.list_datasets()
+
+
+def test_load_dataset_totalseg_returns_ras_float32(ts_volume):
+    volume, spacing = datasets.load_dataset(ts_volume)
+    assert volume.dtype == np.float32 and volume.shape == (2, 3, 4)
+    assert spacing == (1.5, 1.5, 1.5)
+    canonical, _ = datasets.load_dataset(ts_volume, canonical=True)
+    assert np.array_equal(canonical, volume)
+
+
+def test_totalseg_version_metadata_and_camera(ts_volume):
+    assert datasets._dataset_version(ts_volume) == "sha256:" + "cd" * 32
+    metadata = datasets.dataset_metadata(ts_volume)
+    assert metadata["orientation"] == "RAS"
+    assert metadata["version"] == "sha256:" + "cd" * 32
+    assert datasets.default_camera_for(ts_volume) == {"azimuth": 0.0, "elevation": 80.0, "zoom": 1.0}
+
+
+def test_existing_datasets_keep_dataset_normalized_orientation(monkeypatch):
+    volume = np.zeros((2, 2, 2), dtype=np.float32)
+    monkeypatch.setattr(datasets, "load_dataset", lambda name, canonical=False: (volume, (1.0, 1.0, 1.0)))
+    assert datasets.dataset_metadata("synthetic")["orientation"] == "dataset-normalized"
+
+
+def test_volumes_for_split(ts_volume):
+    assert datasets.volumes_for_split("train") == [ts_volume]
+    assert datasets.volumes_for_split("out_of_source") == ["ct_chest", "ct_skull", "ct_cardio", "ct_abdomen"]
+    with pytest.raises(ValueError):
+        datasets.volumes_for_split("holdout")
