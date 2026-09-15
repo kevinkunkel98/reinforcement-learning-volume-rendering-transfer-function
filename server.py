@@ -38,7 +38,6 @@ from scene_schema import normalize_scene, scene_transition as normalize_scene_tr
 from transfer import TISSUE_BANDS, default_params, opacity_mass
 
 LOG_PATH = "out/log.jsonl"
-FEEDBACK_PATH = "out/feedback.jsonl"
 SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
 _SCENE_WRITE_LOCK = threading.Lock()
 AUDIO_DIR = "out/audio"
@@ -124,7 +123,6 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
         "masses": _masses(params),
         "features": features(img),
         "search": search,
-        "feedback": None,
     }
 
 
@@ -184,27 +182,6 @@ class Session:
         step = _render_step(default_params(), None, None, False, 0, self.session_id, default_camera_for(name))
         self.history = [step]
         self.cursor = 0
-        self.save()
-        return self.state()
-
-    def feedback(self, step_id: int, rating: str):
-        if rating not in ("up", "down"):
-            raise ValueError(f"invalid rating: {rating!r}")
-        step = next((s for s in self.history if s["id"] == step_id), None)
-        if step is None:
-            raise ValueError(f"no step with id {step_id}")
-        if step["feedback"] == rating:
-            return self.state()
-        step["feedback"] = rating
-        jsonl_append(FEEDBACK_PATH, {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "session_id": self.session_id,
-            "step_id": step_id,
-            "cmd_text": step["cmd_text"],
-            "cmd_dict": step["cmd_dict"],
-            "params": step["params"],
-            "rating": rating,
-        })
         self.save()
         return self.state()
 
@@ -358,19 +335,6 @@ class DatasetRequest(BaseModel):
 async def dataset_switch(req: DatasetRequest):
     try:
         return session.switch_dataset(req.name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-class FeedbackRequest(BaseModel):
-    step_id: int
-    rating: str  # "up" | "down"
-
-
-@app.post("/api/feedback")
-async def feedback(req: FeedbackRequest):
-    try:
-        return session.feedback(req.step_id, req.rating)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

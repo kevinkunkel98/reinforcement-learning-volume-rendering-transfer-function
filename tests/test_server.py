@@ -273,7 +273,9 @@ def test_state_and_steps_have_no_judgment_fields():
     state = s.command("increase opacity for bone strongly", parser="rule", search=False)
     assert "pending" not in state
     assert "verdict" not in state["current"]
+    assert "feedback" not in state["current"]
     assert not hasattr(s, "judge")
+    assert not hasattr(s, "feedback")
 
 
 def test_command_appends_a_step():
@@ -356,51 +358,6 @@ def test_switch_dataset_unknown_name_raises_and_leaves_history_alone():
     with pytest.raises(ValueError):
         s.switch_dataset("not_a_real_dataset")
     assert s.state()["total"] == 2  # untouched
-
-
-def test_feedback_sets_step_field_and_logs(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    os.makedirs("out", exist_ok=True)
-    s = Session(str(tmp_path / "session.json"))
-    s.command("increase opacity for bone strongly", parser="rule", search=False)
-    step_id = s.state()["current"]["id"]
-
-    state = s.feedback(step_id, "up")
-    assert state["current"]["feedback"] == "up"
-
-    import json
-    lines = (tmp_path / "out" / "feedback.jsonl").read_text().strip().splitlines()
-    assert len(lines) == 1
-    entry = json.loads(lines[0])
-    assert entry["rating"] == "up"
-    assert entry["step_id"] == step_id
-    assert entry["cmd_dict"]["target"] == "bone"
-    assert entry["session_id"] == s.session_id
-
-
-def test_repeated_feedback_is_idempotent(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    s = Session(str(tmp_path / "session.json"))
-    s.command("increase opacity for bone strongly", parser="rule", search=False)
-    step_id = s.state()["current"]["id"]
-
-    s.feedback(step_id, "up")
-    s.feedback(step_id, "up")
-
-    assert len((tmp_path / "out" / "feedback.jsonl").read_text().splitlines()) == 1
-
-
-def test_feedback_invalid_rating_raises():
-    s = _fresh_session()
-    step_id = s.state()["current"]["id"]
-    with pytest.raises(ValueError):
-        s.feedback(step_id, "sideways")
-
-
-def test_feedback_unknown_step_id_raises():
-    s = _fresh_session()
-    with pytest.raises(ValueError):
-        s.feedback(99999, "up")
 
 
 def test_session_id_persists_across_reload():
