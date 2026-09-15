@@ -221,6 +221,18 @@ def test_existing_datasets_keep_dataset_normalized_orientation(monkeypatch):
     assert datasets.dataset_metadata("synthetic")["orientation"] == "dataset-normalized"
 
 
+def test_load_dataset_shares_one_cache_entry_for_equivalent_calls():
+    # "synthetic" (and TotalSegmentator volumes) are RAS either way, so
+    # load_dataset(n), load_dataset(n, False) and load_dataset(n, canonical=True)
+    # must not each hold a separate multi-hundred-MB cache entry.
+    datasets.load_dataset.cache_clear()
+    datasets.load_dataset("synthetic")
+    datasets.load_dataset("synthetic", False)
+    datasets.load_dataset("synthetic", canonical=True)
+    assert datasets.load_dataset.cache_info().currsize == 1
+    datasets.load_dataset.cache_clear()
+
+
 def test_volumes_for_split(ts_volume):
     assert datasets.volumes_for_split("train") == [ts_volume]
     assert datasets.volumes_for_split("out_of_source") == ["ct_chest", "ct_skull", "ct_cardio", "ct_abdomen"]
@@ -272,3 +284,18 @@ def test_reorient_rejects_unsupported_space():
 def test_canonical_rejected_for_uncalibrated_and_mri():
     with pytest.raises(ValueError, match="no canonical RAS orientation"):
         datasets.load_dataset("mri_head", canonical=True)
+    with pytest.raises(ValueError, match="no canonical RAS orientation"):
+        datasets.load_dataset("stag_beetle", canonical=True)
+    with pytest.raises(ValueError, match="no canonical RAS orientation"):
+        datasets.load_dataset("ct_head", canonical=True)
+
+
+@pytest.mark.slow
+def test_load_nrrd_preserves_header_sizes():
+    # The whole NRRD reorientation (_reorient_nrrd_to_ras) rests on VTK's
+    # reader keeping the file's own axis order/extents; confirm that against
+    # a real file's own declared "sizes" field.
+    path = os.path.join("data", "CT-chest.nrrd")
+    header = datasets._read_nrrd_header(path)
+    expected_shape = tuple(int(x) for x in header["sizes"].split())
+    assert datasets._load_nrrd(path)[0].shape == expected_shape

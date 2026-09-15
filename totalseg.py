@@ -46,8 +46,9 @@ def split_names(split: str) -> list:
     experiment never silently runs on fewer volumes than the manifest says."""
     if split not in SPLITS:
         raise ValueError(f"unknown split {split!r}, choices: {', '.join(SPLITS)}")
-    names = sorted(n for n, s in _subjects().items() if s["split"] == split)
-    missing = [n for n in names if not os.path.exists(subject(n)["path"])]
+    subjects = _subjects()
+    names = sorted(n for n, s in subjects.items() if s["split"] == split)
+    missing = [n for n in names if not os.path.exists(subjects[n]["path"])]
     if missing:
         raise FileNotFoundError(f"{len(missing)} {split} volumes missing (e.g. {missing[0]}); {_FETCH_HINT}")
     return names

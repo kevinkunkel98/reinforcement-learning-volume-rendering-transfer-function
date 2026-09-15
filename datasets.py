@@ -273,28 +273,13 @@ def _rescale_intensity_to_hu_range(arr: np.ndarray, lo_percentile: float = 0.5,
 
 
 @functools.lru_cache(maxsize=4)
-def load_dataset(name: str = "synthetic", canonical: bool = False):
-    """Returns (volume: np.ndarray HU, spacing: (float, float, float)).
-
-    canonical=True returns calibrated CT volumes in RAS axis order (numpy
-    axis 0 -> patient right, 1 -> anterior, 2 -> superior), which RL v2
-    relies on. The default keeps each file's own axis order, which the chat
-    UI's per-dataset cameras were tuned for. TotalSegmentator volumes are
-    always RAS; the synthetic phantom is treated as RAS.
-
-    Cached: the viewer's chunked-transfer endpoints (dataset_metadata/
-    get_volume_chunk in server.py) call this once per HTTP request, and a
-    real volume re-reads + re-parses its file every call (~6.5s of server
-    time uncached for one dataset's chunks). Bounded to 4 entries because
-    the RL v2 registry holds ~30 real CT volumes of 50-150 MB each. No
-    caller mutates the returned array in place, so caching is safe.
-    """
+def _load_dataset_cached(name: str, canonical: bool):
     if name == "synthetic":
         return build_phantom(), (1.0, 1.0, 1.0)
     if totalseg.is_totalseg(name):
         return totalseg.load_volume(name)
     if name not in DATASETS:
-        raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
+        raise ValueError(f"unknown dataset {name!r}, choices: {', '.join(list_datasets())}")
     path = _ensure_downloaded(name)
     fmt = DATASETS[name].get("format", "nrrd")
     if canonical and (fmt != "nrrd" or DATASETS[name].get("modality") in ("mri", "uncalibrated")):
@@ -314,6 +299,37 @@ def load_dataset(name: str = "synthetic", canonical: bool = False):
     if DATASETS[name].get("modality") in ("mri", "uncalibrated"):
         volume = _rescale_intensity_to_hu_range(volume)
     return volume, spacing
+
+
+def load_dataset(name: str = "synthetic", canonical: bool = False):
+    """Returns (volume: np.ndarray HU, spacing: (float, float, float)).
+
+    canonical=True returns calibrated CT volumes in RAS axis order (numpy
+    axis 0 -> patient right, 1 -> anterior, 2 -> superior), which RL v2
+    relies on. The default keeps each file's own axis order, which the chat
+    UI's per-dataset cameras were tuned for. TotalSegmentator volumes are
+    always RAS; the synthetic phantom is treated as RAS.
+
+    Cached (in `_load_dataset_cached`) on (name, canonical), with `canonical`
+    normalized to False first for volumes that are RAS either way (synthetic,
+    TotalSegmentator) so load_dataset(n), load_dataset(n, False) and
+    load_dataset(n, canonical=True) share one entry instead of three: the
+    viewer's chunked-transfer endpoints (dataset_metadata/get_volume_chunk in
+    server.py) call this once per HTTP request, and re-parsing an NRRD file
+    from disk plus a flip/rescale pass on every chunk request of one dataset
+    cost ~6.5s of server time uncached. Bounded to 4 entries because a real
+    volume held as float32 is large -- the four Slicer CTs alone range
+    38-337 MB (ct_cardio, the biggest) and the ~30 TotalSegmentator volumes
+    are 38-239 MB (median ~109 MB), so 4 entries can hold up to ~1.1 GB. No
+    caller mutates the returned array in place, so caching is safe.
+    """
+    if name == "synthetic" or totalseg.is_totalseg(name):
+        canonical = False        # already RAS: one cache entry serves both calls
+    return _load_dataset_cached(name, bool(canonical))
+
+
+load_dataset.cache_clear = _load_dataset_cached.cache_clear
+load_dataset.cache_info = _load_dataset_cached.cache_info
 
 
 def list_datasets() -> list:
@@ -382,7 +398,7 @@ def iter_volume_chunks(volume: np.ndarray, chunk_bytes: int = DEFAULT_CHUNK_BYTE
 def dataset_metadata(name: str) -> dict:
     """Return transport metadata for the normalized volume loaded by ``name``."""
     if name not in list_datasets():
-        raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
+        raise ValueError(f"unknown dataset {name!r}, choices: {', '.join(list_datasets())}")
     volume, spacing = load_dataset(name)
     volume = _validated_volume(volume)
     spacing = tuple(float(value) for value in spacing)
@@ -420,7 +436,7 @@ def dataset_metadata(name: str) -> dict:
 def get_volume_chunk(name: str, index: int) -> bytes:
     """Return one normalized volume chunk by dataset name and zero-based index."""
     if name not in list_datasets():
-        raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
+        raise ValueError(f"unknown dataset {name!r}, choices: {', '.join(list_datasets())}")
     if isinstance(index, bool) or not isinstance(index, int):
         raise IndexError("chunk index must be an integer")
     volume, _ = load_dataset(name)

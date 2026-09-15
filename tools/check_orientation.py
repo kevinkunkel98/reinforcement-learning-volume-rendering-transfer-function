@@ -3,13 +3,19 @@ orientation check: in the coronal and sagittal panels the head (superior) must
 be at the top; in the axial panel the front of the body (anterior) must be at
 the top.
 
+Column 0 of the coronal and axial panels is RAS axis-0 index 0, i.e. the
+patient's LEFT side -- these panels are mirrored versus radiological
+convention (which shows the patient's right on the viewer's left). An "L"
+label is drawn in the top-left corner of both panels so a reader can catch a
+left/right mistake, which the superior/anterior checks above cannot.
+
     python -m tools.check_orientation ct_chest ts_s0011
 """
 import argparse
 import os
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from datasets import load_dataset
 
@@ -34,11 +40,23 @@ def _panel_image(plane, row_mm, col_mm):
     return Image.fromarray(plane).resize((width, PANEL_HEIGHT))
 
 
+def _label_left(panel: Image.Image) -> Image.Image:
+    """Marks column 0 (RAS axis-0 index 0, the patient's LEFT side) with an
+    "L" so a coronal/axial mirror mistake is visible, not just inferable."""
+    labeled = panel.convert("RGB")
+    ImageDraw.Draw(labeled).text((4, 4), "L", fill=(255, 80, 80))
+    return labeled
+
+
 def write_projection(name: str, out_dir: str = OUT_DIR) -> str:
     volume, (sx, sy, sz) = load_dataset(name, canonical=True)
     coronal, sagittal, axial = projection_panels(volume)
-    panels = [_panel_image(coronal, sz, sx), _panel_image(sagittal, sz, sy), _panel_image(axial, sy, sx)]
-    sheet = Image.new("L", (sum(p.width for p in panels) + 20 * (len(panels) - 1), PANEL_HEIGHT))
+    panels = [
+        _label_left(_panel_image(coronal, sz, sx)),
+        _panel_image(sagittal, sz, sy).convert("RGB"),
+        _label_left(_panel_image(axial, sy, sx)),
+    ]
+    sheet = Image.new("RGB", (sum(p.width for p in panels) + 20 * (len(panels) - 1), PANEL_HEIGHT))
     x = 0
     for panel in panels:
         sheet.paste(panel, (x, 0))
