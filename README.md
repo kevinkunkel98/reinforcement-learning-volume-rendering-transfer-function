@@ -98,6 +98,26 @@ The web UI supports:
 - Objective hill-climb search for opacity commands
 - Camera state stored with each history step
 
+### RL v2 volumes
+
+RL v2 trains and evaluates on 30 CT scans from the TotalSegmentator small
+subset (CC-BY-4.0, Zenodo record 10047263), split by subject into 20 train,
+4 validation and 6 test volumes (stratified by body region; see
+`data/totalseg_manifest.json`), plus the four Slicer CTs as an out-of-source
+test set. Fetch and extract once:
+
+```bash
+curl -L -o data/Totalsegmentator_dataset_small_v201.zip \
+  "https://zenodo.org/records/10047263/files/Totalsegmentator_dataset_small_v201.zip?download=1"
+python -m tools.select_totalseg
+```
+
+The selected volumes appear as `ts_<subject>` in the dataset list. RL v2 code
+loads every volume with `load_dataset(name, canonical=True)` (RAS axis order)
+and gets split members from `volumes_for_split("train" | "val" | "test" |
+"out_of_source")`. `python -m tools.check_orientation <name>` writes projection
+images for a visual orientation check.
+
 ## Local 3D Viewer
 
 The web UI uses a local `vtk.js` volume renderer when the local viewer is
