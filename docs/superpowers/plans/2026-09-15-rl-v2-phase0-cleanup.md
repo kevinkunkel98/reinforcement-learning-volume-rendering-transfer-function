@@ -530,7 +530,7 @@ Expected: all pass, including `test_state_and_steps_have_no_judgment_fields`.
 - [ ] **Step 10: Verify no dangling references**
 
 Run: `grep -nE "run_policy|PREF_PATH|pending|judge|evaluator|verdict" server.py`
-Expected: only the `verdict=payload.get("verdict")` argument inside `scene_transition_route` (scene schema keeps that optional field).
+Expected: no `run_policy`, `PREF_PATH`, `pending`, `judge` or `evaluator` hits. Remaining `verdict` hits are correct and stay: `"verdict": None` in `_log_command`, the hill-climb's local `verdict` in `_run_objective_search` (logged to `out/log.jsonl`), and `verdict=payload.get("verdict")` in `scene_transition_route`.
 
 - [ ] **Step 11: Commit**
 
