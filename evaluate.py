@@ -1,4 +1,4 @@
-"""+1/-1 verdicts: objective (opacity_mass for opacity commands, always-accept for width/brightness/center) and human (console)."""
+"""+1/-1 objective verdicts for hill-climb search (opacity_mass for opacity commands, always-accept for width/brightness/center), plus a JSONL append helper."""
 import json
 
 from transfer import TISSUE_BANDS, opacity_mass
@@ -53,18 +53,6 @@ def objective(params_before, params_after, cmd: dict) -> int:
         d = abs(opacity_mass(params_after, tlo, thi) - opacity_mass(params_before, tlo, thi))
         max_other = max(max_other, d)
     return 1 if max_other <= abs(delta_target) else -1
-
-
-def human(before_png: str, after_png: str) -> int:
-    print(f"[human] before: {before_png}")
-    print(f"[human] after:  {after_png}")
-    while True:
-        answer = input("Besser oder schlechter? (b/s): ").strip().lower()
-        if answer == "b":
-            return 1
-        if answer == "s":
-            return -1
-        print("Bitte 'b' (besser) oder 's' (schlechter) eingeben.")
 
 
 def jsonl_append(path: str, entry: dict) -> None:
