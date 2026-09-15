@@ -5,7 +5,23 @@ subjects stratified by body region, extracts only the selected CT volumes to
 data/totalseg/<id>/ct.nii.gz and writes data/totalseg_manifest.json.
 Deterministic for a given --seed.
 """
+import argparse
+import gzip
+import hashlib
+import io
+import json
+import os
+import shutil
+import zipfile
+
+import nibabel as nib
 import numpy as np
+
+DEFAULT_ZIP = "data/Totalsegmentator_dataset_small_v201.zip"
+DEFAULT_OUT_DIR = "data/totalseg"
+DEFAULT_MANIFEST = "data/totalseg_manifest.json"
+ZENODO_RECORD = "10047263"
+NIFTI_HEADER_BYTES = 352
 
 REGION_BY_STUDY_TYPE = {
     "ct thorax": "thorax",
@@ -72,3 +88,99 @@ def select_and_split(candidates, split_counts=SPLIT_COUNTS, seed=0) -> dict:
         for sid in picked[n_test + n_val:]:
             assignment[sid] = "train"
     return assignment
+
+
+def _sha256_file(path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def read_meta(zf: zipfile.ZipFile) -> list:
+    lines = zf.read("meta.csv").decode("utf-8-sig").splitlines()
+    header = lines[0].split(";")
+    return [dict(zip(header, line.split(";"))) for line in lines[1:] if line.strip()]
+
+
+def read_ct_header(zf: zipfile.ZipFile, subject_id: str):
+    """(shape, zooms) from the NIfTI header only, without decompressing the volume."""
+    with zf.open(f"{subject_id}/ct.nii.gz") as raw, gzip.open(raw) as stream:
+        header = nib.Nifti1Header.from_fileobj(io.BytesIO(stream.read(NIFTI_HEADER_BYTES)))
+    return header.get_data_shape(), header.get_zooms()
+
+
+def build_manifest(zip_path, out_dir=DEFAULT_OUT_DIR, seed=0, split_counts=SPLIT_COUNTS) -> dict:
+    """Select subjects, extract their ct.nii.gz into out_dir, return the manifest dict."""
+    with zipfile.ZipFile(zip_path) as zf:
+        candidates, info = [], {}
+        for row in read_meta(zf):
+            sid = row["image_id"]
+            shape, zooms = read_ct_header(zf, sid)
+            if not passes_extent_filter(shape, zooms):
+                continue
+            region = region_for_study_type(row["study_type"])
+            candidates.append({"id": sid, "region": region})
+            info[sid] = {
+                "study_type": row["study_type"],
+                "region": region,
+                "shape": [int(v) for v in shape[:3]],
+                "spacing": [float(v) for v in zooms[:3]],
+            }
+        assignment = select_and_split(candidates, split_counts, seed)
+        subjects = []
+        for sid in sorted(assignment):
+            path = os.path.join(out_dir, sid, "ct.nii.gz")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with zf.open(f"{sid}/ct.nii.gz") as src, open(path, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            subjects.append({"id": sid, "name": f"ts_{sid}", "split": assignment[sid],
+                             **info[sid], "path": path, "sha256": _sha256_file(path)})
+    return {
+        "source": {
+            "dataset": "TotalSegmentator small subset v2.0.1",
+            "zenodo_record": ZENODO_RECORD,
+            "zip": os.path.basename(zip_path),
+            "zip_sha256": _sha256_file(zip_path),
+            "license": "CC-BY-4.0",
+        },
+        "selection": {
+            "seed": seed,
+            "split_counts": {region: list(counts) for region, counts in split_counts.items()},
+            "min_inplane_mm": MIN_INPLANE_MM,
+            "min_superior_inferior_mm": MIN_SUPERIOR_INFERIOR_MM,
+            "n_candidates": len(candidates),
+        },
+        "subjects": subjects,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--zip", default=DEFAULT_ZIP)
+    parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
+    parser.add_argument("--manifest", default=DEFAULT_MANIFEST)
+    parser.add_argument("--seed", type=int, default=0)
+    args = parser.parse_args()
+    if not os.path.exists(args.zip):
+        raise SystemExit(
+            f"{args.zip} not found. Download it first:\n"
+            f"  curl -L -o {args.zip} "
+            f"'https://zenodo.org/records/{ZENODO_RECORD}/files/{os.path.basename(args.zip)}?download=1'"
+        )
+    manifest = build_manifest(args.zip, args.out_dir, args.seed)
+    with open(args.manifest, "w") as f:
+        json.dump(manifest, f, indent=2)
+        f.write("\n")
+    counts = {}
+    for s in manifest["subjects"]:
+        counts[(s["split"], s["region"])] = counts.get((s["split"], s["region"]), 0) + 1
+    print(f"[select_totalseg] {len(manifest['subjects'])} subjects from "
+          f"{manifest['selection']['n_candidates']} candidates -> {args.manifest}")
+    for (split, region), n in sorted(counts.items()):
+        print(f"  {split:5s} {region:15s} {n}")
+
+
+if __name__ == "__main__":
+    main()
