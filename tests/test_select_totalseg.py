@@ -56,8 +56,11 @@ def test_select_and_split_raises_when_region_too_small():
 
 
 import gzip
+import hashlib
 import json
+import os
 import zipfile
+from pathlib import Path
 
 import nibabel as nib
 import numpy as np
@@ -104,10 +107,15 @@ def test_build_manifest_selects_extracts_and_describes(tmp_path):
     assert first["region"] == "thorax"
     assert first["shape"] == [200, 200, 120]
     assert first["spacing"] == [1.5, 1.5, 1.5]
-    assert (out_dir / first["id"] / "ct.nii.gz").exists()
-    assert first["path"] == str(out_dir / first["id"] / "ct.nii.gz")
+    expected_path = os.path.relpath(out_dir / first["id"] / "ct.nii.gz")
+    assert first["path"] == expected_path
+    assert Path(expected_path).exists()
+    assert first["sha256"] == hashlib.sha256(Path(first["path"]).read_bytes()).hexdigest()
     assert len(first["sha256"]) == 64
     assert not (out_dir / "s0005").exists()     # pelvis not in split_counts
     assert manifest["source"]["zenodo_record"] == "10047263"
     assert manifest["selection"]["seed"] == 0
+    assert manifest["selection"]["n_candidates"] == 4
+    assert "numpy_version" in manifest["selection"]
+    assert list(out_dir.rglob("*.tmp")) == []
     json.dumps(manifest)                        # serializable

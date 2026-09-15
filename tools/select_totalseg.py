@@ -120,23 +120,28 @@ def build_manifest(zip_path, out_dir=DEFAULT_OUT_DIR, seed=0, split_counts=SPLIT
             shape, zooms = read_ct_header(zf, sid)
             if not passes_extent_filter(shape, zooms):
                 continue
-            region = region_for_study_type(row["study_type"])
+            try:
+                region = region_for_study_type(row["study_type"])
+            except ValueError as exc:
+                raise ValueError(f"{sid}: {exc}") from exc
             candidates.append({"id": sid, "region": region})
             info[sid] = {
                 "study_type": row["study_type"],
                 "region": region,
                 "shape": [int(v) for v in shape[:3]],
-                "spacing": [float(v) for v in zooms[:3]],
+                "spacing": [round(float(v), 6) for v in zooms[:3]],
             }
         assignment = select_and_split(candidates, split_counts, seed)
         subjects = []
         for sid in sorted(assignment):
             path = os.path.join(out_dir, sid, "ct.nii.gz")
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with zf.open(f"{sid}/ct.nii.gz") as src, open(path, "wb") as dst:
+            tmp_path = path + ".tmp"
+            with zf.open(f"{sid}/ct.nii.gz") as src, open(tmp_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+            os.replace(tmp_path, path)
             subjects.append({"id": sid, "name": f"ts_{sid}", "split": assignment[sid],
-                             **info[sid], "path": path, "sha256": _sha256_file(path)})
+                             **info[sid], "path": os.path.relpath(path), "sha256": _sha256_file(path)})
     return {
         "source": {
             "dataset": "TotalSegmentator small subset v2.0.1",
@@ -151,6 +156,7 @@ def build_manifest(zip_path, out_dir=DEFAULT_OUT_DIR, seed=0, split_counts=SPLIT
             "min_inplane_mm": MIN_INPLANE_MM,
             "min_superior_inferior_mm": MIN_SUPERIOR_INFERIOR_MM,
             "n_candidates": len(candidates),
+            "numpy_version": np.__version__,
         },
         "subjects": subjects,
     }

@@ -32,7 +32,8 @@
     },
     "min_inplane_mm": 250.0,
     "min_superior_inferior_mm": 150.0,
-    "n_candidates": 100
+    "n_candidates": 100,
+    "numpy_version": "2.5.2"
   },
   "subjects": [
     {
