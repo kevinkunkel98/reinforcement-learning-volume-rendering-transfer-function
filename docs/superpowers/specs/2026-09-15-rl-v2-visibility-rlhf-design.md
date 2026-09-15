@@ -102,8 +102,8 @@ Done first, in its own commits.
   every `tests/test_rl_*.py`.
 - Old-RL plots: `plots/online_eval_curve.py`,
   `plots/reward_model_eval_curve.py` and their tests. `plots/style.py` and
-  `plots/read_progress.py` stay. `plots/training_curves.py` stays only if it is
-  a generic SB3 `progress.csv` plotter; the implementation plan checks this.
+  `plots/read_progress.py` stay. `plots/training_curves.py` stays (generic SB3
+  `progress.csv` plotter).
 - `stats.py`, `mvp.py`, and the tracked `.$architecture-*.drawio.bkp` files.
 - `evaluate.human()` (console judge, only used by `mvp.py`). `evaluate.objective()`
   stays for the chat UI's hill-climb search.
@@ -112,10 +112,11 @@ Done first, in its own commits.
   `_start_human_search`, `Session.feedback`), `PREF_PATH`, `FEEDBACK_PATH`, the
   judge view and thumbs buttons in `static/`, and their server tests.
 - Design docs in `docs/superpowers/{specs,plans}/` for removed features:
-  `2026-09-04-rl-implementation`, `2026-09-05-training-curve-plots`,
-  `2026-09-06-camera-viewpoint-rl`, `2026-09-07-opacity-rl-live-wiring`,
-  `2026-09-09-rl-online-learning`, `2026-09-09-rlhf-reward-model`,
-  `2026-09-11-goal-conditioned-reward`, `2026-09-11-ingest-feedback`.
+  `2026-09-04-rl-implementation`, `2026-09-06-camera-viewpoint-rl`,
+  `2026-09-07-opacity-rl-live-wiring`, `2026-09-09-rl-online-learning`,
+  `2026-09-09-rlhf-reward-model`, `2026-09-11-goal-conditioned-reward`,
+  `2026-09-11-ingest-feedback`. (`2026-09-05-training-curve-plots` stays: the
+  plotter is generic and kept.)
 
 **Keep:** renderer, transfer functions, rule/LLM parser, voice (`asr.py`),
 camera commands (`camera.py`), datasets, phantom (test fixture), scene schema,
