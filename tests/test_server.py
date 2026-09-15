@@ -10,7 +10,6 @@ import os
 import asyncio
 import json
 
-import numpy as np
 import pytest
 
 from fastapi import HTTPException
@@ -319,6 +318,15 @@ def test_objective_search_appends_one_final_step():
     assert state["current"]["masses"]["bone"] > 220.0
 
 
+def test_objective_search_keeps_current_camera():
+    s = _fresh_session()
+    s.command("rotate right")
+    cam = s.history[s.cursor]["camera"]
+    state = s.command("increase opacity for bone strongly", parser="rule", search=True, steps=3)
+    assert state["current"]["search"] is True
+    assert state["current"]["camera"] == cam
+
+
 def test_search_requested_for_non_opacity_attribute_falls_back_to_direct_apply():
     # "sharpen bone" parses to attribute="width", direction="decrease". search.propose_step
     # is hardcoded to mutate the height/opacity parameter, so search must not run for width
@@ -445,5 +453,3 @@ def test_new_session_starts_with_default_camera():
     from camera import DEFAULT_CAMERA
     session = _fresh_session()
     assert session.history[0]["camera"] == DEFAULT_CAMERA
-
-
