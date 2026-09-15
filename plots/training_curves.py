@@ -20,7 +20,7 @@ def _find_latest_run(log_dir: str) -> str:
     candidates = glob.glob(os.path.join(log_dir, "run_seed*"))
     if not candidates:
         raise FileNotFoundError(
-            f"No run_seed* directories found under {log_dir!r} -- run `python -m rl.train` first."
+            f"No run_seed* directories found under {log_dir!r} -- run an SB3 training script first."
         )
     return max(candidates, key=os.path.getmtime)
 

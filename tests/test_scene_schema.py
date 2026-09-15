@@ -246,7 +246,7 @@ def test_scene_fixture_documents_current_extractor_gap():
     assert normalized[1]["parent_scene_id"] == normalized[0]["scene_id"]
     assert normalized[1]["parent_step_id"] == 1
     assert normalized[1]["carried_forward"] is True
-    # rl.extract_pairs still consumes step_id/parent_step_id rows, not scene IDs.
+    # Normalized scenes carry scene_id/parent_scene_id, not legacy step_id rows.
     assert "step_id" not in normalized[1]
 
 
