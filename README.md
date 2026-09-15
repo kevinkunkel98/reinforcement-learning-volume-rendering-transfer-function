@@ -1,6 +1,6 @@
 # Voice-Driven Transfer Function MVP
 
-**Speech-controlled volume rendering with a learned transfer-function agent.**
+**Speech-controlled volume rendering, toward a learned transfer-function agent.**
 Say "show only bone" or "increase opacity for bone strongly" and a real CT/MRI
 scan re-renders live — parsed by a rule engine or a local LLM and executed by
 exact commands or hill-climbing search. RL v2 (in progress) adds a
@@ -35,7 +35,7 @@ ollama serve
 ollama pull qwen2.5:7b
 ```
 
-Without Ollama, `--parser llm` falls back to the rule parser.
+Without Ollama, the `llm` parser (UI parser toggle) falls back to the rule parser.
 
 ## Quick Start
 
@@ -190,8 +190,12 @@ python -m pytest -q
 
 ## Project Layout
 
-- Root files: rendering, transfer functions, parser, and web UI
+- Root files: rendering, transfer functions, parser, and web UI server
+- `static/`: web UI and local 3D viewer
 - `rl/`: RL v2 (in progress)
+- `plots/`: training-curve plotting
+- `tools/`: maintenance scripts (e.g. `COMMANDS.md` generator)
 - `data/`: datasets and parser evaluation phrases
+- `docs/`, `slides/`: architecture notes, thesis material, design specs and plans
 - `out/`: runtime state, logs, images, models, and reports
 - `tests/`: automated tests
