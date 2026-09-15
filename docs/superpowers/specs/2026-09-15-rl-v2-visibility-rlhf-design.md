@@ -1,11 +1,18 @@
-# RL v2: Visibility-Grounded Transfer-Function Agent With Human Preferences
+# RL v2: Instruction-Following Transfer-Function Agent With Human Preferences
 
 ## Goal
 
-Redesign the RL pipeline so it can actually answer the thesis question — *can a
-transfer function (TF) be learned with RL?* — before any preference data is
-collected. One week (until ~2026-09-22) delivers a working pipeline, a tier-1
-result, and collected preference data; the following month extends it.
+Redesign the RL pipeline so it can answer the thesis question — *can a
+transfer function (TF) be learned with RL?* — for the instructions a user will
+later speak in VR. One goal-conditioned policy learns a diverse set of
+perceptual instructions ("more bone", "more bone, a bit less spongy", "show only
+bone", "high opacity spongy", "brighten fat") on real CT volumes, first from a
+visibility-based objective, then refined with human preferences.
+
+One week (until ~2026-09-22) delivers: cleanup, data, the instruction-following
+policy with its evaluation (tier 1), the collection page, and collected
+preference data. Reward-model fine-tuning, RLHF, and the blind comparison start
+the following month.
 
 ## Why the current pipeline cannot answer the question
 
@@ -23,36 +30,61 @@ Measured on 2026-09-15 with a numpy front-to-back compositing prototype:
 - The reward model sees four global grayscale statistics that cannot tell
   tissues apart.
 - The policy observes no information about the volume.
+- The goal is one tissue plus a direction; compound or graded instructions
+  cannot be expressed.
 
 A single fixed rule ("target peak up, other peaks down") raised the target
 tissue's visibility on all 4 CT volumes for all 4 tissues (16/16, 1.2×–8.2×), so
-a transferable strategy exists. With a pure target-visibility reward, that rule
-is close to optimal — which is why the reward below includes a context term.
+a transferable strategy exists. With requested amounts and "keep the rest"
+constraints, that rule overshoots and the policy must learn how much to change
+per volume. Tissues also interfere: the default bone peak (center 900 HU,
+width 280 HU) still reaches 56% of its height at the spongy/bone boundary
+(600 HU), so "more bone, less spongy" requires narrowing the bone peak.
+
+## Instruction split
+
+| Instruction | Example | Handled by |
+|---|---|---|
+| Relative visibility, graded | "more bone", "a bit less fat" | policy |
+| Compound relative | "more bone, a bit less spongy" | policy |
+| Absolute level | "high opacity bone" | policy |
+| Show only | "show only bone and spongy" | policy |
+| Brightness, graded | "brighten bone", "darken fat" | policy |
+| Sharpen/soften, center shift | "sharpen bone", "shift fat down" | exact (`apply_command`) |
+| Camera, reset | "rotate left", "reset" | exact |
+
+Exact instructions have a closed-form mapping to parameters; learning adds
+nothing. Perceptual instructions depend on the volume and on occlusion; that is
+where RL is used.
 
 ## Success criteria
 
-**Tier 1 (must-have, no human data):** the SAC policy (10 steps) beats baselines
-B1, B2, B3 and B5 on the TotalSegmentator test subjects in mean episode
-objective, paired Wilcoxon p < 0.05, for each of 3 seeds. Also reported, not
-gating: training volumes (new episodes), out-of-source test volumes, and the
-ratio to B4.
+**Goal attainment** per episode: `A = 1 − D_final / D_start`, with `D` the goal
+distance defined under Reward (1 = goal reached, 0 = no progress, < 0 = worse).
 
-**Tier 2 (stretch):** on validation-volume preference pairs, the fine-tuned
-reward model (RM) predicts human choices more accurately than the visibility
-objective, and on the subset where human and objective disagree the accuracy
-difference has a bootstrap 95% CI above 0. Then the RLHF policy is compared with
-its control in a blind A/B test.
+**Tier 1 (must-have, no human data):** on the TotalSegmentator test subjects,
+the policy's mean attainment exceeds B1, B2, B3 and B5 (paired Wilcoxon,
+p < 0.05) for each of 3 seeds. Reported, not gating: attainment per instruction
+type, training volumes (new episodes), out-of-source test volumes, ratio to B4.
+
+**Tier 2 (month):** on validation-volume preference pairs, the fine-tuned reward
+model (RM) predicts human choices more accurately than the objective, and on the
+subset where human and objective disagree the accuracy difference has a
+bootstrap 95% CI above 0. Then the RLHF policy is compared with its control in a
+blind A/B test.
 
 ## Scope
 
-In scope this week: Phase 0 cleanup, TotalSegmentator data, visibility score,
-new environment, SAC training and evaluation, embeddings, preference model,
-`/collect` page, RLHF fine-tuning, blind comparison.
+**This week:** Phase 0 cleanup; TotalSegmentator data; visibility and
+brightness estimate; goal representation, sampler and parser mapping; parser
+extension; environment; SAC training and evaluation; `/collect` page and
+preference collection; `embed.py` and PCA if time remains.
 
-Out of scope (month): anatomy-based goals from segmentation masks, the full
-TotalSegmentator dataset, leave-one-out folds, best-of-4 gallery and iterative
-RLHF rounds, color/center actions, multi-turn episodes, command-text goal
-embeddings, the new policy in the chat UI, CLIP comparison, MRI.
+**Month:** RM pretraining/fine-tuning, RLHF, blind comparison; the policy in the
+chat UI and VR; anatomy-based goals from segmentation masks; learned
+sharpen/center; learned viewpoints; full TotalSegmentator and leave-one-out;
+best-of-4 gallery and iterative RLHF rounds; command-text goal embeddings; CLIP
+comparison; MRI.
 
 ## Phase 0: Cleanup
 
@@ -124,25 +156,22 @@ MRI and uncalibrated volumes are excluded from v2.
 
 ```text
                    ┌──────────── Tier 1 (no human data) ─────────────┐
-volume ─► views.py (6 cameras per volume)                            │
-       └► visibility.py ─► per-tissue visibility + coverage          │
-                 │                                                   │
-                 ▼                                                   │
-          rl/vis_env.py ─► rl/vis_train.py (SAC) ─► rl/vis_eval.py   │
-                 ▲                                    ▲              │
-                 └──────── rl/baselines.py ───────────┘              │
+text ─► parser (rule/LLM) ─► goals.py ─► goal vector                 │
+                                  ▲          │                        │
+                         sampler ─┘          ▼                        │
+volume ─► views.py ─► visibility.py ─► rl/vis_env.py ─► rl/vis_train │
+                                             ▲              │         │
+                              rl/baselines ──┴── rl/vis_eval ◄┘       │
                    └─────────────────────────────────────────────────┘
                    ┌──────────── Tier 2 (human data) ────────────────┐
-rl/candidates.py ─► collect.py (routes) ─► static/collect.{html,js}   │
+rl/candidates.py ─► collect.py ─► static/collect.{html,js}            │
                           │ choice + TF + cameras seen                │
                           ▼                                           │
                  out/vis_preferences.jsonl                            │
                           ▼                                           │
      embed.py (VTK, 6 views, 224 px ─► DINOv2-S ─► mean, 384-D)       │
                           ▼                                           │
-                 rl/pref_model.py (PCA + Bradley–Terry ensemble)      │
-                          ▼                                           │
-                 rl/rlhf_finetune.py ─► rl/blind_eval.py              │
+     rl/pref_model.py ─► rl/rlhf_finetune.py ─► rl/blind_eval.py      │
                    └─────────────────────────────────────────────────┘
 ```
 
@@ -151,17 +180,18 @@ rl/candidates.py ─► collect.py (routes) ─► static/collect.{html,js}   �
 | Unit | Responsibility | Interface |
 |---|---|---|
 | `views.py` | The 6 standard cameras for a volume | `views_for(volume_id) -> list[Camera]`; `Camera` is renderer-neutral `{position, focal_point, view_up}` |
-| `visibility.py` | Per-tissue visibility estimate | `VisibilityModel(volume_id).features(params) -> dict` with keys `fat, soft, spongy, bone, coverage` |
+| `visibility.py` | Per-tissue visibility and brightness estimate | `VisibilityModel(volume_id).features(params) -> Features` with `vis[4]`, `bright[4]`, `coverage`; `.solo_max(tissue)` |
+| `goals.py` | Goal vector, goal distance, sampler, command → goal, goal → text | see Goals |
 | `embed.py` | Multi-view image embedding with disk cache | `embed_state(volume_id, params) -> np.ndarray[384]` |
 | `rl/vis_env.py` | Gymnasium environment | `VisibilityTFEnv(volume_ids, reward_fn=None, seed=None)` |
-| `rl/baselines.py` | B1–B5 as functions of `(env state) -> final params` | one function per baseline |
+| `rl/baselines.py` | B1–B5 as functions `(volume_id, start_params, goal) -> final params` | one function per baseline |
 | `rl/vis_train.py` | SAC training CLI | `python -m rl.vis_train --seed N --lam 0.3` |
-| `rl/vis_eval.py` | Fixed-episode evaluation against baselines | writes JSON report + CSV per episode |
-| `rl/candidates.py` | Start state, goal and candidate pair sampling, near-duplicate filter | `sample_item(volume_id, rng, policy) -> Item` |
+| `rl/vis_eval.py` | Fixed-episode evaluation against baselines | JSON report + per-episode CSV |
+| `rl/candidates.py` | Item sampling for collection, near-duplicate filter | `sample_item(volume_id, rng, policy) -> Item` |
 | `collect.py` | FastAPI router for `/collect` and `/api/collect/*`, mounted by `server.py` | see Collection |
 | `rl/pref_model.py` | PCA, RM ensemble, pretraining and fine-tuning CLIs | `score(start_emb, final_emb, goal) -> (mean, std)` |
-| `rl/rlhf_finetune.py` | Fine-tune a tier-1 policy with the RM | CLI with `--alpha` |
-| `rl/blind_eval.py` | Build blind episodes, analyze `out/blind_eval.jsonl` | CLI |
+| `rl/rlhf_finetune.py` | Fine-tune a tier-1 policy with the RM (month) | CLI with `--alpha` |
+| `rl/blind_eval.py` | Blind episodes and analysis (month) | CLI |
 | `tools/validate_visibility.py` | Proxy vs VTK validation report | CLI |
 | `tools/smoke_rl_v2.py` | End-to-end smoke run | CLI, < 5 min |
 
@@ -176,10 +206,10 @@ azimuth/elevation form keeps working for the chat UI.
 The volume is in canonical RAS. View 0 looks at the volume center from anterior,
 with superior as view-up, at a distance that fits the volume bounds. Views 1–5
 rotate view 0 about the superior axis in 60° steps. The same 6 cameras are used
-by the visibility score, the embeddings, and (view 0) the `/collect` start
+by the visibility estimate, the embeddings, and (view 0) the `/collect` start
 camera.
 
-### Visibility score
+### Visibility and brightness estimate
 
 Precomputed once per volume and cached under `out/cache/visibility/`:
 
@@ -187,17 +217,24 @@ Precomputed once per volume and cached under `out/cache/visibility/`:
 2. For each of the 6 views, rotate the grid so the view direction is axis 0
    (`torch.nn.functional.affine_grid` + `grid_sample`, trilinear).
 3. Label each voxel by `TISSUE_BANDS` (air, fat, soft, spongy, bone).
+4. 16-bin intensity histogram of the full volume over `CENTER_RANGE`,
+   normalized to sum 1.
 
 Per call, on all 6 grids as one batched torch operation:
 
-- Opacity per voxel from the TF's 256-entry lookup table, corrected for step
-  length: `α = 1 − (1 − α_TF)^(Δs / 1 mm)`, with `Δs` the resampled voxel size.
-- Front-to-back transmittance `T = cumprod(1 − α)` (exclusive).
-- Contribution `w = T · α`.
-- `V_t` = mean over rays of the summed contribution of voxels labeled `t`,
-  averaged over the 6 views.
-- `coverage` = share of rays whose accumulated opacity is ≥ 0.3, averaged over
-  views.
+- Opacity and RGB per voxel from the TF's 256-entry lookup tables; opacity
+  corrected for step length: `α = 1 − (1 − α_TF)^(Δs / 1 mm)`, with `Δs` the
+  resampled voxel size.
+- Front-to-back transmittance `T = cumprod(1 − α)` (exclusive), contribution
+  `w = T · α`.
+- `vis_t` = mean over rays of the summed `w` of voxels labeled `t`.
+- `bright_t` = `Σ w · lum(rgb) / Σ w` over voxels labeled `t`, with
+  `lum = 0.2126 R + 0.7152 G + 0.0722 B`; `0` when `Σ w < 1e-4`.
+- `coverage` = share of rays whose accumulated opacity is ≥ 0.3.
+- All quantities averaged over the 6 views.
+
+`solo_max(t)` = `vis_t` with tissue `t`'s peak at height 1 and all other heights
+0 (default widths), computed once per volume and tissue and cached.
 
 Budget: ≤ 30 ms per call. If exceeded: longest axis 64, then 3 views.
 
@@ -206,48 +243,112 @@ on 3 volumes; Spearman correlation between proxy coverage and coverage of the
 real VTK render (same camera) ≥ 0.8, plus a side-by-side figure. Environment
 work does not start until the gate passes.
 
+### Goals (`goals.py`)
+
+Tissues `(fat, soft, spongy, bone)`. A goal vector has 16 values:
+
+- `d[4]`: requested change of `log10(vis_t + ε)` relative to the episode start
+- `m[4]`: 1 if the tissue's visibility is part of the instruction, else 0
+- `e[4]`: requested change of `bright_t` relative to the episode start
+- `n[4]`: 1 if the tissue's brightness is part of the instruction, else 0
+
+`ε = 1e-3`.
+
+**Command → goal** (`goal_from_command(cmd, vis_model, start_features)`):
+
+| Command | Goal entries |
+|---|---|
+| opacity increase/decrease X, strength | `d_X = ±{slightly 0.15, moderately 0.3, strongly 0.6}`, `m_X = 1` |
+| compound | union of its sub-commands |
+| opacity set X level | `d_X = log10(L · solo_max(X) + ε) − log10(vis_X,start + ε)`, `L = {low 0.1, medium 0.4, high 0.8}`, `m_X = 1` |
+| show only X (, Y) | named: `d = max(0, log10(0.8 · solo_max + ε) − log10(vis_start + ε))`; others: `d = log10(ε) − log10(vis_start + ε)` (hide); all `m = 1` |
+| brightness increase/decrease X, strength | `e_X = ±{slightly 0.1, moderately 0.2, strongly 0.4}`, `n_X = 1` |
+
+Other commands (width, center, camera, reset) are not goals; they go to
+`apply_command` or the camera code as today.
+
+**Goal distance** at state `s`, with `c_t = log10(vis_t + ε) − log10(vis_t,start + ε)`
+and `b_t = bright_t − bright_t,start`:
+
+```
+D(s) = Σ_t m_t |c_t − d_t|  +  κ Σ_t n_t |b_t − e_t|
+     + λ Σ_t (1 − m_t) |c_t|  +  λ κ Σ_t (1 − n_t) |b_t|
+```
+
+`κ = 1.5` (a brightness change of 0.2 weighs like a visibility change of 0.3),
+`λ = 0.3` (weight of "keep the unmentioned tissues as they are"; ablation
+`λ = 0`).
+
+**Sampler** (`sample_goal(rng)`) returns `(command dict, text, goal)` with the
+following mix; tissues, strengths and levels uniform:
+
+| Type | Share |
+|---|---|
+| single relative visibility | 40% |
+| compound relative (2 tissues) | 25% |
+| show only (1–2 tissues) | 15% |
+| absolute level (1–2 tissues) | 10% |
+| brightness | 10% |
+
+The sampler never hides all four tissues. Text comes from templates with
+synonyms ("more bone", "increase opacity for bone strongly", "a bit less
+spongy") and is used on the collect page and as parser test phrases.
+
+### Parser extension
+
+- Rule parser: short forms "more/less X [a bit/much/slightly/strongly]";
+  compound relative commands split on "," / "and" into a `compound` of relative
+  sub-commands.
+- Fix: a sentence with several relative clauses currently returns only the
+  first clause; it must return all of them or raise.
+- LLM parser prompt: `compound` may contain relative sub-commands with
+  `strength`, not only `set` sub-commands; validation updated.
+- `data/parser_eval_phrases.json` gains phrases for every instruction type;
+  `eval_parsers.py` reports accuracy per type.
+
+`apply_command` already folds compound sub-commands of any kind and needs no
+change.
+
 ### Environment (`VisibilityTFEnv`)
 
-- **Reset:** training volume chosen uniformly; goal = one of 8
-  (`fat, soft, spongy, bone` × `increase, decrease`), uniform; start TF =
-  `default_params()` plus uniform noise ±0.3 on heights and ±0.2 on widths
-  (normalized units, clipped to [−1, 1]).
-- **Observation (35):** 8 controllable values (height, width of each peak), goal
-  one-hot (4), direction (±1), `log10(V_t + 1e-3)` for 4 tissues, coverage,
-  16-bin intensity histogram of the full volume over `CENTER_RANGE`
-  (normalized to sum 1, precomputed), step fraction `t / 10`.
-- **Action:** 8 values in [−1, 1], scaled to ±0.1 change of each height and
-  width per step. Centers and colors stay fixed.
+- **Reset:** training volume chosen uniformly; goal from `sample_goal`; start TF
+  = `default_params()` plus uniform noise ±0.3 on heights and ±0.2 on widths
+  (normalized units, clipped to [−1, 1]), and one uniform ±0.2 per peak added
+  to its r, g, b in unit space (clipped to [0, 1]).
+- **Action (12):** per peak: height, width, brightness, each in [−1, 1], scaled
+  to ±0.1 change per step. Brightness adds the same amount to the peak's r, g, b
+  in unit space, clipped to [0, 1]. Centers and hue stay fixed.
+- **Observation (62):** 12 controllable values; goal (16); current
+  `log10(vis + ε)` (4) and `bright` (4); progress `c` (4) and `b` (4);
+  coverage (1); volume histogram (16); step fraction `t / 10` (1).
 - **Episode:** 10 steps, then truncation.
-- **Reward per step:**
-  `r_t = s · Δ log10(V_target + ε) + λ · Δ log10(V_context + ε) − 1[coverage < 0.01]`,
-  with `s = +1` for increase and `−1` for decrease, `V_context` = sum of the
-  other three tissues, `ε = 1e-3`, `λ = 0.3` (ablation: `λ = 0`).
-- **info:** visibility before/after, objective components.
+- **Reward:** `r_t = D(s_{t−1}) − D(s_t) − 1[coverage < 0.01]`. Returns
+  telescope to `D_start − D_final` minus penalties.
+- **info:** features before/after, `D`, goal type.
 
 ### Training
 
-SAC (stable-baselines3, default hyperparameters), 100k steps, seeds 0–2, on the
-20 training volumes. Checkpoints every 10k steps; the best checkpoint is chosen
-by mean objective on the validation volumes. Runs go to `out/rl_v2/<run>/`.
+SAC (stable-baselines3, default hyperparameters), 200k steps, seeds 0–2, on the
+20 training volumes. Checkpoints every 20k steps; the best checkpoint is chosen
+by mean attainment on the validation volumes. Runs go to `out/rl_v2/<run>/`.
 
 ### Evaluation
 
-Fixed episode sets (seeded) of 200 episodes each: training volumes (new
-episodes), TotalSegmentator test subjects (primary), out-of-source Slicer CTs.
+Fixed seeded sets of 300 episodes each (sampler mix as in training): training
+volumes (new episodes), TotalSegmentator test subjects (primary), out-of-source
+Slicer CTs.
 
 | ID | Baseline |
 |---|---|
-| B1 | Old behavior: target peak height to 0.9 (increase) or 0.02 (decrease), nothing else |
+| B1 | Current system: `apply_command(cmd, start_params)` for the episode's command |
 | B2 | Random policy, 10 steps |
-| B3 | Coordinate hill-climber on the episode objective, 10 evaluations |
+| B3 | Coordinate hill-climber on `D`, 10 evaluations |
 | B4 | Same hill-climber, 200 evaluations (reference, not gating) |
-| B5 | Rule: increase → target 0.9, others 0.02; decrease → target 0.02, others unchanged |
+| B5 | Occlusion rule: tissues to increase or show → height 0.9, hidden or decreased tissues → 0.02, all other tissues → 0.02 if any tissue is increased or shown; brightness as B1 |
 
-Metrics: episode objective (sum of `r_t`), final target visibility gain, share of
-improved episodes, empty-image rate, per-goal breakdown, evaluations used.
-Paired Wilcoxon per baseline. Also reports `λ = 0` runs against the same
-baselines.
+Metrics: attainment (overall and per instruction type), `D_final`, empty-image
+rate, evaluations used. Paired Wilcoxon per baseline. The `λ = 0` runs are
+reported against the same baselines.
 
 ## Tier 2
 
@@ -257,20 +358,21 @@ baselines.
 
 - Volume from the training and validation splits only, in blocks of 10 items per
   volume.
-- Start TF as in the environment; goals weighted 2 (increase) : 1 (decrease).
+- Start TF as in the environment; goal and text from `sample_goal`.
 - Candidate pair: 50% two stochastic samples of the tier-1 policy
-  (`deterministic=False`, 10 steps); 50% one policy sample vs one of B5, B3, or
-  a random perturbation (start ± uniform 0.3 on the 8 values), chosen uniformly.
+  (`deterministic=False`, 10 steps); 50% one policy sample vs one of B1, B5, B3,
+  or a random perturbation (start ± uniform 0.3 on the 12 values), chosen
+  uniformly.
 - Near-duplicate filter: the pair is regenerated unless at least one tissue
-  differs by ≥ 0.1 in `log10(V + ε)` between A and B.
-- The objective's preferred side is stored with the item.
+  differs by ≥ 0.1 in `log10(vis + ε)` or by ≥ 0.05 in `bright`.
+- The objective's preferred side (lower `D`) is stored with the item.
 
 **Repeats:** 10% of items are repeats of an earlier item by the same rater,
 shown at least 20 items later with A/B sides swapped.
 
 **Page (`static/collect.html`, `static/collect.js`):**
 
-- Goal sentence ("Make the bone more visible").
+- The instruction text.
 - Two vtk.js viewports sharing one loaded volume, with linked cameras (moving
   one moves both), starting at view 0.
 - "Show start" toggle sets both viewports to the start TF while held.
@@ -291,12 +393,12 @@ given container and share already-loaded image data.
 ```json
 {"pair_id": "...", "timestamp": "...", "rater_id": "kk",
  "volume_id": "ts_s0123", "volume_version": "sha256:...",
- "goal": {"tissue": "bone", "direction": "increase"},
+ "command": {}, "text": "more bone, a bit less spongy", "goal": [16 floats],
  "start_params": [24 floats],
  "a": {"params": [24 floats], "source": "policy"},
  "b": {"params": [24 floats], "source": "rule"},
  "choice": "a", "objective_choice": "b",
- "visibility": {"start": {}, "a": {}, "b": {}},
+ "features": {"start": {}, "a": {}, "b": {}},
  "views_seen": [{"t": 0.0, "camera": {}}],
  "decision_ms": 4200, "repeat_of": null}
 ```
@@ -304,7 +406,7 @@ given container and share already-loaded image data.
 `choice` ∈ `a | b | equal | skip`. Images and embeddings are not stored; they
 are recomputed from `(volume_id, params)`.
 
-**Target:** ≥ 300 decisive pairs.
+**Target:** ≥ 300 decisive pairs this week.
 
 ### Embeddings (`embed.py`)
 
@@ -322,38 +424,37 @@ are recomputed from `(volume_id, params)`.
 
 - **PCA to 64 dims**, fitted on ~5,000 unlabeled final states from tier-1
   rollouts on training volumes; stored with the checkpoint.
-- **Input (133):** `pca(final)` (64), `pca(final) − pca(start)` (64), goal
-  one-hot (4), direction (1).
-- **Network:** 133 → 64 → 1, ReLU, dropout 0.2, weight decay 1e-3.
+- **Input (144):** `pca(final)` (64), `pca(final) − pca(start)` (64), goal (16).
+- **Network:** 144 → 64 → 1, ReLU, dropout 0.2, weight decay 1e-3.
 - **Ensemble:** 5 members, bootstrap-resampled training pairs.
 - **Loss:** Bradley–Terry; `equal` uses soft target 0.5; `skip` is ignored.
 - **Pretraining:** ~4,000 pairs of two final states from the same start and
-  goal (tier-1 policy samples and baselines), labeled by the tier-1 episode
-  objective, on training volumes.
+  goal (tier-1 policy samples and baselines), labeled by lower `D`, on training
+  volumes.
 - **Fine-tuning:** human pairs from training volumes, early stopping on
   validation-volume pairs. Pretrained and fine-tuned checkpoints are separate.
 - **Score mapping:** member score `2·sigmoid(s) − 1`; ensemble returns mean and
   std.
 
-**Evaluation** on validation-volume pairs: visibility objective (λ = 0.3),
-pretrained RM, fine-tuned RM, rater self-consistency from repeats. Each overall,
-on the human–objective disagreement subset, and per goal. Bootstrap 95% CIs.
+**Evaluation** on validation-volume pairs: objective (lower `D`), pretrained RM,
+fine-tuned RM, rater self-consistency from repeats. Each overall, on the
+human–objective disagreement subset, per instruction type. Bootstrap 95% CIs.
 
 ### RLHF fine-tuning (`rl/rlhf_finetune.py`)
 
-- Starts from the best tier-1 checkpoint (λ = 0.3).
-- Reward: `r_t = (1 − α) · r_obj,t − 1[coverage < 0.01]`, plus at the last step
-  `α · (μ − σ)` of the RM ensemble scoring start → final.
+- Starts from the best tier-1 checkpoint (`λ = 0.3`).
+- Reward: `r_t = (1 − α) · (D(s_{t−1}) − D(s_t)) − 1[coverage < 0.01]`, plus at
+  the last step `α · (μ − σ)` of the RM ensemble scoring start → final.
 - 20k steps per run, α ∈ {0, 0.7, 1.0}, seeds 0–2. α = 0 is the control for
   extra training steps.
-- Logged every 1k steps: RM mean, RM std, objective. If the ensemble std on
+- Logged every 1k steps: RM mean, RM std, attainment. If the ensemble std on
   rollouts exceeds 1.5× its value at the start of fine-tuning, training stops
   and the last checkpoint below that threshold is kept.
 
 ### Blind comparison (`rl/blind_eval.py`)
 
 - 40 fixed episodes from TotalSegmentator test subjects and the Slicer CTs,
-  goals uniform over 8.
+  goals from the sampler.
 - RLHF policy (α = 0.7, deterministic) vs α = 0 control (deterministic), shown
   on `/collect` in `blind` mode with sources hidden and order randomized.
 - Written to `out/blind_eval.jsonl`, never read by training.
@@ -364,7 +465,9 @@ on the human–objective disagreement subset, and per goal. Bootstrap 95% CIs.
 
 - Missing dataset files or model weights: clear error naming the command that
   fetches them.
-- Visibility: NaN/inf guard; all-transparent TF returns zeros, not NaN.
+- Visibility: NaN/inf guard; an all-transparent TF returns zeros, not NaN.
+- `goal_from_command` raises for commands that are not goals; the caller routes
+  them to `apply_command`.
 - Collection endpoints validate `choice`, `pair_id`, rater ID; unknown pair →
   400.
 - Training CLIs refuse to overwrite existing run directories.
@@ -374,15 +477,19 @@ on the human–objective disagreement subset, and per goal. Bootstrap 95% CIs.
 Unit tests (fast, no weights):
 
 - Visibility: front slab occluding back slab (clearing the front raises the back
-  tissue's `V`); transparent TF → zero coverage; asymmetric volume checks view
-  rotations; step-length correction.
+  tissue's `vis`); transparent TF → zero coverage; brightness follows peak RGB;
+  asymmetric volume checks view rotations; step-length correction; `solo_max`.
 - Views: 6 distinct cameras, view 0 anterior with superior up on a synthetic
   RAS volume.
 - NIfTI loader: synthetic affine → canonical orientation and spacing.
-- Environment: observation/action shapes, bounds, reward sign per direction,
+- Goals: each command type maps to the documented entries; `D = 0` at a state
+  matching the goal; sampler mix and "never hide all" rule; text round-trips
+  through the rule parser for every template.
+- Parser: short forms, compound relative, no silently dropped clauses.
+- Environment: observation/action shapes, bounds, reward = decrease in `D`,
   empty-image penalty, determinism with a seed.
-- Baselines: each returns valid params; B1 changes only the target height.
-- Candidates: near-duplicate filter, repeat scheduling, goal weights.
+- Baselines: each returns valid params; B1 equals `apply_command`.
+- Candidates: near-duplicate filter, repeat scheduling.
 - Preference model: Bradley–Terry, soft ties, PCA round-trip, ensemble shape.
 - Collection routes: row schema, blind mode hides sources, append-only writes.
 - `embed.py` with an injected stub embedder and renderer.
@@ -397,12 +504,13 @@ rater, PCA + RM + 200 RLHF steps, under 5 minutes. Must pass before collecting.
 | Day | Work |
 |---|---|
 | 1 | Phase 0 cleanup; check `nibabel` and DINOv2 on Python 3.14; download and select TotalSegmentator; NIfTI loader |
-| 2 | `views.py`, `visibility.py`, validation gate; environment; tier-1 training overnight |
-| 3 | Baselines and evaluation (tier-1 result); `embed.py`, PCA, RM pretraining overnight |
-| 4 | `/collect` page and routes; smoke test; start collecting |
-| 5 | Collect ≥ 300 pairs; RM fine-tuning and evaluation (RM result) |
-| 6 | RLHF α ablation; blind comparison |
-| 7 | Buffer; if behind, day 6 moves into the month |
+| 2 | `views.py`, `visibility.py` (vis + brightness), validation gate; `goals.py`; parser extension |
+| 3 | Environment, baselines; tier-1 training overnight (3 seeds) |
+| 4 | Evaluation (tier-1 result, per instruction type); `/collect` page and routes; smoke test |
+| 5 | Collect preference pairs; `embed.py` and PCA |
+| 6 | Collect until ≥ 300 decisive pairs; README for v2 |
+| 7 | Buffer, writing |
+| Month start | RM pretraining and fine-tuning, RLHF α ablation, blind comparison |
 
 ## Risks
 
@@ -410,17 +518,23 @@ rater, PCA + RM + 200 RLHF steps, under 5 minutes. Must pass before collecting.
   or a minimal NIfTI-1 reader in numpy.
 - Visibility proxy diverges from VTK → validation gate blocks environment work
   until the view math is fixed.
+- Some instruction types unreachable on some volumes (e.g. strongly more soft
+  tissue when it already dominates) → attainment reported per type; the sampler
+  can be reweighted after the first training run.
 - Inconsistent human choices → measured by repeats; reported as a result.
-- Time → tier 2 is the stretch; RLHF and blind comparison may move to the month.
+- Time → collection is the last hard deliverable of the week; everything in
+  tier 2 after collection is month work.
 
 ## Decisions
 
 | Decision | Choice |
 |---|---|
-| Success bar | Two tiers: objective result must succeed, human-preference result is the stretch |
-| Goals | fat, soft, spongy, bone × increase/decrease, CT only |
-| Action | height + width of all 4 peaks |
-| Tier-1 reward | numpy visibility with context term λ = 0.3 (λ = 0 ablation) |
+| Success bar | Tier 1 (objective) must succeed this week; tier 2 (human preferences) in the month |
+| Instructions | Policy: relative, compound, absolute, show only, brightness. Exact: sharpen/center, camera, reset |
+| Goal | 16-value vector: requested visibility and brightness change per tissue + masks |
+| Action | Height, width, brightness of all 4 peaks (12-D) |
+| Tier-1 reward | Decrease of goal distance `D` from the visibility/brightness estimate; `λ = 0.3` keep term |
+| Language | Parser (rule/LLM) → command → goal vector; policy is language-free |
 | RM input | DINOv2 ViT-S/14 embeddings of 6 server-rendered views |
 | Judging | A/B from the same start, two linked 3D viewports |
 | Data | TotalSegmentator small subset, ~30 subjects, split by subject; Slicer CTs as out-of-source test |
