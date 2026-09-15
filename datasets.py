@@ -34,12 +34,14 @@ import functools
 import hashlib
 import math
 import os
+import re
 import struct
 import sys
 import tarfile
 import urllib.request
 import zipfile
 
+import nibabel as nib
 import numpy as np
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
@@ -178,6 +180,52 @@ def _load_nrrd(path: str):
     return arr, spacing
 
 
+# Maps an NRRD "space" to the 3x3 matrix converting its world axes to RAS.
+_NRRD_SPACE_TO_RAS = {
+    "left-posterior-superior": np.diag([-1.0, -1.0, 1.0]),
+    "right-anterior-superior": np.eye(3),
+}
+
+
+def _read_nrrd_header(path: str) -> dict:
+    """Header fields of an NRRD file (text lines up to the first blank line)."""
+    fields = {}
+    with open(path, "rb") as f:
+        for raw in f:
+            line = raw.decode("latin-1").rstrip("\r\n")
+            if not line:
+                break
+            if line.startswith("#") or ": " not in line:
+                continue
+            key, value = line.split(": ", 1)
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+def _reorient_nrrd_to_ras(volume: np.ndarray, header: dict):
+    """Reorder/flip a volume loaded by _load_nrrd (NRRD axis order) into RAS
+    axis order using the header's space directions. Oblique directions snap to
+    the closest RAS axes (CT-brain is off by a few degrees). Returns (volume,
+    spacing) with spacing reordered to match."""
+    space = header.get("space")
+    if space not in _NRRD_SPACE_TO_RAS:
+        raise ValueError(f"unsupported NRRD space {space!r}")
+    vectors = re.findall(r"\(([^)]*)\)", header.get("space directions", ""))
+    if len(vectors) != 3:
+        raise ValueError("NRRD header needs three space direction vectors")
+    columns = np.array([[float(v) for v in vector.split(",")] for vector in vectors]).T
+    directions = _NRRD_SPACE_TO_RAS[space] @ columns     # column i: world direction of axis i
+    affine = np.eye(4)
+    affine[:3, :3] = directions
+    orientation = nib.orientations.io_orientation(affine)
+    reoriented = nib.orientations.apply_orientation(volume, orientation)
+    zooms = np.linalg.norm(directions, axis=0)
+    spacing = [0.0, 0.0, 0.0]
+    for axis, (target, _) in enumerate(orientation):
+        spacing[int(target)] = float(zooms[axis])
+    return np.ascontiguousarray(reoriented, dtype=np.float32), tuple(spacing)
+
+
 def _load_stagbeetle_zip(path: str) -> np.ndarray:
     """Loads the TU Wien Stag Beetle CT dataset: a zip containing one .dat
     file whose first 6 bytes are three little-endian uint16 dimensions
@@ -249,6 +297,8 @@ def load_dataset(name: str = "synthetic", canonical: bool = False):
         raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
     path = _ensure_downloaded(name)
     fmt = DATASETS[name].get("format", "nrrd")
+    if canonical and (fmt != "nrrd" or DATASETS[name].get("modality") in ("mri", "uncalibrated")):
+        raise ValueError(f"{name!r} has no canonical RAS orientation (only calibrated CT volumes do)")
     if fmt == "nrrd":
         volume, spacing = _load_nrrd(path)
     elif fmt == "stagbeetle_zip":
@@ -257,6 +307,8 @@ def load_dataset(name: str = "synthetic", canonical: bool = False):
         volume, spacing = _load_cthead_tar(path), DATASETS[name]["spacing"]
     else:
         raise ValueError(f"unknown dataset format {fmt!r} for {name!r}")
+    if canonical:
+        return _reorient_nrrd_to_ras(volume, _read_nrrd_header(path))
     if "flip_axis" in DATASETS[name]:
         volume = np.flip(volume, axis=DATASETS[name]["flip_axis"])
     if DATASETS[name].get("modality") in ("mri", "uncalibrated"):

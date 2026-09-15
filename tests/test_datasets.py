@@ -226,3 +226,49 @@ def test_volumes_for_split(ts_volume):
     assert datasets.volumes_for_split("out_of_source") == ["ct_chest", "ct_skull", "ct_cardio", "ct_abdomen"]
     with pytest.raises(ValueError):
         datasets.volumes_for_split("holdout")
+
+
+def _write_nrrd_header(path, space, directions):
+    text = ("NRRD0004\n# comment line\ntype: short\ndimension: 3\n"
+            f"space: {space}\nsizes: 2 3 4\n"
+            f"space directions: {directions}\n"
+            "kinds: domain domain domain\nendian: little\nencoding: raw\n\n")
+    path.write_bytes(text.encode("latin-1") + b"\x00" * 48)
+
+
+def test_read_nrrd_header_parses_fields(tmp_path):
+    path = tmp_path / "h.nrrd"
+    _write_nrrd_header(path, "left-posterior-superior", "(1,0,0) (0,1,0) (0,0,2)")
+    header = datasets._read_nrrd_header(str(path))
+    assert header["space"] == "left-posterior-superior"
+    assert header["space directions"] == "(1,0,0) (0,1,0) (0,0,2)"
+    assert "type" in header and "NRRD0004" not in header
+
+
+def test_reorient_lps_axis_aligned_flips_x_and_y():
+    volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    header = {"space": "left-posterior-superior", "space directions": "(1,0,0) (0,1,0) (0,0,2)"}
+    ras, spacing = datasets._reorient_nrrd_to_ras(volume, header)
+    assert np.array_equal(ras, volume[::-1, ::-1, :])
+    assert spacing == (1.0, 1.0, 2.0)
+
+
+def test_reorient_permutes_axes_and_spacing():
+    volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    # axis0 -> +superior (2 mm), axis1 -> +right (1 mm), axis2 -> -anterior (3 mm)
+    header = {"space": "right-anterior-superior", "space directions": "(0,0,2) (1,0,0) (0,-3,0)"}
+    ras, spacing = datasets._reorient_nrrd_to_ras(volume, header)
+    expected = np.transpose(volume, (1, 2, 0))[:, ::-1, :]
+    assert np.array_equal(ras, expected)
+    assert spacing == (1.0, 3.0, 2.0)
+
+
+def test_reorient_rejects_unsupported_space():
+    with pytest.raises(ValueError, match="unsupported NRRD space"):
+        datasets._reorient_nrrd_to_ras(np.zeros((2, 2, 2), np.float32),
+                                       {"space": "scanner-xyz", "space directions": "(1,0,0) (0,1,0) (0,0,1)"})
+
+
+def test_canonical_rejected_for_uncalibrated_and_mri():
+    with pytest.raises(ValueError, match="no canonical RAS orientation"):
+        datasets.load_dataset("mri_head", canonical=True)
