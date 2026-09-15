@@ -3,7 +3,7 @@ synthetic phantom. Downloaded once, checksum-verified, and cached under
 data/ -- same "download once, cache forever" precedent as the Whisper model
 in asr.py.
 
-All entries are de-identified public test data from the 3D Slicer project
+Most entries are de-identified public test data from the 3D Slicer project
 (https://github.com/Slicer/SlicerTestingData), each verified by hand against
 its registration in Slicer's own SampleData.py before adding it here. The
 CT entries carry real calibrated Hounsfield units (confirmed via the
@@ -17,13 +17,28 @@ command mechanically works and the render looks correct -- but the tissue
 *labels* ("bone", "fat", ...) are not radiologically accurate for this
 dataset, since that would require real MRI tissue segmentation, not a
 one-line rescale. This is a known, deliberate approximation, not a bug.
+
+Two entries are classic volume-rendering benchmark datasets rather than
+Slicer test data: `stag_beetle` (TU Wien industrial CT, 2005 -- a standard
+reference in transfer-function research) and `ct_head` (the Stanford/UNC
+"CThead" dataset, originally from the 1987-89 Marching Cubes-era UNC
+scans -- probably the single most-cited volume dataset in the field's
+history). Both ship as raw scanner-unit integers with no calibrated HU
+scale, same situation as the MRI entry above, so they get the same
+`_rescale_intensity_to_hu_range` treatment (marked via `modality:
+"uncalibrated"` instead of `"mri"` -- same rescale, different reason: not
+because the modality lacks a HU concept, but because these particular
+scanner dumps were never calibrated to one).
 """
 import functools
 import hashlib
 import math
 import os
+import struct
 import sys
+import tarfile
 import urllib.request
+import zipfile
 
 import numpy as np
 import vtk
@@ -97,6 +112,25 @@ DATASETS = {
         # not a face-forward view. Found empirically by sweeping azimuth.
         "default_camera": {"azimuth": 280.0, "elevation": 0.0, "zoom": 1.0},
     },
+    "stag_beetle": {
+        "filename": "dataset-stagbeetle-208x208x123.zip",
+        "url": (
+            "https://www.cg.tuwien.ac.at/research/publications/2005/"
+            "dataset-stagbeetle/dataset-stagbeetle-208x208x123.zip"
+        ),
+        "sha256": "f41bf432fc2bb1f5678171f4924451f903127193ab264008d8d8b84134090bd8",
+        "format": "stagbeetle_zip",
+        "modality": "uncalibrated",  # see module docstring -- industrial CT, no HU calibration
+        "spacing": (1.0, 1.0, 1.0),  # isotropic per the dataset's own documentation
+    },
+    "ct_head": {
+        "filename": "CThead.tar.gz",
+        "url": "https://graphics.stanford.edu/data/voldata/CThead.tar.gz",
+        "sha256": "b176037ed1bde45eaff3b94fce1e02037680c515009df5bf00747210b449bbfa",
+        "format": "cthead_tar",
+        "modality": "uncalibrated",  # see module docstring -- 1980s scanner dump, no HU calibration
+        "spacing": (1.0, 1.0, 2.0),  # per the archive's own info file: X:Y:Z voxel aspect is 1:1:2
+    },
 }
 
 
@@ -135,6 +169,38 @@ def _load_nrrd(path: str):
     return arr, spacing
 
 
+def _load_stagbeetle_zip(path: str) -> np.ndarray:
+    """Loads the TU Wien Stag Beetle CT dataset: a zip containing one .dat
+    file whose first 6 bytes are three little-endian uint16 dimensions
+    (width, height, depth), followed by raw little-endian uint16 voxel
+    data, X-fastest. Confirmed empirically against the known 208x208x123
+    dataset -- those exact header bytes decode to that shape."""
+    with zipfile.ZipFile(path) as zf:
+        dat_name = next(n for n in zf.namelist() if n.endswith(".dat"))
+        raw_bytes = zf.read(dat_name)
+    width, height, depth = struct.unpack("<HHH", raw_bytes[:6])
+    arr = np.frombuffer(raw_bytes[6:], dtype="<u2").reshape((depth, height, width))
+    return np.transpose(arr.astype(np.float32), (2, 1, 0))  # -> (X, Y, Z), matching _load_nrrd
+
+
+def _load_cthead_tar(path: str) -> np.ndarray:
+    """Loads the classic Stanford/UNC CThead dataset: a gzipped tar of 113
+    per-slice files (CThead.1 .. CThead.113, non-lexicographic numeric
+    order), each a headerless 256x256 big-endian ("Mac byte ordering")
+    int16 raster. Confirmed empirically: interpreting as big-endian gives a
+    plausible intensity range (4-1457); little-endian gives full-range
+    int16 noise (-32768-32515)."""
+    with tarfile.open(path, "r:gz") as tar:
+        members = {m.name: m for m in tar.getmembers() if m.name.startswith("CThead.")}
+        ordered_names = sorted(members, key=lambda n: int(n.split(".")[1]))
+        slices = [
+            np.frombuffer(tar.extractfile(members[n]).read(), dtype=">i2").reshape(256, 256)
+            for n in ordered_names
+        ]
+    arr = np.stack(slices, axis=0)  # (depth, height, width)
+    return np.transpose(arr.astype(np.float32), (2, 1, 0))  # -> (X, Y, Z), matching _load_nrrd
+
+
 def _rescale_intensity_to_hu_range(arr: np.ndarray, lo_percentile: float = 0.5,
                                     hi_percentile: float = 99.5) -> np.ndarray:
     """Linearly rescales an arbitrary-unit intensity volume (e.g. MRI, which
@@ -167,10 +233,18 @@ def load_dataset(name: str = "synthetic"):
     if name not in DATASETS:
         raise ValueError(f"unknown dataset {name!r}, choices: synthetic, {', '.join(DATASETS)}")
     path = _ensure_downloaded(name)
-    volume, spacing = _load_nrrd(path)
+    fmt = DATASETS[name].get("format", "nrrd")
+    if fmt == "nrrd":
+        volume, spacing = _load_nrrd(path)
+    elif fmt == "stagbeetle_zip":
+        volume, spacing = _load_stagbeetle_zip(path), DATASETS[name]["spacing"]
+    elif fmt == "cthead_tar":
+        volume, spacing = _load_cthead_tar(path), DATASETS[name]["spacing"]
+    else:
+        raise ValueError(f"unknown dataset format {fmt!r} for {name!r}")
     if "flip_axis" in DATASETS[name]:
         volume = np.flip(volume, axis=DATASETS[name]["flip_axis"])
-    if DATASETS[name].get("modality") == "mri":
+    if DATASETS[name].get("modality") in ("mri", "uncalibrated"):
         volume = _rescale_intensity_to_hu_range(volume)
     return volume, spacing
 
