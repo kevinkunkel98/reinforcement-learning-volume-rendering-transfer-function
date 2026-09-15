@@ -29,7 +29,6 @@ from pydantic import BaseModel
 from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
-from rl.serve import run_policy
 from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import render as render_module
@@ -39,7 +38,6 @@ from scene_schema import normalize_scene, scene_transition as normalize_scene_tr
 from transfer import TISSUE_BANDS, default_params, opacity_mass
 
 LOG_PATH = "out/log.jsonl"
-PREF_PATH = "out/preferences.jsonl"
 FEEDBACK_PATH = "out/feedback.jsonl"
 SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
 _SCENE_WRITE_LOCK = threading.Lock()
@@ -111,7 +109,7 @@ def _scene_event_id(before, after, event_id=None):
     return "scene-event:" + hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
-def _render_step(params, cmd_text, cmd_dict, verdict, search, step_id, session_id, camera):
+def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera):
     image_b64, img, png_bytes = _render_image_b64(params, camera)
     image_path = _save_image_file(session_id, f"step_{step_id}", png_bytes)
     return {
@@ -125,33 +123,18 @@ def _render_step(params, cmd_text, cmd_dict, verdict, search, step_id, session_i
         "image_path": image_path,
         "masses": _masses(params),
         "features": features(img),
-        "verdict": verdict,
         "search": search,
         "feedback": None,
     }
 
 
-def _pending_public(p):
-    if p is None:
-        return None
-    return {
-        "cmd_text": p["cmd_text"],
-        "cmd_dict": p["cmd"],
-        "iteration": p["iteration"],
-        "max_steps": p["max_steps"],
-        "before_image_b64": p["before_image_b64"],
-        "after_image_b64": p["after_image_b64"],
-    }
-
-
 class Session:
-    """All command/history/pending-judgment logic, independent of FastAPI."""
+    """All command/history logic, independent of FastAPI."""
 
     def __init__(self, path: str):
         self.path = path
         self.history = []
         self.cursor = 0
-        self.pending = None
         self.session_id = None
         self._load_or_init()
 
@@ -163,7 +146,7 @@ class Session:
             self.session_id = data.get("session_id") or self._new_session_id()
             return
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, None, False, 0, self.session_id, default_camera_for(_dataset_name))
+        step = _render_step(default_params(), None, None, False, 0, self.session_id, default_camera_for(_dataset_name))
         self.history = [step]
         self.cursor = 0
         self.save()
@@ -183,7 +166,6 @@ class Session:
             "cursor": self.cursor,
             "total": len(self.history),
             "current": self.history[self.cursor],
-            "pending": _pending_public(self.pending),
             "dataset": _dataset_name,
             "session_id": self.session_id,
             "render_info": {
@@ -199,10 +181,9 @@ class Session:
     def switch_dataset(self, name: str):
         set_dataset(name)  # raises ValueError for an unknown name
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, None, False, 0, self.session_id, default_camera_for(name))
+        step = _render_step(default_params(), None, None, False, 0, self.session_id, default_camera_for(name))
         self.history = [step]
         self.cursor = 0
-        self.pending = None
         self.save()
         return self.state()
 
@@ -237,26 +218,6 @@ class Session:
         self.save()
         return self.state()
 
-    def _next_pending_pair(self, cmd_text, cmd, current, idx, sign, step_size, iteration, max_steps, session_id, camera):
-        proposed = propose_step(current, idx, sign, step_size)
-        before_b64, _, before_bytes = _render_image_b64(current, camera)
-        after_b64, _, after_bytes = _render_image_b64(proposed, camera)
-        before_png = _save_image_file(session_id, f"judge{iteration}_before", before_bytes)
-        after_png = _save_image_file(session_id, f"judge{iteration}_after", after_bytes)
-        return {
-            "cmd_text": cmd_text, "cmd": cmd, "current": current, "proposed": proposed,
-            "idx": idx, "sign": sign, "step_size": step_size, "iteration": iteration,
-            "max_steps": max_steps, "session_id": session_id, "camera": camera,
-            "before_image_b64": before_b64, "after_image_b64": after_b64,
-            "before_png": before_png, "after_png": after_png,
-        }
-
-    def _start_human_search(self, cmd_text, cmd, params, steps, camera):
-        sign = 1.0 if cmd["direction"] == "increase" else -1.0
-        step_size = STRENGTH_WORDS[cmd["strength"] or "moderately"]
-        _, idx = _find_or_create_peak(params, cmd["target"])
-        return self._next_pending_pair(cmd_text, cmd, params, idx, sign, step_size, 0, steps, self.session_id, camera)
-
     def _log_command(self, cmd, current_params, new_params, step):
         jsonl_append(LOG_PATH, {
             "timestamp": step["timestamp"], "command": cmd,
@@ -285,7 +246,7 @@ class Session:
                 break
         return current
 
-    def command(self, text, parser="rule", model="qwen2.5:7b", search=False, evaluator="objective", steps=10):
+    def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10):
         cmd = parse_command(text, parser=parser, model=model)  # raises ValueError on failure
 
         current_params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
@@ -293,7 +254,7 @@ class Session:
 
         if "camera" in cmd:
             new_camera = apply_camera_command(cmd["camera"], current_camera)
-            step = _render_step(current_params, text, cmd, None, False,
+            step = _render_step(current_params, text, cmd, False,
                                  self.history[-1]["id"] + 1, self.session_id, new_camera)
             self.history = self.history[:self.cursor + 1] + [step]
             self.cursor = len(self.history) - 1
@@ -301,67 +262,18 @@ class Session:
             return self.state()
 
         if search and cmd.get("attribute") == "opacity" and cmd.get("direction") in ("increase", "decrease"):
-            if evaluator == "human":
-                self.pending = self._start_human_search(text, cmd, current_params, steps, current_camera)
-                return self.state()
-            if evaluator == "policy":
-                _, peak_idx = _find_or_create_peak(current_params, cmd["target"])
-                new_params = run_policy(current_params, cmd["target"], cmd["direction"], peak_idx, steps)
-            else:
-                new_params = self._run_objective_search(cmd, current_params, steps)
-            step = _render_step(new_params, text, cmd, None, True,
+            new_params = self._run_objective_search(cmd, current_params, steps)
+            step = _render_step(new_params, text, cmd, True,
                                  self.history[-1]["id"] + 1, self.session_id, current_camera)
-            if evaluator == "policy":
-                self._log_command(cmd, current_params, new_params, step)
         else:
             new_params = apply_command(cmd, current_params)
-            step = _render_step(new_params, text, cmd, None, False,
+            step = _render_step(new_params, text, cmd, False,
                                  self.history[-1]["id"] + 1, self.session_id, current_camera)
             self._log_command(cmd, current_params, new_params, step)
 
         self.history = self.history[:self.cursor + 1] + [step]
         self.cursor = len(self.history) - 1
         self.save()
-        return self.state()
-
-    def judge(self, verdict: str):
-        if self.pending is None:
-            raise ValueError("no pending judgment")
-
-        p = self.pending
-        human_verdict = 1 if verdict == "better" else -1
-        obj_verdict = objective(p["current"], p["proposed"], p["cmd"])
-
-        jsonl_append(LOG_PATH, {
-            "timestamp": datetime.datetime.now().isoformat(), "command": p["cmd"],
-            "params_before": p["current"].tolist(), "params_after": p["proposed"].tolist(),
-            "features_before": None, "features_after": None, "verdict": human_verdict,
-        })
-        jsonl_append(PREF_PATH, {
-            "timestamp": datetime.datetime.now().isoformat(), "session_id": p["session_id"],
-            "cmd_text": p["cmd_text"], "cmd_dict": p["cmd"],
-            "params_before": p["current"].tolist(), "params_after": p["proposed"].tolist(),
-            "features_before": None, "features_after": None,
-            "before_png": p["before_png"], "after_png": p["after_png"],
-            "human_verdict": verdict,
-            "objective_verdict": "better" if obj_verdict == 1 else "worse",
-        })
-
-        current = p["proposed"] if human_verdict == 1 else p["current"]
-        step_size = resize_step(p["step_size"], accepted=(human_verdict == 1))
-        iteration = p["iteration"] + 1
-
-        if iteration >= p["max_steps"] or step_size < 0.01:
-            step = _render_step(current, p["cmd_text"], p["cmd"], human_verdict, True,
-                                 self.history[-1]["id"] + 1, self.session_id, p["camera"])
-            self.history = self.history[:self.cursor + 1] + [step]
-            self.cursor = len(self.history) - 1
-            self.pending = None
-            self.save()
-            return self.state()
-
-        self.pending = self._next_pending_pair(p["cmd_text"], p["cmd"], current, p["idx"], p["sign"],
-                                                step_size, iteration, p["max_steps"], p["session_id"], p["camera"])
         return self.state()
 
 
@@ -468,26 +380,13 @@ class CommandRequest(BaseModel):
     parser: str = "rule"
     model: str = "qwen2.5:7b"
     search: bool = False
-    evaluator: str = "objective"
     steps: int = 10
 
 
 @app.post("/api/command")
 async def command(req: CommandRequest):
     try:
-        return session.command(req.text, req.parser, req.model, req.search, req.evaluator, req.steps)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-class JudgeRequest(BaseModel):
-    verdict: str  # "better" | "worse"
-
-
-@app.post("/api/judge")
-async def judge(req: JudgeRequest):
-    try:
-        return session.judge(req.verdict)
+        return session.command(req.text, req.parser, req.model, req.search, req.steps)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
