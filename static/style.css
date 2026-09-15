@@ -2,8 +2,8 @@
    Design tokens — shadcn/ui's stock dark-theme token set, unmodified
    (zinc base, the default you get before picking a color theme). The only
    addition is --success/--success-foreground, which shadcn doesn't ship by
-   default but which this UI needs for "better"/good-feedback states
-   alongside the stock --destructive. All colors are HSL triples so
+   default but which this UI needs for success states (session indicator,
+   .btn-success) alongside the stock --destructive. All colors are HSL triples so
    component rules can modulate alpha via hsl(var(--x) / <alpha>), exactly
    like shadcn's own components do.
    ========================================================================== */
