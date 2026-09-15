@@ -6,6 +6,7 @@ __pycache__/
 data/*.nrrd
 data/*.zip
 data/*.tar.gz
+data/totalseg/
 .venv/
 .DS_Store
 .worktrees/
