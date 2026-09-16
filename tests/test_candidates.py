@@ -6,6 +6,7 @@ import transfer
 from rl import candidates
 from rl.baselines import CONTROLLABLE
 from rl.candidates import SOURCES, sample_item
+from rl.oneshot_env import OneShotEnv
 
 
 class _StubModel:
@@ -130,6 +131,30 @@ def test_sampling_is_deterministic_for_a_seed(monkeypatch):
     assert np.allclose(item1["a"]["params"], item2["a"]["params"])
     assert np.allclose(item1["b"]["params"], item2["b"]["params"])
     assert item1["instruction"]["text"] == item2["instruction"]["text"]
+
+
+# --- observation shared with OneShotEnv -------------------------------------
+
+def test_candidates_observation_matches_oneshot_env_observation(monkeypatch):
+    # rl/candidates.py used to reimplement OneShotEnv's 57-value observation
+    # layout by hand; both now go through rl.oneshot_env.build_observation,
+    # so this pins them to stay identical for the same inputs.
+    model = _make_model(monkeypatch)
+    start_params = goals.starting_params()
+    start_agg = goals.aggregate(model.features(start_params))
+    instruction = goals.sample_instruction("fake_a", model, start_agg, np.random.default_rng(0))
+
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: model)
+    env._volume = "fake_a"
+    env._model = model
+    env._start_params = start_params
+    env._instruction = instruction
+    env._start_agg = start_agg
+    env_observation = env._build_observation()
+
+    candidates_observation = candidates._observation_for(model, start_params, instruction, start_agg)
+
+    assert np.array_equal(env_observation, candidates_observation)
 
 
 # --- policy=None fallback ------------------------------------------------

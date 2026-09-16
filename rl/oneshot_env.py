@@ -45,6 +45,22 @@ OBSERVATION_BOUND = 10.0
 _ATTAINMENT_FLOOR = 1e-9
 
 
+def build_observation(goal, histogram, start_agg: dict, solo_max_log, controllable) -> np.ndarray:
+    """The `OBSERVATION_SIZE`-value one-shot observation: goal (16) +
+    histogram (16) + log10 visibility (4) + brightness (4) + log10 solo_max
+    ceiling (4) + controllable start parameters (12) + coverage (1), all at
+    the start state. The single implementation of this layout -- used by
+    `OneShotEnv._build_observation` during training/rollout and by
+    `rl.candidates` to query a policy standalone for preference collection,
+    so the two can never silently drift apart and feed the policy a
+    different observation than it was trained on."""
+    log_vis = [math.log10(start_agg["vis"][c] + goals.EPSILON) for c in goals.GOAL_CLASSES]
+    bright = [start_agg["bright"][c] for c in goals.GOAL_CLASSES]
+    values = (list(goal) + list(histogram) + log_vis + bright
+              + list(solo_max_log) + list(controllable) + [start_agg["coverage"]])
+    return np.asarray(values, dtype=np.float32)
+
+
 class OneShotEnv(gym.Env):
     """One-step episode: the action is the new transfer function, scored by
     how much closer it gets to a sampled visibility/brightness instruction on
@@ -119,14 +135,10 @@ class OneShotEnv(gym.Env):
         return [float(np.mean([params[i] for i in group])) for group in CONTROLLABLE]
 
     def _build_observation(self) -> np.ndarray:
-        log_vis = [math.log10(self._start_agg["vis"][c] + goals.EPSILON) for c in goals.GOAL_CLASSES]
-        bright = [self._start_agg["bright"][c] for c in goals.GOAL_CLASSES]
         solo_max_log = self._solo_max_log(self._volume, self._model)
         controllable = self._controllable_values(self._start_params)
-
-        values = (list(self._instruction["goal"]) + list(self._model.histogram) + log_vis + bright
-                  + solo_max_log + controllable + [self._start_agg["coverage"]])
-        return np.asarray(values, dtype=np.float32)
+        return build_observation(self._instruction["goal"], self._model.histogram, self._start_agg,
+                                  solo_max_log, controllable)
 
     def _attainment(self, agg: dict) -> float:
         if self._start_distance <= _ATTAINMENT_FLOOR:

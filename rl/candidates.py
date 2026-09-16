@@ -4,10 +4,10 @@ instruction, and two candidate transfer functions from different sources.
 `sample_item` is the entry point `collect.py` calls per rater request. A
 candidate's source is one of `SOURCES`: two independent stochastic samples of
 a one-shot policy (`rl.oneshot_env.OneShotEnv`'s observation, action ->
-params, see `build_observation`/`_apply_action`), a non-learned baseline
-(`rl.baselines.BASELINES`), or a random perturbation of the start state. The
-policy is injected -- a plain callable `policy(observation, rng,
-deterministic) -> action` or an SB3-style model exposing
+params, see `rl.oneshot_env.build_observation`/`_apply_action`), a
+non-learned baseline (`rl.baselines.BASELINES`), or a random perturbation of
+the start state. The policy is injected -- a plain callable `policy(
+observation, rng, deterministic) -> action` or an SB3-style model exposing
 `.predict(observation, deterministic=...) -> (action, state)` -- so this
 module never hard-codes a checkpoint path, and `policy=None` still produces
 usable items from the non-policy sources alone.
@@ -18,6 +18,7 @@ import numpy as np
 
 import goals
 from rl.baselines import BASELINES, CONTROLLABLE
+from rl.oneshot_env import build_observation
 
 SOURCES = ("policy", "policy", "B1_current_executor", "B3_hill_climb_10", "B5_occlusion_rule", "perturbation")
 NON_POLICY_SOURCES = tuple(source for source in dict.fromkeys(SOURCES) if source != "policy")
@@ -28,18 +29,15 @@ MAX_ATTEMPTS = 10
 PERTURBATION_NOISE = 0.3            # uniform +-, normalized parameter units, per controllable group
 
 
-def build_observation(model, start_params: np.ndarray, instruction: dict, start_agg: dict) -> np.ndarray:
-    """The 57-value one-shot observation for `start_params`/`instruction` on
-    `model` -- same layout as `rl.oneshot_env.OneShotEnv._build_observation`,
-    computed standalone so a policy can be queried without a live env."""
-    log_vis = [math.log10(start_agg["vis"][c] + goals.EPSILON) for c in goals.GOAL_CLASSES]
-    bright = [start_agg["bright"][c] for c in goals.GOAL_CLASSES]
+def _observation_for(model, start_params: np.ndarray, instruction: dict, start_agg: dict) -> np.ndarray:
+    """The one-shot observation for `start_params`/`instruction` on `model`,
+    via `rl.oneshot_env.build_observation` -- the single shared
+    implementation of the layout `OneShotEnv` trains on, so a policy queried
+    standalone here (without a live env) sees exactly the same input."""
     solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
                      for c in goals.GOAL_CLASSES]
     controllable = [float(np.mean([start_params[i] for i in group])) for group in CONTROLLABLE]
-    values = (list(instruction["goal"]) + list(model.histogram) + log_vis + bright
-              + solo_max_log + controllable + [start_agg["coverage"]])
-    return np.asarray(values, dtype=np.float32)
+    return build_observation(instruction["goal"], model.histogram, start_agg, solo_max_log, controllable)
 
 
 def _apply_action(start_params: np.ndarray, action: np.ndarray) -> np.ndarray:
@@ -82,7 +80,7 @@ def _choose_sources(rng: np.random.Generator, policy) -> tuple:
 def _sample_candidate(source: str, model, start_params: np.ndarray, instruction: dict,
                        start_agg: dict, rng: np.random.Generator, policy) -> np.ndarray:
     if source == "policy":
-        observation = build_observation(model, start_params, instruction, start_agg)
+        observation = _observation_for(model, start_params, instruction, start_agg)
         action = _predict(policy, observation, rng, deterministic=False)
         return _apply_action(start_params, action)
     if source == "perturbation":

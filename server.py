@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
+import collect
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
@@ -260,6 +261,7 @@ session = Session(UI_SESSION_PATH)
 app = FastAPI()
 if os.path.isdir("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(collect.router)
 
 
 @app.get("/")
