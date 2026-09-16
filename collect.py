@@ -30,7 +30,7 @@ import visibility
 from collect_images import grid_data_url
 from datasets import _dataset_version, volumes_for_split
 from evaluate import jsonl_append
-from rl.candidates import sample_item
+from rl.candidates import anchor_items, sample_item
 
 PREF_PATH = "out/vis_preferences.jsonl"
 _WRITE_LOCK = threading.Lock()
@@ -39,6 +39,7 @@ VALID_CHOICES = ("a", "b", "equal", "skip")
 VALID_ROLES = ("radiologist", "clinician", "researcher", "other")
 REPEAT_RATE = 0.10          # share of items that are a repeat of an earlier one
 REPEAT_MIN_GAP = 20         # a repeat is shown only >= this many items after the original
+ANCHOR_RATE = 0.20          # share of items drawn from the shared anchor pool (roughly one in five)
 
 POLICY_PATH = "out/rl_v2/oneshot_v2_seed0/best.zip"
 _policy_state = {"loaded": False, "policy": None}
@@ -103,7 +104,8 @@ class Collector:
     datasets or a real policy checkpoint: `model_for_volume` (default
     `visibility.for_volume`), `image_fn` (default `collect_images.
     grid_data_url`), `dataset_version_fn` (default `datasets._dataset_
-    version`), `sample_item_fn` (default `rl.candidates.sample_item`) and
+    version`), `sample_item_fn` (default `rl.candidates.sample_item`),
+    `anchor_items_fn` (default `rl.candidates.anchor_items`) and
     `policy_provider` (default `_load_policy`, called -- lazily -- on every
     sampled item).
     """
@@ -111,7 +113,7 @@ class Collector:
     def __init__(self, pref_path: str = PREF_PATH, volumes=None, rng: np.random.Generator = None,
                  policy_provider=None, model_for_volume=visibility.for_volume,
                  image_fn=grid_data_url, dataset_version_fn=_dataset_version,
-                 sample_item_fn=sample_item):
+                 sample_item_fn=sample_item, anchor_items_fn=anchor_items):
         self.pref_path = pref_path
         self._volumes = list(volumes) if volumes is not None else None
         self.rng = rng if rng is not None else np.random.default_rng()
@@ -120,13 +122,17 @@ class Collector:
         self.image_fn = image_fn
         self.dataset_version_fn = dataset_version_fn
         self.sample_item_fn = sample_item_fn
+        self.anchor_items_fn = anchor_items_fn
 
         self._model_cache = {}
         self._items = {}                                  # pair_id -> displayed item, kept for repeats
         self._pending = {}                                 # pair_id -> rater_id, not yet judged
         self._repeat_of = {}                                # pair_id -> original pair_id or None
+        self._anchor_id = {}                                # pair_id -> anchor pool index or None
         self._rater_history = collections.defaultdict(list)  # rater_id -> judged pair_id, in order
         self._rater_meta = {}                               # rater_id -> {"role", "experience"}
+        self._anchor_pool = None                            # lazily generated, then cached for the process
+        self._rater_anchor_seen = collections.defaultdict(set)  # rater_id -> anchor indices already served
 
     def _get_volumes(self) -> list:
         # Resolved lazily (not at construction) so importing this module, and
@@ -147,15 +153,47 @@ class Collector:
         history = self._rater_history[rater_id]
         return len(history) >= REPEAT_MIN_GAP and self.rng.random() < REPEAT_RATE
 
+    def _get_anchor_pool(self) -> list:
+        # Generated at most once per process (the module-level `collector`
+        # lives for the life of the server) -- `anchor_items_fn` itself
+        # caches to disk (see `rl.candidates.anchor_items`), so a restart is
+        # cheap too.
+        if self._anchor_pool is None:
+            self._anchor_pool = self.anchor_items_fn(volumes=self._get_volumes(),
+                                                       model_for_volume=self.model_for_volume)
+        return self._anchor_pool
+
+    def _next_anchor_index(self, rater_id: str):
+        """The lowest anchor-pool index `rater_id` has not yet been served,
+        in the same deterministic order (0, 1, 2, ...) for every rater --
+        or `None` once the pool is exhausted for them."""
+        pool = self._get_anchor_pool()
+        seen = self._rater_anchor_seen[rater_id]
+        for i in range(len(pool)):
+            if i not in seen:
+                return i
+        return None
+
+    def _should_use_anchor(self, rater_id: str) -> bool:
+        return self._next_anchor_index(rater_id) is not None and self.rng.random() < ANCHOR_RATE
+
     def _serve(self, rater_id: str) -> tuple:
-        """Generate (or repeat) one item for `rater_id`, register it as
-        pending judgment, and return `(pair_id, item, repeat_of)`."""
+        """Generate (or repeat, or draw from the anchor pool) one item for
+        `rater_id`, register it as pending judgment, and return `(pair_id,
+        item, repeat_of, anchor_id)`."""
         repeat_of = None
+        anchor_id = None
         if self._should_repeat(rater_id):
             history = self._rater_history[rater_id]
             eligible = history[:len(history) - REPEAT_MIN_GAP + 1]
             repeat_of = str(self.rng.choice(eligible))
             item = _swap_sides(self._items[repeat_of])
+        elif self._should_use_anchor(rater_id):
+            anchor_id = self._next_anchor_index(rater_id)
+            self._rater_anchor_seen[rater_id].add(anchor_id)
+            item = _to_displayed(self._get_anchor_pool()[anchor_id])
+            if self.rng.random() < 0.5:
+                item = _swap_sides(item)
         else:
             volume = str(self.rng.choice(self._get_volumes()))
             model = self._get_model(volume)
@@ -168,7 +206,8 @@ class Collector:
         self._items[pair_id] = item
         self._pending[pair_id] = rater_id
         self._repeat_of[pair_id] = repeat_of
-        return pair_id, item, repeat_of
+        self._anchor_id[pair_id] = anchor_id
+        return pair_id, item, repeat_of, anchor_id
 
     def _response(self, pair_id: str, item: dict, repeat_of) -> dict:
         volume = item["volume"]
@@ -195,7 +234,7 @@ class Collector:
             if rater_role not in VALID_ROLES:
                 raise ValueError(f"invalid role: {rater_role!r}, expected one of {VALID_ROLES}")
             self._rater_meta[rater_id] = {"role": rater_role, "experience": rater_experience}
-        pair_id, item, repeat_of = self._serve(rater_id)
+        pair_id, item, repeat_of, _anchor_id = self._serve(rater_id)
         return self._response(pair_id, item, repeat_of)
 
     def judge(self, pair_id: str, choice: str, decision_ms) -> dict:
@@ -230,6 +269,7 @@ class Collector:
             "features": item["features"],
             "decision_ms": decision_ms,
             "repeat_of": self._repeat_of.get(pair_id),
+            "anchor_id": self._anchor_id.get(pair_id),
         }
         with _WRITE_LOCK:
             os.makedirs(os.path.dirname(self.pref_path) or ".", exist_ok=True)

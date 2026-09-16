@@ -12,7 +12,9 @@ observation, rng, deterministic) -> action` or an SB3-style model exposing
 module never hard-codes a checkpoint path, and `policy=None` still produces
 usable items from the non-policy sources alone.
 """
+import json
 import math
+import os
 
 import numpy as np
 
@@ -22,6 +24,8 @@ from rl.oneshot_env import build_observation
 
 SOURCES = ("policy", "policy", "B1_current_executor", "B3_hill_climb_10", "B5_occlusion_rule", "perturbation")
 NON_POLICY_SOURCES = tuple(source for source in dict.fromkeys(SOURCES) if source != "policy")
+
+ANCHOR_CACHE_PATH = "out/cache/anchor_items.json"
 
 MIN_VISIBILITY_DIFFERENCE = 0.1     # log10 units, per class
 MIN_BRIGHTNESS_DIFFERENCE = 0.05
@@ -136,3 +140,115 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None) -> di
         "near_duplicate": near_duplicate,
         "features": {"start": start_agg, "a": a_agg, "b": b_agg},
     }
+
+
+# --- anchor pool: a fixed set of items every rater judges --------------------
+#
+# Inter-rater agreement is only measurable when different raters judge the
+# *same* items. `anchor_items` produces a small, deterministic pool of them --
+# same volumes, start parameters, instructions and candidate pairs for every
+# rater on every machine -- and caches it to disk so it never silently drifts
+# (e.g. because a newer policy checkpoint changed what "policy" proposes: the
+# default `policy=None` keeps the pool on baselines/perturbation only, stable
+# across the life of the project).
+
+def _item_to_json(item: dict) -> dict:
+    """`sample_item`'s output (numpy arrays), narrowed and converted for
+    `json.dump` -- the inverse of `_item_from_json`."""
+    return {
+        "volume": item["volume"],
+        "start_params": np.asarray(item["start_params"], dtype=np.float64).tolist(),
+        "instruction": {
+            "kind": item["instruction"]["kind"],
+            "text": item["instruction"]["text"],
+            "targets": item["instruction"]["targets"],
+            "goal": np.asarray(item["instruction"]["goal"], dtype=np.float64).tolist(),
+        },
+        "a": {"params": np.asarray(item["a"]["params"], dtype=np.float64).tolist(), "source": item["a"]["source"]},
+        "b": {"params": np.asarray(item["b"]["params"], dtype=np.float64).tolist(), "source": item["b"]["source"]},
+        "objective_choice": item["objective_choice"],
+        "near_duplicate": bool(item["near_duplicate"]),
+        "features": item["features"],
+    }
+
+
+def _item_from_json(data: dict) -> dict:
+    """The inverse of `_item_to_json` -- restores a `sample_item`-shaped
+    dict (numpy arrays back where `collect.py`'s `_to_displayed` expects
+    them) from one cached JSON entry."""
+    return {
+        "volume": data["volume"],
+        "start_params": np.asarray(data["start_params"], dtype=np.float64),
+        "instruction": {
+            "kind": data["instruction"]["kind"],
+            "text": data["instruction"]["text"],
+            "targets": data["instruction"]["targets"],
+            "goal": np.asarray(data["instruction"]["goal"], dtype=np.float64),
+        },
+        "a": {"params": np.asarray(data["a"]["params"], dtype=np.float64), "source": data["a"]["source"]},
+        "b": {"params": np.asarray(data["b"]["params"], dtype=np.float64), "source": data["b"]["source"]},
+        "objective_choice": data["objective_choice"],
+        "near_duplicate": data["near_duplicate"],
+        "features": data["features"],
+    }
+
+
+def _load_anchor_cache(cache_path: str, count: int, seed: int):
+    if not os.path.exists(cache_path):
+        return None
+    with open(cache_path) as f:
+        data = json.load(f)
+    if data.get("seed") != seed or data.get("count") != count:
+        return None
+    return [_item_from_json(entry) for entry in data["items"]]
+
+
+def _save_anchor_cache(cache_path: str, count: int, seed: int, items: list) -> None:
+    os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
+    data = {"seed": seed, "count": count, "items": [_item_to_json(item) for item in items]}
+    with open(cache_path, "w") as f:
+        json.dump(data, f)
+
+
+def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, model_for_volume=None,
+                  cache_path: str = ANCHOR_CACHE_PATH) -> list:
+    """`count` items (see `sample_item`) generated deterministically from
+    `seed` alone -- independent of any rater's history -- so every rater on
+    every machine judging the same `cache_path` sees byte-identical items.
+    Cached to `cache_path`; regenerated only when the file is missing or its
+    recorded `seed`/`count` differ from the ones requested here, so a
+    checked-in cache is never silently invalidated by, say, a newer policy
+    checkpoint (`policy` defaults to `None`, the same "baselines and
+    perturbation only" fallback `sample_item` itself uses -- see its
+    docstring -- keeping the pool stable even as models change).
+
+    `volumes`/`model_for_volume` default to the real dataset split and
+    `visibility.for_volume` (imported lazily so importing this module never
+    depends on the TotalSegmentator data being present); both are injectable
+    so tests never touch either.
+    """
+    cached = _load_anchor_cache(cache_path, count, seed)
+    if cached is not None:
+        return cached
+
+    if volumes is None:
+        from datasets import volumes_for_split
+        volumes = volumes_for_split("train") + volumes_for_split("val")
+    if model_for_volume is None:
+        import visibility
+        model_for_volume = visibility.for_volume
+
+    sorted_volumes = sorted(volumes)
+    rng = np.random.default_rng(seed)
+    model_cache = {}
+    items = []
+    for _ in range(count):
+        volume = str(rng.choice(sorted_volumes))
+        model = model_cache.get(volume)
+        if model is None:
+            model = model_for_volume(volume)
+            model_cache[volume] = model
+        items.append(sample_item(volume, model, rng, policy=policy))
+
+    _save_anchor_cache(cache_path, count, seed, items)
+    return items

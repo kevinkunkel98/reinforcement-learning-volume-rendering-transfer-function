@@ -16,7 +16,7 @@ import collect
 import goals
 import transfer
 from collect import Collector, JudgeRequest, NextRequest
-from rl.candidates import SOURCES
+from rl.candidates import SOURCES, sample_item
 
 
 class _StubModel:
@@ -61,7 +61,7 @@ def _stub_image_fn(volume, params):
     return f"data:image/png;base64,{volume}:{tag}"
 
 
-def _make_collector(monkeypatch, tmp_path, rng=None, volumes=("fake_a",), policy=None):
+def _make_collector(monkeypatch, tmp_path, rng=None, volumes=("fake_a",), policy=None, anchor_items_fn=None):
     _patch_totalseg(monkeypatch)
     model = _StubModel()
     return Collector(
@@ -72,6 +72,7 @@ def _make_collector(monkeypatch, tmp_path, rng=None, volumes=("fake_a",), policy
         model_for_volume=lambda name: model,
         image_fn=_stub_image_fn,
         dataset_version_fn=lambda name: f"version:{name}",
+        anchor_items_fn=anchor_items_fn if anchor_items_fn is not None else (lambda **kwargs: []),
     )
 
 
@@ -140,6 +141,7 @@ def test_rows_land_in_the_configured_path(monkeypatch, tmp_path):
         pref_path=str(path), volumes=["fake_a"], rng=np.random.default_rng(1),
         policy_provider=lambda: None, model_for_volume=lambda name: model,
         image_fn=_stub_image_fn, dataset_version_fn=lambda name: "v",
+        anchor_items_fn=lambda **kwargs: [],
     )
     item = collector.next_item("kk")
     collector.judge(item["pair_id"], "b", 100)
@@ -204,6 +206,112 @@ def test_no_repeat_before_the_minimum_gap(monkeypatch, tmp_path):
     # Fewer than REPEAT_MIN_GAP judged items so far -- must never repeat,
     # regardless of what the RNG would otherwise pick.
     assert collector._should_repeat("kk") is False
+
+
+# --- anchor pool: shared items for inter-rater agreement ---------------------
+
+def _anchor_pool(model, count=3, seed_base=100):
+    return [sample_item("fake_a", model, np.random.default_rng(seed_base + i), policy=None) for i in range(count)]
+
+
+def test_anchor_pool_served_in_deterministic_order_then_exhausted(monkeypatch, tmp_path):
+    _patch_totalseg(monkeypatch)
+    model = _StubModel()
+    pool = _anchor_pool(model, count=3)
+    collector = _make_collector(monkeypatch, tmp_path, anchor_items_fn=lambda **kwargs: pool)
+    monkeypatch.setattr(collect, "ANCHOR_RATE", 1.0)  # always draw an anchor while the pool isn't exhausted
+
+    served = []
+    for _ in range(3):
+        item = collector.next_item("kk")
+        served.append(collector._anchor_id[item["pair_id"]])
+    assert served == [0, 1, 2]
+
+    # pool exhausted for "kk" -- falls back to a fresh sample
+    item = collector.next_item("kk")
+    assert collector._anchor_id[item["pair_id"]] is None
+
+    # a different rater starts from the same beginning of the pool
+    other_item = collector.next_item("other")
+    assert collector._anchor_id[other_item["pair_id"]] == 0
+
+
+def test_anchor_items_are_shown_with_correct_content_possibly_swapped(monkeypatch, tmp_path):
+    _patch_totalseg(monkeypatch)
+    model = _StubModel()
+    pool = _anchor_pool(model, count=1)
+    collector = _make_collector(monkeypatch, tmp_path, anchor_items_fn=lambda **kwargs: pool)
+    monkeypatch.setattr(collect, "ANCHOR_RATE", 1.0)
+
+    item_response = collector.next_item("kk")
+    served = collector._items[item_response["pair_id"]]
+    raw = pool[0]
+
+    matches_direct = np.allclose(served["a"]["params"], raw["a"]["params"])
+    matches_swapped = np.allclose(served["a"]["params"], raw["b"]["params"])
+    assert matches_direct or matches_swapped
+    if matches_direct:
+        assert np.allclose(served["b"]["params"], raw["b"]["params"])
+    else:
+        assert np.allclose(served["b"]["params"], raw["a"]["params"])
+
+
+def test_anchor_rows_get_the_anchor_id(monkeypatch, tmp_path):
+    _patch_totalseg(monkeypatch)
+    model = _StubModel()
+    pool = _anchor_pool(model, count=1)
+    collector = _make_collector(monkeypatch, tmp_path, anchor_items_fn=lambda **kwargs: pool)
+    monkeypatch.setattr(collect, "ANCHOR_RATE", 1.0)
+
+    item = collector.next_item("kk")
+    collector.judge(item["pair_id"], "a", 100)
+
+    with open(collector.pref_path) as f:
+        row = json.loads(f.readline())
+    assert row["anchor_id"] == 0
+
+
+def test_non_anchor_rows_have_a_null_anchor_id(monkeypatch, tmp_path):
+    collector = _make_collector(monkeypatch, tmp_path)  # default: empty anchor pool
+    item = collector.next_item("kk")
+    collector.judge(item["pair_id"], "a", 100)
+
+    with open(collector.pref_path) as f:
+        row = json.loads(f.readline())
+    assert row["anchor_id"] is None
+
+
+def test_anchor_pool_is_generated_once_and_cached_in_memory(monkeypatch, tmp_path):
+    _patch_totalseg(monkeypatch)
+    model = _StubModel()
+    pool = _anchor_pool(model, count=1)
+    calls = []
+
+    def anchor_items_fn(**kwargs):
+        calls.append(1)
+        return pool
+
+    collector = _make_collector(monkeypatch, tmp_path, anchor_items_fn=anchor_items_fn)
+    monkeypatch.setattr(collect, "ANCHOR_RATE", 1.0)
+
+    collector.next_item("kk")   # anchor 0, the only one
+    collector.next_item("kk")   # exhausted -- but still needs to consult the (cached) pool
+
+    assert len(calls) == 1
+
+
+def test_existing_repeat_rate_and_mechanics_are_unaffected_by_an_empty_anchor_pool(monkeypatch, tmp_path):
+    # With the default (empty) anchor pool used by _make_collector, the new
+    # anchor branch must short-circuit without consuming any extra draws from
+    # `collector.rng`, so every pre-existing seeded test keeps behaving
+    # exactly as before.
+    collector = _make_collector(monkeypatch, tmp_path, rng=np.random.default_rng(3))
+    for _ in range(20):
+        item = collector.next_item("kk")
+        collector.judge(item["pair_id"], "a", 100)
+    monkeypatch.setattr(collector, "_should_repeat", lambda rater_id: True)
+    repeat_response = collector.next_item("kk")
+    assert repeat_response["repeat_of"] is not None
 
 
 # --- rater metadata: role and experience -------------------------------------

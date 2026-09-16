@@ -1,3 +1,6 @@
+import json
+import os
+
 import numpy as np
 import pytest
 
@@ -5,7 +8,7 @@ import goals
 import transfer
 from rl import candidates
 from rl.baselines import CONTROLLABLE
-from rl.candidates import SOURCES, sample_item
+from rl.candidates import SOURCES, anchor_items, sample_item
 from rl.oneshot_env import OneShotEnv
 
 
@@ -166,3 +169,128 @@ def test_no_policy_falls_back_to_non_policy_sources(monkeypatch):
         assert item["a"]["source"] != "policy"
         assert item["b"]["source"] != "policy"
         assert item["a"]["source"] != item["b"]["source"]
+
+
+# --- anchor_items: a fixed, shared pool for inter-rater agreement -----------
+
+def _counting_model_for_volume(model):
+    """A `model_for_volume` that counts calls, so a test can tell whether
+    `anchor_items` actually regenerated the pool or served it from cache."""
+    calls = {"n": 0}
+
+    def fn(name):
+        calls["n"] += 1
+        return model
+
+    return fn, calls
+
+
+def test_anchor_items_is_deterministic_for_the_same_seed_and_count(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    model_for_volume, _ = _counting_model_for_volume(model)
+
+    items1 = anchor_items(count=4, seed=0, volumes=["fake_a"], model_for_volume=model_for_volume,
+                           cache_path=str(tmp_path / "a.json"))
+    items2 = anchor_items(count=4, seed=0, volumes=["fake_a"], model_for_volume=model_for_volume,
+                           cache_path=str(tmp_path / "b.json"))  # different cache -> regenerated, not reused
+
+    assert len(items1) == len(items2) == 4
+    for a, b in zip(items1, items2):
+        assert a["instruction"]["text"] == b["instruction"]["text"]
+        assert np.allclose(a["start_params"], b["start_params"])
+        assert a["a"]["source"] == b["a"]["source"]
+        assert a["b"]["source"] == b["b"]["source"]
+        assert np.allclose(a["a"]["params"], b["a"]["params"])
+        assert np.allclose(a["b"]["params"], b["b"]["params"])
+
+
+def test_anchor_items_differs_for_a_different_seed(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    model_for_volume, _ = _counting_model_for_volume(model)
+
+    items1 = anchor_items(count=4, seed=0, volumes=["fake_a"], model_for_volume=model_for_volume,
+                           cache_path=str(tmp_path / "a.json"))
+    items2 = anchor_items(count=4, seed=1, volumes=["fake_a"], model_for_volume=model_for_volume,
+                           cache_path=str(tmp_path / "b.json"))
+
+    texts1 = [item["instruction"]["text"] for item in items1]
+    texts2 = [item["instruction"]["text"] for item in items2]
+    params1 = [item["a"]["params"] for item in items1]
+    params2 = [item["a"]["params"] for item in items2]
+    assert texts1 != texts2 or any(not np.allclose(p1, p2) for p1, p2 in zip(params1, params2))
+
+
+def test_anchor_items_shape_matches_sample_item(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    model_for_volume, _ = _counting_model_for_volume(model)
+
+    [item] = anchor_items(count=1, seed=0, volumes=["fake_a"], model_for_volume=model_for_volume,
+                           cache_path=str(tmp_path / "a.json"))
+
+    assert set(item.keys()) == {"volume", "start_params", "instruction", "a", "b",
+                                 "objective_choice", "near_duplicate", "features"}
+    assert item["volume"] == "fake_a"
+    assert len(item["start_params"]) == 24
+    assert item["a"]["source"] in SOURCES
+    assert item["b"]["source"] in SOURCES
+
+
+def test_anchor_items_writes_and_reuses_the_cache_file(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    model_for_volume, calls = _counting_model_for_volume(model)
+    cache_path = str(tmp_path / "anchor_items.json")
+
+    first = anchor_items(count=3, seed=0, volumes=["fake_a"], model_for_volume=model_for_volume,
+                          cache_path=cache_path)
+    assert calls["n"] > 0
+    assert os.path.exists(cache_path)
+
+    calls["n"] = 0
+
+    def _broken_model_for_volume(name):
+        raise AssertionError("should not regenerate: the cache should have been reused")
+
+    second = anchor_items(count=3, seed=0, volumes=["fake_a"], model_for_volume=_broken_model_for_volume,
+                           cache_path=cache_path)
+
+    assert calls["n"] == 0
+    assert len(second) == 3
+    for a, b in zip(first, second):
+        assert a["instruction"]["text"] == b["instruction"]["text"]
+        assert np.allclose(a["a"]["params"], b["a"]["params"])
+        assert np.allclose(a["b"]["params"], b["b"]["params"])
+        assert a["a"]["source"] == b["a"]["source"]
+
+
+def test_anchor_items_regenerates_when_count_differs_from_cache(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    model_for_volume, calls = _counting_model_for_volume(model)
+    cache_path = str(tmp_path / "anchor_items.json")
+
+    anchor_items(count=3, seed=0, volumes=["fake_a"], model_for_volume=model_for_volume, cache_path=cache_path)
+    calls["n"] = 0
+
+    regenerated = anchor_items(count=5, seed=0, volumes=["fake_a"], model_for_volume=model_for_volume,
+                                cache_path=cache_path)
+
+    assert calls["n"] > 0
+    assert len(regenerated) == 5
+    with open(cache_path) as f:
+        data = json.load(f)
+    assert data["count"] == 5
+
+
+def test_anchor_items_regenerates_when_seed_differs_from_cache(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    model_for_volume, calls = _counting_model_for_volume(model)
+    cache_path = str(tmp_path / "anchor_items.json")
+
+    anchor_items(count=3, seed=0, volumes=["fake_a"], model_for_volume=model_for_volume, cache_path=cache_path)
+    calls["n"] = 0
+
+    anchor_items(count=3, seed=1, volumes=["fake_a"], model_for_volume=model_for_volume, cache_path=cache_path)
+
+    assert calls["n"] > 0
+    with open(cache_path) as f:
+        data = json.load(f)
+    assert data["seed"] == 1
