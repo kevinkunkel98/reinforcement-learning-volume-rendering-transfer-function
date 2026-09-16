@@ -382,8 +382,18 @@ everything, which the lung experiment above produces).
   `log10(vis + ε)` (4) and `bright` (4); progress `c` (4) and `b` (4);
   coverage (1); volume histogram (16); step fraction `t / 10` (1).
 - **Episode:** 10 steps, then truncation.
-- **Reward:** `r_t = D(s_{t−1}) − D(s_t) − 1[coverage < 0.01]`. Returns
-  telescope to `D_start − D_final` minus penalties.
+- **Reward:** `r_t = clip((D(s_{t−1}) − D(s_t)) / max(D_start, 0.05), −1, 1)`,
+  minus the useless-state penalty. The undiscounted return is then the
+  episode's attainment, so every instruction counts the same regardless of how
+  much it asks for. Measured reason for the division: start distances range
+  from 0.15 ("brighten the skeleton slightly") to 3.0 ("show only the lungs"),
+  and with raw distance drops a 40k-step policy optimised the large-target
+  episodes and learned nothing consistent (validation attainment −2.1).
+- **Reporting attainment:** attainment is `1 − D_final/D_start` and therefore
+  unbounded below — a single bad episode on an easy goal measured −17.3 and
+  swamped the mean. Every aggregate reports median, mean clipped to [−1, 1],
+  raw mean and the share of episodes that beat doing nothing, for the policy
+  and the baselines alike.
 - **info:** features before/after, `D`, goal type.
 
 ### Training
