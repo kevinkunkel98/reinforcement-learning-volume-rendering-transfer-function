@@ -6,6 +6,7 @@ import pytest
 import goals
 import transfer
 from rl import vis_eval
+from rl.baselines import CONTROLLABLE
 from rl.oneshot_env import OneShotEnv
 from rl.vis_env import ACTION_SIZE, MAX_STEPS, VisibilityTFEnv
 
@@ -76,6 +77,27 @@ class _CountingActionModel(_FixedActionModel):
     def predict(self, obs, deterministic=True):
         self.calls += 1
         return super().predict(obs, deterministic=deterministic)
+
+
+class _CountingFeaturesModel:
+    """Wraps a `_StubModel`, counting calls to `features()` -- so a test can
+    isolate how many visibility evaluations a refinement search spends,
+    separate from the one-shot proposal's own setup/scoring calls."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.calls = 0
+
+    def features(self, params) -> dict:
+        self.calls += 1
+        return self._inner.features(params)
+
+    def solo_max(self, name: str) -> float:
+        return self._inner.solo_max(name)
+
+    @property
+    def histogram(self):
+        return self._inner.histogram
 
 
 # --- fixed_episodes -----------------------------------------------------------
@@ -265,6 +287,85 @@ def test_run_policy_loads_the_model_from_model_path(monkeypatch):
     assert seen_paths == ["some/path.zip"]
 
 
+# --- run_policy_with_refinement ----------------------------------------------------
+
+def test_run_policy_with_refinement_zero_evaluations_matches_plain_policy(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 3, seed=0, volume_ids=("stub_a", "stub_b"), model_for_volume=_model_for_volume,
+        formulation="one_shot")
+    action = np.full(ACTION_SIZE, 0.2, dtype=np.float32)
+    policy = _FixedActionModel(action=action)
+
+    plain = vis_eval.run_policy("unused.zip", episodes, model_for_volume=_model_for_volume,
+                                 load_model=lambda path: policy, formulation="one_shot")
+    refined = vis_eval.run_policy_with_refinement(
+        "unused.zip", episodes, evaluations=0, model_for_volume=_model_for_volume,
+        load_model=lambda path: policy)
+
+    assert refined == plain
+
+
+def test_run_policy_with_refinement_never_scores_worse_than_the_proposal(monkeypatch):
+    # A hand-built episode (bypassing fixed_episodes' randomness) whose
+    # instruction unambiguously wants more skeleton visibility, and a fixed
+    # action that keeps things visible -- so the plain one-shot proposal
+    # scores clearly better than a "search" that hides everything.
+    _patch_totalseg(monkeypatch)
+    start_params = goals.starting_params()
+    instruction = {"kind": "relative", "text": "more bone",
+                   "targets": {"skeleton": {"vis": 0.3}},
+                   "goal": goals.goal_vector({"skeleton": {"vis": 0.3}})}
+    episodes = [{"volume": "stub_a", "start_params": start_params, "instruction": instruction}]
+    action = np.full(ACTION_SIZE, 0.6, dtype=np.float32)
+    policy = _FixedActionModel(action=action)
+
+    plain = vis_eval.run_policy("unused.zip", episodes, model_for_volume=_model_for_volume,
+                                 load_model=lambda path: policy, formulation="one_shot")
+    proposal_attainment = plain[0]["attainment"]
+
+    def _hides_everything(model, start_params, instruction, evaluations=200, initial_step=0.2):
+        bad = start_params.copy()
+        for group in CONTROLLABLE:
+            for index in group:
+                bad[index] = -1.0
+        return bad
+
+    monkeypatch.setattr(vis_eval, "hill_climb", _hides_everything)
+
+    refined = vis_eval.run_policy_with_refinement(
+        "unused.zip", episodes, evaluations=5, model_for_volume=_model_for_volume,
+        load_model=lambda path: policy)
+
+    assert refined[0]["attainment"] == pytest.approx(proposal_attainment)
+
+
+def test_run_policy_with_refinement_search_uses_exactly_the_budgeted_evaluations(monkeypatch):
+    # `evaluations` bounds rl.baselines.hill_climb's own model.features
+    # calls (its documented contract); run_policy_with_refinement spends one
+    # further call scoring the search's result against the original start,
+    # so the refinement's total is evaluations + 1 beyond the plain
+    # proposal's own setup/scoring calls.
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        formulation="one_shot")
+    action = np.full(ACTION_SIZE, 0.2, dtype=np.float32)
+    policy = _FixedActionModel(action=action)
+
+    zero = _CountingFeaturesModel(_StubModel())
+    vis_eval.run_policy_with_refinement(
+        "unused.zip", episodes, evaluations=0, model_for_volume=lambda name: zero,
+        load_model=lambda path: policy)
+
+    five = _CountingFeaturesModel(_StubModel())
+    vis_eval.run_policy_with_refinement(
+        "unused.zip", episodes, evaluations=5, model_for_volume=lambda name: five,
+        load_model=lambda path: policy)
+
+    assert five.calls - zero.calls == 5 + 1
+
+
 # --- run_baseline -----------------------------------------------------------------
 
 def test_run_baseline_do_nothing_scores_zero(monkeypatch):
@@ -421,3 +522,13 @@ def test_cli_default_formulation_is_one_shot():
 def test_cli_formulation_can_be_set_to_multi_step():
     args = vis_eval.parse_args(["--policy", "some/path.zip", "--formulation", "multi_step"])
     assert args.formulation == "multi_step"
+
+
+def test_cli_refine_defaults_to_off():
+    args = vis_eval.parse_args(["--policy", "some/path.zip"])
+    assert args.refine == 0
+
+
+def test_cli_refine_can_be_set():
+    args = vis_eval.parse_args(["--policy", "some/path.zip", "--refine", "10"])
+    assert args.refine == 10

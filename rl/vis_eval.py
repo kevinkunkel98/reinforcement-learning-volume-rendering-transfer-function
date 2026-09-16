@@ -28,7 +28,7 @@ import numpy as np
 import datasets
 import goals
 import visibility
-from rl.baselines import BASELINES
+from rl.baselines import BASELINES, hill_climb
 from rl.oneshot_env import OneShotEnv
 from rl.vis_env import MAX_STEPS, VisibilityTFEnv, _ATTAINMENT_FLOOR
 
@@ -156,6 +156,57 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
                 obs, reward, terminated, truncated, info = env.step(action)
                 if terminated or truncated:
                     break
+        results.append({"attainment": info["attainment"], "kind": info["kind"]})
+    return results
+
+
+def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int = 3,
+                                model_for_volume=None, load_model=None) -> list:
+    """Run the one-shot policy's proposal (as `run_policy` does for
+    `formulation="one_shot"`), then, when `evaluations > 0`, refine it with
+    `rl.baselines.hill_climb`'s coordinate search -- the same search the
+    B3/B4 baselines use -- starting from that proposal and budgeted at
+    `evaluations` visibility evaluations (matching `hill_climb`'s own
+    `evaluations` contract: one call to score its start state, one per
+    proposal after that). Returns one `{"attainment", "kind"}` dict per
+    episode, from whichever of {proposal, refined} scores higher, so this is
+    directly comparable to `run_policy`'s one-shot results.
+
+    `evaluations=0` skips the search entirely and returns exactly what
+    `run_policy` would.
+
+    `hill_climb` keeps the best state *it* has seen, but relative to its own
+    reference point: the proposal, passed to it as `start_params`, not the
+    episode's original start. An instruction's goal deltas are fixed,
+    absolute log10/brightness changes computed once relative to the
+    original start; reapplied by `hill_climb` relative to a start that has
+    already made some of that progress, the search can chase past the goal
+    and, once scored back against the original start (as `run_policy`
+    scores the plain proposal), come out worse than the proposal it began
+    from. So this function does not trust `hill_climb`'s internal notion of
+    "improved" -- it independently scores the refined result against the
+    same original-start baseline `run_policy` uses via `goals.attainment`,
+    and keeps whichever of {proposal, refined} is better itself.
+    """
+    loader = load_model or _load_sac
+    model = loader(model_path)
+    kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
+
+    results = []
+    for episode in episodes:
+        env, obs, info = _frozen_one_shot_env(
+            episode["volume"], episode["start_params"], episode["instruction"], **kwargs)
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = env.step(action)
+
+        if evaluations > 0:
+            refined_params = hill_climb(env._model, env._params, episode["instruction"],
+                                         evaluations=evaluations)
+            refined_agg = goals.aggregate(env._model.features(refined_params))
+            refined_attainment = env._attainment(refined_agg)
+            if refined_attainment > info["attainment"]:
+                info = {**info, "attainment": refined_attainment}
+
         results.append({"attainment": info["attainment"], "kind": info["kind"]})
     return results
 
@@ -343,6 +394,10 @@ def parse_args(argv=None):
     parser.add_argument("--out", type=str, default=None)
     parser.add_argument("--formulation", default=DEFAULT_FORMULATION, choices=("one_shot", "multi_step"),
                          help="which policy formulation to evaluate (default: %(default)s)")
+    parser.add_argument("--refine", type=int, default=0,
+                         help="visibility-evaluation budget to refine the one-shot policy's proposal "
+                              "with a hill_climb search (0 = off, default: %(default)s); adds a "
+                              "policy_plus_refine row to the comparison")
     return parser.parse_args(argv)
 
 
@@ -351,6 +406,9 @@ def main(argv=None):
     episodes = fixed_episodes(args.split, args.episodes, seed=args.seed, formulation=args.formulation)
 
     results = {"policy": run_policy(args.policy, episodes, formulation=args.formulation)}
+    if args.refine > 0:
+        results["policy_plus_refine"] = run_policy_with_refinement(
+            args.policy, episodes, evaluations=args.refine)
     for name in BASELINES:
         results[name] = run_baseline(name, episodes)
 
@@ -361,7 +419,8 @@ def main(argv=None):
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as stream:
         json.dump({"policy": args.policy, "split": args.split, "episodes": args.episodes,
-                    "seed": args.seed, "formulation": args.formulation, **comparison}, stream, indent=2)
+                    "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
+                    **comparison}, stream, indent=2)
     print(f"\n[vis_eval] wrote {out}")
 
 
