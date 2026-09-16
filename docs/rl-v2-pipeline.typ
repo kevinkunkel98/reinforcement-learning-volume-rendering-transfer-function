@@ -339,33 +339,39 @@ never saw, every method scored on the same episodes:
 
 #figure(
   table(
-    columns: 5,
-    align: (left, center, center, center, center),
+    columns: 6,
+    align: (left, center, center, center, center, center),
     stroke: (x, y) => if y == 0 { (bottom: 0.8pt + navy) } else { (bottom: 0.3pt + luma(200)) },
-    table.header[*Method*][*Median*][*Mean (clipped)*][*Share +*][*vs policy*],
-    [B4 hill-climb (200 evals)], [+0.660], [+0.604], [100 %], [better, $p < 0.001$],
-    [B3 hill-climb (10 evals)], [+0.205], [+0.301], [90 %], [better, $p < 0.001$],
-    [*policy* (1 forward pass)], [*+0.168*], [+0.087], [64 %], [—],
-    [B0 do nothing], [0.000], [0.000], [—], [worse, $p = 0.0002$],
-    [B1 today's executor], [#sym.minus 0.020], [#sym.minus 0.158], [37 %], [worse, $p < 0.001$],
-    [B2 random], [#sym.minus 0.024], [#sym.minus 0.105], [44 %], [worse, $p < 0.001$],
-    [B5 strip-everything], [#sym.minus 0.150], [#sym.minus 0.284], [33 %], [worse, $p < 0.001$],
+    table.header[*Method*][*Evals*][*Median*][*Mean (clipped)*][*Share +*][*vs policy*],
+    [B4 hill-climb], [200], [+0.660], [+0.604], [100 %], [better, $p < 0.001$],
+    [*policy + refinement*], [*4*], [*+0.218*], [+0.130], [69 %], [better, $p < 0.001$],
+    [B3 hill-climb], [10], [+0.205], [+0.301], [90 %], [better, $p < 0.001$],
+    [*policy*], [*0*], [*+0.194*], [+0.101], [67 %], [—],
+    [policy, no ceiling input], [0], [+0.168], [+0.087], [64 %], [ablation],
+    [B0 do nothing], [0], [0.000], [0.000], [—], [worse, $p = 0.0002$],
+    [B1 today's executor], [0], [#sym.minus 0.020], [#sym.minus 0.158], [37 %], [worse, $p < 0.001$],
+    [B2 random], [0], [#sym.minus 0.024], [#sym.minus 0.105], [44 %], [worse, $p < 0.001$],
+    [B5 strip-everything], [0], [#sym.minus 0.150], [#sym.minus 0.284], [33 %], [worse, $p < 0.001$],
   ),
-  caption: [Ablation run — the policy *without* the achievable-ceiling input.
-  Paired Wilcoxon signed-rank, two-sided. The improved policy's held-out
-  evaluation is in progress at the time of writing.],
+  caption: [200 fixed episodes on the six held-out test subjects, every method
+  scored on the same episodes. Paired Wilcoxon signed-rank, two-sided. "Evals"
+  counts visibility evaluations spent per instruction; the policy needs one to
+  build its input features and none to search.],
 )
 
 What this supports, stated plainly: the learned policy *generalises to unseen
 patients* and beats doing nothing, today's rule-based executor, a random policy
-and the hand-written heuristic, all at $p < 0.001$. It does *not* match search: a
-10-evaluation hill-climber is better on the median and far more reliable (90 % vs
-64 %).
+and the hand-written heuristic, all at $p < 0.001$.
 
-#caveat[The amortisation claim in its strong form is therefore not established by
-tier 1. The policy is cheaper — one forward pass, no search — but currently
-worse than cheap search. When the objective is a formula this cheap to evaluate,
-the efficiency argument is weak on its own.]
+#finding[A learned proposal followed by three refinement evaluations edges out
+the 10-evaluation hill-climber on the median (+0.218 vs +0.205) at less than half
+the budget. Learned initialisation plus short search beats search from scratch.]
+
+#caveat[Reliability is the remaining gap and it is not small: the hill-climber
+improves 90 % of episodes, the policy 67 % and the hybrid 69 %, and the
+hill-climber's clipped mean (+0.301) is still the better figure. The fair claim
+is that the policy matches cheap search *in the middle of the distribution* while
+being cheaper, not that it is better overall. Its worst episodes remain worse.]
 
 = Where reinforcement learning actually earns its place <why-rl>
 
@@ -407,8 +413,8 @@ choice and the decision time, in one file that training reads directly.
   - Organs and muscle are one target, because no transfer function separates them.
   - Vessels are only a goal on contrast scans (5 of 30 volumes).
   - The out-of-source volumes use intensity labels, not anatomy.
-  - The policy is below cheap search on held-out subjects; the gap is mostly
-    reliability (64 % vs 90 % of episodes improved).
+  - The policy matches cheap search on the median but not on reliability
+    (67 % vs 90 % of episodes improved); its worst episodes are worse.
   - Peak positions are fixed; only height, width and brightness are learned. Lung
     goals are reachable only because a peak is seeded at #sym.minus 800 HU.
   - One seed evaluated so far; two more are training.
