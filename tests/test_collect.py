@@ -206,6 +206,68 @@ def test_no_repeat_before_the_minimum_gap(monkeypatch, tmp_path):
     assert collector._should_repeat("kk") is False
 
 
+# --- rater metadata: role and experience -------------------------------------
+
+def test_row_carries_rater_role_and_experience_alongside_rater_id(monkeypatch, tmp_path):
+    collector = _make_collector(monkeypatch, tmp_path)
+    item = collector.next_item("kk", rater_role="radiologist", rater_experience="8 years CT")
+
+    collector.judge(item["pair_id"], "a", 100)
+
+    with open(collector.pref_path) as f:
+        row = json.loads(f.readline())
+    assert row["rater_id"] == "kk"  # unchanged, for backwards compatibility
+    assert row["rater"] == {"id": "kk", "role": "radiologist", "experience": "8 years CT"}
+
+
+def test_rater_role_defaults_to_none_when_never_given(monkeypatch, tmp_path):
+    collector = _make_collector(monkeypatch, tmp_path)
+    item = collector.next_item("kk")
+
+    collector.judge(item["pair_id"], "a", 100)
+
+    with open(collector.pref_path) as f:
+        row = json.loads(f.readline())
+    assert row["rater"] == {"id": "kk", "role": None, "experience": None}
+
+
+def test_rater_role_persists_across_later_calls_that_omit_it(monkeypatch, tmp_path):
+    # The frontend only needs to send role/experience once per rater (they're
+    # asked once, per the task); a later next_item call for the same rater_id
+    # that omits them (e.g. the one judge() makes internally) must keep using
+    # what was given earlier, not reset to unknown.
+    collector = _make_collector(monkeypatch, tmp_path)
+    first = collector.next_item("kk", rater_role="clinician", rater_experience="")
+    next_item = collector.judge(first["pair_id"], "a", 100)  # calls next_item("kk") internally
+    collector.judge(next_item["pair_id"], "b", 100)
+
+    with open(collector.pref_path) as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    assert rows[1]["rater"] == {"id": "kk", "role": "clinician", "experience": ""}
+
+
+def test_invalid_role_raises(monkeypatch, tmp_path):
+    collector = _make_collector(monkeypatch, tmp_path)
+    with pytest.raises(ValueError):
+        collector.next_item("kk", rater_role="surgeon")
+
+
+def test_next_route_rejects_invalid_role_with_http_400(monkeypatch, tmp_path):
+    monkeypatch.setattr(collect, "collector", _make_collector(monkeypatch, tmp_path))
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(collect.next_route(NextRequest(rater_id="kk", rater_role="surgeon")))
+    assert exc_info.value.status_code == 400
+
+
+def test_next_route_accepts_a_valid_role_and_experience(monkeypatch, tmp_path):
+    test_collector = _make_collector(monkeypatch, tmp_path)
+    monkeypatch.setattr(collect, "collector", test_collector)
+    result = asyncio.run(collect.next_route(
+        NextRequest(rater_id="kk", rater_role="researcher", rater_experience="RL for TFs")))
+    assert "pair_id" in result
+    assert test_collector._rater_meta["kk"] == {"role": "researcher", "experience": "RL for TFs"}
+
+
 # --- routes, driven directly (see module docstring) --------------------------
 
 def test_next_route_returns_item(monkeypatch, tmp_path):

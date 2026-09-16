@@ -7,6 +7,9 @@
  * asynchronously) to the moment a choice is made.
  */
 const RATER_KEY = "collectRaterId";
+const ROLE_KEY = "collectRaterRole";
+const EXPERIENCE_KEY = "collectRaterExperience";
+const VALID_ROLES = ["radiologist", "clinician", "researcher", "other"];
 
 function getRaterId() {
   let id = localStorage.getItem(RATER_KEY);
@@ -17,7 +20,31 @@ function getRaterId() {
   return id;
 }
 
+// Asked once per browser (stored in localStorage, same as the rater ID) --
+// role is validated against VALID_ROLES so /api/collect/next always gets one
+// of the four values the server accepts; experience is free text and may be
+// left blank.
+function getRaterRole() {
+  let role = localStorage.getItem(ROLE_KEY);
+  while (!role || !VALID_ROLES.includes(role)) {
+    role = (window.prompt(`Role (${VALID_ROLES.join("/")}):`) || "").trim().toLowerCase();
+  }
+  localStorage.setItem(ROLE_KEY, role);
+  return role;
+}
+
+function getRaterExperience() {
+  let experience = localStorage.getItem(EXPERIENCE_KEY);
+  if (experience === null) {
+    experience = (window.prompt("Experience (optional, e.g. \"8 years CT\"):") || "").trim();
+    localStorage.setItem(EXPERIENCE_KEY, experience);
+  }
+  return experience;
+}
+
 const raterId = getRaterId();
+const raterRole = getRaterRole();
+const raterExperience = getRaterExperience();
 const countKey = `collectJudgedCount:${raterId}`;
 
 function loadJudgedCount() {
@@ -78,7 +105,7 @@ async function fetchNext() {
   const response = await fetch("/api/collect/next", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rater_id: raterId }),
+    body: JSON.stringify({ rater_id: raterId, rater_role: raterRole, rater_experience: raterExperience }),
   });
   if (!response.ok) throw new Error(`next failed: ${response.status}`);
   return response.json();

@@ -36,6 +36,7 @@ PREF_PATH = "out/vis_preferences.jsonl"
 _WRITE_LOCK = threading.Lock()
 
 VALID_CHOICES = ("a", "b", "equal", "skip")
+VALID_ROLES = ("radiologist", "clinician", "researcher", "other")
 REPEAT_RATE = 0.10          # share of items that are a repeat of an earlier one
 REPEAT_MIN_GAP = 20         # a repeat is shown only >= this many items after the original
 
@@ -125,6 +126,7 @@ class Collector:
         self._pending = {}                                 # pair_id -> rater_id, not yet judged
         self._repeat_of = {}                                # pair_id -> original pair_id or None
         self._rater_history = collections.defaultdict(list)  # rater_id -> judged pair_id, in order
+        self._rater_meta = {}                               # rater_id -> {"role", "experience"}
 
     def _get_volumes(self) -> list:
         # Resolved lazily (not at construction) so importing this module, and
@@ -181,7 +183,18 @@ class Collector:
             "repeat_of": repeat_of,
         }
 
-    def next_item(self, rater_id: str) -> dict:
+    def next_item(self, rater_id: str, rater_role: str = None, rater_experience: str = None) -> dict:
+        """`rater_role`/`rater_experience` are asked once by the frontend
+        (alongside the rater ID) and resent on every `/next` call, same as
+        `rater_id` itself; when given here they (re)record this rater's
+        metadata, used on every row they judge from now on (see `judge`).
+        Omitting them (as `judge`'s own internal call does) keeps whatever
+        was recorded earlier for this `rater_id`. Raises `ValueError` for a
+        `rater_role` outside `VALID_ROLES`."""
+        if rater_role is not None:
+            if rater_role not in VALID_ROLES:
+                raise ValueError(f"invalid role: {rater_role!r}, expected one of {VALID_ROLES}")
+            self._rater_meta[rater_id] = {"role": rater_role, "experience": rater_experience}
         pair_id, item, repeat_of = self._serve(rater_id)
         return self._response(pair_id, item, repeat_of)
 
@@ -197,10 +210,12 @@ class Collector:
         rater_id = self._pending.pop(pair_id)
         item = self._items[pair_id]
         volume = item["volume"]
+        rater_meta = self._rater_meta.get(rater_id, {"role": None, "experience": None})
         row = {
             "pair_id": pair_id,
             "timestamp": datetime.datetime.now().isoformat(),
-            "rater_id": rater_id,
+            "rater_id": rater_id,                    # kept for backwards compatibility with earlier rows
+            "rater": {"id": rater_id, "role": rater_meta["role"], "experience": rater_meta["experience"]},
             "volume": volume,
             "volume_version": self.dataset_version_fn(volume),
             "instruction": _instruction_json(item["instruction"]),
@@ -230,6 +245,8 @@ collector = Collector()
 
 class NextRequest(BaseModel):
     rater_id: str
+    rater_role: str | None = None
+    rater_experience: str | None = None
 
 
 class JudgeRequest(BaseModel):
@@ -245,7 +262,10 @@ async def collect_page():
 
 @router.post("/api/collect/next")
 async def next_route(req: NextRequest):
-    return collector.next_item(req.rater_id)
+    try:
+        return collector.next_item(req.rater_id, req.rater_role, req.rater_experience)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/api/collect/judge")
