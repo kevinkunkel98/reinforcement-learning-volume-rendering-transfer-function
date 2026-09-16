@@ -6,6 +6,7 @@ import pytest
 import goals
 import transfer
 from rl import vis_eval
+from rl.oneshot_env import OneShotEnv
 from rl.vis_env import ACTION_SIZE, MAX_STEPS, VisibilityTFEnv
 
 
@@ -63,6 +64,20 @@ class _FixedActionModel:
         return self.action, None
 
 
+class _CountingActionModel(_FixedActionModel):
+    """Same as `_FixedActionModel`, but counts how many times `predict` was
+    called -- so a test can assert exactly one env step per one-shot
+    episode."""
+
+    def __init__(self, action=None):
+        super().__init__(action=action)
+        self.calls = 0
+
+    def predict(self, obs, deterministic=True):
+        self.calls += 1
+        return super().predict(obs, deterministic=deterministic)
+
+
 # --- fixed_episodes -----------------------------------------------------------
 
 def test_fixed_episodes_is_deterministic(monkeypatch):
@@ -95,6 +110,48 @@ def test_fixed_episodes_start_params_have_full_transfer_function_length(monkeypa
     [episode] = vis_eval.fixed_episodes(
         "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume)
     assert episode["start_params"].shape == (transfer.N_PEAKS * transfer.PARAMS_PER_PEAK,)
+
+
+def test_fixed_episodes_one_shot_is_deterministic(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    kwargs = dict(volume_ids=("stub_a", "stub_b"), model_for_volume=_model_for_volume, seed=3,
+                  formulation="one_shot")
+
+    first = vis_eval.fixed_episodes("val", 6, **kwargs)
+    second = vis_eval.fixed_episodes("val", 6, **kwargs)
+
+    assert len(first) == 6
+    for a, b in zip(first, second):
+        assert a["volume"] == b["volume"]
+        assert np.array_equal(a["start_params"], b["start_params"])
+        assert a["instruction"]["text"] == b["instruction"]["text"]
+        assert np.array_equal(a["instruction"]["goal"], b["instruction"]["goal"])
+
+
+def test_fixed_episodes_one_shot_only_uses_volumes_of_the_requested_split(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    monkeypatch.setattr(vis_eval.datasets, "volumes_for_split",
+                         lambda split: {"val": ["stub_a", "stub_b"], "train": ["other"]}[split])
+
+    episodes = vis_eval.fixed_episodes("val", 10, seed=0, model_for_volume=_model_for_volume,
+                                        formulation="one_shot")
+
+    assert {episode["volume"] for episode in episodes} <= {"stub_a", "stub_b"}
+
+
+def test_fixed_episodes_one_shot_start_params_differ_from_multi_step_convention(monkeypatch):
+    # Same seed and single volume, so the only remaining difference is each
+    # env's own reset-noise convention (OneShotEnv.START_NOISE applied
+    # uniformly per controllable group vs. VisibilityTFEnv's separate
+    # width/height/brightness noise draws) -- the two conventions must not
+    # coincidentally produce the same start parameters.
+    _patch_totalseg(monkeypatch)
+    kwargs = dict(volume_ids=("stub_a",), model_for_volume=_model_for_volume, seed=5)
+
+    [multi_step_episode] = vis_eval.fixed_episodes("val", 1, formulation="multi_step", **kwargs)
+    [one_shot_episode] = vis_eval.fixed_episodes("val", 1, formulation="one_shot", **kwargs)
+
+    assert not np.array_equal(multi_step_episode["start_params"], one_shot_episode["start_params"])
 
 
 # --- run_policy -----------------------------------------------------------------
@@ -135,6 +192,64 @@ def test_run_policy_replays_the_exact_episode_state(monkeypatch):
         assert row["kind"] == episode["instruction"]["kind"]
 
 
+def test_run_policy_one_shot_replays_the_exact_episode_state(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 3, seed=1, volume_ids=("stub_a", "stub_b"), model_for_volume=_model_for_volume,
+        formulation="one_shot")
+    action = np.full(ACTION_SIZE, 0.2, dtype=np.float32)
+    model = _FixedActionModel(action=action)
+
+    results = vis_eval.run_policy("unused.zip", episodes, model_for_volume=_model_for_volume,
+                                   load_model=lambda path: model, formulation="one_shot")
+
+    assert len(results) == 3
+    for row, episode in zip(results, episodes):
+        # Reproduce the same episode by hand: freeze the same recorded
+        # (volume, start_params, instruction) into a `OneShotEnv`, then take
+        # the same fixed action for its single step.
+        env = OneShotEnv([episode["volume"]], model_for_volume=_model_for_volume)
+        env._volume = episode["volume"]
+        env._model = _model_for_volume(episode["volume"])
+        raw = env._model.features(episode["start_params"])
+        start_agg = goals.aggregate(raw)
+        env._start_params = episode["start_params"].copy()
+        env._params = env._start_params
+        env._instruction = episode["instruction"]
+        env._start_agg = start_agg
+        env._start_distance = goals.distance(episode["instruction"]["goal"], start_agg, start_agg)
+
+        _, _, _, _, info = env.step(action)
+
+        assert row["attainment"] == pytest.approx(info["attainment"])
+        assert row["kind"] == episode["instruction"]["kind"]
+
+
+def test_run_policy_one_shot_takes_exactly_one_step_per_episode(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 3, seed=0, volume_ids=("stub_a", "stub_b"), model_for_volume=_model_for_volume,
+        formulation="one_shot")
+    model = _CountingActionModel(action=np.full(ACTION_SIZE, 0.2, dtype=np.float32))
+
+    vis_eval.run_policy("unused.zip", episodes, model_for_volume=_model_for_volume,
+                         load_model=lambda path: model, formulation="one_shot")
+
+    assert model.calls == 3
+
+
+def test_run_policy_defaults_to_multi_step_formulation(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 2, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume)
+    model = _CountingActionModel(action=np.full(ACTION_SIZE, 0.2, dtype=np.float32))
+
+    vis_eval.run_policy("unused.zip", episodes, model_for_volume=_model_for_volume,
+                         load_model=lambda path: model)
+
+    assert model.calls == 2 * MAX_STEPS
+
+
 def test_run_policy_loads_the_model_from_model_path(monkeypatch):
     _patch_totalseg(monkeypatch)
     episodes = vis_eval.fixed_episodes(
@@ -156,6 +271,21 @@ def test_run_baseline_do_nothing_scores_zero(monkeypatch):
     _patch_totalseg(monkeypatch)
     episodes = vis_eval.fixed_episodes(
         "val", 4, seed=2, volume_ids=("stub_a", "stub_b"), model_for_volume=_model_for_volume)
+
+    results = vis_eval.run_baseline("B0_do_nothing", episodes, model_for_volume=_model_for_volume)
+
+    assert len(results) == 4
+    for row in results:
+        assert row["attainment"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_run_baseline_do_nothing_scores_zero_on_one_shot_episodes(monkeypatch):
+    # Baselines are scored identically regardless of which formulation
+    # generated the episodes -- the episode record's shape is the same.
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 4, seed=2, volume_ids=("stub_a", "stub_b"), model_for_volume=_model_for_volume,
+        formulation="one_shot")
 
     results = vis_eval.run_baseline("B0_do_nothing", episodes, model_for_volume=_model_for_volume)
 
@@ -279,3 +409,15 @@ def test_compare_uses_the_given_policy_name():
     comparison = vis_eval.compare(results, policy_name="my_policy")
     assert "B0_do_nothing" in comparison["comparisons"]
     assert "my_policy" not in comparison["comparisons"]
+
+
+# --- CLI -------------------------------------------------------------------------
+
+def test_cli_default_formulation_is_one_shot():
+    args = vis_eval.parse_args(["--policy", "some/path.zip"])
+    assert args.formulation == "one_shot"
+
+
+def test_cli_formulation_can_be_set_to_multi_step():
+    args = vis_eval.parse_args(["--policy", "some/path.zip", "--formulation", "multi_step"])
+    assert args.formulation == "multi_step"

@@ -29,26 +29,36 @@ import datasets
 import goals
 import visibility
 from rl.baselines import BASELINES
+from rl.oneshot_env import OneShotEnv
 from rl.vis_env import MAX_STEPS, VisibilityTFEnv, _ATTAINMENT_FLOOR
 
 EVAL_KINDS = tuple(kind for kind, _ in goals.INSTRUCTION_MIX)
 DEFAULT_EPISODES = 300
 DEFAULT_OUT_TEMPLATE = "out/rl_v2/eval_{split}.json"
+DEFAULT_FORMULATION = "one_shot"
+
+_ENV_FOR_FORMULATION = {"multi_step": VisibilityTFEnv, "one_shot": OneShotEnv}
 
 
 # --- fixed episodes ----------------------------------------------------------
 
 def fixed_episodes(split: str, count: int, seed: int = 0,
-                    volume_ids=None, model_for_volume=None) -> list:
+                    volume_ids=None, model_for_volume=None,
+                    formulation: str = "multi_step") -> list:
     """A deterministic list of `count` `{"volume", "start_params",
     "instruction"}` episodes drawn from `split` (or `volume_ids`, for tests):
-    one `VisibilityTFEnv.reset(seed=seed + i)` per episode, recording the
-    exact state it produced. Calling this again with the same arguments
-    reproduces the same list -- that is what makes evaluation runs
-    comparable across policies and seeds."""
+    one `reset(seed=seed + i)` per episode, recording the exact state it
+    produced. `formulation` picks which env generates the episodes --
+    `"multi_step"` (`VisibilityTFEnv`, the default) or `"one_shot"`
+    (`OneShotEnv`, which uses its own reset-noise convention) -- but the
+    episode record's shape is the same either way, so baselines (and
+    `compare`) score both formulations identically. Calling this again with
+    the same arguments reproduces the same list -- that is what makes
+    evaluation runs comparable across policies and seeds."""
     ids = volume_ids if volume_ids is not None else datasets.volumes_for_split(split)
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
-    env = VisibilityTFEnv(list(ids), **kwargs)
+    env_cls = _ENV_FOR_FORMULATION[formulation]
+    env = env_cls(list(ids), **kwargs)
 
     episodes = []
     for i in range(count):
@@ -94,24 +104,58 @@ def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict
     return env, obs, info
 
 
-def run_policy(model_path: str, episodes: list, model_for_volume=None, load_model=None) -> list:
-    """Run the policy at `model_path` (an SB3 SAC checkpoint) on every
-    episode with the deterministic action; return one `{"attainment",
-    "kind"}` dict per episode, from the final step's info. `load_model`
-    lets tests inject a stub instead of loading a real checkpoint."""
+def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dict,
+                          model_for_volume=visibility.for_volume):
+    """A `OneShotEnv` loaded directly into one episode's exact state, the
+    `OneShotEnv` counterpart of `_frozen_episode_env` above."""
+    env = OneShotEnv([volume], model_for_volume=model_for_volume)
+    model = model_for_volume(volume)
+    raw_features = model.features(start_params)
+    start_agg = goals.aggregate(raw_features)
+    start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
+
+    env._volume = volume
+    env._model = model
+    env._start_params = np.asarray(start_params, dtype=np.float64).copy()
+    env._params = env._start_params
+    env._instruction = instruction
+    env._start_agg = start_agg
+    env._start_distance = start_distance
+
+    obs = env._build_observation()
+    info = env._info(env._attainment(start_agg), goals.is_useless(raw_features))
+    return env, obs, info
+
+
+def run_policy(model_path: str, episodes: list, model_for_volume=None, load_model=None,
+               formulation: str = "multi_step") -> list:
+    """Run the policy at `model_path` (an SB3 checkpoint) on every episode
+    with the deterministic action; return one `{"attainment", "kind"}` dict
+    per episode, from the final step's info. For `formulation="multi_step"`
+    (the default) that drives a frozen `VisibilityTFEnv` for up to
+    `MAX_STEPS` steps; for `"one_shot"`, a frozen `OneShotEnv` for exactly
+    one step, since the action there already is the final transfer function.
+    `load_model` lets tests inject a stub instead of loading a real
+    checkpoint."""
     loader = load_model or _load_sac
     model = loader(model_path)
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
 
     results = []
     for episode in episodes:
-        env, obs, info = _frozen_episode_env(
-            episode["volume"], episode["start_params"], episode["instruction"], **kwargs)
-        for _ in range(MAX_STEPS):
+        if formulation == "one_shot":
+            env, obs, info = _frozen_one_shot_env(
+                episode["volume"], episode["start_params"], episode["instruction"], **kwargs)
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
-            if terminated or truncated:
-                break
+        else:
+            env, obs, info = _frozen_episode_env(
+                episode["volume"], episode["start_params"], episode["instruction"], **kwargs)
+            for _ in range(MAX_STEPS):
+                action, _ = model.predict(obs, deterministic=True)
+                obs, reward, terminated, truncated, info = env.step(action)
+                if terminated or truncated:
+                    break
         results.append({"attainment": info["attainment"], "kind": info["kind"]})
     return results
 
@@ -292,19 +336,21 @@ def _print_table(comparison: dict) -> None:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--policy", required=True, help="path to an SB3 SAC checkpoint (e.g. best.zip)")
+    parser.add_argument("--policy", required=True, help="path to an SB3 checkpoint (e.g. best.zip)")
     parser.add_argument("--split", default="val", choices=("train", "val", "test", "out_of_source"))
     parser.add_argument("--episodes", type=int, default=DEFAULT_EPISODES)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", type=str, default=None)
+    parser.add_argument("--formulation", default=DEFAULT_FORMULATION, choices=("one_shot", "multi_step"),
+                         help="which policy formulation to evaluate (default: %(default)s)")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
-    episodes = fixed_episodes(args.split, args.episodes, seed=args.seed)
+    episodes = fixed_episodes(args.split, args.episodes, seed=args.seed, formulation=args.formulation)
 
-    results = {"policy": run_policy(args.policy, episodes)}
+    results = {"policy": run_policy(args.policy, episodes, formulation=args.formulation)}
     for name in BASELINES:
         results[name] = run_baseline(name, episodes)
 
@@ -315,7 +361,7 @@ def main(argv=None):
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as stream:
         json.dump({"policy": args.policy, "split": args.split, "episodes": args.episodes,
-                    "seed": args.seed, **comparison}, stream, indent=2)
+                    "seed": args.seed, "formulation": args.formulation, **comparison}, stream, indent=2)
     print(f"\n[vis_eval] wrote {out}")
 
 
