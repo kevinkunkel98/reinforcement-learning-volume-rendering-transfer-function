@@ -24,7 +24,8 @@ import goals
 import visibility
 from rl.baselines import CONTROLLABLE
 
-OBSERVATION_SIZE = 53   # 16 goal + 16 histogram + 4 log10 visibility + 4 brightness + 12 start parameters + 1 coverage
+OBSERVATION_SIZE = 57   # 16 goal + 16 histogram + 4 log10 visibility + 4 brightness + 4 log10 solo_max ceiling
+                         # + 12 start parameters + 1 coverage
 ACTION_SIZE = 12        # the new value of each controllable parameter group, in [-1, 1]
 USELESS_PENALTY = 1.0
 REWARD_CLIP = 1.0
@@ -47,7 +48,14 @@ _ATTAINMENT_FLOOR = 1e-9
 class OneShotEnv(gym.Env):
     """One-step episode: the action is the new transfer function, scored by
     how much closer it gets to a sampled visibility/brightness instruction on
-    a randomly chosen volume from `volume_ids`."""
+    a randomly chosen volume from `volume_ids`.
+
+    Observation layout (`OBSERVATION_SIZE` = 57): goal (16, `goal_vector`) +
+    histogram (16, `model.histogram`) + log10 visibility (4, one per
+    `goals.GOAL_CLASSES`, at the start state) + brightness (4, ditto) +
+    log10 solo_max ceiling (4, ditto -- see `_solo_max_log` below) +
+    controllable start parameters (12) + coverage (1, at the start state).
+    """
 
     metadata = {"render_modes": []}
 
@@ -58,6 +66,7 @@ class OneShotEnv(gym.Env):
         self.volume_ids = list(volume_ids)
         self._model_for_volume = model_for_volume
         self._model_cache = {}
+        self._solo_max_log_cache = {}
 
         self.observation_space = spaces.Box(
             low=-OBSERVATION_BOUND, high=OBSERVATION_BOUND, shape=(OBSERVATION_SIZE,), dtype=np.float32)
@@ -81,6 +90,23 @@ class OneShotEnv(gym.Env):
             self._model_cache[volume] = model
         return model
 
+    def _solo_max_log(self, volume: str, model) -> list:
+        """log10(ceiling + EPSILON) per `goals.GOAL_CLASSES`, where ceiling is
+        the most of that goal class a single-peak transfer function can show
+        (`model.solo_max`, summed over `goals.MEASURED_FOR_GOAL` the way
+        `goals._absolute_target_delta` does, since a goal class like "soft"
+        has no single underlying `model.solo_max` name of its own).
+        `model.solo_max` already caches per class on the model, but this
+        additionally avoids redoing the summation/log10 work on every reset
+        of an already-seen volume.
+        """
+        cached = self._solo_max_log_cache.get(volume)
+        if cached is None:
+            cached = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
+                      for c in goals.GOAL_CLASSES]
+            self._solo_max_log_cache[volume] = cached
+        return cached
+
     def _sample_start_params(self, rng) -> np.ndarray:
         params = goals.starting_params()
         for group in CONTROLLABLE:
@@ -95,10 +121,11 @@ class OneShotEnv(gym.Env):
     def _build_observation(self) -> np.ndarray:
         log_vis = [math.log10(self._start_agg["vis"][c] + goals.EPSILON) for c in goals.GOAL_CLASSES]
         bright = [self._start_agg["bright"][c] for c in goals.GOAL_CLASSES]
+        solo_max_log = self._solo_max_log(self._volume, self._model)
         controllable = self._controllable_values(self._start_params)
 
         values = (list(self._instruction["goal"]) + list(self._model.histogram) + log_vis + bright
-                  + controllable + [self._start_agg["coverage"]])
+                  + solo_max_log + controllable + [self._start_agg["coverage"]])
         return np.asarray(values, dtype=np.float32)
 
     def _attainment(self, agg: dict) -> float:

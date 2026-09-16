@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pytest
 
@@ -13,9 +15,13 @@ class _StubModel:
     but still responsive to every controllable value."""
 
     MEASURED = {"skeleton": "skeleton", "lungs": "lungs", "soft": "organs", "vessels": "vessels"}
+    # Distinct per underlying (non-goal) class, so a test can tell the
+    # appended observation values apart instead of all matching one constant.
+    SOLO_MAX = {"skeleton": 0.6, "lungs": 0.3, "organs": 0.4, "muscle": 0.1, "vessels": 0.05}
 
     def __init__(self):
         self.histogram = np.full(16, 1.0 / 16.0, dtype=np.float32)
+        self.solo_max_calls = 0
 
     def features(self, params) -> dict:
         vis, bright = {}, {}
@@ -30,7 +36,8 @@ class _StubModel:
         return {"vis": vis, "bright": bright, "coverage": coverage}
 
     def solo_max(self, name: str) -> float:
-        return 1.0
+        self.solo_max_calls += 1
+        return self.SOLO_MAX[name]
 
 
 CLASSES_PRESENT = {
@@ -58,6 +65,39 @@ def test_observation_and_action_space_shapes(monkeypatch):
     assert env.action_space.shape == (ACTION_SIZE,)
     assert np.all(env.action_space.low == -1.0)
     assert np.all(env.action_space.high == 1.0)
+
+
+def test_observation_appends_log_solo_max_per_goal_class(monkeypatch):
+    env = _make_env(monkeypatch, volume_ids=("fake_a",))
+    obs, info = env.reset(seed=0)
+
+    model = env._model
+    expected = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
+                for c in goals.GOAL_CLASSES]
+
+    # Layout: goal(16) + histogram(16) + log_vis(4) + bright(4) + solo_max(4)
+    # + controllable(12) + coverage(1) == 57, appended right after brightness.
+    start = 16 + 16 + 4 + 4
+    appended = obs[start:start + 4]
+    assert appended == pytest.approx(expected, abs=1e-5)
+
+
+def test_solo_max_is_computed_once_per_volume_across_resets(monkeypatch):
+    # sample_instruction() may itself call model.solo_max() (e.g. for
+    # "absolute" instructions), so the *total* call count after reset()
+    # depends on which instruction kind was sampled -- isolate the env's own
+    # per-volume caching (_solo_max_log) instead of asserting an exact total.
+    env = _make_env(monkeypatch, volume_ids=("fake_a",))
+    env.reset(seed=0)
+    model = env._model
+
+    assert "fake_a" in env._solo_max_log_cache
+    calls_before = model.solo_max_calls
+    first = env._solo_max_log("fake_a", model)
+    second = env._solo_max_log("fake_a", model)
+
+    assert model.solo_max_calls == calls_before   # already cached during reset(), no new calls
+    assert second is first                        # the exact cached list, not a recomputation
 
 
 def test_observation_is_finite_and_inside_space_after_reset_and_step(monkeypatch):
