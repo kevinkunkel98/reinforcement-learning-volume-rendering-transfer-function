@@ -305,3 +305,127 @@ def test_real_check_sample_instructions_on_contrast_and_non_contrast():
             print(instruction["kind"], "|", instruction["text"], "|", nonzero)
             if not totalseg.is_contrast(name):
                 assert "vessels" not in instruction["targets"]
+
+
+# --- Task 2: commands become goals -------------------------------------------
+
+def _patch_contrast_volume(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+
+
+def test_goal_from_command_relative_increase_matches_visibility_strength(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.05)
+    cmd = {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "strongly"}
+    result = goals.goal_from_command(cmd, model, start, volume="fake")
+    assert result["kind"] == "relative"
+    assert result["targets"] == {"skeleton": {"vis": goals.VISIBILITY_STRENGTH["strongly"]}}
+    assert result["text"]
+    np.testing.assert_array_equal(result["goal"], goals.goal_vector(result["targets"]))
+
+
+def test_goal_from_command_relative_decrease_is_negative(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(soft=0.05)
+    cmd = {"target": "soft", "attribute": "opacity", "direction": "decrease", "strength": "slightly"}
+    result = goals.goal_from_command(cmd, model, start, volume="fake")
+    assert result["targets"] == {"soft": {"vis": -goals.VISIBILITY_STRENGTH["slightly"]}}
+
+
+def test_goal_from_command_brightness_matches_brightness_strength(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(lungs=0.05)
+    cmd = {"target": "lungs", "attribute": "brightness", "direction": "increase", "strength": "moderately"}
+    result = goals.goal_from_command(cmd, model, start, volume="fake")
+    assert result["kind"] == "brightness"
+    assert result["targets"] == {"lungs": {"bright": goals.BRIGHTNESS_STRENGTH["moderately"]}}
+
+
+def test_goal_from_command_absolute_level_matches_absolute_target_delta(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel(solo=0.5)
+    start = _aggregated(vessels=0.05)
+    cmd = {"target": "vessels", "attribute": "opacity", "direction": "set", "level": "high"}
+    result = goals.goal_from_command(cmd, model, start, volume="fake")
+    assert result["kind"] == "absolute"
+    expected = goals._absolute_target_delta(model, "vessels", "high", 0.05)
+    assert result["targets"]["vessels"]["vis"] == pytest.approx(expected)
+
+
+def test_goal_from_command_show_only_hides_the_rest(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.05, lungs=0.05, soft=0.05, vessels=0.05)
+    cmd = {"target": ["skeleton", "lungs"], "attribute": "opacity", "direction": "show_only", "strength": None}
+    result = goals.goal_from_command(cmd, model, start, volume="fake")
+    assert result["kind"] == "show_only"
+    assert result["targets"]["skeleton"]["vis"] == goals.HIDE_STRENGTH
+    assert result["targets"]["lungs"]["vis"] == goals.HIDE_STRENGTH
+    assert result["targets"]["soft"]["vis"] == -goals.HIDE_STRENGTH
+    assert result["targets"]["vessels"]["vis"] == -goals.HIDE_STRENGTH
+
+
+def test_goal_from_command_show_only_single_string_target(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.05, lungs=0.05, soft=0.05, vessels=0.05)
+    cmd = {"target": "skeleton", "attribute": "opacity", "direction": "show_only", "strength": None}
+    result = goals.goal_from_command(cmd, model, start, volume="fake")
+    assert result["targets"]["skeleton"]["vis"] == goals.HIDE_STRENGTH
+    assert result["targets"]["lungs"]["vis"] == -goals.HIDE_STRENGTH
+
+
+def test_goal_from_command_compound_merges_subcommands(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.05, soft=0.05)
+    cmd = {"compound": [
+        {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "moderately"},
+        {"target": "soft", "attribute": "opacity", "direction": "decrease", "strength": "slightly"},
+    ]}
+    result = goals.goal_from_command(cmd, model, start, volume="fake")
+    assert result["kind"] == "compound"
+    assert result["targets"] == {
+        "skeleton": {"vis": goals.VISIBILITY_STRENGTH["moderately"]},
+        "soft": {"vis": -goals.VISIBILITY_STRENGTH["slightly"]},
+    }
+    np.testing.assert_array_equal(result["goal"], goals.goal_vector(result["targets"]))
+
+
+@pytest.mark.parametrize("cmd", [
+    {"target": None, "attribute": None, "direction": "reset", "strength": None},
+    {"target": "skeleton", "attribute": "width", "direction": "increase", "strength": "strongly"},
+    {"target": "skeleton", "attribute": "center", "direction": "increase", "strength": "slightly"},
+    {"camera": {"action": "rotate", "direction": "left", "strength": "moderately"}},
+])
+def test_goal_from_command_non_goal_commands_raise_pointing_at_apply_command(monkeypatch, cmd):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.05)
+    with pytest.raises(ValueError, match="apply_command"):
+        goals.goal_from_command(cmd, model, start, volume="fake")
+
+
+def test_goal_from_command_vessels_without_contrast_raises(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: False)
+    model = _StubModel()
+    start = _aggregated(vessels=0.05)
+    cmd = {"target": "vessels", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+    with pytest.raises(ValueError):
+        goals.goal_from_command(cmd, model, start, volume="fake")
+
+
+def test_goal_from_command_class_absent_from_volume_raises(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present",
+                        lambda name: ["skeleton", "organs", "muscle", "vessels"])
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _StubModel()
+    start = _aggregated(lungs=0.05)
+    cmd = {"target": "lungs", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+    with pytest.raises(ValueError):
+        goals.goal_from_command(cmd, model, start, volume="fake")

@@ -322,3 +322,129 @@ def sample_instruction(name, model, start_features, rng) -> dict:
     else:
         targets, text = _sample_brightness(classes, rng)
     return {"kind": kind, "text": text, "targets": targets, "goal": goal_vector(targets)}
+
+
+# --- Task 2: parsed commands -> goals -----------------------------------------
+
+_NOT_A_GOAL = ("{what} is not a goal -- apply it exactly via commands.apply_command")
+
+_CLASS_LABEL = {"skeleton": "the skeleton", "lungs": "the lungs",
+                "soft": "soft tissue", "vessels": "the vessels"}
+
+
+def _check_class_supported(goal_class: str, volume) -> None:
+    """Raise if `goal_class` isn't something this volume can be a goal for --
+    vessels only exist as a goal on contrast scans, and a class whose labels
+    aren't present on this volume at all can't be measured either."""
+    if volume is None:
+        return
+    supported = goal_classes_for_volume(volume)
+    if goal_class in supported:
+        return
+    if goal_class == "vessels":
+        raise ValueError(f"vessels is not a goal on {volume!r} -- it has no contrast")
+    raise ValueError(f"{goal_class!r} is not present on volume {volume!r}")
+
+
+def _relative_command_text(goal_class: str, direction: str, strength: str) -> str:
+    verb = "more" if direction == "increase" else "less"
+    prefix = {"slightly": "a bit ", "moderately": "", "strongly": "a lot "}[strength]
+    return f"{prefix}{verb} {_CLASS_LABEL[goal_class]}"
+
+
+def _absolute_command_text(goal_class: str, level: str) -> str:
+    return f"{level} opacity for {_CLASS_LABEL[goal_class]}"
+
+
+def _brightness_command_text(goal_class: str, direction: str) -> str:
+    verb = "brighten" if direction == "increase" else "darken"
+    return f"{verb} {_CLASS_LABEL[goal_class]}"
+
+
+def _show_only_command_text(shown) -> str:
+    return "show only " + " and ".join(_CLASS_LABEL[c] for c in shown)
+
+
+def _goal_relative(command: dict, volume) -> dict:
+    goal_class = command["target"]
+    _check_class_supported(goal_class, volume)
+    sign = 1.0 if command["direction"] == "increase" else -1.0
+    targets = {goal_class: {"vis": sign * VISIBILITY_STRENGTH[command["strength"]]}}
+    text = _relative_command_text(goal_class, command["direction"], command["strength"])
+    return {"kind": "relative", "text": text, "targets": targets, "goal": goal_vector(targets)}
+
+
+def _goal_absolute(command: dict, model, start_features: dict, volume) -> dict:
+    goal_class = command["target"]
+    _check_class_supported(goal_class, volume)
+    start_vis = start_features["vis"][goal_class]
+    delta = _absolute_target_delta(model, goal_class, command["level"], start_vis)
+    targets = {goal_class: {"vis": delta}}
+    text = _absolute_command_text(goal_class, command["level"])
+    return {"kind": "absolute", "text": text, "targets": targets, "goal": goal_vector(targets)}
+
+
+def _goal_brightness(command: dict, volume) -> dict:
+    goal_class = command["target"]
+    _check_class_supported(goal_class, volume)
+    sign = 1.0 if command["direction"] == "increase" else -1.0
+    targets = {goal_class: {"bright": sign * BRIGHTNESS_STRENGTH[command["strength"]]}}
+    text = _brightness_command_text(goal_class, command["direction"])
+    return {"kind": "brightness", "text": text, "targets": targets, "goal": goal_vector(targets)}
+
+
+def _goal_show_only(command: dict, volume) -> dict:
+    shown = command["target"] if isinstance(command["target"], list) else [command["target"]]
+    for goal_class in shown:
+        _check_class_supported(goal_class, volume)
+    classes = goal_classes_for_volume(volume) if volume is not None else list(GOAL_CLASSES)
+    targets = {goal_class: {"vis": HIDE_STRENGTH} for goal_class in shown}
+    for goal_class in classes:
+        if goal_class not in shown:
+            targets[goal_class] = {"vis": -HIDE_STRENGTH}
+    text = _show_only_command_text(shown)
+    return {"kind": "show_only", "text": text, "targets": targets, "goal": goal_vector(targets)}
+
+
+def goal_from_command(command: dict, model, start_features: dict, volume: str = None) -> dict:
+    """Turn a parsed command (from `commands.parse_command_rule`/`_llm`) into
+    the same {"kind", "text", "targets", "goal"} shape `sample_instruction`
+    produces, so downstream code cannot tell a typed instruction from a
+    sampled one.
+
+    Raises ValueError for commands that are not goals (width, centre, camera,
+    reset -- those are applied exactly by `commands.apply_command`), and for
+    goals the volume cannot support (vessels on a plain scan, a class the
+    scan does not contain).
+    """
+    if "camera" in command:
+        raise ValueError(_NOT_A_GOAL.format(what="a camera command"))
+
+    if "compound" in command:
+        sub_goals = [goal_from_command(sub, model, start_features, volume)
+                     for sub in command["compound"]]
+        targets = {}
+        for sub_goal in sub_goals:
+            targets.update(sub_goal["targets"])
+        text = ", ".join(sub_goal["text"] for sub_goal in sub_goals)
+        return {"kind": "compound", "text": text, "targets": targets, "goal": goal_vector(targets)}
+
+    direction = command.get("direction")
+    attribute = command.get("attribute")
+
+    if direction == "reset":
+        raise ValueError(_NOT_A_GOAL.format(what="reset"))
+
+    if direction == "show_only":
+        return _goal_show_only(command, volume)
+
+    if attribute == "opacity" and direction in ("increase", "decrease"):
+        return _goal_relative(command, volume)
+
+    if attribute == "opacity" and direction == "set":
+        return _goal_absolute(command, model, start_features, volume)
+
+    if attribute == "brightness" and direction in ("increase", "decrease"):
+        return _goal_brightness(command, volume)
+
+    raise ValueError(_NOT_A_GOAL.format(what=f"{command!r}"))
