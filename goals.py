@@ -20,6 +20,7 @@ import math
 
 import numpy as np
 
+import totalseg
 from transfer import PARAMS_PER_PEAK, TOTAL_PARAMS, CENTER_RANGE, WIDTH_RANGE, _from_range, _from_unit
 
 GOAL_CLASSES = ("skeleton", "lungs", "soft", "vessels")
@@ -136,3 +137,151 @@ def is_useless(features: dict) -> bool:
     """Nothing drawn, or an opaque wall hiding everything."""
     return (features["coverage"] < 0.01
             or sum(features["vis"].values()) < 0.001)
+
+
+INSTRUCTION_MIX = (("relative", 0.40), ("compound", 0.25), ("show_only", 0.15),
+                   ("absolute", 0.10), ("brightness", 0.10))
+
+# "show only" hides the unnamed classes hard -- bigger than any VISIBILITY_STRENGTH
+# so a hill-climber (or a policy) reads it as "push these away", not "nudge them".
+HIDE_STRENGTH = 1.0
+
+# Spoken noun phrases per goal class, several synonyms each.
+CLASS_WORDS = {
+    "skeleton": ("bone", "skeleton"),
+    "lungs": ("lungs",),
+    "soft": ("soft tissue",),
+    "vessels": ("vessels", "blood vessels"),
+}
+
+
+def goal_classes_for_volume(name: str) -> list:
+    """Goal classes this volume supports: those with labels present, with
+    `vessels` only on contrast scans (elsewhere vessels share intensities with
+    soft tissue and no transfer function can single them out)."""
+    present = set(totalseg.classes_present(name))
+    supported = []
+    for goal_class in GOAL_CLASSES:
+        if goal_class == "vessels":
+            if "vessels" in present and totalseg.is_contrast(name):
+                supported.append(goal_class)
+        elif any(m in present for m in MEASURED_FOR_GOAL[goal_class]):
+            supported.append(goal_class)
+    return supported
+
+
+def _class_word(goal_class: str, rng) -> str:
+    return rng.choice(CLASS_WORDS[goal_class])
+
+
+def _relative_text(goal_class: str, direction: str, strength: str, rng) -> str:
+    word = _class_word(goal_class, rng)
+    verb = "more" if direction == "increase" else "less"
+    action = "increase" if direction == "increase" else "decrease"
+    templates = {
+        "slightly": [f"a bit {verb} {word}"],
+        "moderately": [f"{verb} {word}", f"{action} opacity for the {word}"],
+        "strongly": [f"a lot {verb} {word}", f"{action} opacity for the {word} strongly"],
+    }[strength]
+    return rng.choice(templates)
+
+
+def _absolute_target_delta(model, goal_class: str, level: str, start_vis: float) -> float:
+    """The vis change an absolute-level instruction requests: `level`'s share
+    of solo_max (aggregated for the goal class) as a log10 change from
+    `start_vis`, so "high skeleton" means the same thing on every volume."""
+    solo = sum(model.solo_max(m) for m in MEASURED_FOR_GOAL[goal_class])
+    target_vis = ABSOLUTE_LEVEL[level] * solo
+    return math.log10(target_vis + EPSILON) - math.log10(start_vis + EPSILON)
+
+
+def _absolute_text(goal_class: str, level: str, rng) -> str:
+    word = _class_word(goal_class, rng)
+    templates = [f"{level} opacity {word}", f"{level} opacity for the {word}"]
+    return rng.choice(templates)
+
+
+def _brightness_text(goal_class: str, direction: str, rng) -> str:
+    word = _class_word(goal_class, rng)
+    verb = "brighten" if direction == "increase" else "darken"
+    return f"{verb} the {word}"
+
+
+def _sample_kind(rng) -> str:
+    kinds = [k for k, _ in INSTRUCTION_MIX]
+    weights = [w for _, w in INSTRUCTION_MIX]
+    return str(rng.choice(kinds, p=weights))
+
+
+def _sample_relative(classes: list, rng) -> tuple:
+    goal_class = rng.choice(classes)
+    direction = rng.choice(("increase", "decrease"))
+    strength = rng.choice(list(VISIBILITY_STRENGTH))
+    sign = 1.0 if direction == "increase" else -1.0
+    targets = {goal_class: {"vis": sign * VISIBILITY_STRENGTH[strength]}}
+    return targets, _relative_text(goal_class, direction, strength, rng)
+
+
+def _sample_compound(classes: list, rng) -> tuple:
+    n = min(2, len(classes))
+    chosen = list(rng.choice(classes, size=n, replace=False))
+    targets, phrases = {}, []
+    for goal_class in chosen:
+        direction = rng.choice(("increase", "decrease"))
+        strength = rng.choice(list(VISIBILITY_STRENGTH))
+        sign = 1.0 if direction == "increase" else -1.0
+        targets[goal_class] = {"vis": sign * VISIBILITY_STRENGTH[strength]}
+        phrases.append(_relative_text(goal_class, direction, strength, rng))
+    return targets, ", ".join(phrases)
+
+
+def _sample_show_only(classes: list, rng) -> tuple:
+    n = min(int(rng.integers(1, 3)), len(classes))
+    shown = list(rng.choice(classes, size=n, replace=False))
+    targets = {goal_class: {"vis": HIDE_STRENGTH} for goal_class in shown}
+    for goal_class in classes:
+        if goal_class not in shown:
+            targets[goal_class] = {"vis": -HIDE_STRENGTH}
+    words = [_class_word(goal_class, rng) for goal_class in shown]
+    text = "show only the " + " and the ".join(words)
+    return targets, text
+
+
+def _sample_absolute(classes: list, model, start_features: dict, rng) -> tuple:
+    goal_class = rng.choice(classes)
+    level = rng.choice(list(ABSOLUTE_LEVEL))
+    delta = _absolute_target_delta(model, goal_class, level, start_features["vis"][goal_class])
+    targets = {goal_class: {"vis": delta}}
+    return targets, _absolute_text(goal_class, level, rng)
+
+
+def _sample_brightness(classes: list, rng) -> tuple:
+    goal_class = rng.choice(classes)
+    direction = rng.choice(("increase", "decrease"))
+    strength = rng.choice(list(BRIGHTNESS_STRENGTH))
+    sign = 1.0 if direction == "increase" else -1.0
+    targets = {goal_class: {"bright": sign * BRIGHTNESS_STRENGTH[strength]}}
+    return targets, _brightness_text(goal_class, direction, rng)
+
+
+def sample_instruction(name, model, start_features, rng) -> dict:
+    """One instruction: {"kind", "text", "targets", "goal"}.
+
+    `targets` is the goal_vector input; `text` is the spoken form. Absolute
+    levels use ABSOLUTE_LEVEL x model.solo_max aggregated for the goal class,
+    turned into a requested change from the start state, so "high skeleton"
+    means the same thing on every volume.
+    """
+    classes = goal_classes_for_volume(name)
+    kind = _sample_kind(rng)
+    if kind == "relative":
+        targets, text = _sample_relative(classes, rng)
+    elif kind == "compound":
+        targets, text = _sample_compound(classes, rng)
+    elif kind == "show_only":
+        targets, text = _sample_show_only(classes, rng)
+    elif kind == "absolute":
+        targets, text = _sample_absolute(classes, model, start_features, rng)
+    else:
+        targets, text = _sample_brightness(classes, rng)
+    return {"kind": kind, "text": text, "targets": targets, "goal": goal_vector(targets)}
