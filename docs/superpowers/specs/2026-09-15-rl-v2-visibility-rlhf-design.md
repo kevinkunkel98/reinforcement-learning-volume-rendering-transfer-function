@@ -147,9 +147,19 @@ volume to canonical RAS (`nib.as_closest_canonical`) and returns float32 HU plus
 spacing. Registry names are `ts_<subject>`. `.gitignore` adds `data/*.nii.gz` and
 the extracted TotalSegmentator directory.
 
+**Anatomical labels:** each selected subject's masks are extracted alongside its
+CT and collapsed into one label volume (`skeleton` from the 63 bone structures,
+`lungs` from the 5 lobes, `organs` from the 21 abdominal/thoracic organs,
+`muscle` from the 10 muscle structures, `vessels` from the 18 heart and
+great-vessel structures; everything else is `other`). Masks are ~11 MB per
+subject. Measured on two subjects: only 7–20% of body voxels carry any label,
+so `other` is the majority of what occludes.
+
 **Out-of-source test set:** the four Slicer CTs (`ct_chest`, `ct_skull`,
 `ct_cardio`, `ct_abdomen`). Each gets a registry entry mapping it to canonical
-orientation (axis permutation and flips), verified visually once.
+orientation (axis permutation and flips), verified visually once. They have no
+masks, so they are measured with intensity-band labels and every result on them
+is reported as approximate.
 
 MRI and uncalibrated volumes are excluded from v2.
 
@@ -214,11 +224,19 @@ camera.
 
 Precomputed once per volume and cached under `out/cache/visibility/`:
 
-1. Resample to isotropic spacing, longest axis 96 voxels.
-2. For each of the 6 views, rotate the grid so the view direction is axis 0
-   (`torch.nn.functional.affine_grid` + `grid_sample`, trilinear).
-3. Label each voxel by `TISSUE_BANDS` (air, fat, soft, spongy, bone).
-4. 16-bin intensity histogram of the full volume over `CENTER_RANGE`,
+1. Resample into one cube per view (side 80, isotropic step, covering the
+   volume's largest extent), so cube axis 0 runs front to back
+   (`torch.nn.functional.grid_sample`, nearest — interpolating across a tissue
+   boundary invents intensities that fall into classes the volume does not
+   contain there).
+2. Label each sample by **anatomy**, from the TotalSegmentator masks: the
+   classes are `skeleton`, `lungs`, `organs`, `muscle`, plus `vessels` on
+   contrast scans. Everything else (subcutaneous fat, skin, bowel contents,
+   the scanner table) is `other`: it occludes like anything else, but is never
+   a goal. Volumes without masks (the four Slicer CTs, the synthetic phantom)
+   fall back to `TISSUE_BANDS` intensity labels, and every result measured on
+   them says so.
+3. 16-bin intensity histogram of the full volume over `CENTER_RANGE`,
    normalized to sum 1.
 
 Per call, on all 6 grids as one batched torch operation:
@@ -234,24 +252,49 @@ Per call, on all 6 grids as one batched torch operation:
 - `coverage` = share of rays whose accumulated opacity is ≥ 0.3.
 - All quantities averaged over the 6 views.
 
-`solo_max(t)` = `vis_t` with tissue `t`'s peak at height 1 and all other heights
-0 (default widths), computed once per volume and tissue and cached.
+`solo_max(c)` = the most of class `c` a simple transfer function can show on this
+volume: the largest `vis_c` over the four single-peak transfer functions (one
+peak at full height, the others at zero). Computed once per volume and class and
+cached. Anatomical classes have no peak of their own — the agent's peaks live in
+intensity, not anatomy — so "fully shown" has to be measured, not assumed.
 
 Budget: ≤ 30 ms per call. If exceeded: longest axis 64, then 3 views.
 
-**Validation gate** (`tools/validate_visibility.py`): 50 random TFs per volume
-on 3 volumes; Spearman correlation between proxy coverage and coverage of the
-real VTK render (same camera) ≥ 0.8, plus a side-by-side figure. Environment
-work does not start until the gate passes.
+**Validation gate** (`tools/validate_visibility.py`). Environment work does not
+start until it passes.
+
+The reference for one class is the mean rendered luminance of the volume minus
+the mean rendered luminance of the same TF with **that class's colour set to
+black and its opacity unchanged**, over the 6 views. Opacity must stay
+untouched: deleting the class's voxels instead (the first method tried) opens
+holes that reveal what lies behind, which measures something else entirely and
+made thin surface tissue anti-correlate.
+
+Transfer functions are sampled per class by sweeping that class's own peak,
+because random transfer functions barely move a given class and the resulting
+correlation is noise. Coverage is checked separately on a global opacity sweep
+(random TFs leave it near-constant).
+
+Gate: Pearson ≥ 0.7 per class whose reference contribution actually varies,
+and rank agreement ≥ 0.9 for coverage on the opacity sweep. Classes below the
+noise floor are reported as unvalidated rather than counted as passes.
 
 ### Goals (`goals.py`)
 
-Tissues `(fat, soft, spongy, bone)`. A goal vector has 16 values:
+Classes `(skeleton, lungs, organs, muscle, vessels)`. A goal vector has 20
+values:
 
-- `d[4]`: requested change of `log10(vis_t + ε)` relative to the episode start
-- `m[4]`: 1 if the tissue's visibility is part of the instruction, else 0
-- `e[4]`: requested change of `bright_t` relative to the episode start
-- `n[4]`: 1 if the tissue's brightness is part of the instruction, else 0
+- `d[5]`: requested change of `log10(vis_c + ε)` relative to the episode start
+- `m[5]`: 1 if that class's visibility is part of the instruction, else 0
+- `e[5]`: requested change of `bright_c` relative to the episode start
+- `n[5]`: 1 if that class's brightness is part of the instruction, else 0
+
+Goals are only sampled for classes the volume actually contains, and `vessels`
+only on contrast scans: in a plain scan vessels sit at the same intensities as
+organs and muscle, so no intensity-based transfer function can single them out.
+Asking anyway would train against an impossible instruction. The spoken words
+map onto the classes ("the bones"/"skeleton", "the lungs", "the organs", "the
+muscle", "the vessels"), so `commands.py`'s tissue vocabulary changes with them.
 
 `ε = 1e-3`.
 
@@ -532,11 +575,13 @@ rater, PCA + RM + 200 RLHF steps, under 5 minutes. Must pass before collecting.
 |---|---|
 | Success bar | Tier 1 (objective) must succeed this week; tier 2 (human preferences) in the month |
 | Instructions | Policy: relative, compound, absolute, show only, brightness. Exact: sharpen/center, camera, reset |
-| Goal | 16-value vector: requested visibility and brightness change per tissue + masks |
+| Goal | 20-value vector: requested visibility and brightness change per anatomical class + masks |
+| Classes | skeleton, lungs, organs, muscle from TotalSegmentator masks; vessels only on contrast scans; everything else is `other` (occludes, never a target) |
 | Action | Height, width, brightness of all 4 peaks (12-D) |
 | Tier-1 reward | Decrease of goal distance `D` from the visibility/brightness estimate; `λ = 0.3` keep term |
 | Language | Parser (rule/LLM) → command → goal vector; policy is language-free |
 | RM input | DINOv2 ViT-S/14 embeddings of 6 server-rendered views |
 | Judging | A/B from the same start, two linked 3D viewports |
-| Data | TotalSegmentator small subset, ~30 subjects, split by subject; Slicer CTs as out-of-source test |
+| Data | TotalSegmentator small subset, ~30 subjects, split by subject; Slicer CTs as out-of-source test (intensity labels, flagged) |
+| Validation | Reference = same TF with one class's colour blacked out, opacity untouched; per-class sweeps; coverage on an opacity sweep |
 | Old code | Old RL pipeline, camera RL, old feedback paths and `mvp.py` removed |
