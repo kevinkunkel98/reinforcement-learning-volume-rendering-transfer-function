@@ -146,21 +146,30 @@ python server.py --dataset ct_chest
 
 Text or voice (push-to-talk with Space), rule or LLM parsing, history
 navigation, and a local `vtk.js` renderer that applies transfer-function and
-camera changes in the browser. Commands:
+camera changes in the browser. A third toolbar toggle, **policy**, answers
+with the trained one-shot policy instead of applying the command exactly —
+it turns the parsed command into a goal vector (`goals.goal_from_command`)
+and runs the policy in a single forward pass, falling back to exact
+application when there is no trained checkpoint or the command is not a goal
+(camera, reset, width, brightness, centre). Commands name one of four
+anatomical classes — `skeleton`, `lungs`, `soft` (organs and muscle
+together), `vessels` (contrast scans only):
 
 ```text
-increase|decrease opacity for <tissue> [slightly|moderately|strongly]
-show only <tissue> [and <tissue> ...]
-<low|medium|high> opacity for <tissue>
-sharpen|soften <tissue>   ·   brighten|darken <tissue>
-shift <tissue>'s center up|down
+increase|decrease opacity for <class> [slightly|moderately|strongly]
+show only <class> [and <class> ...]
+<low|medium|high> opacity for <class>
+sharpen|soften <class>   ·   brighten|darken <class>
+shift <class>'s center up|down
 rotate left|right   ·   tilt up|down   ·   zoom in|out   ·   reset
 ```
 
-LLM parsing needs Ollama (`ollama serve && ollama pull qwen2.5:7b`); without it,
-the `llm` toggle falls back to the rule parser. See `COMMANDS.md` for the full
-grammar. The UI session persists in `out/ui_session.json`; say `reset` or delete
-that file to start over.
+Natural phrasings work too — "more bone", "a bit less soft tissue", "show me
+the lungs" — and several relative or absolute clauses in one sentence become
+a compound command. LLM parsing needs Ollama (`ollama serve && ollama pull
+qwen2.5:7b`); without it, the `llm` toggle falls back to the rule parser. See
+`COMMANDS.md` for the full grammar. The UI session persists in
+`out/ui_session.json`; say `reset` or delete that file to start over.
 
 ## Data
 
