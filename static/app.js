@@ -1,5 +1,8 @@
 const state = { current: null, cursor: 0, total: 1, dataset: null };
-const config = { parser: "rule", search: false };
+// mode is the source of truth for which of the three ways a command is
+// answered ("exact" | "search" | "policy"); `search` is kept in sync for the
+// request body / UI toggle state the search-options panel reads.
+const config = { parser: "rule", search: false, mode: "exact" };
 
 const el = (id) => document.getElementById(id);
 const messagesEl = el("messages");
@@ -164,12 +167,12 @@ function appendMessage(step) {
   text.textContent = step.cmd_text;
   div.appendChild(text);
 
-  if (step.search) {
+  if (step.search || step.mode === "policy") {
     const tags = document.createElement("div");
     tags.className = "msg-tags";
     const t = document.createElement("span");
     t.className = "tag";
-    t.textContent = "search";
+    t.textContent = step.mode === "policy" ? "policy" : "search";
     tags.appendChild(t);
     div.appendChild(tags);
   }
@@ -199,6 +202,7 @@ async function sendCommand(text) {
     parser: config.parser,
     search: config.search,
     steps: parseInt(el("steps-input").value, 10),
+    mode: config.mode,
   };
   const r = await fetch("/api/command", {
     method: "POST",
@@ -214,6 +218,10 @@ async function sendCommand(text) {
   await refresh(data);
   await postSceneTransition(data);
   appendMessage(data.current);
+  // mode="policy" degrades to exact application (no checkpoint, or the
+  // command isn't a goal) and explains why in current.message -- surface it
+  // rather than silently answering with a different mode than requested.
+  if (data.current.message) showToast(data.current.message, "default");
 }
 
 function autoResize() {
@@ -285,10 +293,33 @@ document.querySelectorAll("[data-toggle-group]").forEach(initToggleGroup);
 
 const searchToggleBtn = el("search-toggle-btn");
 const searchOptions = el("search-options");
+const policyToggleBtn = el("policy-toggle-btn");
+
+// search and policy are two different ways of answering the same command --
+// mutually exclusive, alongside the default "exact" mode.
 searchToggleBtn.addEventListener("click", () => {
   config.search = !config.search;
   searchToggleBtn.dataset.active = String(config.search);
   searchOptions.hidden = !config.search;
+  if (config.search) {
+    policyToggleBtn.dataset.active = "false";
+    config.mode = "search";
+  } else {
+    config.mode = "exact";
+  }
+});
+
+policyToggleBtn.addEventListener("click", () => {
+  const active = policyToggleBtn.dataset.active !== "true";
+  policyToggleBtn.dataset.active = String(active);
+  if (active) {
+    config.search = false;
+    searchToggleBtn.dataset.active = "false";
+    searchOptions.hidden = true;
+    config.mode = "policy";
+  } else {
+    config.mode = "exact";
+  }
 });
 
 // ---------- mic: push to talk + real audio-reactive waveform ----------

@@ -10,12 +10,14 @@ import os
 import asyncio
 import json
 
+import numpy as np
 import pytest
 
 from fastapi import HTTPException
 from fastapi.responses import Response
 
 import server
+from rl.baselines import CONTROLLABLE
 from server import Session
 
 TEST_SESSION_PATH = "/tmp/test_ui_session.json"
@@ -410,3 +412,131 @@ def test_new_session_starts_with_default_camera():
     from camera import DEFAULT_CAMERA
     session = _fresh_session()
     assert session.history[0]["camera"] == DEFAULT_CAMERA
+
+
+# --- Task 3: policy mode -----------------------------------------------------
+# mode="policy" builds a goal from the parsed command (goals.goal_from_command)
+# and runs the trained one-shot policy on it; a stub in place of the real SB3
+# checkpoint keeps these tests fast and deterministic. Camera commands bypass
+# the whole mechanism (handled earlier in `command()`, same as every other
+# mode). When the policy is unavailable, or the command isn't a goal at all,
+# it falls back to exact application and records why.
+
+class _StubPolicy:
+    """Stands in for an SB3 model: same `.predict(obs, deterministic=...)`
+    interface, always returns the same fixed action."""
+
+    def __init__(self, action):
+        self._action = np.asarray(action, dtype=np.float64)
+
+    def predict(self, observation, deterministic=True):
+        return self._action, None
+
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _use_real_totalseg_manifest(monkeypatch):
+    """`_isolate_cwd` chdirs into a scratch tmp_path so these tests never write
+    into the real project's out/; `totalseg`'s manifest and volume/label paths
+    are repo-root-relative, so patch `totalseg.subject` (every other totalseg
+    lookup routes through it) to resolve them against the real repo root, for
+    the one real TotalSegmentator volume (`ts_s1379`) the policy-mode tests
+    below exercise."""
+    import totalseg
+    with open(os.path.join(_REPO_ROOT, "data/totalseg_manifest.json")) as f:
+        subjects = {s["name"]: s for s in json.load(f)["subjects"]}
+
+    def _subject(name):
+        entry = dict(subjects[name])
+        entry["path"] = os.path.join(_REPO_ROOT, entry["path"])
+        if entry.get("labels_path"):
+            entry["labels_path"] = os.path.join(_REPO_ROOT, entry["labels_path"])
+        return entry
+
+    monkeypatch.setattr(totalseg, "subject", _subject)
+
+
+@pytest.fixture
+def ts_session(monkeypatch):
+    """A fresh Session switched to the real `ts_s1379` TotalSegmentator
+    volume -- the one dataset these policy-mode tests can run a real goal
+    check against (see `_use_real_totalseg_manifest`). `server._dataset_name`
+    is module-level global state that outlives any one test, so this restores
+    whatever dataset was active beforehand once the test is done, regardless
+    of outcome."""
+    _use_real_totalseg_manifest(monkeypatch)
+    original_dataset = server._dataset_name
+    s = _fresh_session()
+    s.switch_dataset("ts_s1379")
+    try:
+        yield s
+    finally:
+        server.set_dataset(original_dataset)
+
+
+def test_policy_mode_applies_the_policys_action(ts_session):
+    s = ts_session
+    action = np.linspace(-0.9, 0.9, len(CONTROLLABLE))
+    s.policy_provider = lambda: _StubPolicy(action)
+
+    before_params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    state = s.command("more bone", mode="policy")
+
+    assert state["current"]["mode"] == "policy"
+    assert state["current"]["message"] is None
+    params = np.array(state["current"]["params"], dtype=np.float64)
+    for group, value in zip(CONTROLLABLE, action):
+        for index in group:
+            assert params[index] == pytest.approx(float(value))
+    controllable_indices = {i for group in CONTROLLABLE for i in group}
+    for i in range(len(before_params)):
+        if i not in controllable_indices:
+            assert params[i] == pytest.approx(before_params[i])  # centres untouched
+
+
+def test_policy_mode_camera_command_still_moves_camera(ts_session):
+    s = ts_session
+    s.policy_provider = lambda: _StubPolicy(np.zeros(len(CONTROLLABLE)))
+    before_camera = s.history[s.cursor]["camera"]
+
+    state = s.command("rotate right", mode="policy")
+
+    assert state["current"]["camera"]["azimuth"] != before_camera["azimuth"]
+    assert state["current"]["mode"] == "camera"
+
+
+def test_policy_mode_without_checkpoint_falls_back_to_exact_and_says_so():
+    s = _fresh_session()
+    # The default policy_provider looks for out/rl_v2/oneshot_v2_seed0/best.zip
+    # relative to cwd; this test's cwd (tmp_path, via _isolate_cwd) has none.
+    state = s.command("increase opacity for bone strongly", mode="policy")
+
+    assert state["current"]["mode"] == "exact"
+    assert state["current"]["message"]
+    assert state["current"]["cmd_dict"]["target"] == "skeleton"
+    # falls back to exactly what apply_command would have produced
+    direct = _fresh_session()
+    direct_state = direct.command("increase opacity for bone strongly", mode="exact")
+    assert state["current"]["params"] == direct_state["current"]["params"]
+
+
+def test_policy_mode_non_goal_command_falls_back_with_message(ts_session):
+    s = ts_session
+    s.policy_provider = lambda: _StubPolicy(np.zeros(len(CONTROLLABLE)))
+
+    state = s.command("reset", mode="policy")
+
+    assert state["current"]["mode"] == "exact"
+    assert state["current"]["message"]
+
+
+def test_command_records_its_mode():
+    s = _fresh_session()
+    exact_state = s.command("increase opacity for bone strongly", parser="rule", search=False)
+    assert exact_state["current"]["mode"] == "exact"
+    assert exact_state["current"]["message"] is None
+
+    search_state = s.command("increase opacity for bone strongly", parser="rule",
+                              search=True, steps=3)
+    assert search_state["current"]["mode"] == "search"

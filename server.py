@@ -13,6 +13,7 @@ import datetime
 import hashlib
 import io
 import json
+import math
 import os
 import sys
 import threading
@@ -32,16 +33,50 @@ import collect
 from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
 from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
+import goals
 import render as render_module
 from render import features, grab, render
+from rl.baselines import CONTROLLABLE
+from rl.oneshot_env import build_observation
 from search import propose_step, resize_step
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
 from transfer import TISSUE_BANDS, default_params, opacity_mass
+import visibility
 
 LOG_PATH = "out/log.jsonl"
 SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
 _SCENE_WRITE_LOCK = threading.Lock()
 AUDIO_DIR = "out/audio"
+
+# --- Task 3: the one-shot policy, for mode="policy" --------------------------
+# Loaded lazily and cached, the same pattern collect.py uses for the same
+# checkpoint: importing this module (and starting the server) must not
+# require a finished training run, and every command after the first pays no
+# reload cost.
+POLICY_PATH = "out/rl_v2/oneshot_v2_seed0/best.zip"
+_policy_state = {"loaded": False, "policy": None}
+
+
+def _load_policy():
+    if not _policy_state["loaded"]:
+        _policy_state["loaded"] = True
+        if os.path.exists(POLICY_PATH):
+            from stable_baselines3 import SAC
+            _policy_state["policy"] = SAC.load(POLICY_PATH)
+    return _policy_state["policy"]
+
+
+def _predict_action(policy, observation: np.ndarray) -> np.ndarray:
+    """One action from `policy`, an SB3-style model (`.predict(observation,
+    deterministic=...) -> (action, state)`) or a plain callable -- mirrors
+    `rl.candidates._predict`, deterministic here since the chat UI wants one
+    consistent answer, not the sampling diversity preference collection
+    wants."""
+    if hasattr(policy, "predict"):
+        action, _ = policy.predict(observation, deterministic=True)
+    else:
+        action = policy(observation)
+    return np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
 
 
 def _resolve_dataset_name():
@@ -109,7 +144,8 @@ def _scene_event_id(before, after, event_id=None):
     return "scene-event:" + hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
-def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera):
+def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera,
+                  mode="exact", message=None):
     image_b64, img, png_bytes = _render_image_b64(params, camera)
     image_path = _save_image_file(session_id, f"step_{step_id}", png_bytes)
     return {
@@ -124,17 +160,25 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
         "masses": _masses(params),
         "features": features(img),
         "search": search,
+        "mode": mode,
+        "message": message,
     }
 
 
 class Session:
     """All command/history logic, independent of FastAPI."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, policy_provider=None, model_for_volume=visibility.for_volume):
         self.path = path
         self.history = []
         self.cursor = 0
         self.session_id = None
+        # Injectable, like collect.Collector's seams: policy_provider defaults
+        # to the lazily-loaded/cached checkpoint above, model_for_volume to
+        # the real visibility model -- tests substitute cheap stand-ins for
+        # both without touching VTK or a real checkpoint.
+        self.policy_provider = policy_provider or _load_policy
+        self.model_for_volume = model_for_volume
         self._load_or_init()
 
     def _load_or_init(self):
@@ -224,7 +268,38 @@ class Session:
                 break
         return current
 
-    def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10):
+    def _run_policy(self, cmd, current_params):
+        """mode="policy": build the goal `cmd` asks for (`goals.
+        goal_from_command`) and run the cached one-shot policy on it, the
+        same observation layout `rl.candidates` builds for a standalone
+        policy query (`rl.oneshot_env.build_observation`). Returns
+        `(new_params, goal_text)`. Raises `ValueError` -- caught by
+        `command()`, which falls back to exact application -- when no
+        checkpoint is loaded, or `goal_from_command`/the volume's model
+        raises for a non-goal command (camera, reset, width, centre) or a
+        goal this volume can't support."""
+        policy = self.policy_provider()
+        if policy is None:
+            raise ValueError(
+                "no trained policy checkpoint found -- applied the command directly instead")
+
+        model = self.model_for_volume(_dataset_name)
+        start_agg = goals.aggregate(model.features(current_params))
+        goal = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
+
+        solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
+                         for c in goals.GOAL_CLASSES]
+        controllable = [float(np.mean([current_params[i] for i in group])) for group in CONTROLLABLE]
+        observation = build_observation(goal["goal"], model.histogram, start_agg, solo_max_log, controllable)
+
+        action = _predict_action(policy, observation)
+        new_params = current_params.copy()
+        for group, value in zip(CONTROLLABLE, action):
+            for index in group:
+                new_params[index] = float(value)
+        return new_params, goal["text"]
+
+    def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10, mode=None):
         cmd = parse_command(text, parser=parser, model=model)  # raises ValueError on failure
 
         current_params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
@@ -233,20 +308,38 @@ class Session:
         if "camera" in cmd:
             new_camera = apply_camera_command(cmd["camera"], current_camera)
             step = _render_step(current_params, text, cmd, False,
-                                 self.history[-1]["id"] + 1, self.session_id, new_camera)
+                                 self.history[-1]["id"] + 1, self.session_id, new_camera,
+                                 mode="camera")
             self.history = self.history[:self.cursor + 1] + [step]
             self.cursor = len(self.history) - 1
             self.save()
             return self.state()
 
-        if search and cmd.get("attribute") == "opacity" and cmd.get("direction") in ("increase", "decrease"):
+        # mode wins over the legacy `search` bool when given; `search=True`
+        # alone still means mode="search", so existing callers (and the UI's
+        # search toggle) keep working unchanged.
+        effective_mode = mode or ("search" if search else "exact")
+
+        message = None
+        if effective_mode == "policy":
+            try:
+                new_params, _goal_text = self._run_policy(cmd, current_params)
+                actual_mode, search_flag = "policy", False
+            except ValueError as exc:
+                message = str(exc)
+                new_params = apply_command(cmd, current_params)
+                actual_mode, search_flag = "exact", False
+        elif effective_mode == "search" and cmd.get("attribute") == "opacity" and cmd.get("direction") in ("increase", "decrease"):
             new_params = self._run_objective_search(cmd, current_params, steps)
-            step = _render_step(new_params, text, cmd, True,
-                                 self.history[-1]["id"] + 1, self.session_id, current_camera)
+            actual_mode, search_flag = "search", True
         else:
             new_params = apply_command(cmd, current_params)
-            step = _render_step(new_params, text, cmd, False,
-                                 self.history[-1]["id"] + 1, self.session_id, current_camera)
+            actual_mode, search_flag = "exact", False
+
+        step = _render_step(new_params, text, cmd, search_flag,
+                             self.history[-1]["id"] + 1, self.session_id, current_camera,
+                             mode=actual_mode, message=message)
+        if actual_mode == "exact":
             self._log_command(cmd, current_params, new_params, step)
 
         self.history = self.history[:self.cursor + 1] + [step]
@@ -347,12 +440,13 @@ class CommandRequest(BaseModel):
     model: str = "qwen2.5:7b"
     search: bool = False
     steps: int = 10
+    mode: str | None = None  # "exact" | "search" | "policy"; overrides `search` when given
 
 
 @app.post("/api/command")
 async def command(req: CommandRequest):
     try:
-        return session.command(req.text, req.parser, req.model, req.search, req.steps)
+        return session.command(req.text, req.parser, req.model, req.search, req.steps, req.mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
