@@ -1,7 +1,8 @@
 """+1/-1 objective verdicts for hill-climb search (opacity_mass for opacity commands, always-accept for width/brightness/center), plus a JSONL append helper."""
 import json
 
-from transfer import TISSUE_BANDS, opacity_mass
+from commands import CLASS_BANDS
+from transfer import opacity_mass
 
 EPS = 1e-4
 
@@ -9,8 +10,8 @@ EPS = 1e-4
 def _dominance(params, target) -> float:
     """Target band(s)' share of total opacity mass across all bands."""
     targets = target if isinstance(target, list) else [target]
-    target_mass = sum(opacity_mass(params, *TISSUE_BANDS[t]) for t in targets)
-    total = sum(opacity_mass(params, tlo, thi) for tlo, thi in TISSUE_BANDS.values())
+    target_mass = sum(opacity_mass(params, *CLASS_BANDS[t]) for t in targets)
+    total = sum(opacity_mass(params, tlo, thi) for tlo, thi in CLASS_BANDS.values())
     return target_mass / (total + EPS)
 
 
@@ -41,13 +42,13 @@ def objective(params_before, params_after, cmd: dict) -> int:
         return 1 if after_dom > before_dom + EPS else -1
 
     direction = "increase" if cmd["direction"] == "increase" else "decrease"
-    lo, hi = TISSUE_BANDS[cmd["target"]]
+    lo, hi = CLASS_BANDS[cmd["target"]]
     delta_target = opacity_mass(params_after, lo, hi) - opacity_mass(params_before, lo, hi)
     signed = delta_target if direction == "increase" else -delta_target
     if signed <= EPS:
         return -1
     max_other = 0.0
-    for tissue, (tlo, thi) in TISSUE_BANDS.items():
+    for tissue, (tlo, thi) in CLASS_BANDS.items():
         if tissue == cmd["target"]:
             continue
         d = abs(opacity_mass(params_after, tlo, thi) - opacity_mass(params_before, tlo, thi))

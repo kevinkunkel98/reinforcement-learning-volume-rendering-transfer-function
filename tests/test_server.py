@@ -283,7 +283,7 @@ def test_command_appends_a_step():
     state = s.command("increase opacity for bone strongly", parser="rule", search=False)
     assert state["total"] == 2
     assert state["cursor"] == 1
-    assert state["current"]["cmd_dict"]["target"] == "bone"
+    assert state["current"]["cmd_dict"]["target"] == "skeleton"
     assert state["current"]["image_b64"]
 
 
@@ -305,10 +305,10 @@ def test_new_command_after_going_back_truncates_forward_history():
     s = _fresh_session()
     s.command("increase opacity for bone strongly", parser="rule", search=False)
     s.back()
-    s.command("increase opacity for fat strongly", parser="rule", search=False)
+    s.command("increase opacity for lungs strongly", parser="rule", search=False)
     state = s.state()
     assert state["total"] == 2
-    assert state["current"]["cmd_dict"]["target"] == "fat"
+    assert state["current"]["cmd_dict"]["target"] == "lungs"
 
 
 def test_objective_search_appends_one_final_step():
