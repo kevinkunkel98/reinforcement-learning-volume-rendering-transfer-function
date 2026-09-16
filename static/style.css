@@ -903,3 +903,109 @@ select:focus-visible {
   #dataset-row { max-width: 100%; }
   .select-trigger { max-width: calc(100vw - 80px); }
 }
+
+/* ==========================================================================
+   /collect — preference collection page. The rater judges exactly the 6-view
+   grid the reward model will later see (collect_images.view_grid), so the
+   layout is deliberately plain: two grids side by side, a start-state grid
+   that only appears on request, and nothing that hints at where a candidate
+   came from.
+   ========================================================================== */
+
+#collect-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 32px;
+  gap: 20px;
+}
+
+#collect-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+#collect-instruction {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: hsl(var(--foreground));
+}
+
+#collect-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+#collect-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+#pair-grids {
+  display: flex;
+  gap: 16px;
+}
+
+.candidate-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.candidate-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: hsl(var(--muted-foreground));
+}
+
+.candidate-grid {
+  width: 100%;
+  display: block;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
+  background: #000;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+}
+
+#start-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 50%;
+}
+
+#start-panel[hidden] { display: none; }
+
+#collect-controls {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding-top: 8px;
+}
+
+.judge-btn { min-width: 96px; }
+
+@media (max-width: 700px) {
+  #pair-grids { flex-direction: column; }
+  #start-panel { max-width: 100%; }
+  #collect-controls { flex-wrap: wrap; }
+}
