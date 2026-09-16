@@ -26,6 +26,99 @@ _SYNONYM_LOOKUP = sorted(
     key=lambda t: -len(t[0]),
 )
 
+# --- rule parser vocabulary: the four RL v2 goal classes --------------------
+# The rule parser (and only the rule parser -- the LLM prompt/validator are
+# updated separately, in a later task) speaks the same four anatomical goal
+# classes the trained policy does. An organ name maps to "soft" because no
+# transfer function can isolate one organ from the rest of soft tissue --
+# the parser must not promise what the renderer cannot deliver.
+CLASS_SYNONYMS = {
+    "skeleton": ["bone", "bones", "skeleton", "ribs", "rib", "spine", "vertebrae",
+                 "hip", "femur", "skull"],
+    "lungs": ["lung", "lungs", "pulmonary"],
+    "soft": ["soft tissue", "soft", "organs", "organ", "muscle", "muscles",
+             "liver", "kidney", "spleen"],
+    "vessels": ["vessel", "vessels", "artery", "arteries", "vein", "veins",
+                "aorta", "contrast"],
+}
+_CLASS_LOOKUP = sorted(
+    ((phrase, cls) for cls, phrases in CLASS_SYNONYMS.items() for phrase in phrases),
+    key=lambda t: -len(t[0]),
+)
+
+# fat/air/spongy are retired -- no goal class isolates them any more, and
+# silently remapping them to something else would corrupt collected
+# preference data. The rule parser rejects them outright.
+RETIRED_CLASS_WORDS = {
+    "fat": ["fatty", "fat", "adipose"],
+    "air": ["air", "background"],
+    "spongy": ["spongy bone", "spongy", "cancellous", "trabecular"],
+}
+_RETIRED_LOOKUP = sorted(
+    ((phrase, name) for name, phrases in RETIRED_CLASS_WORDS.items() for phrase in phrases),
+    key=lambda t: -len(t[0]),
+)
+
+
+def _check_retired(t: str) -> None:
+    for phrase, name in _RETIRED_LOOKUP:
+        if re.search(rf"\b{re.escape(phrase)}\b", t):
+            raise ValueError(
+                f"{name!r} is no longer a supported class -- the supported "
+                f"classes are: {', '.join(CLASS_SYNONYMS)}"
+            )
+
+
+def _find_class(text: str):
+    for phrase, cls in _CLASS_LOOKUP:
+        if phrase in text:
+            return cls
+    return None
+
+
+def _split_class_list(text: str) -> list:
+    """'bone and lungs' / 'bone, lungs' / 'bone + lungs' -> ['skeleton', 'lungs']."""
+    parts = re.split(r"\s*(?:,|\+|\band\b)\s*", text.strip())
+    classes = []
+    for part in parts:
+        cls = _find_class(part)
+        if cls and cls not in classes:
+            classes.append(cls)
+    return classes
+
+
+_STRENGTH_MODIFIER_WORDS = {"a bit": "slightly", "a lot": "strongly", "much": "strongly"}
+
+
+def _parse_relative_clause(clause: str):
+    """One relative clause -> a single relative command dict, or None if the
+    clause isn't one of the recognized relative phrasings."""
+    m = re.search(r"\b(increase|decrease)\s+(opacity|width|sharpness|brightness)\s+for\s+([\w ]+)", clause)
+    if m:
+        direction, attr_word, target_text = m.group(1), m.group(2), m.group(3)
+        attribute = ATTRIBUTE_WORD_ALIASES.get(attr_word, attr_word)
+        strength = "moderately"
+        for word in STRENGTH_WORDS:
+            if word in target_text:
+                strength = word
+                target_text = target_text.replace(word, "")
+        cls = _find_class(target_text)
+        if cls:
+            return {"target": cls, "attribute": attribute,
+                    "direction": direction, "strength": strength}
+        return None
+
+    m = re.search(r"\b(?:(a bit|a lot|much)\s+)?(more|less)\s+([\w ]+)", clause)
+    if m:
+        modifier, verb, target_text = m.group(1), m.group(2), m.group(3)
+        cls = _find_class(target_text)
+        if cls:
+            strength = _STRENGTH_MODIFIER_WORDS.get(modifier, "moderately")
+            direction = "increase" if verb == "more" else "decrease"
+            return {"target": cls, "attribute": "opacity",
+                    "direction": direction, "strength": strength}
+    return None
+
 COMMAND_REFERENCE = [
     {
         "category": "Opacity (relative)",
@@ -88,34 +181,28 @@ ATTRIBUTE_WORD_ALIASES = {"sharpness": "width"}
 
 
 def _find_tissue(text: str):
+    # Legacy 5-tissue vocabulary, used only by the LLM parser's alias
+    # normalization (`_normalize_target`) until that pathway is updated to
+    # the anatomical goal classes -- see `_find_class` for the rule parser.
     for phrase, tissue in _SYNONYM_LOOKUP:
         if phrase in text:
             return tissue
     return None
 
 
-def _split_tissue_list(text: str) -> list:
-    """'bone and spongy' / 'bone, spongy' / 'bone + spongy' -> ['bone', 'spongy']."""
-    parts = re.split(r"\s*(?:,|\+|\band\b)\s*", text.strip())
-    tissues = []
-    for part in parts:
-        tissue = _find_tissue(part)
-        if tissue and tissue not in tissues:
-            tissues.append(tissue)
-    return tissues
-
-
 def parse_command_rule(text: str) -> dict:
     t = text.lower().strip()
+
+    _check_retired(t)
 
     if "reset" in t:
         return {"target": None, "attribute": None, "direction": "reset", "strength": None}
 
-    m = re.search(r"show only ([\w ,\+]+)", t)
+    m = re.search(r"show(?:\s+only|\s+me(?:\s+the)?)\s+([\w ,\+]+)", t)
     if m:
-        tissues = _split_tissue_list(m.group(1))
-        if tissues:
-            return {"target": tissues[0] if len(tissues) == 1 else tissues,
+        classes = _split_class_list(m.group(1))
+        if classes:
+            return {"target": classes[0] if len(classes) == 1 else classes,
                      "attribute": "opacity", "direction": "show_only", "strength": None}
 
     m = re.search(r"\b(sharpen|soften|brighten|darken)\b\s+([\w ]+)", t)
@@ -127,18 +214,18 @@ def parse_command_rule(text: str) -> dict:
             if word in target_text:
                 strength = word
                 target_text = target_text.replace(word, "")
-        tissue = _find_tissue(target_text)
-        if tissue:
-            return {"target": tissue, "attribute": attribute,
+        cls = _find_class(target_text)
+        if cls:
+            return {"target": cls, "attribute": attribute,
                      "direction": direction, "strength": strength}
 
     m = re.search(r"\b(?:shift|move)\s+([\w ]+?)(?:'s)?\s+(?:center|position)?\s*(up|down|higher|lower)\b", t)
     if m:
         target_text, word = m.group(1), m.group(2)
-        tissue = _find_tissue(target_text)
-        if tissue:
+        cls = _find_class(target_text)
+        if cls:
             direction = "increase" if word in ("up", "higher") else "decrease"
-            return {"target": tissue, "attribute": "center",
+            return {"target": cls, "attribute": "center",
                      "direction": direction, "strength": "moderately"}
 
     m = re.search(r"\b(rotate|turn)\s+(left|right)\b", t)
@@ -165,8 +252,8 @@ def parse_command_rule(text: str) -> dict:
                 strength = word
         return {"camera": {"action": "zoom", "direction": m.group(1), "strength": strength}}
 
-    # "high opacity spongy", "low opacity for bone", "high sharpness bone" --
-    # an absolute level per tissue+attribute, not a relative delta. One or
+    # "high opacity vessels", "low opacity for skeleton", "high sharpness bone" --
+    # an absolute level per class+attribute, not a relative delta. One or
     # more may appear in the same sentence, each becomes its own
     # sub-command, folded together into one compound command.
     level_matches = list(re.finditer(
@@ -174,28 +261,32 @@ def parse_command_rule(text: str) -> dict:
     if level_matches:
         subcommands = []
         for lm in level_matches:
-            level, attr_word, tissue_text = lm.group(1), lm.group(2), lm.group(3)
+            level, attr_word, class_text = lm.group(1), lm.group(2), lm.group(3)
             attribute = ATTRIBUTE_WORD_ALIASES.get(attr_word, attr_word)
-            tissue = _find_tissue(tissue_text)
-            if tissue:
-                subcommands.append({"target": tissue, "attribute": attribute,
+            cls = _find_class(class_text)
+            if cls:
+                subcommands.append({"target": cls, "attribute": attribute,
                                       "direction": "set", "level": level})
         if subcommands:
             return subcommands[0] if len(subcommands) == 1 else {"compound": subcommands}
 
-    m = re.search(r"(increase|decrease)\s+(opacity|width|sharpness|brightness)\s+for\s+([\w ]+)", t)
-    if m:
-        direction, attr_word, target_text = m.group(1), m.group(2), m.group(3)
-        attribute = ATTRIBUTE_WORD_ALIASES.get(attr_word, attr_word)
-        strength = "moderately"
-        for word in STRENGTH_WORDS:
-            if word in target_text:
-                strength = word
-                target_text = target_text.replace(word, "")
-        tissue = _find_tissue(target_text)
-        if tissue:
-            return {"target": tissue, "attribute": attribute,
-                     "direction": direction, "strength": strength}
+    # Relative clauses: "increase opacity for skeleton strongly", "more bone",
+    # "a bit less soft tissue". Several comma/semicolon-separated clauses
+    # become a compound of all of them; if some clauses in a multi-clause
+    # sentence parse as relative commands and others don't, that's an error
+    # -- never silently drop a clause the user actually said.
+    clauses = [c.strip() for c in re.split(r"\s*[,;]\s*", t) if c.strip()]
+    if len(clauses) > 1:
+        parsed = [_parse_relative_clause(c) for c in clauses]
+        if any(p is not None for p in parsed):
+            if all(p is not None for p in parsed):
+                return {"compound": parsed}
+            bad = clauses[parsed.index(None)]
+            raise ValueError(f"could not parse clause {bad!r} in compound command: {text!r}")
+    else:
+        single = _parse_relative_clause(t)
+        if single:
+            return single
 
     raise ValueError(f"rule parser cannot parse: {text!r}")
 
@@ -210,9 +301,19 @@ def _peak_center_hu(params: np.ndarray, i: int) -> float:
     return peak_internal(params, i)["center"]
 
 
+# apply_command's peak-placement vocabulary: the legacy 5-tissue table
+# (still reachable through the unchanged LLM pathway) plus the three new
+# goal-class names the rule parser now emits. "soft" and "bone"/"spongy"'s
+# HU already coincide with "soft"/"skeleton"/"vessels", so those just reuse
+# the same peak; only "lungs" has no legacy equivalent.
+CLASS_HU = {**TISSUE_HU, "lungs": -800.0, "vessels": 300.0, "skeleton": 900.0}
+CLASS_BANDS = {**TISSUE_BANDS, "lungs": (-1050.0, -550.0),
+                "vessels": (170.0, 600.0), "skeleton": (600.0, 2000.0)}
+
+
 def _find_or_create_peak(params: np.ndarray, tissue: str):
     """Nearest peak to the tissue's HU; reseed the weakest peak if none is near."""
-    target_hu = TISSUE_HU[tissue]
+    target_hu = CLASS_HU[tissue]
     centers = [_peak_center_hu(params, i) for i in range(N_PEAKS)]
     distances = [abs(c - target_hu) for c in centers]
     idx = int(np.argmin(distances))
@@ -246,7 +347,7 @@ def _center_band_clip(ext_value: float, tissue: str) -> float:
     # A center shift must stay within the target tissue's own HU band --
     # otherwise repeated shifts could walk a peak out of its own tissue
     # entirely and into a neighboring one's territory, silently.
-    lo_hu, hi_hu = TISSUE_BANDS[tissue]
+    lo_hu, hi_hu = CLASS_BANDS[tissue]
     lo_ext = _from_range(lo_hu, *CENTER_RANGE)
     hi_ext = _from_range(hi_hu, *CENTER_RANGE)
     return float(np.clip(ext_value, lo_ext, hi_ext))

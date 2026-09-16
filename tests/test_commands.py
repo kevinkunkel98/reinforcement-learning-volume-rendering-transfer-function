@@ -18,21 +18,21 @@ def _isolate_cwd(tmp_path, monkeypatch):
 
 def test_parse_increase_with_strength():
     cmd = parse_command_rule("increase opacity for bone strongly")
-    assert cmd == {"target": "bone", "attribute": "opacity",
+    assert cmd == {"target": "skeleton", "attribute": "opacity",
                     "direction": "increase", "strength": "strongly"}
 
 
 def test_parse_decrease_default_strength():
-    cmd = parse_command_rule("decrease opacity for fat")
-    assert cmd["target"] == "fat"
+    cmd = parse_command_rule("decrease opacity for lungs")
+    assert cmd["target"] == "lungs"
     assert cmd["direction"] == "decrease"
     assert cmd["strength"] == "moderately"
 
 
 def test_parse_show_only():
-    cmd = parse_command_rule("show only spongy bone")
+    cmd = parse_command_rule("show only soft tissue")
     assert cmd["direction"] == "show_only"
-    assert cmd["target"] == "spongy"
+    assert cmd["target"] == "soft"
 
 
 def test_parse_reset():
@@ -119,7 +119,7 @@ def test_parse_command_llm_valid_response():
 def test_parse_command_llm_falls_back_on_connection_error(capsys):
     with patch("commands.urlopen", side_effect=OSError("connection refused")):
         cmd = parse_command_llm("increase opacity for bone strongly")
-    assert cmd["target"] == "bone"
+    assert cmd["target"] == "skeleton"  # fallback re-parses with the rule parser's new vocabulary
     assert cmd["direction"] == "increase"
     assert "falling back to rule parser" in capsys.readouterr().out
 
@@ -127,7 +127,7 @@ def test_parse_command_llm_falls_back_on_connection_error(capsys):
 def test_parse_command_llm_falls_back_on_invalid_schema(capsys):
     with patch("commands.urlopen", return_value=_fake_response({"foo": "bar"})):
         cmd = parse_command_llm("increase opacity for bone strongly")
-    assert cmd["target"] == "bone"
+    assert cmd["target"] == "skeleton"
     assert "falling back to rule parser" in capsys.readouterr().out
 
 
@@ -135,7 +135,7 @@ def test_parse_command_llm_falls_back_when_target_missing_for_non_reset(capsys):
     payload = {"target": None, "attribute": "opacity", "direction": "show_only", "strength": None}
     with patch("commands.urlopen", return_value=_fake_response(payload)):
         cmd = parse_command_llm("increase opacity for bone strongly")
-    assert cmd["target"] == "bone"
+    assert cmd["target"] == "skeleton"
     assert "falling back to rule parser" in capsys.readouterr().out
 
 
@@ -170,20 +170,20 @@ def test_parse_command_llm_logs_fallback_with_reason(tmp_path):
     entry = json.loads(lines[0])
     assert entry["fell_back"] is True
     assert "connection refused" in entry["fallback_reason"]
-    assert entry["final_cmd"]["target"] == "bone"
+    assert entry["final_cmd"]["target"] == "skeleton"
 
 
 # ---------- multi-target show_only ----------
 
 def test_parse_show_only_multiple_tissues():
-    cmd = parse_command_rule("show only bone and spongy")
+    cmd = parse_command_rule("show only bone and lungs")
     assert cmd["direction"] == "show_only"
-    assert sorted(cmd["target"]) == ["bone", "spongy"]
+    assert sorted(cmd["target"]) == ["lungs", "skeleton"]
 
 
 def test_parse_show_only_single_tissue_still_returns_plain_string():
     cmd = parse_command_rule("show only bone")
-    assert cmd["target"] == "bone"
+    assert cmd["target"] == "skeleton"
 
 
 def test_apply_command_show_only_multi_target_keeps_both_visible():
@@ -201,14 +201,14 @@ def test_apply_command_show_only_multi_target_keeps_both_visible():
 
 def test_parse_single_level_command_not_wrapped_in_compound():
     cmd = parse_command_rule("high opacity for bone")
-    assert cmd == {"target": "bone", "attribute": "opacity", "direction": "set", "level": "high"}
+    assert cmd == {"target": "skeleton", "attribute": "opacity", "direction": "set", "level": "high"}
 
 
 def test_parse_compound_level_command():
-    cmd = parse_command_rule("high opacity spongy, low opacity bone")
+    cmd = parse_command_rule("high opacity vessels, low opacity bone")
     assert "compound" in cmd
     by_target = {c["target"]: c["level"] for c in cmd["compound"]}
-    assert by_target == {"spongy": "high", "bone": "low"}
+    assert by_target == {"vessels": "high", "skeleton": "low"}
     assert all(c["direction"] == "set" for c in cmd["compound"])
 
 
@@ -341,7 +341,7 @@ def test_apply_command_rejects_center_with_set_direction():
 
 def test_parse_sharpen_verb():
     cmd = parse_command_rule("sharpen the bone peak")
-    assert cmd["target"] == "bone"
+    assert cmd["target"] == "skeleton"
     assert cmd["attribute"] == "width"
     assert cmd["direction"] == "decrease"
 
@@ -355,49 +355,49 @@ def test_parse_soften_verb():
 
 def test_parse_brighten_verb():
     cmd = parse_command_rule("brighten bone strongly")
-    assert cmd["target"] == "bone"
+    assert cmd["target"] == "skeleton"
     assert cmd["attribute"] == "brightness"
     assert cmd["direction"] == "increase"
     assert cmd["strength"] == "strongly"
 
 
 def test_parse_darken_verb():
-    cmd = parse_command_rule("darken fat")
-    assert cmd["target"] == "fat"
+    cmd = parse_command_rule("darken lungs")
+    assert cmd["target"] == "lungs"
     assert cmd["attribute"] == "brightness"
     assert cmd["direction"] == "decrease"
 
 
 def test_parse_shift_center_up_with_apostrophe():
     cmd = parse_command_rule("shift bone's center up")
-    assert cmd["target"] == "bone"
+    assert cmd["target"] == "skeleton"
     assert cmd["attribute"] == "center"
     assert cmd["direction"] == "increase"
 
 
 def test_parse_move_down_without_center_word():
-    cmd = parse_command_rule("move fat down")
-    assert cmd["target"] == "fat"
+    cmd = parse_command_rule("move lungs down")
+    assert cmd["target"] == "lungs"
     assert cmd["attribute"] == "center"
     assert cmd["direction"] == "decrease"
 
 
 def test_parse_increase_width_generalized():
-    cmd = parse_command_rule("increase width for fat")
-    assert cmd["target"] == "fat"
+    cmd = parse_command_rule("increase width for lungs")
+    assert cmd["target"] == "lungs"
     assert cmd["attribute"] == "width"
     assert cmd["direction"] == "increase"
 
 
 def test_parse_increase_sharpness_maps_to_width():
-    cmd = parse_command_rule("increase sharpness for spongy strongly")
-    assert cmd["target"] == "spongy"
+    cmd = parse_command_rule("increase sharpness for vessels strongly")
+    assert cmd["target"] == "vessels"
     assert cmd["attribute"] == "width"
 
 
 def test_parse_low_brightness_absolute():
-    cmd = parse_command_rule("low brightness for spongy")
-    assert cmd == {"target": "spongy", "attribute": "brightness", "direction": "set", "level": "low"}
+    cmd = parse_command_rule("low brightness for vessels")
+    assert cmd == {"target": "vessels", "attribute": "brightness", "direction": "set", "level": "low"}
 
 
 def test_parse_high_sharpness_absolute_maps_to_width():
@@ -480,3 +480,103 @@ def test_validate_rejects_camera_command_with_null_strength():
     from commands import _validate_cmd
     bad = {"camera": {"action": "rotate", "direction": "left", "strength": None}}
     assert _validate_cmd(bad) is False
+
+
+# ---------- Task 1: anatomical vocabulary in the parser ----------
+
+from commands import CLASS_SYNONYMS
+
+
+@pytest.mark.parametrize("cls,words", list(CLASS_SYNONYMS.items()))
+def test_every_synonym_resolves_to_its_goal_class(cls, words):
+    for word in words:
+        cmd = parse_command_rule(f"increase opacity for {word} strongly")
+        assert cmd["target"] == cls, (word, cmd)
+
+
+def test_parse_more_bone_defaults_to_moderate_increase():
+    cmd = parse_command_rule("more bone")
+    assert cmd == {"target": "skeleton", "attribute": "opacity",
+                    "direction": "increase", "strength": "moderately"}
+
+
+def test_parse_less_bone_defaults_to_moderate_decrease():
+    cmd = parse_command_rule("less bone")
+    assert cmd == {"target": "skeleton", "attribute": "opacity",
+                    "direction": "decrease", "strength": "moderately"}
+
+
+def test_parse_a_bit_less_soft_tissue_is_slight_decrease():
+    cmd = parse_command_rule("a bit less soft tissue")
+    assert cmd == {"target": "soft", "attribute": "opacity",
+                    "direction": "decrease", "strength": "slightly"}
+
+
+def test_parse_much_less_is_strong_decrease():
+    cmd = parse_command_rule("much less vessels")
+    assert cmd["target"] == "vessels"
+    assert cmd["direction"] == "decrease"
+    assert cmd["strength"] == "strongly"
+
+
+def test_parse_compound_relative_clauses():
+    cmd = parse_command_rule("more bone, a bit less soft tissue")
+    assert "compound" in cmd
+    assert cmd["compound"] == [
+        {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "moderately"},
+        {"target": "soft", "attribute": "opacity", "direction": "decrease", "strength": "slightly"},
+    ]
+
+
+def test_parse_compound_relative_clauses_raises_if_one_clause_unparseable():
+    with pytest.raises(ValueError):
+        parse_command_rule("more bone, make the weather nicer")
+
+
+def test_parse_show_me_the_class():
+    cmd = parse_command_rule("show me the lungs")
+    assert cmd["direction"] == "show_only"
+    assert cmd["target"] == "lungs"
+
+
+def test_parse_rejects_fat():
+    with pytest.raises(ValueError, match="skeleton, lungs, soft, vessels"):
+        parse_command_rule("decrease opacity for fat")
+
+
+def test_parse_rejects_air():
+    with pytest.raises(ValueError, match="skeleton, lungs, soft, vessels"):
+        parse_command_rule("decrease opacity for air")
+
+
+def test_parse_rejects_spongy():
+    with pytest.raises(ValueError, match="skeleton, lungs, soft, vessels"):
+        parse_command_rule("decrease opacity for spongy bone")
+
+
+# ---------- camera, reset, width and centre commands still parse unchanged ----------
+
+def test_parse_reset_still_parses_unchanged():
+    assert parse_command_rule("reset") == {
+        "target": None, "attribute": None, "direction": "reset", "strength": None}
+
+
+def test_parse_camera_commands_still_parse_unchanged():
+    assert parse_command_rule("rotate left") == {
+        "camera": {"action": "rotate", "direction": "left", "strength": "moderately"}}
+    assert parse_command_rule("tilt up") == {
+        "camera": {"action": "tilt", "direction": "up", "strength": "moderately"}}
+    assert parse_command_rule("zoom in") == {
+        "camera": {"action": "zoom", "direction": "in", "strength": "moderately"}}
+
+
+def test_parse_width_and_centre_commands_still_parse_unchanged():
+    cmd = parse_command_rule("increase width for bone strongly")
+    assert cmd["target"] == "skeleton"
+    assert cmd["attribute"] == "width"
+    assert cmd["direction"] == "increase"
+
+    cmd = parse_command_rule("shift bone's center up")
+    assert cmd["target"] == "skeleton"
+    assert cmd["attribute"] == "center"
+    assert cmd["direction"] == "increase"
