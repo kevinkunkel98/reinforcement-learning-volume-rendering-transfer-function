@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import visibility
-from transfer import TISSUE_BANDS, default_params, PARAMS_PER_PEAK
+from transfer import CENTER_RANGE, N_PEAKS, WIDTH_RANGE, default_params, PARAMS_PER_PEAK
 
 
 def _slab_volume(front_hu, back_hu, n=24):
@@ -23,17 +23,23 @@ def _params(heights):
     return params
 
 
+def _single_peak_params(center_hu, height=0.9, width_hu=80.0, peak=0):
+    """A transfer function with one peak at an arbitrary HU center, the rest off."""
+    params = default_params().copy()
+    lo, hi = CENTER_RANGE
+    wlo, whi = WIDTH_RANGE
+    base = peak * PARAMS_PER_PEAK
+    params[base + 0] = 2.0 * (center_hu - lo) / (hi - lo) - 1.0
+    params[base + 1] = 2.0 * (width_hu - wlo) / (whi - wlo) - 1.0
+    params[base + 2] = 2.0 * height - 1.0
+    for i in range(N_PEAKS):
+        if i != peak:
+            params[i * PARAMS_PER_PEAK + 2] = -1.0
+    return params
+
+
 def _model(volume, spacing=(2.0, 2.0, 2.0), **kwargs):
     return visibility.VisibilityModel.from_volume(volume, spacing, **kwargs)
-
-
-def test_transparent_transfer_function_is_invisible():
-    model = _model(_slab_volume(700.0, 900.0))
-    features = model.features(_params([0.0, 0.0, 0.0, 0.0]))
-    assert features["coverage"] == 0.0
-    for tissue in visibility.TISSUES:
-        assert features["vis"][tissue] == pytest.approx(0.0, abs=1e-6)
-        assert features["bright"][tissue] == 0.0
 
 
 def _core_volume(core_hu, shell_hu, n=24):
@@ -45,18 +51,35 @@ def _core_volume(core_hu, shell_hu, n=24):
     return volume
 
 
+def _core_labels(class_name, n=24):
+    """Labels matching _core_volume's core region as `class_name`, shell/rest 'other'."""
+    labels = np.zeros((n, n, n), dtype=np.uint8)
+    labels[3 * n // 8: 5 * n // 8, 3 * n // 8: 5 * n // 8, :] = visibility.CLASSES.index(class_name) + 1
+    return labels
+
+
+def test_transparent_transfer_function_is_invisible():
+    model = _model(_slab_volume(700.0, 900.0))
+    features = model.features(_params([0.0, 0.0, 0.0, 0.0]))
+    assert features["coverage"] == 0.0
+    for name in visibility.CLASSES:
+        assert features["vis"][name] == pytest.approx(0.0, abs=1e-6)
+        assert features["bright"][name] == 0.0
+
+
 def test_surrounding_tissue_occludes_the_core():
-    # bone core inside soft tissue, as ribs or a spine sit inside a body
+    # bone-HU core inside soft tissue, as ribs or a spine sit inside a body;
+    # with no explicit labels, HU 900 falls into the skeleton fallback band.
     volume = _core_volume(core_hu=900.0, shell_hu=50.0)
     model = _model(volume)
-    occluded = model.features(_params([0.0, 0.9, 0.0, 0.9]))["vis"]["bone"]
-    cleared = model.features(_params([0.0, 0.0, 0.0, 0.9]))["vis"]["bone"]
+    occluded = model.features(_params([0.0, 0.9, 0.0, 0.9]))["vis"]["skeleton"]
+    cleared = model.features(_params([0.0, 0.0, 0.0, 0.9]))["vis"]["skeleton"]
     assert cleared > occluded * 2.0
 
 
 def test_visibility_rises_with_opacity_until_it_saturates():
     model = _model(_slab_volume(-1000.0, 900.0))       # nothing in front of the bone
-    values = [model.features(_params([0, 0, 0, h]))["vis"]["bone"] for h in (0.1, 0.3, 0.6)]
+    values = [model.features(_params([0, 0, 0, h]))["vis"]["skeleton"] for h in (0.1, 0.3, 0.6)]
     assert values[0] < values[1] < values[2]
 
 
@@ -66,9 +89,9 @@ def test_brightness_follows_peak_colour():
     dark = default_params().copy()
     bright = default_params().copy()
     for channel in range(3):
-        dark[3 * PARAMS_PER_PEAK + 3 + channel] = -0.6      # dim bone colour
-        bright[3 * PARAMS_PER_PEAK + 3 + channel] = 1.0     # white bone colour
-    assert model.features(bright)["bright"]["bone"] > model.features(dark)["bright"]["bone"]
+        dark[3 * PARAMS_PER_PEAK + 3 + channel] = -0.6      # dim bone-peak colour
+        bright[3 * PARAMS_PER_PEAK + 3 + channel] = 1.0     # white bone-peak colour
+    assert model.features(bright)["bright"]["skeleton"] > model.features(dark)["bright"]["skeleton"]
 
 
 def test_coverage_counts_rays_that_accumulate_opacity():
@@ -85,15 +108,15 @@ def test_views_see_different_things():
     volume[:, n // 2: 3 * n // 4, :] = 900.0     # bone in the middle
     volume[:, 3 * n // 4:, :] = 50.0             # soft tissue in front of it (anterior)
     model = _model(volume, n_views=2)            # view 0 anterior, view 1 posterior
-    per_view = model.per_view_visibility(_params([0.0, 0.9, 0.0, 0.9]), "bone")
+    per_view = model.per_view_visibility(_params([0.0, 0.9, 0.0, 0.9]), "skeleton")
     assert len(per_view) == 2
     assert per_view[1] > per_view[0] * 1.5       # seen from behind, bone is not occluded
 
 
-def test_solo_max_is_the_visibility_of_that_tissue_alone():
+def test_solo_max_is_the_visibility_of_that_class_alone():
     model = _model(_slab_volume(50.0, 900.0))
-    solo = model.solo_max("bone")
-    assert solo > model.features(_params([0.0, 0.9, 0.0, 0.9]))["vis"]["bone"]
+    solo = model.solo_max("skeleton")
+    assert solo > model.features(_params([0.0, 0.9, 0.0, 0.9]))["vis"]["skeleton"]
     assert 0.0 < solo <= 1.0
 
 
@@ -105,11 +128,49 @@ def test_histogram_is_normalised_and_shaped():
     assert (histogram >= 0).all()
 
 
-def test_labels_follow_tissue_bands():
-    lo, hi = TISSUE_BANDS["bone"]
-    model = _model(_slab_volume(-1000.0, (lo + hi) / 2.0))
-    assert model.features(_params([0, 0, 0, 0.9]))["vis"]["bone"] > 0.0
-    assert model.features(_params([0, 0, 0.9, 0]))["vis"]["spongy"] == pytest.approx(0.0, abs=1e-6)
+def test_classes_come_from_the_label_volume():
+    """A bone-HU core carrying the 'organs' label shows up under organs, not
+    skeleton -- labels, not intensities, decide the class."""
+    volume = _core_volume(core_hu=900.0, shell_hu=50.0)
+    labels = _core_labels("organs")
+    model = visibility.VisibilityModel.from_volume(volume, (2.0, 2.0, 2.0), labels=labels)
+    vis = model.features(_params([0.0, 0.0, 0.0, 0.9]))["vis"]
+    assert vis["organs"] > 0.0
+    assert vis["skeleton"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_label_source_is_reported():
+    volume = _slab_volume(50.0, 900.0)
+    labels = np.zeros_like(volume, dtype=np.uint8)
+    with_labels = _model(volume, labels=labels)
+    without_labels = _model(volume)
+    assert with_labels.label_source == "anatomy"
+    assert without_labels.label_source == "intensity"
+
+
+def test_intensity_fallback_maps_to_the_same_class_names():
+    bone_model = _model(_slab_volume(-1000.0, 900.0))
+    assert bone_model.label_source == "intensity"
+    assert bone_model.features(_single_peak_params(900.0))["vis"]["skeleton"] > 0.0
+
+    lung_model = _model(_slab_volume(-1000.0, -800.0))
+    assert lung_model.features(_single_peak_params(-800.0))["vis"]["lungs"] > 0.0
+
+
+def test_intensity_fallback_leaves_muscle_and_vessels_empty():
+    model = _model(_slab_volume(-1000.0, 900.0))
+    features = model.features(_params([0.0, 0.0, 0.0, 0.9]))
+    assert features["vis"]["muscle"] == pytest.approx(0.0, abs=1e-6)
+    assert features["vis"]["vessels"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_solo_max_uses_the_best_single_peak():
+    volume = _core_volume(core_hu=900.0, shell_hu=50.0)
+    labels = _core_labels("skeleton")
+    model = visibility.VisibilityModel.from_volume(volume, (2.0, 2.0, 2.0), labels=labels)
+    solo = model.solo_max("skeleton")
+    assert solo > 0.0
+    assert solo >= model.features(default_params())["vis"]["skeleton"]
 
 
 def test_features_are_deterministic():
@@ -130,6 +191,8 @@ def test_cache_round_trip_reproduces_features(tmp_path, monkeypatch):
     assert loaded.features(params) == built.features(params)
     assert loaded.step_mm == built.step_mm
     assert np.array_equal(loaded.histogram, built.histogram)
+    assert loaded.label_source == built.label_source
+    assert np.array_equal(loaded.class_ids, built.class_ids)
 
 
 def test_cache_miss_on_different_version(tmp_path, monkeypatch):
@@ -152,6 +215,7 @@ def test_for_volume_builds_once_then_loads(tmp_path, monkeypatch):
     monkeypatch.setattr(visibility.VisibilityModel, "from_volume", staticmethod(counting))
     monkeypatch.setattr(visibility, "_load_volume", lambda name: (_slab_volume(50.0, 900.0), (2.0, 2.0, 2.0)))
     monkeypatch.setattr(visibility, "_volume_version", lambda name: "v1")
+    monkeypatch.setattr(visibility, "_has_labels", lambda name: False)
     first = visibility.for_volume("fake")
     second = visibility.for_volume("fake")
     assert len(calls) == 1

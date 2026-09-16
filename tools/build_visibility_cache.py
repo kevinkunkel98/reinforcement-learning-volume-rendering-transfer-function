@@ -20,7 +20,7 @@ def build(splits=SPLITS, cache_dir=None) -> list:
             model = visibility.for_volume(name, cache_dir)
             built.append((split, name, time.time() - started))
             print(f"[visibility] {split:13s} {name:12s} "
-                  f"step={model.step_mm:5.2f}mm {built[-1][2]:5.2f}s")
+                  f"step={model.step_mm:5.2f}mm labels={model.label_source:9s} {built[-1][2]:5.2f}s")
     return built
 
 
