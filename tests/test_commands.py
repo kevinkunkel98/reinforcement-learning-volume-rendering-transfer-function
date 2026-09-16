@@ -109,7 +109,7 @@ def _fake_response(payload: dict):
 
 
 def test_parse_command_llm_valid_response():
-    payload = {"target": "bone", "attribute": "opacity",
+    payload = {"target": "skeleton", "attribute": "opacity",
                "direction": "increase", "strength": "strongly"}
     with patch("commands.urlopen", return_value=_fake_response(payload)):
         cmd = parse_command_llm("make the skeleton pop")
@@ -143,12 +143,12 @@ def test_parse_command_llm_normalizes_alias_target_instead_of_falling_back(capsy
     payload = {"target": "bones", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
     with patch("commands.urlopen", return_value=_fake_response(payload)):
         cmd = parse_command_llm("increase opacity for the bones")
-    assert cmd["target"] == "bone"
+    assert cmd["target"] == "skeleton"
     assert "falling back to rule parser" not in capsys.readouterr().out
 
 
 def test_parse_command_llm_logs_successful_request(tmp_path):
-    payload = {"target": "bone", "attribute": "opacity", "direction": "increase", "strength": "strongly"}
+    payload = {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "strongly"}
     with patch("commands.urlopen", return_value=_fake_response(payload)):
         parse_command_llm("increase opacity for bone strongly")
 
@@ -233,20 +233,20 @@ def test_apply_command_compound_sets_each_tissue_to_its_own_level():
 
 
 def test_parse_command_llm_multi_target_show_only():
-    payload = {"target": ["bone", "spongy"], "attribute": "opacity",
+    payload = {"target": ["bone", "lungs"], "attribute": "opacity",
                "direction": "show_only", "strength": None}
     with patch("commands.urlopen", return_value=_fake_response(payload)):
-        cmd = parse_command_llm("show bone and spongy")
-    assert sorted(cmd["target"]) == ["bone", "spongy"]
+        cmd = parse_command_llm("show bone and lungs")
+    assert sorted(cmd["target"]) == ["lungs", "skeleton"]
 
 
 def test_parse_command_llm_compound_response():
     payload = {"compound": [
-        {"target": "spongy", "attribute": "opacity", "direction": "set", "level": "high"},
-        {"target": "bone", "attribute": "opacity", "direction": "set", "level": "low"},
+        {"target": "vessels", "attribute": "opacity", "direction": "set", "level": "high"},
+        {"target": "skeleton", "attribute": "opacity", "direction": "set", "level": "low"},
     ]}
     with patch("commands.urlopen", return_value=_fake_response(payload)):
-        cmd = parse_command_llm("high opacity spongy, low opacity bone")
+        cmd = parse_command_llm("high opacity vessels, low opacity skeleton")
     assert cmd == payload
 
 
@@ -256,8 +256,63 @@ def test_parse_command_llm_compound_normalizes_alias_targets(capsys):
     ]}
     with patch("commands.urlopen", return_value=_fake_response(payload)):
         cmd = parse_command_llm("low opacity for the bones")
-    assert cmd["compound"][0]["target"] == "bone"
+    assert cmd["compound"][0]["target"] == "skeleton"
     assert "falling back to rule parser" not in capsys.readouterr().out
+
+
+# ---------- Task 4: the LLM parser speaks the new vocabulary ----------
+
+def test_validate_accepts_compound_of_relative_subcommands():
+    from commands import _validate_cmd
+    good = {"compound": [
+        {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "moderately"},
+        {"target": "soft", "attribute": "opacity", "direction": "decrease", "strength": "slightly"},
+    ]}
+    assert _validate_cmd(good) is True
+
+
+def test_validate_rejects_retired_class_target():
+    from commands import _validate_cmd
+    bad = {"target": "spongy", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+    assert _validate_cmd(bad) is False
+
+
+def test_validate_rejects_compound_subcommand_mixing_level_and_strength():
+    from commands import _validate_cmd
+    bad = {"compound": [
+        {"target": "skeleton", "attribute": "opacity", "direction": "set",
+         "level": "high", "strength": "strongly"},
+    ]}
+    assert _validate_cmd(bad) is False
+
+
+def test_validate_set_cmd_shape_unchanged():
+    from commands import _validate_set_cmd
+    good = {"target": "skeleton", "attribute": "opacity", "direction": "set", "level": "high"}
+    assert _validate_set_cmd(good) is True
+
+
+def test_validate_single_cmd_shape_unchanged():
+    from commands import _validate_single_cmd
+    good = {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+    assert _validate_single_cmd(good) is True
+
+
+def test_parse_command_llm_compound_with_relative_subcommands():
+    payload = {"compound": [
+        {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "moderately"},
+        {"target": "soft", "attribute": "opacity", "direction": "decrease", "strength": "slightly"},
+    ]}
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        cmd = parse_command_llm("more bone, a bit less soft tissue")
+    assert cmd == payload
+
+
+def test_parse_command_llm_rejects_retired_target_via_rule_parser_fallback():
+    payload = {"target": "spongy", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        with pytest.raises(ValueError, match="skeleton, lungs, soft, vessels"):
+            parse_command_llm("decrease opacity for spongy bone")
 
 
 # ---------- width / brightness / center attributes ----------
@@ -417,7 +472,7 @@ def test_validate_rejects_center_with_set_direction():
 def test_validate_accepts_width_set():
     from commands import _validate_cmd
     good = {"compound": [
-        {"target": "bone", "attribute": "width", "direction": "set", "level": "high"},
+        {"target": "skeleton", "attribute": "width", "direction": "set", "level": "high"},
     ]}
     assert _validate_cmd(good) is True
 

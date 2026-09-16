@@ -13,25 +13,11 @@ from transfer import (
     WIDTH_RANGE, _from_range, _from_unit, _unit, default_params, peak_internal,
 )
 
-TISSUE_SYNONYMS = {
-    "bone": ["bone", "bones", "cortical bone", "cortical", "skeleton"],
-    "spongy": ["spongy bone", "spongy", "cancellous", "trabecular"],
-    "soft": ["soft tissue", "soft", "tissue", "muscle"],
-    "fat": ["fatty", "fat", "adipose"],
-    "air": ["air", "background"],
-}
-# longest phrase first so "cortical bone" matches before "bone"
-_SYNONYM_LOOKUP = sorted(
-    ((phrase, tissue) for tissue, phrases in TISSUE_SYNONYMS.items() for phrase in phrases),
-    key=lambda t: -len(t[0]),
-)
-
-# --- rule parser vocabulary: the four RL v2 goal classes --------------------
-# The rule parser (and only the rule parser -- the LLM prompt/validator are
-# updated separately, in a later task) speaks the same four anatomical goal
-# classes the trained policy does. An organ name maps to "soft" because no
-# transfer function can isolate one organ from the rest of soft tissue --
-# the parser must not promise what the renderer cannot deliver.
+# --- goal-class vocabulary: the four RL v2 goal classes ---------------------
+# Both the rule parser and the LLM parser (prompt + validator) speak the same
+# four anatomical goal classes the trained policy does. An organ name maps to
+# "soft" because no transfer function can isolate one organ from the rest of
+# soft tissue -- the parser must not promise what the renderer cannot deliver.
 CLASS_SYNONYMS = {
     "skeleton": ["bone", "bones", "skeleton", "ribs", "rib", "spine", "vertebrae",
                  "hip", "femur", "skull"],
@@ -180,16 +166,6 @@ DIRECT_VERBS = {
 ATTRIBUTE_WORD_ALIASES = {"sharpness": "width"}
 
 
-def _find_tissue(text: str):
-    # Legacy 5-tissue vocabulary, used only by the LLM parser's alias
-    # normalization (`_normalize_target`) until that pathway is updated to
-    # the anatomical goal classes -- see `_find_class` for the rule parser.
-    for phrase, tissue in _SYNONYM_LOOKUP:
-        if phrase in text:
-            return tissue
-    return None
-
-
 def parse_command_rule(text: str) -> dict:
     t = text.lower().strip()
 
@@ -301,11 +277,12 @@ def _peak_center_hu(params: np.ndarray, i: int) -> float:
     return peak_internal(params, i)["center"]
 
 
-# apply_command's peak-placement vocabulary: the legacy 5-tissue table
-# (still reachable through the unchanged LLM pathway) plus the three new
-# goal-class names the rule parser now emits. "soft" and "bone"/"spongy"'s
-# HU already coincide with "soft"/"skeleton"/"vessels", so those just reuse
-# the same peak; only "lungs" has no legacy equivalent.
+# apply_command's peak-placement vocabulary: the legacy single-tissue names
+# (bone, spongy, fat, air, soft -- still used directly by apply_command's own
+# unit tests) plus the four anatomical goal classes both parsers now speak.
+# "soft" and "bone"/"spongy"'s HU already coincide with
+# "soft"/"skeleton"/"vessels", so those just reuse the same peak; only
+# "lungs" has no legacy equivalent.
 CLASS_HU = {**TISSUE_HU, "lungs": -800.0, "vessels": 300.0, "skeleton": 900.0}
 CLASS_BANDS = {**TISSUE_BANDS, "lungs": (-1050.0, -550.0),
                 "vessels": (170.0, 600.0), "skeleton": (600.0, 2000.0)}
@@ -429,41 +406,45 @@ def _validate_camera_cmd(obj) -> bool:
     return True
 
 
-def _tissue_synonym_lines() -> str:
-    # Generated from TISSUE_SYNONYMS so the LLM and the rule parser can never
-    # drift onto different tissue vocabularies.
+def _class_synonym_lines() -> str:
+    # Generated from CLASS_SYNONYMS so the LLM and the rule parser can never
+    # drift onto different anatomical vocabularies.
     lines = []
-    for tissue, phrases in TISSUE_SYNONYMS.items():
-        aliases = [p for p in phrases if p != tissue]
-        lines.append(f'- "{tissue}": also called {", ".join(aliases)}' if aliases else f'- "{tissue}"')
+    for cls, phrases in CLASS_SYNONYMS.items():
+        aliases = [p for p in phrases if p != cls]
+        lines.append(f'- "{cls}": also called {", ".join(aliases)}' if aliases else f'- "{cls}"')
     return "\n".join(lines)
 
 
 _SYSTEM_PROMPT = f"""You convert one spoken instruction about a volume-rendering \
 transfer function into strict JSON, nothing else.
 
-Tissues, with the words people actually use for them -- map any of these back to
-the exact tissue name on the left, never invent a different one:
-{_tissue_synonym_lines()}
+Anatomical classes, with the words people actually use for them -- map any of
+these back to the exact class name on the left, never invent a different one:
+{_class_synonym_lines()}
 
-"spongy" and "bone" are different tissues in this system even though everyday
-speech calls both of them "bone" -- spongy/cancellous/trabecular bone is its own
-target, distinct from cortical bone/skeleton.
+"soft" covers organs and muscle together (liver, kidney, spleen, muscle, ...) --
+no transfer function can isolate one organ from the rest, so never invent a
+narrower target such as "liver". "vessels" is only meaningful on contrast-
+enhanced scans. "fat", "air" and "spongy" (cancellous/trabecular bone) are not
+supported classes any more -- if the user asks for one of those, still map it
+to the nearest of the four classes above if there plainly is one (e.g. spongy
+bone is part of the skeleton); otherwise do your best with what is available.
 
 Output schema -- the usual case is a single command:
-{{"target": "<tissue>|[<tissue>, ...]|null", "attribute": "opacity"|"width"|"brightness"|"center"|null,
+{{"target": "<class>|[<class>, ...]|null", "attribute": "opacity"|"width"|"brightness"|"center"|null,
  "direction": "increase"|"decrease"|"show_only"|"reset",
  "strength": "slightly"|"moderately"|"strongly"|null}}
 
 "attribute" is usually "opacity", but can also be "width" (how spread out /
-sharp a tissue's peak is -- "sharpen"/"soften" mean decrease/increase width),
-"brightness" (how light/dark a tissue's color is -- "brighten"/"darken" mean
+sharp a class's peak is -- "sharpen"/"soften" mean decrease/increase width),
+"brightness" (how light/dark a class's color is -- "brighten"/"darken" mean
 increase/decrease), or "center" (where in Hounsfield space the peak sits --
 "shift up"/"shift down" mean increase/decrease). These follow the same
 increase/decrease/strength shape as opacity.
 
 "target" is a list only for "show_only" when the user names more than one
-tissue ("show bone and spongy" -> target: ["bone", "spongy"]).
+class ("show skeleton and lungs" -> target: ["skeleton", "lungs"]).
 
 direction is from the user's goal, not their wording: if something is missing,
 faint, invisible, or needs more presence, that is "increase" (more of it should
@@ -474,20 +455,25 @@ increase). If something is hiding, dominating, or should be reduced, that is
 Never output numeric values. "reset" has target=null, attribute=null, strength=null.
 "show_only" has strength=null.
 
-When the user wants two or more tissues set to different absolute levels in
-one sentence ("high opacity spongy, low opacity bone"), respond with a
-compound command instead: a list of single-tissue "set" commands, each with a
-"level" field (not "strength"):
+When the user gives two or more instructions in one sentence, respond with a
+compound command instead: a list of single-class sub-commands, each either a
+relative change (with "direction": "increase"|"decrease" and "strength", like
+the single-command shape above) or an absolute level (with "direction": "set"
+and a "level" field instead of "strength") -- never mix "strength" and
+"level" in the same sub-command:
 {{"compound": [
-  {{"target": "spongy", "attribute": "opacity", "direction": "set", "level": "high"}},
-  {{"target": "bone", "attribute": "opacity", "direction": "set", "level": "low"}}
+  {{"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "moderately"}},
+  {{"target": "soft", "attribute": "opacity", "direction": "decrease", "strength": "slightly"}}
+]}}
+{{"compound": [
+  {{"target": "vessels", "attribute": "opacity", "direction": "set", "level": "high"}},
+  {{"target": "skeleton", "attribute": "opacity", "direction": "set", "level": "low"}}
 ]}}
 "level" is "low"|"medium"|"high" -- an absolute target, not a relative change.
-Use "set"/"level" only inside a compound command, never "strength" there.
 "center" never takes an absolute "set"/"level" -- only increase/decrease.
 
 Camera movement is a completely separate command shape, not a variant of
-the schema above -- it has no tissue target at all:
+the schema above -- it has no class target at all:
 {{"camera": {{"action": "rotate"|"tilt"|"zoom",
  "direction": "left"|"right" (rotate) | "up"|"down" (tilt) | "in"|"out" (zoom),
  "strength": "slightly"|"moderately"|"strongly"}}}}
@@ -506,9 +492,26 @@ def _validate_set_cmd(obj) -> bool:
         return False
     if obj["attribute"] == "center":
         return False
-    if not isinstance(obj["target"], str) or obj["target"] not in TISSUE_HU:
+    if not isinstance(obj["target"], str) or obj["target"] not in CLASS_SYNONYMS:
         return False
     if obj["level"] not in VALID_LEVELS:
+        return False
+    return True
+
+
+def _validate_relative_cmd(obj) -> bool:
+    # A compound sub-command's relative-change shape -- same fields as a
+    # top-level single command, but restricted to increase/decrease (no
+    # reset/show_only/null target inside a compound).
+    if not isinstance(obj, dict):
+        return False
+    if set(obj.keys()) != {"target", "attribute", "direction", "strength"}:
+        return False
+    if obj["direction"] not in ("increase", "decrease"):
+        return False
+    if not isinstance(obj["target"], str) or obj["target"] not in CLASS_SYNONYMS:
+        return False
+    if obj["strength"] not in STRENGTH_WORDS:
         return False
     return True
 
@@ -522,10 +525,10 @@ def _validate_single_cmd(obj) -> bool:
         return False
     if obj["direction"] == "show_only":
         targets = obj["target"] if isinstance(obj["target"], list) else [obj["target"]]
-        if not targets or any(t is None or t not in TISSUE_HU for t in targets):
+        if not targets or any(t is None or t not in CLASS_SYNONYMS for t in targets):
             return False
     else:
-        if obj["target"] is not None and obj["target"] not in TISSUE_HU:
+        if obj["target"] is not None and obj["target"] not in CLASS_SYNONYMS:
             return False
         if obj["direction"] == "increase" or obj["direction"] == "decrease":
             if obj["target"] is None:
@@ -540,7 +543,7 @@ def _validate_cmd(obj) -> bool:
         subs = obj["compound"]
         if not isinstance(subs, list) or not subs:
             return False
-        return all(_validate_set_cmd(sub) for sub in subs)
+        return all(_validate_set_cmd(sub) or _validate_relative_cmd(sub) for sub in subs)
     if isinstance(obj, dict) and set(obj.keys()) == {"camera"}:
         return _validate_camera_cmd(obj)
     return _validate_single_cmd(obj)
@@ -597,14 +600,18 @@ def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = OLLAMA_H
         return final
 
     # The model sometimes echoes an alias ("bones") instead of the canonical
-    # key ("bone") despite the prompt asking it not to -- normalize through the
-    # same synonym table the rule parser uses before validating, rather than
-    # discarding an otherwise-correct answer over a naming mismatch. Applies
-    # to a plain string target, each entry of a list target (multi-tissue
-    # show_only), and each sub-command's target inside a compound command.
+    # class name ("skeleton") despite the prompt asking it not to -- normalize
+    # through the same synonym table the rule parser uses (`_find_class`)
+    # before validating, rather than discarding an otherwise-correct answer
+    # over a naming mismatch. Applies to a plain string target, each entry of
+    # a list target (multi-class show_only), and each sub-command's target
+    # inside a compound command. A retired class word (fat/air/spongy) has no
+    # entry in CLASS_SYNONYMS, so it normalizes to itself, fails validation
+    # below, and falls back to the rule parser -- which rejects it with the
+    # same message `_check_retired` raises for the rule parser directly.
     def _normalize_target(value):
-        if isinstance(value, str) and value not in TISSUE_HU:
-            return _find_tissue(value) or value
+        if isinstance(value, str) and value not in CLASS_SYNONYMS:
+            return _find_class(value) or value
         if isinstance(value, list):
             return [_normalize_target(v) for v in value]
         return value
