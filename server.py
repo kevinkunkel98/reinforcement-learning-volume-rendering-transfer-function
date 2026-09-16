@@ -87,7 +87,11 @@ def _resolve_dataset_name():
         idx = sys.argv.index("--dataset")
         if idx + 1 < len(sys.argv):
             return sys.argv[idx + 1]
-    return os.environ.get("UI_DATASET", "mri_head")
+    # ct_chest, not mri_head: MRI has no calibrated Hounsfield scale (see
+    # datasets.py's module docstring) and is excluded from RL v2 for exactly
+    # that reason, so the chat UI's default should be a calibrated CT where
+    # every mode -- including policy -- works.
+    return os.environ.get("UI_DATASET", "ct_chest")
 
 
 _dataset_name = _resolve_dataset_name()

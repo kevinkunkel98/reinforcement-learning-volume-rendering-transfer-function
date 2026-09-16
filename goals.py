@@ -192,11 +192,32 @@ CLASS_WORDS = {
 }
 
 
+# Goal classes measurable on a volume with no anatomical labelling at all --
+# visibility.for_volume's intensity fallback (label_source == "intensity")
+# only separates skeleton, lungs and organs by Hounsfield value; muscle and
+# vessels are never populated by it, so `soft` is supported (via organs) but
+# `vessels` never is -- there is no contrast information to tell it apart
+# from soft tissue. Callers that need to know *why* (whether this volume
+# actually has anatomical labels) should read `visibility.for_volume(name)
+# .label_source` themselves; this function only reports which goals are
+# measurable either way, so policy mode and instruction sampling keep working
+# on every calibrated CT, not just TotalSegmentator subjects.
+FALLBACK_GOAL_CLASSES = tuple(c for c in GOAL_CLASSES if c != "vessels")
+
+
 def goal_classes_for_volume(name: str) -> list:
     """Goal classes this volume supports: those with labels present, with
     `vessels` only on contrast scans (elsewhere vessels share intensities with
-    soft tissue and no transfer function can single them out)."""
-    present = set(totalseg.classes_present(name))
+    soft tissue and no transfer function can single them out).
+
+    Volumes with no TotalSegmentator anatomy labelling (anything that isn't a
+    `ts_*` subject) fall back to `FALLBACK_GOAL_CLASSES` -- what the
+    intensity-label fallback in `visibility.for_volume` can actually
+    measure."""
+    try:
+        present = set(totalseg.classes_present(name))
+    except ValueError:
+        return list(FALLBACK_GOAL_CLASSES)
     supported = []
     for goal_class in GOAL_CLASSES:
         if goal_class == "vessels":

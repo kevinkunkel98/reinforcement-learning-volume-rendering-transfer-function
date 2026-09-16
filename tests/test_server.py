@@ -531,6 +531,53 @@ def test_policy_mode_non_goal_command_falls_back_with_message(ts_session):
     assert state["current"]["message"]
 
 
+@pytest.fixture
+def ct_chest_session(monkeypatch):
+    """A fresh Session switched to the real `ct_chest` Slicer CT -- the chat
+    UI's default dataset (see server._resolve_dataset_name), which has no
+    TotalSegmentator anatomy labels at all (unlike `ts_s1379` above). This
+    exercises goals.goal_classes_for_volume's intensity-label fallback
+    end to end through the real trained checkpoint, not a stub. Both
+    `datasets.DATA_DIR` and `server.POLICY_PATH` are relative to cwd, and
+    `_isolate_cwd` chdirs into a scratch tmp_path, so both are patched to
+    the real repo paths -- same trick `_use_real_totalseg_manifest` plays
+    for the manifest. `_policy_state` is a process-wide cache (like
+    `server._dataset_name`), so it's reset around the test too: an earlier
+    test's `_load_policy()` call (e.g. the "no checkpoint" test above) may
+    have already cached a `None` policy from a cwd with no checkpoint."""
+    import datasets
+    monkeypatch.setattr(datasets, "DATA_DIR", os.path.join(_REPO_ROOT, "data"))
+    monkeypatch.setattr(server, "POLICY_PATH", os.path.join(_REPO_ROOT, "out/rl_v2/oneshot_v2_seed0/best.zip"))
+    server._policy_state["loaded"] = False
+    server._policy_state["policy"] = None
+    original_dataset = server._dataset_name
+    s = _fresh_session()
+    s.switch_dataset("ct_chest")
+    try:
+        yield s
+    finally:
+        server.set_dataset(original_dataset)
+        server._policy_state["loaded"] = False
+        server._policy_state["policy"] = None
+
+
+def test_policy_mode_on_ct_chest_produces_a_real_policy_answer(ct_chest_session):
+    # ct_chest has no anatomy labels, so this only works because
+    # goals.goal_classes_for_volume falls back to what the intensity-label
+    # visibility model can measure (skeleton, lungs, soft) instead of
+    # raising -- confirming policy mode isn't limited to TotalSegmentator
+    # volumes any more.
+    s = ct_chest_session
+    before_params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    state = s.command("more bone", mode="policy")
+
+    assert state["current"]["mode"] == "policy"
+    assert state["current"]["message"] is None
+    params = np.array(state["current"]["params"], dtype=np.float64)
+    assert not np.array_equal(params, before_params)
+
+
 def test_command_records_its_mode():
     s = _fresh_session()
     exact_state = s.command("increase opacity for bone strongly", parser="rule", search=False)

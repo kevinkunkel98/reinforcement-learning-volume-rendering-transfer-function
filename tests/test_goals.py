@@ -205,6 +205,19 @@ def test_goal_classes_exclude_absent_classes(monkeypatch):
     assert "skeleton" in supported and "soft" in supported and "vessels" in supported
 
 
+def test_goal_classes_for_volume_falls_back_for_volumes_without_anatomical_labels():
+    # ct_chest is a real Slicer CT, not a ts_* TotalSegmentator subject, so it
+    # has no anatomy labelling -- goal_classes_for_volume must still return
+    # what visibility's intensity fallback can measure instead of raising.
+    supported = goals.goal_classes_for_volume("ct_chest")
+    assert set(supported) == {"skeleton", "lungs", "soft"}
+
+
+def test_goal_classes_for_volume_fallback_never_includes_vessels():
+    assert "vessels" not in goals.goal_classes_for_volume("ct_chest")
+    assert "vessels" not in goals.goal_classes_for_volume("mri_head")
+
+
 def test_sample_instruction_mix_matches_the_declared_shares(monkeypatch):
     monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
     monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
