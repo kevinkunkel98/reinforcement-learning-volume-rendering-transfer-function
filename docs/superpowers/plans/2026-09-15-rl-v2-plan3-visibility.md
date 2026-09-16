@@ -330,9 +330,18 @@ def test_transparent_transfer_function_is_invisible():
         assert features["bright"][tissue] == 0.0
 
 
-def test_front_tissue_occludes_the_one_behind_it():
-    # front slab: soft tissue; back slab: bone
-    volume = _slab_volume(front_hu=50.0, back_hu=900.0)
+def _core_volume(core_hu, shell_hu, n=24):
+    """A core wrapped on every side (in the axial plane) by another tissue, so
+    every one of the 6 views looks through the shell to reach the core."""
+    volume = np.full((n, n, n), -1000.0, dtype=np.float32)
+    volume[n // 6: 5 * n // 6, n // 6: 5 * n // 6, :] = shell_hu
+    volume[3 * n // 8: 5 * n // 8, 3 * n // 8: 5 * n // 8, :] = core_hu
+    return volume
+
+
+def test_surrounding_tissue_occludes_the_core():
+    # bone core inside soft tissue, as ribs or a spine sit inside a body
+    volume = _core_volume(core_hu=900.0, shell_hu=50.0)
     model = _model(volume)
     occluded = model.features(_params([0.0, 0.9, 0.0, 0.9]))["vis"]["bone"]
     cleared = model.features(_params([0.0, 0.0, 0.0, 0.9]))["vis"]["bone"]
@@ -496,8 +505,13 @@ def _sample_cubes(volume, spacing, directions, n):
         normalized = 2.0 * (points / np.asarray(spacing)) / (shape - 1.0) - 1.0
         grid = torch.from_numpy(np.stack(
             [normalized[..., 2], normalized[..., 1], normalized[..., 0]], -1).astype(np.float32))
+        # Nearest, not interpolated: at a ~4 mm step, interpolating across a
+        # tissue boundary invents HU values that fall into bands the volume
+        # does not contain (a soft-tissue reading between air and bone), which
+        # would then be counted as that tissue being visible.
         sampled = torch.nn.functional.grid_sample(
-            source, grid[None], align_corners=True, padding_mode="zeros")[0, 0] + AIR_HU
+            source, grid[None], mode="nearest", align_corners=True,
+            padding_mode="zeros")[0, 0] + AIR_HU
         cubes.append(sampled.numpy())
     return np.stack(cubes), step
 
