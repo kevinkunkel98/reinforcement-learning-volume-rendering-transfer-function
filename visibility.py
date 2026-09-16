@@ -167,3 +167,55 @@ class VisibilityModel:
             params[peak * PARAMS_PER_PEAK + 2] = 1.0
             self._solo_max[tissue] = self.features(params)["vis"][tissue]
         return self._solo_max[tissue]
+
+    def cache_key(self, volume_version: str) -> str:
+        parts = (self.volume_id, volume_version, self.n_views, self.indices.shape[1],
+                 LUT_SIZE, CACHE_VERSION)
+        return hashlib.sha256(":".join(str(p) for p in parts).encode()).hexdigest()[:16]
+
+    def save_cache(self, volume_version: str, cache_dir: str = None) -> str:
+        cache_dir = cache_dir or CACHE_DIR
+        os.makedirs(cache_dir, exist_ok=True)
+        path = os.path.join(cache_dir, f"{self.volume_id}-{self.cache_key(volume_version)}.npz")
+        temporary = path + ".tmp.npz"     # np.savez_compressed appends .npz unless it is there
+        np.savez_compressed(temporary, indices=self.indices.numpy(),
+                            step_mm=np.float64(self.step_mm), histogram=self.histogram,
+                            spacing=np.asarray(self.spacing if self.spacing else (0, 0, 0), dtype=np.float64))
+        os.replace(temporary, path)
+        return path
+
+    @classmethod
+    def load_cache(cls, volume_id: str, volume_version: str, cache_dir: str = None,
+                   n=GRID_N, n_views=N_VIEWS):
+        cache_dir = cache_dir or CACHE_DIR
+        probe = cls(np.zeros((n_views, n, n, n), dtype=np.uint8), 1.0,
+                    np.zeros(HISTOGRAM_BINS), volume_id)
+        path = os.path.join(cache_dir, f"{volume_id}-{probe.cache_key(volume_version)}.npz")
+        if not os.path.exists(path):
+            return None
+        with np.load(path) as data:
+            spacing = tuple(float(v) for v in data["spacing"])
+            return cls(data["indices"], float(data["step_mm"]), data["histogram"],
+                       volume_id, spacing if any(spacing) else None)
+
+
+def _load_volume(name: str):
+    from datasets import load_dataset
+    return load_dataset(name, canonical=True)
+
+
+def _volume_version(name: str) -> str:
+    from datasets import _dataset_version
+    return _dataset_version(name)
+
+
+def for_volume(name: str, cache_dir: str = None) -> VisibilityModel:
+    """The visibility model of a volume, from the cache when possible."""
+    version = _volume_version(name)
+    cached = VisibilityModel.load_cache(name, version, cache_dir)
+    if cached is not None:
+        return cached
+    volume, spacing = _load_volume(name)
+    model = VisibilityModel.from_volume(volume, spacing, volume_id=name)
+    model.save_cache(version, cache_dir)
+    return model

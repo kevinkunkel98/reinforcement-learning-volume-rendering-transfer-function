@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pytest
 
@@ -114,3 +116,43 @@ def test_features_are_deterministic():
     model = _model(_slab_volume(50.0, 900.0))
     params = _params([0.2, 0.4, 0.1, 0.7])
     assert model.features(params) == model.features(params)
+
+
+def test_cache_round_trip_reproduces_features(tmp_path, monkeypatch):
+    monkeypatch.setattr(visibility, "CACHE_DIR", str(tmp_path))
+    volume = _slab_volume(50.0, 900.0)
+    params = _params([0.2, 0.5, 0.1, 0.8])
+    built = visibility.VisibilityModel.from_volume(volume, (2.0, 2.0, 2.0), volume_id="fake")
+    path = built.save_cache("version-1")
+    assert os.path.exists(path)
+    loaded = visibility.VisibilityModel.load_cache("fake", "version-1")
+    assert loaded is not None
+    assert loaded.features(params) == built.features(params)
+    assert loaded.step_mm == built.step_mm
+    assert np.array_equal(loaded.histogram, built.histogram)
+
+
+def test_cache_miss_on_different_version(tmp_path, monkeypatch):
+    monkeypatch.setattr(visibility, "CACHE_DIR", str(tmp_path))
+    visibility.VisibilityModel.from_volume(_slab_volume(50.0, 900.0), (2.0, 2.0, 2.0),
+                                           volume_id="fake").save_cache("version-1")
+    assert visibility.VisibilityModel.load_cache("fake", "version-2") is None
+    assert visibility.VisibilityModel.load_cache("other", "version-1") is None
+
+
+def test_for_volume_builds_once_then_loads(tmp_path, monkeypatch):
+    monkeypatch.setattr(visibility, "CACHE_DIR", str(tmp_path))
+    calls = []
+    real_from_volume = visibility.VisibilityModel.from_volume
+
+    def counting(volume, spacing, **kwargs):
+        calls.append(1)
+        return real_from_volume(volume, spacing, **kwargs)
+
+    monkeypatch.setattr(visibility.VisibilityModel, "from_volume", staticmethod(counting))
+    monkeypatch.setattr(visibility, "_load_volume", lambda name: (_slab_volume(50.0, 900.0), (2.0, 2.0, 2.0)))
+    monkeypatch.setattr(visibility, "_volume_version", lambda name: "v1")
+    first = visibility.for_volume("fake")
+    second = visibility.for_volume("fake")
+    assert len(calls) == 1
+    assert first.features(_params([0, 0, 0, 0.5])) == second.features(_params([0, 0, 0, 0.5]))
