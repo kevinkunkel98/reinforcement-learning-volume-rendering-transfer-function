@@ -119,6 +119,36 @@ that measures your self-consistency, which is the ceiling any reward model can
 reach. Judgments land in `out/vis_preferences.jsonl`, ready for reward-model
 training.
 
+### A second rater
+
+~2000 judgments from one person is a start; the thesis needs several raters,
+including clinical supervisors, and inter-rater agreement to know how much any
+of them — or a reward model trained on them — can be trusted. A second rater
+does exactly what the first one did: `python server.py`, open `/collect`, judge.
+The page now also asks, once, for a role (radiologist/clinician/researcher/
+other) and optional experience ("8 years CT"); everything else is unchanged.
+When they're done, they send their `out/vis_preferences.jsonl`.
+
+Different raters only agree measurably if they judge *some of the same items* —
+so roughly one item in five is drawn from a fixed anchor pool
+(`rl.candidates.anchor_items`), the same items in the same order for every
+rater, independent of who has judged what before. The rest are sampled fresh,
+same as with one rater.
+
+```bash
+python -m tools.merge_preferences out/*.jsonl --out out/preferences_merged.jsonl
+```
+
+merges every rater's file (de-duplicated on pair + rater, later timestamp wins)
+and reports, per pair of raters, how much they agreed on the anchor items they
+share — raw agreement and linearly-weighted Cohen's kappa — plus Krippendorff's
+alpha across all raters together and each rater's own self-consistency (the
+repeats above). Agreement is resolved by *which candidate* a rater chose, never
+by which letter it was shown as, since sides are shuffled independently per
+rater. Inter-rater agreement is the ceiling any reward model trained on this
+data can be expected to reach: it cannot be more consistent with any one rater
+than the raters are with each other.
+
 ## What did not work
 
 Documented, with the curves, because the failures shaped the design:
