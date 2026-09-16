@@ -2,8 +2,8 @@
    Design tokens — shadcn/ui's stock dark-theme token set, unmodified
    (zinc base, the default you get before picking a color theme). The only
    addition is --success/--success-foreground, which shadcn doesn't ship by
-   default but which this UI needs for "better"/good-feedback states
-   alongside the stock --destructive. All colors are HSL triples so
+   default but which this UI needs for success states (session indicator,
+   .btn-success) alongside the stock --destructive. All colors are HSL triples so
    component rules can modulate alpha via hsl(var(--x) / <alpha>), exactly
    like shadcn's own components do.
    ========================================================================== */
@@ -289,15 +289,6 @@ select:focus-visible {
   touch-action: none;
 }
 
-#before-image,
-#after-image {
-  max-width: 100%;
-  max-height: 60vh;
-  border-radius: var(--radius);
-  border: 1px solid hsl(var(--border));
-  background: #000;
-}
-
 #dataset-row {
   align-self: flex-start;
   display: flex;
@@ -378,32 +369,6 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
   min-width: 3.5em;
   text-align: center;
-}
-
-.pair {
-  display: flex;
-  gap: 16px;
-}
-
-.pair p {
-  text-align: center;
-  margin: 0 0 6px;
-  font-size: 12px;
-  font-weight: 500;
-  color: hsl(var(--muted-foreground));
-}
-
-#judge-progress {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-  font-variant-numeric: tabular-nums;
-}
-
-#judge-buttons {
-  display: flex;
-  gap: 10px;
-  margin-top: 4px;
 }
 
 /* ---------- telemetry strip ---------- */
@@ -511,35 +476,6 @@ select:focus-visible {
   color: hsl(var(--secondary-foreground));
 }
 
-.tag.good { background: transparent; border-color: hsl(var(--success) / 0.4); color: hsl(var(--success)); }
-.tag.bad { background: transparent; border-color: hsl(var(--destructive) / 0.4); color: hsl(var(--destructive)); }
-
-.msg-feedback {
-  display: flex;
-  gap: 4px;
-  align-self: flex-end;
-}
-
-.feedback-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius);
-  border: none;
-  background: transparent;
-  color: hsl(var(--muted-foreground) / 0.7);
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.feedback-btn svg { width: 13px; height: 13px; }
-
-.feedback-btn:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
-
-.feedback-btn.active.up { color: hsl(var(--success)); }
-.feedback-btn.active.down { color: hsl(var(--destructive)); }
-
 /* ---------- composer ---------- */
 
 #composer {
@@ -624,13 +560,6 @@ select:focus-visible {
 .toggle-item[data-state="on"] {
   background: hsl(var(--primary) / 0.15);
   color: hsl(var(--primary));
-}
-
-.toggle-group-sm .toggle-item,
-.toggle-item-sm {
-  height: 26px;
-  padding: 0 10px;
-  font-size: 11.5px;
 }
 
 #steps-input {
@@ -973,4 +902,110 @@ select:focus-visible {
   #chat-panel { min-width: 0; width: 100%; }
   #dataset-row { max-width: 100%; }
   .select-trigger { max-width: calc(100vw - 80px); }
+}
+
+/* ==========================================================================
+   /collect — preference collection page. The rater judges exactly the 6-view
+   grid the reward model will later see (collect_images.view_grid), so the
+   layout is deliberately plain: two grids side by side, a start-state grid
+   that only appears on request, and nothing that hints at where a candidate
+   came from.
+   ========================================================================== */
+
+#collect-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 32px;
+  gap: 20px;
+}
+
+#collect-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+#collect-instruction {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: hsl(var(--foreground));
+}
+
+#collect-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+#collect-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+#pair-grids {
+  display: flex;
+  gap: 16px;
+}
+
+.candidate-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.candidate-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: hsl(var(--muted-foreground));
+}
+
+.candidate-grid {
+  width: 100%;
+  display: block;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
+  background: #000;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+}
+
+#start-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 50%;
+}
+
+#start-panel[hidden] { display: none; }
+
+#collect-controls {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding-top: 8px;
+}
+
+.judge-btn { min-width: 96px; }
+
+@media (max-width: 700px) {
+  #pair-grids { flex-direction: column; }
+  #start-panel { max-width: 100%; }
+  #collect-controls { flex-wrap: wrap; }
 }

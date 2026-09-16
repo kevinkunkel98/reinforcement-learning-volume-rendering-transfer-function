@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Preference Collection</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div id="collect-app">
+    <header id="collect-header">
+      <div id="collect-header-main">
+        <p id="collect-instruction">Loading…</p>
+        <div id="collect-meta">
+          <span id="collect-volume">—</span>
+          <span id="collect-progress">judged: 0</span>
+          <span id="collect-rater"></span>
+        </div>
+      </div>
+      <button id="show-start-toggle" class="btn btn-outline btn-sm" type="button">show start</button>
+    </header>
+
+    <main id="collect-main">
+      <div id="pair-grids">
+        <section class="candidate-panel" data-side="a">
+          <h2 class="candidate-label">A</h2>
+          <img id="candidate-a-image" class="candidate-grid" alt="candidate A: six standard views" />
+        </section>
+        <section class="candidate-panel" data-side="b">
+          <h2 class="candidate-label">B</h2>
+          <img id="candidate-b-image" class="candidate-grid" alt="candidate B: six standard views" />
+        </section>
+      </div>
+
+      <section id="start-panel" hidden>
+        <h2 class="candidate-label">START</h2>
+        <img id="start-image" class="candidate-grid" alt="start state: six standard views" />
+      </section>
+    </main>
+
+    <footer id="collect-controls">
+      <button class="btn btn-default judge-btn" data-choice="a" type="button">A</button>
+      <button class="btn btn-default judge-btn" data-choice="b" type="button">B</button>
+      <button class="btn btn-secondary judge-btn" data-choice="equal" type="button">E · equal</button>
+      <button class="btn btn-ghost judge-btn" data-choice="skip" type="button">S · skip</button>
+    </footer>
+  </div>
+  <script src="/static/collect.js"></script>
+</body>
+</html>

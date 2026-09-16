@@ -2,6 +2,7 @@ import numpy as np
 from phantom import build_phantom
 from transfer import default_params
 import render as render_module
+import views
 from render import render, grab, features
 
 
@@ -41,3 +42,31 @@ def test_render_accepts_custom_camera_and_defaults_match_old_behavior():
     img_default = grab(render(volume, params))
     img_custom = grab(render(volume, params, camera={"azimuth": 90.0, "elevation": 0.0, "zoom": 1.0}))
     assert not np.array_equal(img_default, img_custom)
+
+
+def test_render_accepts_a_renderer_neutral_camera():
+    volume = build_phantom()
+    params = default_params()
+    cameras = views.cameras_for_volume(volume, (1.0, 1.0, 1.0))
+    front = grab(render(volume, params, (1.0, 1.0, 1.0), cameras[0]))
+    side = grab(render(volume, params, (1.0, 1.0, 1.0), cameras[2]))
+    assert front.shape == side.shape
+    assert front.max() > 0                       # something is visible
+    assert not np.array_equal(front, side)
+
+
+def test_render_still_accepts_the_azimuth_camera():
+    volume = build_phantom()
+    params = default_params()
+    image = grab(render(volume, params, (1.0, 1.0, 1.0),
+                        {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}))
+    assert image.shape[2] == 3 and image.max() > 0
+
+
+def test_same_camera_renders_deterministically():
+    volume = build_phantom()
+    params = default_params()
+    camera = views.cameras_for_volume(volume, (1.0, 1.0, 1.0))[1]
+    first = grab(render(volume, params, (1.0, 1.0, 1.0), camera))
+    second = grab(render(volume, params, (1.0, 1.0, 1.0), camera))
+    assert np.array_equal(first, second)

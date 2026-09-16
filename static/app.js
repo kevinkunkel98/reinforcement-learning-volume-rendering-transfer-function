@@ -1,12 +1,7 @@
-const state = { current: null, cursor: 0, total: 1, pending: null, dataset: null };
-const config = { parser: "rule", search: false, evaluator: "objective" };
-
-const THUMB_UP_PATH = "M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3";
-const THUMB_DOWN_PATH = "M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17";
+const state = { current: null, cursor: 0, total: 1, dataset: null };
+const config = { parser: "rule", search: false };
 
 const el = (id) => document.getElementById(id);
-const singleView = el("single-view");
-const judgeView = el("judge-view");
 const messagesEl = el("messages");
 const emptyState = el("empty-state");
 const textInput = el("text-input");
@@ -104,9 +99,6 @@ async function postSceneTransition(data, metadata = {}) {
   const before = sceneSnapshot;
   const identity = transitionIdentity(data, before, metadata);
   const after = { ...sceneFromState(data, sceneSnapshot.scene_id, `web:${data.session_id}:${sceneNonce}:transition:${identity}`), ...metadata };
-  if (metadata.verdict) {
-    after.scene_id = `${after.scene_id}:feedback:${metadata.verdict}`;
-  }
   const eventId = `web:${data.session_id}:${sceneNonce}:event:${identity}`;
   const response = await fetch("/api/scenes/transition", {
     method: "POST",
@@ -126,29 +118,17 @@ async function refresh(data) {
   state.current = data.current;
   state.cursor = data.cursor;
   state.total = data.total;
-  state.pending = data.pending;
   if (data.dataset && data.dataset !== state.dataset) {
     setSelectValue(data.dataset);
   }
 
   el("step-counter").textContent = `${state.cursor + 1} / ${state.total}`;
-  el("back-btn").disabled = state.cursor <= 0 || !!state.pending;
-  el("forward-btn").disabled = state.cursor >= state.total - 1 || !!state.pending;
-  el("reset-btn").disabled = !!state.pending;
+  el("back-btn").disabled = state.cursor <= 0;
+  el("forward-btn").disabled = state.cursor >= state.total - 1;
 
-  if (state.pending) {
-    singleView.hidden = true;
-    judgeView.hidden = false;
-    el("before-image").src = `data:image/png;base64,${state.pending.before_image_b64}`;
-    el("after-image").src = `data:image/png;base64,${state.pending.after_image_b64}`;
-    el("judge-progress").textContent = `search step ${state.pending.iteration + 1} / ${state.pending.max_steps}`;
-  } else {
-    singleView.hidden = false;
-    judgeView.hidden = true;
-    el("current-image").src = `data:image/png;base64,${state.current.image_b64}`;
-    if (window.volumeViewer && state.dataset && state.current) {
-      await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera);
-    }
+  el("current-image").src = `data:image/png;base64,${state.current.image_b64}`;
+  if (window.volumeViewer && state.dataset && state.current) {
+    await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera);
   }
 
   updateTelemetry(state.current.masses);
@@ -184,62 +164,18 @@ function appendMessage(step) {
   text.textContent = step.cmd_text;
   div.appendChild(text);
 
-  const tags = document.createElement("div");
-  tags.className = "msg-tags";
   if (step.search) {
+    const tags = document.createElement("div");
+    tags.className = "msg-tags";
     const t = document.createElement("span");
     t.className = "tag";
     t.textContent = "search";
     tags.appendChild(t);
+    div.appendChild(tags);
   }
-  if (step.verdict === 1 || step.verdict === -1) {
-    const t = document.createElement("span");
-    t.className = `tag ${step.verdict === 1 ? "good" : "bad"}`;
-    t.textContent = step.verdict === 1 ? "better" : "worse";
-    tags.appendChild(t);
-  }
-  if (tags.children.length) div.appendChild(tags);
-
-  div.appendChild(buildFeedbackRow(step));
 
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-function buildFeedbackRow(step) {
-  const row = document.createElement("div");
-  row.className = "msg-feedback";
-
-  const makeBtn = (rating, path) => {
-    const btn = document.createElement("button");
-    btn.className = "feedback-btn";
-    btn.setAttribute("aria-label", rating === "up" ? "Good result" : "Bad result");
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
-    if (step.feedback === rating) btn.classList.add("active", rating);
-    btn.addEventListener("click", async () => {
-      if (step.feedback === rating) return;
-      const r = await fetch("/api/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ step_id: step.id, rating }),
-      });
-       if (r.status !== 200) return;
-       const data = await r.json();
-       step.feedback = rating;
-       await postSceneTransition(data, {
-         verdict: rating === "up" ? "accepted" : "worse",
-         accepted: rating === "up",
-         ended: true,
-       });
-      row.querySelectorAll(".feedback-btn").forEach((b) => b.classList.remove("active", "up", "down"));
-      btn.classList.add("active", rating);
-    });
-    return btn;
-  };
-
-  row.appendChild(makeBtn("up", THUMB_UP_PATH));
-  row.appendChild(makeBtn("down", THUMB_DOWN_PATH));
-  return row;
 }
 
 async function loadState() {
@@ -262,7 +198,6 @@ async function sendCommand(text) {
     text,
     parser: config.parser,
     search: config.search,
-    evaluator: config.evaluator,
     steps: parseInt(el("steps-input").value, 10),
   };
   const r = await fetch("/api/command", {
@@ -278,21 +213,7 @@ async function sendCommand(text) {
   const data = await r.json();
   await refresh(data);
   await postSceneTransition(data);
-  if (!data.pending) appendMessage(data.current);
-}
-
-async function judge(verdict) {
-  const r = await fetch("/api/judge", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ verdict }),
-  });
-  const data = await r.json();
-  await refresh(data);
-  if (!data.pending) await postSceneTransition(data, {
-    verdict, accepted: verdict === "better", ended: true,
-  });
-  if (!data.pending) appendMessage(data.current);
+  appendMessage(data.current);
 }
 
 function autoResize() {
@@ -335,8 +256,6 @@ async function navigate(path) {
 el("back-btn").addEventListener("click", () => navigate("/api/back"));
 el("forward-btn").addEventListener("click", () => navigate("/api/forward"));
 el("reset-btn").addEventListener("click", () => sendCommand("reset"));
-el("better-btn").addEventListener("click", () => judge("better"));
-el("worse-btn").addEventListener("click", () => judge("worse"));
 
 // ---------- toolbar: toggle groups + single toggle ----------
 

@@ -54,17 +54,6 @@
               <button id="reset-btn" class="btn btn-secondary btn-sm" data-tooltip="Reset the transfer function to its default">Reset</button>
             </div>
           </div>
-          <div id="judge-view" hidden>
-            <div class="pair">
-              <div><p>Before</p><img id="before-image" alt="before" /></div>
-              <div><p>After</p><img id="after-image" alt="after" /></div>
-            </div>
-            <p id="judge-progress"></p>
-            <div id="judge-buttons">
-              <button id="worse-btn" class="btn btn-destructive">Worse</button>
-              <button id="better-btn" class="btn btn-success">Better</button>
-            </div>
-          </div>
         </div>
 
         <div id="telemetry">
@@ -92,11 +81,6 @@
             </div>
             <button id="search-toggle-btn" class="toggle" data-active="false" data-tooltip="Hill-climb search">search</button>
             <div id="search-options" hidden>
-              <div id="evaluator-toggle-group" class="toggle-group toggle-group-sm" data-toggle-group="evaluator" role="radiogroup" aria-label="Search evaluator">
-                <button type="button" class="toggle-item toggle-item-sm" data-value="objective" data-state="on">objective</button>
-                <button type="button" class="toggle-item toggle-item-sm" data-value="human" data-state="off">human</button>
-                <button type="button" class="toggle-item toggle-item-sm" data-value="policy" data-state="off">policy</button>
-              </div>
               <input id="steps-input" type="number" value="10" min="1" max="50" aria-label="Search steps" />
             </div>
           </div>

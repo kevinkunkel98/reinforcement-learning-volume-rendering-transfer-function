@@ -1,10 +1,11 @@
 # Voice-Driven Transfer Function MVP
 
-**RLHF for speech-controlled volume rendering.** Say "show only bone" or "make
-the skeleton pop" and a real CT/MRI scan re-renders live — parsed by a rule
-engine or a local LLM, optimized by hill-climbing or a trained RL policy, and
-steered by a goal-conditioned reward model learned from human preferences
-instead of a hand-coded metric.
+**Speech-controlled volume rendering, toward a learned transfer-function agent.**
+Say "show only bone" or "increase opacity for bone strongly" and a real CT/MRI
+scan re-renders live — parsed by a rule engine or a local LLM and executed by
+exact commands or hill-climbing search. RL v2 (in progress) adds a
+goal-conditioned policy for perceptual instructions, refined with human
+preferences.
 
 <p align="center">
   <img src="docs/screenshots/architecture-highlevel-dark.png" width="85%" alt="Project architecture" />
@@ -34,23 +35,20 @@ ollama serve
 ollama pull qwen2.5:7b
 ```
 
-Without Ollama, `--parser llm` falls back to the rule parser.
+Without Ollama, the `llm` parser (UI parser toggle) falls back to the rule parser.
 
 ## Quick Start
 
 ```bash
-python mvp.py
-python mvp.py --cmd "increase opacity for bone strongly"
-python mvp.py --cmd "show only bone" --learn --steps 15
-python mvp.py --listen
 python server.py
+python server.py --dataset ct_chest
 ```
 
 The web UI runs at `http://127.0.0.1:8000`. Start commands from repository
 root because the application uses relative paths such as `out/` and `static/`.
 
-The current transfer-function state persists in `out/state.json`. Delete that
-file or run `reset` to return to the default state.
+The UI session persists in `out/ui_session.json`. Delete that file or say
+`reset` to return to the default transfer function.
 
 <p align="center">
   <img src="docs/screenshots/chat-ui-ct-skull.png" width="70%" alt="Chat UI on a real CT skull scan, bone tissue isolated" />
@@ -86,7 +84,6 @@ Default dataset is `mri_head`. Other datasets include `ct_chest`, `ct_skull`,
 `ct_cardio`, `ct_abdomen`, and `synthetic`.
 
 ```bash
-python mvp.py --dataset ct_chest --cmd "show only bone"
 python server.py --dataset ct_chest
 ```
 
@@ -98,10 +95,28 @@ The web UI supports:
 
 - Text and voice commands
 - Back/forward navigation through session history
-- Human Better/Worse judgments during search
+- Objective hill-climb search for opacity commands
 - Camera state stored with each history step
 
-VR and web clients can use the same reward-data contract described below.
+### RL v2 volumes
+
+RL v2 trains and evaluates on 30 CT scans from the TotalSegmentator small
+subset (CC-BY-4.0, Zenodo record 10047263), split by subject into 20 train,
+4 validation and 6 test volumes (stratified by body region; see
+`data/totalseg_manifest.json`), plus the four Slicer CTs as an out-of-source
+test set. Fetch and extract once:
+
+```bash
+curl -L -o data/Totalsegmentator_dataset_small_v201.zip \
+  "https://zenodo.org/records/10047263/files/Totalsegmentator_dataset_small_v201.zip?download=1"
+python -m tools.select_totalseg
+```
+
+The selected volumes appear as `ts_<subject>` in the dataset list. RL v2 code
+loads every volume with `load_dataset(name, canonical=True)` (RAS axis order)
+and gets split members from `volumes_for_split("train" | "val" | "test" |
+"out_of_source")`. `python -m tools.check_orientation <name>` writes projection
+images for a visual orientation check.
 
 ## Local 3D Viewer
 
@@ -174,206 +189,80 @@ hardware integration is not required for the current web viewer. Scene logs
 are written to `out/scene_transitions.jsonl` and do not contain binary volume
 chunks.
 
-### Preference collection
+## Reinforcement Learning (v2, in progress)
 
-Use the web viewer to issue commands, change the camera, and select Better or
-Worse on resulting states. The UI records scene IDs, parent IDs, dataset and
-camera state, transfer function, goal context, and optional `accepted` or
-`ended` verdicts. The same scene contract can later be submitted by `vrui`, so
-preferences from both clients can enter the same extraction pipeline.
+The previous RL pipeline (a height-only SAC agent trained on `mass_fraction`,
+camera RL, and a reward model on four global image statistics) has been
+removed: its reward did not measure what is visible on screen.
 
-Export preference pairs from the session logs before reward-model training:
+RL v2 trains one goal-conditioned policy for perceptual instructions
+(relative, compound, absolute, show only, brightness) against a per-tissue
+visibility estimate on real CT volumes, then refines it with human A/B
+preferences collected on a dedicated page. Design:
+[`docs/superpowers/specs/2026-09-15-rl-v2-visibility-rlhf-design.md`](docs/superpowers/specs/2026-09-15-rl-v2-visibility-rlhf-design.md).
 
-```bash
-python -m rl.extract_pairs \
-  --log out/log.jsonl \
-  --feedback out/feedback.jsonl \
-  --preferences out/rlhf_preferences.jsonl \
-  --out out/pairs.jsonl
-```
+### Visibility estimate
 
-Branch pairs require explicit parent/child scene metadata; the extractor does
-not infer branches from matching transfer-function values. The resulting JSONL
-keeps scene and audit fields where available and remains compatible with the
-existing scalar feature and PNG fallback rows. Continue with the reward-model
-training and evaluation commands in [Reinforcement Learning](#reinforcement-learning).
+`visibility.py` estimates, per anatomical class, how much of a transfer
+function's rendered image that class contributes (`vis`), how bright it
+looks (`bright`), and how much of the frame is covered at all (`coverage`) --
+without running VTK. It resamples a volume once per one of the 6 fixed views
+into a front-to-back cube, then composites that cube for a given transfer
+function; this is what the RL reward and observation are computed from,
+since a real VTK render is too slow to call every training step.
 
-## Reinforcement Learning
+Classes come from TotalSegmentator segmentation masks, collapsed into five
+anatomical groups: `skeleton`, `lungs`, `organs`, `muscle`, `vessels` (label
+ids 1-5; id 0, `other`, is everything TotalSegmentator's 117 structures don't
+cover -- fat, skin, bowel contents, the scanner table -- and is the majority
+of the body: only 7-20% of voxels in a typical scan carry any mask at all).
+The four Slicer CTs and the synthetic phantom carry no TotalSegmentator
+labels, so their samples fall back to coarse Hounsfield bands mapped onto the
+same class names (skeleton >= 300 HU, lungs <= -500 HU, organs -30..300 HU);
+muscle and vessels are never populated by the fallback, since they aren't
+separable by intensity alone. `VisibilityModel.label_source` reports which
+source (`"anatomy"` or `"intensity"`) produced a given model's estimate.
+Vessels are anatomically labeled on every TotalSegmentator scan, but only
+stand out as their own structure on a contrast (angiography) scan -- on a
+plain scan they sit at the same HU as the soft tissue around them, so no
+transfer function can visually single them out. "Show me the vessels" is
+therefore only a meaningful RL goal on contrast scans.
 
-The project has three related RL experiments.
+`tools/validate_visibility.py` checks the estimate against real VTK renders.
+For each class a volume's label volume carries, it sweeps 10 transfer
+functions that isolate that class (the peak whose single-peak transfer
+function shows the most of it, height 0.02 -> 1.0, the other peaks jittered
+by a seeded generator), and compares the estimate's `vis * bright` against a
+real reference: mean luminance over the 6 views, normal render minus a
+render with that class's label colour blacked out and its opacity left
+untouched, using VTK's label-map masking
+(`vtkGPUVolumeRayCastMapper.SetMaskInput` + `SetMaskTypeToLabelMap`).
+Blackening rather than deleting a class's voxels keeps occlusion the same --
+deleting opens a hole that reveals whatever sits behind, which is not that
+class's actual contribution to the image. Coverage is checked separately, by
+rank agreement between the estimate's `coverage` and the rendered fraction of
+lit pixels over a global opacity sweep (every peak's height swept together).
+A class whose real contribution barely moves across the sampled transfer
+functions (rendered luminance range below 0.002, the renderer's own noise
+floor) can't be validated this way and is reported unvalidated rather than
+failed.
 
-### Objective RL
+Measured on three TotalSegmentator volumes (`out/visibility_validation.json`;
+Pearson >= 0.7 required per validated class, rank agreement >= 0.9 for
+coverage -- every validated class passed):
 
-`rl/env.py` trains an opacity policy. Each episode has a target tissue and a
-direction. The policy changes the target peak and receives signed
-`mass_fraction` improvement.
+| volume | skeleton | organs | muscle | vessels | lungs | coverage (rank agreement) |
+| --- | --- | --- | --- | --- | --- | --- |
+| ts_s1379 (contrast) | 1.000 | 0.995 | 0.981 | 0.992 | 0.804, unvalidated (range 0.0001) | 1.000 |
+| ts_s1337 | 0.999 | 0.994 | 0.948 | 0.989 | 0.349, unvalidated (range 0.0000) | 1.000 |
+| ts_s0454 | 1.000 | 0.969 | 0.999 | 1.000, unvalidated (range 0.0009) | -- (no lungs label present) | 1.000 |
 
-```bash
-python -m rl.train --timesteps 200000
-python -m rl.eval
-```
-
-`rl/camera_env.py` trains a separate camera policy against a centroid-alignment
-objective:
-
-```bash
-python -m rl.camera_train --timesteps 200000
-python -m rl.camera_eval
-```
-
-`rl/online_train.py` trains the opacity policy continuously and evaluates it
-against fixed held-out episodes:
-
-```bash
-python -m rl.online_train --timesteps 50000 --eval-interval 5000
-python -m plots.online_eval_curve
-```
-
-`mass_fraction` is useful for optimization, but it only measures whether a
-transfer-function change follows the literal command. It does not measure
-whether the rendered image is useful to the user.
-
-### Goal-Conditioned Reward Model
-
-This project now treats reward learning as a goal-conditioned preference
-problem:
-
-> Does conditioning reward on the user's tissue and direction improve
-> preference prediction and policy behavior beyond a hand-designed objective?
-
-The reward model sees this 18-value observation:
-
-```text
-[features_after(4), features_before(4), after-before(4), target_onehot(5), direction(1)]
-```
-
-Image features are `mean`, `std`, `coverage`, and `entropy`. Target order is
-`air`, `fat`, `soft`, `spongy`, `bone`. The model is an `18 -> 64 -> 32 -> 1`
-MLP trained with weighted Bradley-Terry loss. Reward mapping is:
-
-```text
-r_model = 2 * sigmoid(R(z)) - 1
-```
-
-Training uses scalar image features, not pixels. PNG/JPEG files are retained
-for audit, blind evaluation, and recovery of missing legacy features. This
-keeps the same data contract usable by web and VR clients without requiring a
-vision model.
-
-#### Preference data
-
-Canonical clients write one JSON object per line:
-
-```json
-{
-  "observation_a": {"before_features": {}, "after_features": {}, "before_image": null, "after_image": null},
-  "observation_b": {"before_features": {}, "after_features": {}, "before_image": null, "after_image": null},
-  "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
-  "target_tissue": "bone",
-  "direction": "increase",
-  "label": 1,
-  "source": "branch",
-  "weight": 1.0
-}
-```
-
-`label=1` means A is preferred. `label=-1` means B is preferred. Pair sources
-have different weights:
-
-- Branch choices: `1.0`, strongest signal
-- Accepted/ended episode states: `0.7`
-- Absolute thumbs up/down: `0.4`, weakest signal
-
-Branches are extracted only when logs preserve explicit parent/child and
-carried-forward metadata. The extractor never guesses branches from similar
-parameters.
-
-#### Train and evaluate
-
-Run from repository root:
-
-```bash
-python -m rl.extract_pairs \
-  --log out/log.jsonl \
-  --feedback out/feedback.jsonl \
-  --preferences out/rlhf_preferences.jsonl \
-  --out out/pairs.jsonl
-```
-
-The command prints counts by source, target, and total. Historical logs may
-report zero branch pairs because old sessions did not preserve branch metadata.
-
-Pretrain on synthetic rendered pairs. Use a small run first:
-
-```bash
-python -m rl.pretrain_reward \
-  --pairs 20 --members 1 --epochs 2 \
-  --out out/rl_models/reward_pretrained_smoke.pt
-```
-
-Full pretraining:
-
-```bash
-python -m rl.pretrain_reward \
-  --pairs 20000 --members 5 \
-  --out out/rl_models/reward_pretrained.pt
-```
-
-Synthetic labels currently use signed `mass_fraction`. This is a cold-start
-objective, not a human label. The implementation marks the location where a
-visibility metric should replace it.
-
-Fine-tune on real preference pairs:
-
-```bash
-python -m rl.finetune_reward \
-  --preferences out/pairs.jsonl \
-  --pretrained out/rl_models/reward_pretrained.pt \
-  --out out/rl_models/reward_finetuned.pt
-```
-
-Pretrained and fine-tuned artifacts remain separate. Fine-tuning uses a fixed,
-seeded held-out split and never trains on evaluation rows.
-
-Evaluate both models on the same test split:
-
-```bash
-python -m rl.eval_reward \
-  --preferences out/pairs.jsonl \
-  --pretrained out/rl_models/reward_pretrained.pt \
-  --finetuned out/rl_models/reward_finetuned.pt \
-  --disagreements out/reward_disagreements.jsonl \
-  --out out/reward_report.json
-```
-
-Evaluation reports:
-
-1. Pretrained and fine-tuned accuracy, overall and by pair source
-2. RLHF policy performance against the objective metric
-3. Blind policy versus hill-climber judgments in a separate results file
-
-The disagreement file identifies cases where the objective and human verdict
-disagree, including image paths. These cases show where the objective metric is
-blind.
-
-#### Reward safeguards
-
-`RewardModelTFEnv` combines model and objective rewards:
-
-```text
-r = alpha * (mean(model_reward) - std(model_reward))
-    + (1 - alpha) * objective_reward
-```
-
-Default `alpha` is `0.7`. The useful ablations are:
-
-- `alpha=0.0`: objective only
-- `alpha=0.7`: blended reward
-- `alpha=1.0`: learned reward only
-
-Near-black and near-opaque states receive independent hard penalties. The
-ensemble standard deviation discourages states outside the training
-distribution.
+`lungs` and, on the non-contrast `ts_s0454`, `vessels` fell below the
+0.002 noise floor and are unvalidated rather than failed: lungs sit near air
+HU, so a transfer-function peak aimed at them barely changes mean luminance
+against the scan's own dark background, and `ts_s0454`'s vessels are a small,
+non-contrast structure that stays a thin sliver of the rendered image either
+way.
 
 ## Tests
 
@@ -382,20 +271,14 @@ python -m pytest -q -m "not slow"
 python -m pytest -q
 ```
 
-Reward pipeline tests:
-
-```bash
-python -m pytest -q \
-  tests/test_rl_reward_model.py \
-  tests/test_rl_reward_model_env.py \
-  tests/test_rl_extract_pairs.py \
-  tests/test_rl_reward_pipeline.py
-```
-
 ## Project Layout
 
-- Root files: rendering, transfer functions, parser, CLI, and web UI
-- `rl/`: environments, policies, reward model, data pipeline, evaluation
+- Root files: rendering, transfer functions, parser, and web UI server
+- `static/`: web UI and local 3D viewer
+- `rl/`: RL v2 (in progress)
+- `plots/`: training-curve plotting
+- `tools/`: maintenance scripts (e.g. `COMMANDS.md` generator)
 - `data/`: datasets and parser evaluation phrases
+- `docs/`, `slides/`: architecture notes, thesis material, design specs and plans
 - `out/`: runtime state, logs, images, models, and reports
 - `tests/`: automated tests

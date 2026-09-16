@@ -4,6 +4,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 data/*.nrrd
+data/*.zip
+data/*.tar.gz
+data/totalseg/
 .venv/
 .DS_Store
 .worktrees/

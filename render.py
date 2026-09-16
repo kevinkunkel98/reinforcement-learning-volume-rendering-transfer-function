@@ -152,16 +152,29 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), came
     prop.SetColor(ctf)
     prop.SetScalarOpacity(otf)
 
-    bounds = _visible_bounds(volume, params, spacing)
-    if bounds is not None:
-        renderer.ResetCamera(bounds)
-    else:
-        renderer.ResetCamera()
     cam = renderer.GetActiveCamera()
     cam_state = camera or {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}
-    cam.Azimuth(cam_state["azimuth"])
-    cam.Elevation(cam_state["elevation"])
-    cam.Zoom(cam_state["zoom"])
+    if "position" in cam_state:
+        # Renderer-neutral camera (views.py): an absolute placement in the
+        # volume's own millimetre coordinates, so the same camera means the
+        # same picture in VTK, in vtk.js and in the visibility estimate. No
+        # ResetCamera here -- that would re-frame and undo the placement.
+        cam.SetParallelProjection("parallel_scale" in cam_state)
+        cam.SetPosition(*[float(v) for v in cam_state["position"]])
+        cam.SetFocalPoint(*[float(v) for v in cam_state["focal_point"]])
+        cam.SetViewUp(*[float(v) for v in cam_state["view_up"]])
+        if "parallel_scale" in cam_state:
+            cam.SetParallelScale(float(cam_state["parallel_scale"]))
+    else:
+        cam.SetParallelProjection(False)
+        bounds = _visible_bounds(volume, params, spacing)
+        if bounds is not None:
+            renderer.ResetCamera(bounds)
+        else:
+            renderer.ResetCamera()
+        cam.Azimuth(cam_state["azimuth"])
+        cam.Elevation(cam_state["elevation"])
+        cam.Zoom(cam_state["zoom"])
     renderer.ResetCameraClippingRange()
 
     win.Render()
