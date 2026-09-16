@@ -85,10 +85,34 @@ def test_distance_penalises_unmentioned_classes_drifting():
     without_drift = _aggregated(skeleton=new_vis, lungs=0.05)
     with_drift = _aggregated(skeleton=new_vis, lungs=0.08)
     c_lungs = math.log10(0.08 + goals.EPSILON) - math.log10(0.05 + goals.EPSILON)
-    extra = goals.LAMBDA_KEEP * abs(c_lungs)
+    # drift beyond KEEP_TOLERANCE is penalised; the tolerated part is free
+    extra = goals.LAMBDA_KEEP * max(0.0, abs(c_lungs) - goals.KEEP_TOLERANCE)
     d0 = goals.distance(goal, start, without_drift)
     d1 = goals.distance(goal, start, with_drift)
     assert d1 - d0 == pytest.approx(extra)
+
+
+def test_distance_tolerates_small_keep_drift():
+    """An unmentioned class drifting by exactly KEEP_TOLERANCE costs nothing
+    (inaction on it looks the same as a drift that small); drifting by
+    2xKEEP_TOLERANCE costs exactly LAMBDA_KEEP * KEEP_TOLERANCE more."""
+    start = _aggregated(skeleton=0.01, lungs=0.05)
+    goal = goals.goal_vector({"skeleton": {"vis": 0.3}})
+    new_skeleton = 10 ** (0.3 + math.log10(0.01 + goals.EPSILON)) - goals.EPSILON
+
+    def _lungs_at(c_target):
+        return 10 ** (c_target + math.log10(0.05 + goals.EPSILON)) - goals.EPSILON
+
+    no_drift = _aggregated(skeleton=new_skeleton, lungs=0.05)
+    at_tolerance = _aggregated(skeleton=new_skeleton, lungs=_lungs_at(goals.KEEP_TOLERANCE))
+    beyond_tolerance = _aggregated(skeleton=new_skeleton, lungs=_lungs_at(2 * goals.KEEP_TOLERANCE))
+
+    d_no_drift = goals.distance(goal, start, no_drift)
+    d_at_tolerance = goals.distance(goal, start, at_tolerance)
+    d_beyond = goals.distance(goal, start, beyond_tolerance)
+
+    assert d_at_tolerance == pytest.approx(d_no_drift)
+    assert d_beyond - d_no_drift == pytest.approx(goals.LAMBDA_KEEP * goals.KEEP_TOLERANCE)
 
 
 def test_attainment_is_one_when_reached_and_negative_when_worse():

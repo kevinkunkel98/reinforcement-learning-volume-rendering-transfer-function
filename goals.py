@@ -38,6 +38,7 @@ PEAK_COLOURS = {"lungs": (0.55, 0.70, 0.95), "soft": (0.85, 0.35, 0.35),
 EPSILON = 1e-3           # floor inside log10, so "invisible" is finite
 KAPPA = 1.5              # brightness weight: 0.2 brightness ~= 0.3 log10 visibility
 LAMBDA_KEEP = 0.3        # weight of "leave the unmentioned classes alone"
+KEEP_TOLERANCE = 0.15    # unmentioned-class drift this small is free (see distance)
 VISIBILITY_STRENGTH = {"slightly": 0.15, "moderately": 0.3, "strongly": 0.6}   # log10 units
 BRIGHTNESS_STRENGTH = {"slightly": 0.1, "moderately": 0.2, "strongly": 0.4}
 ABSOLUTE_LEVEL = {"low": 0.1, "medium": 0.4, "high": 0.8}                      # share of solo_max
@@ -115,7 +116,15 @@ def distance(goal: np.ndarray, start: dict, current: dict) -> float:
     """How far a state is from the goal.
 
     sum m*|c - d| + KAPPA*sum n*|b - e|
-      + LAMBDA_KEEP*(sum (1-m)*|c| + KAPPA*sum (1-n)*|b|)
+      + LAMBDA_KEEP*sum (1-m)*max(0, |c| - KEEP_TOLERANCE)
+      + LAMBDA_KEEP*KAPPA*sum (1-n)*max(0, |b| - KEEP_TOLERANCE)
+
+    Moving one peak inevitably shifts what occludes what elsewhere in the
+    volume, so an unmentioned class always drifts a little even when the
+    instruction is followed well; a keep term that punishes any drift at
+    all makes leaving the transfer function untouched score better than
+    acting on the instruction. KEEP_TOLERANCE gives that small, unavoidable
+    side effect for free and only penalises drift beyond it.
     """
     c, b = progress(start, current)
     n_classes = len(GOAL_CLASSES)
@@ -124,7 +133,8 @@ def distance(goal: np.ndarray, start: dict, current: dict) -> float:
     total = 0.0
     for i, goal_class in enumerate(GOAL_CLASSES):
         total += m[i] * abs(c[goal_class] - d[i]) + KAPPA * n[i] * abs(b[goal_class] - e[i])
-        total += LAMBDA_KEEP * ((1.0 - m[i]) * abs(c[goal_class]) + KAPPA * (1.0 - n[i]) * abs(b[goal_class]))
+        total += LAMBDA_KEEP * (1.0 - m[i]) * max(0.0, abs(c[goal_class]) - KEEP_TOLERANCE)
+        total += LAMBDA_KEEP * KAPPA * (1.0 - n[i]) * max(0.0, abs(b[goal_class]) - KEEP_TOLERANCE)
     return float(total)
 
 

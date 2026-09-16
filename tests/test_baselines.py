@@ -77,6 +77,23 @@ def _brightness_instruction(goal_class: str, bright_delta: float) -> dict:
     return {"kind": "brightness", "text": "test", "targets": targets, "goal": goals.goal_vector(targets)}
 
 
+# --- B0 do_nothing -------------------------------------------------------------
+
+def test_do_nothing_returns_start_unchanged_and_scores_zero():
+    model = _StubModel()
+    start = _start_params()
+    instruction = _relative_instruction("skeleton", goals.VISIBILITY_STRENGTH["moderately"])
+
+    result = baselines.do_nothing(model, start, instruction)
+
+    assert np.array_equal(result, start)
+    assert result is not start  # a copy, not the same array object
+
+    start_agg = goals.aggregate(model.features(start))
+    final_agg = goals.aggregate(model.features(result))
+    assert goals.attainment(instruction["goal"], start_agg, final_agg) == pytest.approx(0.0)
+
+
 # --- B1 current_executor -----------------------------------------------------
 
 def test_current_executor_only_touches_the_mentioned_peak():

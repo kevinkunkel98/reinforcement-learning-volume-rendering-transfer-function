@@ -5,6 +5,9 @@ final_params`, where `model` is a `visibility.VisibilityModel`, `start_params`
 is a 24-value transfer-function vector, and `instruction` is what
 `goals.sample_instruction` returns (`{"kind", "text", "targets", "goal"}`).
 
+B0 `do_nothing` is the reference: it returns `start_params` unchanged, and
+under `goals.distance`'s KEEP_TOLERANCE it scores attainment exactly 0.
+
 B1 `current_executor` replicates today's command executor (`commands.py`):
 it acts only on the peak of the mentioned goal class(es), reading the same
 strength/level words but touching nothing else. B5 `occlusion_rule` adds the
@@ -67,6 +70,14 @@ def _infer_level(model, goal_class: str, delta: float, start_vis: float) -> str:
     target_vis = 10.0 ** (delta + math.log10(start_vis + goals.EPSILON)) - goals.EPSILON
     fraction = target_vis / solo if solo > 0.0 else 0.0
     return min(goals.ABSOLUTE_LEVEL, key=lambda key: abs(goals.ABSOLUTE_LEVEL[key] - fraction))
+
+
+def do_nothing(model, start_params, instruction) -> np.ndarray:
+    """B0: the reference every other baseline (and any learned policy) has
+    to beat. Under `goals.distance`'s KEEP_TOLERANCE, inaction scores
+    attainment exactly 0 -- it is not the floor (B2 random can score below
+    it), it is the "did following the instruction actually help" line."""
+    return start_params.copy()
 
 
 def current_executor(model, start_params, instruction) -> np.ndarray:
@@ -194,6 +205,7 @@ def hill_climb_200(model, start_params, instruction) -> np.ndarray:
 
 
 BASELINES = {
+    "B0_do_nothing": do_nothing,
     "B1_current_executor": current_executor,
     "B2_random_policy": random_policy,
     "B3_hill_climb_10": hill_climb_10,
