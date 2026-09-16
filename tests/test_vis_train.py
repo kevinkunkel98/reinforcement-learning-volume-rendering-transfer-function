@@ -128,6 +128,9 @@ def test_summarize_eval_aggregates_overall_and_per_kind():
     ]
     summary = vis_train.summarize_eval(results)
     assert summary["mean_attainment"] == pytest.approx(0.5)
+    assert summary["median_attainment"] == pytest.approx(0.5)
+    assert summary["mean_clipped_attainment"] == pytest.approx(0.5)
+    assert summary["share_positive"] == pytest.approx(2.0 / 3.0)
     assert summary["by_kind"]["relative"] == pytest.approx(0.75)
     assert summary["by_kind"]["compound"] == pytest.approx(0.0)
     assert summary["by_kind"]["show_only"] is None
@@ -168,3 +171,32 @@ def test_smoke_run_writes_eval_progress_csv_with_expected_columns(monkeypatch, t
         rows = list(reader)
     assert len(rows) == 2  # 200 timesteps / 100 eval-interval
     assert os.path.exists(result["best_path"])
+
+
+def test_best_checkpoint_is_selected_by_median_not_mean(monkeypatch, tmp_path):
+    # Round 1 has a high mean (0.575) but a low median (-0.9), dragged up by
+    # one outlier; round 2 has a lower mean (0.3) but a higher median (0.3).
+    # Selecting by median must treat round 2 as the new best, even though
+    # its mean is worse -- that is the whole point of the fix (median is
+    # robust to the single-episode outliers attainment produces).
+    _patch_totalseg(monkeypatch)
+    train_env = VisibilityTFEnv(["stub_a"], model_for_volume=lambda name: _StubModel())
+    eval_env = VisibilityTFEnv(["stub_a"], model_for_volume=lambda name: _StubModel())
+    out = str(tmp_path / "median_run")
+
+    round1 = [{"attainment": a, "kind": "relative"} for a in (-0.9, -0.9, -0.9, 5.0)]
+    round2 = [{"attainment": a, "kind": "relative"} for a in (0.3, 0.3, 0.3, 0.3)]
+    rounds = iter([round1, round2])
+    monkeypatch.setattr(vis_train, "evaluate_policy_on", lambda episodes, model: next(rounds))
+
+    saved_paths = []
+    monkeypatch.setattr(vis_train.SAC, "save", lambda self, path: saved_paths.append(path))
+
+    vis_train.run_training(
+        out=out, timesteps=200, seed=0, eval_interval=100,
+        train_env=train_env, eval_env=eval_env, eval_episode_count=4)
+
+    best_path = os.path.join(out, vis_train.BEST_NAME)
+    # best.zip is saved once for round 1 (nothing to compare against yet)
+    # and again for round 2, because round 2's median beats round 1's.
+    assert saved_paths.count(best_path) == 2

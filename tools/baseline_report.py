@@ -53,8 +53,10 @@ def run_volume(name: str, n_instructions: int, seed: int = 0) -> list:
 
 
 def summarise(rows: list) -> dict:
-    """Mean attainment per baseline, and per (baseline, instruction kind),
-    over rows with a non-None attainment; None rows are not counted."""
+    """Robust attainment stats per baseline (`goals.summarise_attainment`:
+    median, mean clipped to [-1, 1], raw mean, share of episodes that
+    improved on doing nothing, n), and a plain mean per (baseline,
+    instruction kind); None rows are not counted."""
     by_baseline: dict = {}
     by_kind: dict = {}
     for row in rows:
@@ -64,8 +66,7 @@ def summarise(rows: list) -> dict:
         by_baseline.setdefault(row["baseline"], []).append(attainment)
         by_kind.setdefault(row["baseline"], {}).setdefault(row["kind"], []).append(attainment)
 
-    baseline_summary = {name: {"mean": float(np.mean(values)), "n": len(values)}
-                        for name, values in by_baseline.items()}
+    baseline_summary = {name: goals.summarise_attainment(values) for name, values in by_baseline.items()}
     kind_summary = {name: {kind: {"mean": float(np.mean(values)), "n": len(values)}
                            for kind, values in kinds.items()}
                     for name, kinds in by_kind.items()}
@@ -73,10 +74,11 @@ def summarise(rows: list) -> dict:
 
 
 def _print_table(summary: dict) -> None:
-    print(f"{'baseline':22s} {'mean attainment':>16s} {'n':>6s}")
+    print(f"{'baseline':22s} {'median':>8s} {'mean_clip':>10s} {'mean_raw':>10s} {'share+':>8s} {'n':>6s}")
     for name in sorted(summary["by_baseline"]):
         entry = summary["by_baseline"][name]
-        print(f"{name:22s} {entry['mean']:16.3f} {entry['n']:6d}")
+        print(f"{name:22s} {entry['median']:8.3f} {entry['mean_clipped']:10.3f} "
+              f"{entry['mean_raw']:10.3f} {entry['share_positive']:8.3f} {entry['n']:6d}")
 
     print()
     print(f"{'baseline':22s} {'kind':12s} {'mean attainment':>16s} {'n':>6s}")
@@ -102,7 +104,7 @@ def main():
     _print_table(summary)
 
     high = [name for name, entry in summary["by_baseline"].items()
-            if name.startswith("B1") and entry["mean"] >= 0.9]
+            if name.startswith("B1") and entry["median"] is not None and entry["median"] >= 0.9]
     if high:
         print()
         print("WARNING: B1 (today's executor) already attains >= 0.9 mean attainment -- "

@@ -127,6 +127,25 @@ def test_attainment_is_one_when_reached_and_negative_when_worse():
     assert goals.attainment(goal, start, worse) < 0.0
 
 
+def test_summarise_attainment_reports_robust_stats_and_ignores_none():
+    values = [-17, 0.5, 0.6, 0.7, None]
+    summary = goals.summarise_attainment(values)
+    assert summary["median"] == pytest.approx(0.55)
+    assert summary["mean_clipped"] == pytest.approx(0.2)
+    assert summary["mean_raw"] == pytest.approx(-3.8)
+    assert summary["share_positive"] == pytest.approx(0.75)
+    assert summary["n"] == 4
+
+
+def test_summarise_attainment_handles_all_none():
+    summary = goals.summarise_attainment([None, None])
+    assert summary["n"] == 0
+    assert summary["median"] is None
+    assert summary["mean_clipped"] is None
+    assert summary["mean_raw"] is None
+    assert summary["share_positive"] is None
+
+
 def test_is_useless_detects_empty_and_opaque_states():
     empty = _aggregated(skeleton=0.2, coverage=0.0)
     assert goals.is_useless(empty) is True

@@ -4,10 +4,13 @@ training volumes, with periodic evaluation on the validation volumes.
     .venv/bin/python -m rl.vis_train --timesteps 200000 --seed 0 --out out/rl_v2/seed0
 
 Every `--eval-interval` steps: run a fixed, seeded set of validation episodes
-with the deterministic policy, append mean attainment (overall and per
-instruction kind) to `eval_progress.csv` in the run directory, save a
-checkpoint, and keep the best-scoring checkpoint as `best.zip`. SB3's own CSV
-logger writes `progress.csv` to the same directory (what
+with the deterministic policy, append attainment stats (mean, median, mean
+clipped to [-1, 1], share of episodes that improved on doing nothing --
+overall and per instruction kind) to `eval_progress.csv` in the run
+directory, save a checkpoint, and keep the best-scoring checkpoint as
+`best.zip`, selected by median attainment (robust to the single-episode
+outliers a mean is vulnerable to -- see `goals.summarise_attainment`). SB3's
+own CSV logger writes `progress.csv` to the same directory (what
 `plots/training_curves.py` and `plots/read_progress.py` read).
 """
 import argparse
@@ -25,7 +28,8 @@ from rl.vis_env import VisibilityTFEnv
 VALIDATION_EPISODES = 40
 VALIDATION_SEED_BASE = 10_000   # fixed offset so validation seeds never collide with training
 EVAL_KINDS = tuple(kind for kind, _ in goals.INSTRUCTION_MIX)
-CSV_FIELDS = ["timesteps", "mean_attainment"] + [f"attainment_{kind}" for kind in EVAL_KINDS]
+CSV_FIELDS = (["timesteps", "mean_attainment", "median_attainment", "mean_clipped_attainment", "share_positive"]
+              + [f"attainment_{kind}" for kind in EVAL_KINDS])
 DEFAULT_OUT_TEMPLATE = "out/rl_v2/sac_seed{seed}"
 CHECKPOINT_NAME = "checkpoint_{timesteps}.zip"
 BEST_NAME = "best.zip"
@@ -71,15 +75,19 @@ def evaluate_policy_on(episodes, model) -> list:
 
 
 def summarize_eval(results: list) -> dict:
-    """Mean attainment overall and per instruction kind; `None` for a kind
+    """Robust attainment stats overall (`goals.summarise_attainment`: mean,
+    median, mean clipped to [-1, 1], share of episodes that improved on
+    doing nothing) and a plain mean per instruction kind; `None` for a kind
     with no episodes in `results` (rather than crashing on an empty mean)."""
     attainments = [row["attainment"] for row in results]
-    mean_attainment = float(np.mean(attainments)) if attainments else None
+    stats = goals.summarise_attainment(attainments)
     by_kind = {}
     for kind in EVAL_KINDS:
         values = [row["attainment"] for row in results if row["kind"] == kind]
         by_kind[kind] = float(np.mean(values)) if values else None
-    return {"mean_attainment": mean_attainment, "by_kind": by_kind}
+    return {"mean_attainment": stats["mean_raw"], "median_attainment": stats["median"],
+            "mean_clipped_attainment": stats["mean_clipped"], "share_positive": stats["share_positive"],
+            "by_kind": by_kind}
 
 
 def ensure_run_dir(out: str) -> None:
@@ -92,7 +100,10 @@ def ensure_run_dir(out: str) -> None:
 
 
 def _eval_row(timesteps: int, summary: dict) -> dict:
-    row = {"timesteps": timesteps, "mean_attainment": summary["mean_attainment"]}
+    row = {"timesteps": timesteps, "mean_attainment": summary["mean_attainment"],
+           "median_attainment": summary["median_attainment"],
+           "mean_clipped_attainment": summary["mean_clipped_attainment"],
+           "share_positive": summary["share_positive"]}
     for kind in EVAL_KINDS:
         row[f"attainment_{kind}"] = summary["by_kind"][kind]
     return row
@@ -134,9 +145,12 @@ def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
             rows.append(row)
 
             model.save(os.path.join(out, CHECKPOINT_NAME.format(timesteps=done)))
-            mean_attainment = summary["mean_attainment"]
-            if mean_attainment is not None and (best_attainment is None or mean_attainment > best_attainment):
-                best_attainment = mean_attainment
+            # Select by median, not mean: attainment is unbounded below, and
+            # a mean lets a single bad episode swing which checkpoint looks
+            # best (see goals.summarise_attainment).
+            median_attainment = summary["median_attainment"]
+            if median_attainment is not None and (best_attainment is None or median_attainment > best_attainment):
+                best_attainment = median_attainment
                 model.save(best_path)
 
     return {"out": out, "eval_progress_path": eval_path, "best_path": best_path, "rows": rows}

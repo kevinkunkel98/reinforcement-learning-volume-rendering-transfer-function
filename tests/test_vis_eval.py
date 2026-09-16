@@ -252,10 +252,17 @@ def test_compare_aggregates_per_kind_and_handles_a_failed_baseline_episode():
     comparison = vis_eval.compare(results)
 
     summary = comparison["summary"]
-    assert summary["policy"]["mean_attainment"] == pytest.approx((0.8 + 0.6 + 0.4) / 3.0)
+    # Robust stats (median, mean_clipped, mean_raw, share_positive, n), from
+    # goals.summarise_attainment -- see test_goals.py for the formulas.
+    assert summary["policy"]["median"] == pytest.approx(0.6)
+    assert summary["policy"]["mean_raw"] == pytest.approx((0.8 + 0.6 + 0.4) / 3.0)
+    assert summary["policy"]["mean_clipped"] == pytest.approx((0.8 + 0.6 + 0.4) / 3.0)
+    assert summary["policy"]["share_positive"] == pytest.approx(1.0)
+    assert summary["policy"]["n"] == 3
     assert summary["policy"]["by_kind"]["relative"] == pytest.approx(0.7)
     assert summary["policy"]["by_kind"]["compound"] == pytest.approx(0.4)
-    assert summary["B0_do_nothing"]["mean_attainment"] == pytest.approx(0.0)
+    assert summary["B0_do_nothing"]["median"] == pytest.approx(0.0)
+    assert summary["B0_do_nothing"]["mean_raw"] == pytest.approx(0.0)
     assert summary["B0_do_nothing"]["n"] == 2   # the None episode is dropped
     assert summary["B0_do_nothing"]["by_kind"]["compound"] is None
 

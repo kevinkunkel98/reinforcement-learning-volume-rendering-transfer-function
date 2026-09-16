@@ -11,9 +11,12 @@ is exact independent of which volume list the episode was generated from)
 and stepping with the deterministic action for `MAX_STEPS`. Every baseline
 gets the identical `(model, start_params, instruction)` and is scored with
 `goals.attainment` -- so policy and baselines are measured identically.
-`compare` reports mean attainment per method (overall and per instruction
-kind) and a paired Wilcoxon signed-rank test of the policy against each
-baseline, computed directly (`scipy` is not installed in this environment).
+`compare` reports robust attainment stats per method (median, mean clipped to
+[-1, 1], raw mean, share of episodes that improved on doing nothing -- see
+`goals.summarise_attainment`) overall, a plain mean per instruction kind, and
+a paired Wilcoxon signed-rank test of the policy against each baseline (on
+the raw, unclipped paired values), computed directly (`scipy` is not
+installed in this environment).
 """
 import argparse
 import json
@@ -226,13 +229,19 @@ def wilcoxon(x, y) -> dict:
 # --- comparison table ----------------------------------------------------------
 
 def _summarize(rows: list) -> dict:
-    attainments = [row["attainment"] for row in rows if row["attainment"] is not None]
-    mean_attainment = float(np.mean(attainments)) if attainments else None
+    # Robust stats (median, mean_clipped, mean_raw, share_positive, n) from
+    # goals.summarise_attainment -- attainment is unbounded below, so a plain
+    # mean is misleading (see that function's docstring). The per-kind
+    # breakdown stays a plain mean: those buckets are small, and they exist
+    # to spot which instruction kinds the method struggles with, not to
+    # stand alone as a headline number.
+    attainments = [row["attainment"] for row in rows]
+    stats = goals.summarise_attainment(attainments)
     by_kind = {}
     for kind in EVAL_KINDS:
         values = [row["attainment"] for row in rows if row["kind"] == kind and row["attainment"] is not None]
         by_kind[kind] = float(np.mean(values)) if values else None
-    return {"mean_attainment": mean_attainment, "n": len(attainments), "by_kind": by_kind}
+    return {**stats, "by_kind": by_kind}
 
 
 def compare(results: dict, policy_name: str = "policy") -> dict:
@@ -261,13 +270,17 @@ def compare(results: dict, policy_name: str = "policy") -> dict:
 
 # --- CLI -----------------------------------------------------------------------
 
+def _fmt(value) -> str:
+    return "n/a" if value is None else f"{value:.3f}"
+
+
 def _print_table(comparison: dict) -> None:
     summary = comparison["summary"]
-    print(f"{'method':22s} {'mean attainment':>16s} {'n':>6s}")
+    print(f"{'method':22s} {'median':>8s} {'mean_clip':>10s} {'mean_raw':>10s} {'share+':>8s} {'n':>6s}")
     for name in sorted(summary):
         entry = summary[name]
-        mean = "n/a" if entry["mean_attainment"] is None else f"{entry['mean_attainment']:.3f}"
-        print(f"{name:22s} {mean:>16s} {entry['n']:6d}")
+        print(f"{name:22s} {_fmt(entry['median']):>8s} {_fmt(entry['mean_clipped']):>10s} "
+              f"{_fmt(entry['mean_raw']):>10s} {_fmt(entry['share_positive']):>8s} {entry['n']:6d}")
 
     print()
     print(f"{'baseline':22s} {'p-value':>10s} {'n pairs':>8s}")

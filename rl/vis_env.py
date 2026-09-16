@@ -5,7 +5,19 @@ Each episode picks a volume and an instruction (`goals.sample_instruction`);
 the agent edits the transfer function's 12 controllable values (height,
 width, brightness per peak -- centres and hue stay fixed) over `MAX_STEPS`
 steps. The reward is the drop in `goals.distance` to the instruction's goal,
-minus a penalty when the resulting state shows effectively nothing.
+normalized by that episode's starting distance (`D_start`, floored at
+`DISTANCE_FLOOR` so a near-zero `D_start` cannot blow the reward up) and
+clipped to `[-REWARD_CLIP, REWARD_CLIP]`, minus a penalty when the resulting
+state shows effectively nothing.
+
+`D_start` varies about 20x across instructions (a small ask like "brighten
+the skeleton slightly" vs. a big one like "show only the lungs"); without
+this normalization the raw distance drop rewards big asks 20x more than
+small ones, so a policy trained on the raw drop optimises the big-ask
+episodes and ignores the rest. Dividing by `D_start` makes an episode's
+undiscounted return telescope to `(D_start - D_final) / D_start`, i.e. its
+attainment (up to clipping) -- so every instruction contributes comparably
+regardless of how much it asks for.
 """
 import math
 
@@ -23,6 +35,13 @@ ACTION_SIZE = 12
 MAX_STEPS = 10
 STEP_SCALE = 0.1           # per action unit, in normalized parameter units
 USELESS_PENALTY = 1.0
+
+# Reward normalization: floor for the episode's starting distance (the
+# reward's denominator), so an episode that already nearly meets its goal
+# cannot produce an unboundedly large per-step reward; and the resulting
+# per-step reward's clip range.
+DISTANCE_FLOOR = 0.05
+REWARD_CLIP = 1.0
 
 # Generous finite bound for the observation Box: every packed quantity (params
 # in [-1, 1], goal/log-vis/bright/progress within a handful of units,
@@ -157,7 +176,9 @@ class VisibilityTFEnv(gym.Env):
         agg = goals.aggregate(raw_features)
         distance = goals.distance(self._instruction["goal"], self._start_agg, agg)
         useless = goals.is_useless(raw_features)
-        reward = self._prev_distance - distance - (USELESS_PENALTY if useless else 0.0)
+        denom = max(self._start_distance, DISTANCE_FLOOR)
+        normalized_drop = np.clip((self._prev_distance - distance) / denom, -REWARD_CLIP, REWARD_CLIP)
+        reward = float(normalized_drop) - (USELESS_PENALTY if useless else 0.0)
         self._prev_distance = distance
 
         self._step_count += 1

@@ -14,10 +14,15 @@ def _rows():
 
 
 def test_summarise_means_and_counts_per_baseline():
+    # by_baseline now reports goals.summarise_attainment's robust stats
+    # rather than a plain mean -- B1's values are [0.5, 1.0, 0.0].
     summary = summarise(_rows())
-    assert summary["by_baseline"]["B1"]["mean"] == pytest.approx(0.5)
+    assert summary["by_baseline"]["B1"]["median"] == pytest.approx(0.5)
+    assert summary["by_baseline"]["B1"]["mean_raw"] == pytest.approx(0.5)
+    assert summary["by_baseline"]["B1"]["mean_clipped"] == pytest.approx(0.5)
+    assert summary["by_baseline"]["B1"]["share_positive"] == pytest.approx(2.0 / 3.0)
     assert summary["by_baseline"]["B1"]["n"] == 3
-    assert summary["by_baseline"]["B2"]["mean"] == pytest.approx(-0.5)
+    assert summary["by_baseline"]["B2"]["mean_raw"] == pytest.approx(-0.5)
     assert summary["by_baseline"]["B2"]["n"] == 1
 
 

@@ -5,7 +5,8 @@ import pytest
 
 import goals
 import transfer
-from rl.vis_env import ACTION_SIZE, MAX_STEPS, OBSERVATION_SIZE, VisibilityTFEnv
+from rl import vis_env
+from rl.vis_env import ACTION_SIZE, DISTANCE_FLOOR, MAX_STEPS, OBSERVATION_SIZE, REWARD_CLIP, VisibilityTFEnv
 
 
 class _StubModel:
@@ -74,9 +75,9 @@ def test_observation_is_finite_and_inside_space_after_reset_and_step(monkeypatch
     assert env.observation_space.contains(obs)
 
 
-# --- reward = drop in goals.distance ----------------------------------------
+# --- reward = drop in goals.distance, normalised by episode difficulty ------
 
-def test_step_reward_equals_drop_in_goal_distance(monkeypatch):
+def test_step_reward_equals_distance_drop_normalised_by_start_distance(monkeypatch):
     env = _make_env(monkeypatch, volume_ids=("fake_a",))
     obs, info = env.reset(seed=1)
 
@@ -89,8 +90,95 @@ def test_step_reward_equals_drop_in_goal_distance(monkeypatch):
     final_agg = goals.aggregate(env._model.features(env._params))
     final_distance = goals.distance(env._instruction["goal"], env._start_agg, final_agg)
 
+    denom = max(env._start_distance, DISTANCE_FLOOR)
+    expected = float(np.clip((start_distance - final_distance) / denom, -REWARD_CLIP, REWARD_CLIP))
+
     assert not info["useless"]
-    assert reward == pytest.approx(start_distance - final_distance)
+    assert reward == pytest.approx(expected)
+
+
+def test_normalised_reward_matches_a_worked_example(monkeypatch):
+    # An episode with D_start=0.4 whose distance halves to 0.2 in one step
+    # should earn reward (0.4 - 0.2) / 0.4 = 0.5 -- the same as the episode's
+    # attainment at that point, since D_start is the fixed denominator for
+    # every step (see the module docstring's telescoping-sum argument).
+    env = _make_env(monkeypatch, volume_ids=("fake_a",))
+    env.reset(seed=1)
+    env._start_distance = 0.4
+    env._prev_distance = 0.4
+    monkeypatch.setattr(vis_env.goals, "distance", lambda goal, start, current: 0.2)
+    monkeypatch.setattr(vis_env.goals, "is_useless", lambda features: False)
+
+    obs, reward, terminated, truncated, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
+
+    assert reward == pytest.approx(0.5)
+
+
+def test_undiscounted_return_telescopes_to_attainment_when_unclipped(monkeypatch):
+    # Reward is (prev - current) / D_start every step, so summing it over an
+    # episode telescopes to (D_start - D_final) / D_start == attainment,
+    # as long as no per-step reward hits the clip.
+    env = _make_env(monkeypatch, volume_ids=("fake_a",))
+    env.reset(seed=1)
+    env._start_distance = 1.0
+    env._prev_distance = 1.0
+
+    # goals.distance is called more than once per step (step() itself, then
+    # again inside goals.attainment() while building info["attainment"]), so
+    # the stub must be idempotent: memoize by the identity of `current` and
+    # special-case the start-vs-start baseline call attainment() also makes.
+    step_distances = iter([0.8, 0.6, 0.5])
+    cache = {}
+
+    def fake_distance(goal, start, current):
+        if current is start:
+            return 1.0
+        key = id(current)
+        if key not in cache:
+            cache[key] = next(step_distances)
+        return cache[key]
+
+    monkeypatch.setattr(vis_env.goals, "distance", fake_distance)
+    monkeypatch.setattr(vis_env.goals, "is_useless", lambda features: False)
+
+    total_reward = 0.0
+    for _ in range(3):
+        obs, reward, terminated, truncated, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
+        total_reward += reward
+
+    assert total_reward == pytest.approx((1.0 - 0.5) / 1.0)
+
+
+def test_reward_is_clipped_for_a_catastrophic_step(monkeypatch):
+    # A start distance near the floor combined with a huge jump in distance
+    # would otherwise produce an unbounded reward; it must be clipped to
+    # [-REWARD_CLIP, REWARD_CLIP].
+    env = _make_env(monkeypatch, volume_ids=("fake_a",))
+    env.reset(seed=1)
+    env._start_distance = DISTANCE_FLOOR
+    env._prev_distance = 0.0
+    monkeypatch.setattr(vis_env.goals, "distance", lambda goal, start, current: 10.0)
+    monkeypatch.setattr(vis_env.goals, "is_useless", lambda features: False)
+
+    obs, reward, terminated, truncated, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
+
+    assert reward == pytest.approx(-REWARD_CLIP)
+
+
+def test_reward_clip_is_applied_before_the_useless_penalty(monkeypatch):
+    # The clip bounds the raw distance-drop term to [-1, 1]; USELESS_PENALTY
+    # is subtracted afterward, so a useless catastrophic step can still read
+    # below -REWARD_CLIP.
+    env = _make_env(monkeypatch, volume_ids=("fake_a",))
+    env.reset(seed=1)
+    env._start_distance = DISTANCE_FLOOR
+    env._prev_distance = 0.0
+    monkeypatch.setattr(vis_env.goals, "distance", lambda goal, start, current: 10.0)
+    monkeypatch.setattr(vis_env.goals, "is_useless", lambda features: True)
+
+    obs, reward, terminated, truncated, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
+
+    assert reward == pytest.approx(-REWARD_CLIP - 1.0)
 
 
 # --- useless penalty ---------------------------------------------------------
@@ -112,15 +200,17 @@ def test_useless_penalty_lowers_reward_relative_to_no_penalty(monkeypatch):
     env.reset(seed=2)
     env._params = np.full(24, -1.0, dtype=np.float64)
     prev_distance = env._prev_distance
+    start_distance = env._start_distance
 
     obs, reward, terminated, truncated, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
 
     final_agg = goals.aggregate(env._model.features(env._params))
     distance = goals.distance(env._instruction["goal"], env._start_agg, final_agg)
-    bare_drop = prev_distance - distance
+    denom = max(start_distance, DISTANCE_FLOOR)
+    normalised_drop = float(np.clip((prev_distance - distance) / denom, -REWARD_CLIP, REWARD_CLIP))
 
     assert info["useless"]
-    assert reward == pytest.approx(bare_drop - 1.0)
+    assert reward == pytest.approx(normalised_drop - 1.0)
 
 
 # --- truncation --------------------------------------------------------------

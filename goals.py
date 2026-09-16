@@ -149,6 +149,33 @@ def is_useless(features: dict) -> bool:
             or sum(features["vis"].values()) < 0.001)
 
 
+ATTAINMENT_CLIP = 1.0
+
+
+def summarise_attainment(values) -> dict:
+    """Aggregate episode attainment robustly.
+
+    Attainment is 1 - D_final/D_start, so it is unbounded below: a single bad
+    episode on an easy goal (small D_start) can read -17 and swamp a mean.
+    Report the median and a mean of values clipped to [-1, 1] alongside the
+    raw mean, plus the share of episodes that improved on doing nothing.
+    """
+    filtered = [v for v in values if v is not None]
+    n = len(filtered)
+    if n == 0:
+        return {"median": None, "mean_clipped": None, "mean_raw": None,
+                "share_positive": None, "n": 0}
+    array = np.asarray(filtered, dtype=np.float64)
+    clipped = np.clip(array, -ATTAINMENT_CLIP, ATTAINMENT_CLIP)
+    return {
+        "median": float(np.median(array)),
+        "mean_clipped": float(np.mean(clipped)),
+        "mean_raw": float(np.mean(array)),
+        "share_positive": float(np.mean(array > 0.0)),
+        "n": n,
+    }
+
+
 INSTRUCTION_MIX = (("relative", 0.40), ("compound", 0.25), ("show_only", 0.15),
                    ("absolute", 0.10), ("brightness", 0.10))
 
