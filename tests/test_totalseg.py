@@ -17,6 +17,14 @@ def _write_subject(tmp_path, sid, split, data=None):
             "path": str(path), "sha256": "ab" * 32}
 
 
+def _write_labels(tmp_path, sid, shape):
+    labels = np.zeros(shape, dtype=np.uint8)
+    labels[0, 0, 0] = 1
+    path = tmp_path / "totalseg" / sid / "labels.nii.gz"
+    nib.save(nib.Nifti1Image(labels, np.diag([1.5, 1.5, 1.5, 1.0])), str(path))
+    return str(path)
+
+
 @pytest.fixture
 def manifest(tmp_path, monkeypatch):
     subjects = [_write_subject(tmp_path, "s0001", "train"),
@@ -87,3 +95,52 @@ def test_load_volume_unknown_and_missing(manifest):
 def test_missing_manifest_means_no_volumes(tmp_path, monkeypatch):
     monkeypatch.setattr(totalseg, "MANIFEST_PATH", str(tmp_path / "none.json"))
     assert totalseg.available_names() == []
+
+
+@pytest.fixture
+def labelled_manifest(tmp_path, monkeypatch):
+    with_labels = _write_subject(tmp_path, "l0001", "train")
+    with_labels["labels_path"] = _write_labels(tmp_path, "l0001", (2, 3, 4))
+    with_labels["classes_present"] = ["organs", "skeleton"]
+    with_labels["contrast"] = True
+
+    no_labels_key = _write_subject(tmp_path, "l0002", "train")
+
+    missing_labels_file = _write_subject(tmp_path, "l0003", "train")
+    missing_labels_file["labels_path"] = str(tmp_path / "totalseg" / "l0003" / "labels.nii.gz")
+
+    subjects = [with_labels, no_labels_key, missing_labels_file]
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps({"subjects": subjects}))
+    monkeypatch.setattr(totalseg, "MANIFEST_PATH", str(path))
+    return subjects
+
+
+def test_has_labels_true_only_when_file_exists(labelled_manifest):
+    assert totalseg.has_labels("ts_l0001") is True
+    assert totalseg.has_labels("ts_l0002") is False    # no labels_path key
+    assert totalseg.has_labels("ts_l0003") is False    # labels_path set but file missing
+
+
+def test_load_labels_matches_volume_shape_and_dtype(labelled_manifest):
+    labels = totalseg.load_labels("ts_l0001")
+    volume, _ = totalseg.load_volume("ts_l0001")
+    assert labels.dtype == np.uint8
+    assert labels.shape == volume.shape
+
+
+def test_load_labels_raises_when_missing(labelled_manifest):
+    with pytest.raises(FileNotFoundError, match="tools.select_totalseg"):
+        totalseg.load_labels("ts_l0002")
+    with pytest.raises(FileNotFoundError, match="tools.select_totalseg"):
+        totalseg.load_labels("ts_l0003")
+
+
+def test_classes_present_returns_manifest_list(labelled_manifest):
+    assert totalseg.classes_present("ts_l0001") == ["organs", "skeleton"]
+    assert totalseg.classes_present("ts_l0002") == []
+
+
+def test_is_contrast_returns_flag(labelled_manifest):
+    assert totalseg.is_contrast("ts_l0001") is True
+    assert totalseg.is_contrast("ts_l0002") is False

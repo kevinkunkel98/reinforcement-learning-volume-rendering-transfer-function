@@ -67,3 +67,26 @@ def load_volume(name: str):
     volume = image.get_fdata(dtype=np.float32)
     spacing = tuple(float(z) for z in image.header.get_zooms()[:3])
     return np.ascontiguousarray(volume), spacing
+
+
+def has_labels(name: str) -> bool:
+    entry = _subjects().get(name)
+    return bool(entry and entry.get("labels_path") and os.path.exists(entry["labels_path"]))
+
+
+def classes_present(name: str) -> list:
+    return list(subject(name).get("classes_present", []))
+
+
+def is_contrast(name: str) -> bool:
+    return bool(subject(name).get("contrast", False))
+
+
+def load_labels(name: str) -> np.ndarray:
+    """Anatomical class ids per voxel, canonical RAS, matching load_volume()."""
+    entry = subject(name)
+    path = entry.get("labels_path")
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError(f"{name} has no label volume; {_FETCH_HINT}")
+    image = nib.as_closest_canonical(nib.load(path))
+    return np.ascontiguousarray(np.asarray(image.dataobj, dtype=np.uint8))
