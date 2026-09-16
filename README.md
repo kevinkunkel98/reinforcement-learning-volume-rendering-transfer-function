@@ -201,6 +201,69 @@ visibility estimate on real CT volumes, then refines it with human A/B
 preferences collected on a dedicated page. Design:
 [`docs/superpowers/specs/2026-09-15-rl-v2-visibility-rlhf-design.md`](docs/superpowers/specs/2026-09-15-rl-v2-visibility-rlhf-design.md).
 
+### Visibility estimate
+
+`visibility.py` estimates, per anatomical class, how much of a transfer
+function's rendered image that class contributes (`vis`), how bright it
+looks (`bright`), and how much of the frame is covered at all (`coverage`) --
+without running VTK. It resamples a volume once per one of the 6 fixed views
+into a front-to-back cube, then composites that cube for a given transfer
+function; this is what the RL reward and observation are computed from,
+since a real VTK render is too slow to call every training step.
+
+Classes come from TotalSegmentator segmentation masks, collapsed into five
+anatomical groups: `skeleton`, `lungs`, `organs`, `muscle`, `vessels` (label
+ids 1-5; id 0, `other`, is everything TotalSegmentator's 117 structures don't
+cover -- fat, skin, bowel contents, the scanner table -- and is the majority
+of the body: only 7-20% of voxels in a typical scan carry any mask at all).
+The four Slicer CTs and the synthetic phantom carry no TotalSegmentator
+labels, so their samples fall back to coarse Hounsfield bands mapped onto the
+same class names (skeleton >= 300 HU, lungs <= -500 HU, organs -30..300 HU);
+muscle and vessels are never populated by the fallback, since they aren't
+separable by intensity alone. `VisibilityModel.label_source` reports which
+source (`"anatomy"` or `"intensity"`) produced a given model's estimate.
+Vessels are anatomically labeled on every TotalSegmentator scan, but only
+stand out as their own structure on a contrast (angiography) scan -- on a
+plain scan they sit at the same HU as the soft tissue around them, so no
+transfer function can visually single them out. "Show me the vessels" is
+therefore only a meaningful RL goal on contrast scans.
+
+`tools/validate_visibility.py` checks the estimate against real VTK renders.
+For each class a volume's label volume carries, it sweeps 10 transfer
+functions that isolate that class (the peak whose single-peak transfer
+function shows the most of it, height 0.02 -> 1.0, the other peaks jittered
+by a seeded generator), and compares the estimate's `vis * bright` against a
+real reference: mean luminance over the 6 views, normal render minus a
+render with that class's label colour blacked out and its opacity left
+untouched, using VTK's label-map masking
+(`vtkGPUVolumeRayCastMapper.SetMaskInput` + `SetMaskTypeToLabelMap`).
+Blackening rather than deleting a class's voxels keeps occlusion the same --
+deleting opens a hole that reveals whatever sits behind, which is not that
+class's actual contribution to the image. Coverage is checked separately, by
+rank agreement between the estimate's `coverage` and the rendered fraction of
+lit pixels over a global opacity sweep (every peak's height swept together).
+A class whose real contribution barely moves across the sampled transfer
+functions (rendered luminance range below 0.002, the renderer's own noise
+floor) can't be validated this way and is reported unvalidated rather than
+failed.
+
+Measured on three TotalSegmentator volumes (`out/visibility_validation.json`;
+Pearson >= 0.7 required per validated class, rank agreement >= 0.9 for
+coverage -- every validated class passed):
+
+| volume | skeleton | organs | muscle | vessels | lungs | coverage (rank agreement) |
+| --- | --- | --- | --- | --- | --- | --- |
+| ts_s1379 (contrast) | 1.000 | 0.995 | 0.981 | 0.992 | 0.804, unvalidated (range 0.0001) | 1.000 |
+| ts_s1337 | 0.999 | 0.994 | 0.948 | 0.989 | 0.349, unvalidated (range 0.0000) | 1.000 |
+| ts_s0454 | 1.000 | 0.969 | 0.999 | 1.000, unvalidated (range 0.0009) | -- (no lungs label present) | 1.000 |
+
+`lungs` and, on the non-contrast `ts_s0454`, `vessels` fell below the
+0.002 noise floor and are unvalidated rather than failed: lungs sit near air
+HU, so a transfer-function peak aimed at them barely changes mean luminance
+against the scan's own dark background, and `ts_s0454`'s vessels are a small,
+non-contrast structure that stays a thin sliver of the rendered image either
+way.
+
 ## Tests
 
 ```bash
