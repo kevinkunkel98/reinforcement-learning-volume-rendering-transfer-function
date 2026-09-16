@@ -1,284 +1,222 @@
-# Voice-Driven Transfer Function MVP
+# Say what you want to see
 
-**Speech-controlled volume rendering, toward a learned transfer-function agent.**
-Say "show only bone" or "increase opacity for bone strongly" and a real CT/MRI
-scan re-renders live — parsed by a rule engine or a local LLM and executed by
-exact commands or hill-climbing search. RL v2 (in progress) adds a
-goal-conditioned policy for perceptual instructions, refined with human
-preferences.
-
-<p align="center">
-  <img src="docs/screenshots/architecture-highlevel-dark.png" width="85%" alt="Project architecture" />
-</p>
-
-Detailed architecture and mathematical notes:
-
-- `docs/architecture.typ` and `docs/architecture.pdf`
-- `docs/rl-write-test.typ` and `docs/rl-math.pdf`
-
-## Setup
-
-Use a virtual environment. Install dependencies with the same Python that will
-run the project:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
-
-First Whisper use downloads and caches a model. LLM parsing requires Ollama:
-
-```bash
-ollama serve
-ollama pull qwen2.5:7b
-```
-
-Without Ollama, the `llm` parser (UI parser toggle) falls back to the rule parser.
-
-## Quick Start
-
-```bash
-python server.py
-python server.py --dataset ct_chest
-```
-
-The web UI runs at `http://127.0.0.1:8000`. Start commands from repository
-root because the application uses relative paths such as `out/` and `static/`.
-
-The UI session persists in `out/ui_session.json`. Delete that file or say
-`reset` to return to the default transfer function.
+**Speak to a CT scan and watch it reveal what you asked for.** "Show only the
+skeleton." "More lungs, a bit less soft tissue." A rule engine or a local LLM
+parses the words, and the transfer function — the map from tissue density to
+colour and opacity — is rewritten so the render answers.
 
 <p align="center">
   <img src="docs/screenshots/chat-ui-ct-skull.png" width="70%" alt="Chat UI on a real CT skull scan, bone tissue isolated" />
 </p>
 
-## Commands
+The research question underneath: **can that transfer function be learned?** Not
+hand-tuned per scan, not hill-climbed for a hundred seconds per command, but
+produced by a policy that has seen enough patients to know what "show the ribs"
+requires on *this* one — and eventually trained on what a radiologist actually
+prefers, rather than on a formula someone invented.
+
+This repository is a master's thesis in progress. It contains a working voice
+UI, a measurement of what a rendering actually shows that is validated against
+real renders, a learned policy that follows instructions on patients it has never
+seen, and the apparatus for learning from human preferences.
+
+---
+
+## The hard part isn't the rendering
+
+A transfer function decides what a volume rendering shows. Get it wrong and the
+skin hides the ribs; get it right and the anatomy you asked for stands out. The
+difficulty is that "show more bone" has no closed-form answer: it depends on what
+lies *in front of* the bone in that particular patient.
+
+The previous version of this project optimised a metric called `mass_fraction` —
+the area under the opacity curve over bone's Hounsfield range. It looked
+reasonable and was quietly meaningless:
+
+| Change to the transfer function | Bone actually visible | `mass_fraction` says |
+|---|---|---|
+| default | 0.3 % | 0.26 |
+| raise the bone peak to maximum | 0.3 % | **0.43** ("better") |
+| clear the fat and soft-tissue peaks | **4.5 %** | 0.26 ("no change") |
+
+The metric never looked at the scan. It rewarded a change that altered nothing on
+screen and ignored the one that made bone nine times more visible. Everything
+below follows from fixing that.
+
+## Measuring what a render shows
+
+`visibility.py` estimates, for a given transfer function, how much each
+anatomical structure contributes to the final image and how bright it appears. It
+resamples each volume once per viewing direction, labels every sample by anatomy
+(from TotalSegmentator masks: skeleton, lungs, organs, muscle, vessels), and
+composites front to back — **14 ms**, against 50–210 ms for a real render, and it
+can attribute pixels to tissues, which a render cannot.
+
+It is validated against VTK by rendering each state twice: once normally, once
+with one structure's *colour* blacked out and its opacity untouched. The
+difference is exactly that structure's contribution.
+
+| | skeleton | organs | muscle | vessels | coverage |
+|---|---|---|---|---|---|
+| correlation with real renders | **1.00** | 0.97–0.99 | 0.95–1.00 | 0.99 | 1.00 |
+
+Lungs sit below the renderer's noise floor and are reported as unvalidated rather
+than quietly counted — see `docs/rl-v2-pipeline.typ` for the caveats that belong
+with every number here.
+
+```bash
+python -m tools.validate_visibility ts_s1379 ts_s1337 ts_s0454
+```
+
+## Learning the mapping
+
+An instruction becomes a target: a requested change in visibility and brightness
+per structure. The policy sees the instruction, the scan's intensity histogram,
+what is currently visible and what is *achievable* on this scan, and outputs a
+transfer function in a single forward pass.
+
+Measured on 200 instructions over six patients it never saw:
+
+| Method | Evaluations used | Median attainment | Improved |
+|---|---|---|---|
+| hill-climb (thorough) | 200 | +0.660 | 100 % |
+| **policy + 3 refinements** | **4** | **+0.218** | 69 % |
+| hill-climb (cheap) | 10 | +0.205 | 90 % |
+| **policy alone** | **0** | **+0.194** | 67 % |
+| do nothing | 0 | 0.000 | — |
+| today's rule-based executor | 0 | −0.020 | 37 % |
+| random | 0 | −0.024 | 44 % |
+
+Attainment is 1 when the instruction is satisfied, 0 when nothing changed,
+negative when the result got worse. The policy beats every non-search baseline at
+p < 0.001, and a learned proposal plus three refinement steps edges past cheap
+search at less than half the cost. It is not yet as *reliable* as search (67 % vs
+90 % of instructions improved) — that gap is the honest headline.
+
+```bash
+python -m rl.oneshot_train --timesteps 150000 --seed 0 --out out/rl_v2/seed0
+python -m rl.vis_eval --policy out/rl_v2/seed0/best.zip --split test --episodes 200 --refine 3
+```
+
+## Why a policy at all, when search works?
+
+Because search stops working the moment the objective is a person. A hill-climber
+needs 10–200 evaluations per instruction. You cannot ask a radiologist 200 times
+whether they like a rendering, and even against a learned preference model each
+evaluation costs a render plus an embedding — roughly 100 seconds per spoken
+command. A policy answers in one pass.
+
+That is what the collection page is for:
+
+```bash
+python server.py      # then open http://127.0.0.1:8000/collect
+```
+
+Each item shows an instruction and two candidate results as six views each, with
+no hint of where either came from. Press **A**, **B**, **E** (equal) or **S**
+(skip). Roughly every tenth item repeats an earlier one with the sides swapped —
+that measures your self-consistency, which is the ceiling any reward model can
+reach. Judgments land in `out/vis_preferences.jsonl`, ready for reward-model
+training.
+
+## What did not work
+
+Documented, with the curves, because the failures shaped the design:
+
+- **Ten-step refinement.** Letting the policy nudge parameters over ten steps
+  does not train — it stays flat across volumes and *degrades* with more training
+  on a single one (−0.15 → −0.98). The diagnosis: the policy must commit to each
+  change blind, while the search it is compared against may try a change, measure
+  it, and reject it. It was being asked to learn an optimisation procedure.
+- **Intensity-band tissue labels.** "Fat" also collects lung edges; "spongy"
+  collects contrast-filled vessels. Both failed validation (0.46–0.68) until the
+  labels became anatomical.
+- **Measuring a tissue by deleting it.** Removing its voxels opens holes that
+  reveal what is behind, so the measurement includes the background. Blackening
+  the colour while keeping opacity is the correct reference.
+- **An unforgiving side-effect penalty.** Punishing any drift in unmentioned
+  structures made *doing nothing* beat executing the instruction.
+
+## Using the viewer
+
+```bash
+python server.py                      # http://127.0.0.1:8000
+python server.py --dataset ct_chest
+```
+
+Text or voice (push-to-talk with Space), rule or LLM parsing, history
+navigation, and a local `vtk.js` renderer that applies transfer-function and
+camera changes in the browser. Commands:
 
 ```text
 increase|decrease opacity for <tissue> [slightly|moderately|strongly]
 show only <tissue> [and <tissue> ...]
 <low|medium|high> opacity for <tissue>
-sharpen|soften <tissue>
-brighten|darken <tissue>
+sharpen|soften <tissue>   ·   brighten|darken <tissue>
 shift <tissue>'s center up|down
-rotate left|right | tilt up|down | zoom in|out
-reset
+rotate left|right   ·   tilt up|down   ·   zoom in|out   ·   reset
 ```
 
-Supported tissues: `bone`, `spongy`, `soft`, `fat`, and `air`. See
-`commands.py` for synonyms and the complete grammar. Camera commands change
-the view and do not change the transfer function.
+LLM parsing needs Ollama (`ollama serve && ollama pull qwen2.5:7b`); without it,
+the `llm` toggle falls back to the rule parser. See `COMMANDS.md` for the full
+grammar. The UI session persists in `out/ui_session.json`; say `reset` or delete
+that file to start over.
 
-Useful evaluation commands:
+## Data
 
-```bash
-python eval_parsers.py
-python eval_parsers.py --llm-model qwen2.5:7b
-```
-
-## Data And UI
-
-Default dataset is `mri_head`. Other datasets include `ct_chest`, `ct_skull`,
-`ct_cardio`, `ct_abdomen`, and `synthetic`.
-
-```bash
-python server.py --dataset ct_chest
-```
-
-Datasets are downloaded into `data/` and cached. MRI intensities are rescaled
-to the transfer-function range, so tissue names are functional labels rather
-than guaranteed radiological labels. Use CT data for radiological claims.
-
-The web UI supports:
-
-- Text and voice commands
-- Back/forward navigation through session history
-- Objective hill-climb search for opacity commands
-- Camera state stored with each history step
-
-### RL v2 volumes
-
-RL v2 trains and evaluates on 30 CT scans from the TotalSegmentator small
-subset (CC-BY-4.0, Zenodo record 10047263), split by subject into 20 train,
-4 validation and 6 test volumes (stratified by body region; see
-`data/totalseg_manifest.json`), plus the four Slicer CTs as an out-of-source
-test set. Fetch and extract once:
+30 CT scans from the TotalSegmentator small subset (CC-BY-4.0), split by subject
+into 20 train / 4 validation / 6 test and stratified by body region, plus four
+3D Slicer CTs as an out-of-source test set from different scanners. Anatomical
+labels come from the dataset's 117 structure masks.
 
 ```bash
 curl -L -o data/Totalsegmentator_dataset_small_v201.zip \
   "https://zenodo.org/records/10047263/files/Totalsegmentator_dataset_small_v201.zip?download=1"
-python -m tools.select_totalseg
+python -m tools.select_totalseg          # select, label, split (writes the manifest)
+python -m tools.build_visibility_cache   # precompute the visibility caches
 ```
 
-The selected volumes appear as `ts_<subject>` in the dataset list. RL v2 code
-loads every volume with `load_dataset(name, canonical=True)` (RAS axis order)
-and gets split members from `volumes_for_split("train" | "val" | "test" |
-"out_of_source")`. `python -m tools.check_orientation <name>` writes projection
-images for a visual orientation check.
+The selection is deterministic and committed as `data/totalseg_manifest.json`, so
+the splits reproduce without redistributing the scans. Volumes load in canonical
+anatomical orientation; `python -m tools.check_orientation <name>` writes
+projection images to verify it.
 
-## Local 3D Viewer
-
-The web UI uses a local `vtk.js` volume renderer when the local viewer is
-available. Start the server as usual:
+## Setup
 
 ```bash
-python server.py
+python3 -m venv .venv && source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-After a dataset is selected, the browser fetches normalized dataset metadata
-from `/api/datasets/<name>/metadata`, then downloads the binary `float32`
-volume from `/api/datasets/<name>/chunks/<index>`. Metadata includes dimensions,
-spacing, intensity range, orientation/version, byte order, storage order, and
-chunk descriptors. The browser validates the descriptors and reconstructs the
-volume before creating vtk.js image data. Existing NRRD files and the Python
-loader remain the source of truth; the transport avoids requiring NRRD parsing
-in the browser and preserves the loader's orientation and MRI rescaling rules.
-
-Camera interaction and transfer-function changes are browser-owned. vtk.js
-renders these changes locally after the initial volume upload; they do not
-request a new server-rendered frame. The transfer function remains the shared
-24-value vector used by the Python renderer and RL pipeline. Camera state uses
-the renderer-neutral form `position`, `focal_point`, `view_up`, and `zoom`.
-
-If metadata or chunk validation fails, or the local viewer is disabled, the UI
-keeps the existing PNG renderer available through its fallback mode. PNG images
-and image features are legacy compatibility, audit, blind-evaluation, and
-recovery fields. They are not the target visual representation for new local
-viewer preference data.
-
-### Scene transitions
-
-Each committed browser state is logged through `POST /api/scenes/transition`
-as renderer-neutral JSON. A transition links `after.parent_scene_id` to the
-previous `before.scene_id`; returning to an earlier state therefore records an
-explicit branch rather than relying on similar parameters. A typical record
-contains:
-
-```json
-{
-  "scene_id": "web:session-123:scene:7",
-  "parent_scene_id": "web:session-123:scene:6",
-  "session_id": "session-123",
-  "client": "web",
-  "dataset": "ct_cardio",
-  "dataset_version": "sha256:...",
-  "volume": {
-    "dimensions": [512, 512, 300],
-    "spacing": [0.7, 0.7, 1.0],
-    "scalar_type": "float32",
-    "orientation": "dataset-normalized"
-  },
-  "transfer_function": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-  "camera": {
-    "position": [0.0, 0.0, 1.0],
-    "focal_point": [0.0, 0.0, 0.0],
-    "view_up": [0.0, 1.0, 0.0],
-    "zoom": 1.0
-  },
-  "goal": {"target": "bone", "direction": "increase"},
-  "command": {"attribute": "opacity", "target": "bone", "direction": "increase"}
-}
-```
-
-The canonical schema accepts `client` values `web` and `vrui`. Both clients
-share dataset/version, volume, camera, transfer-function, goal, command, and
-parent-link fields. Client-specific details belong in `client_metadata`; VR
-hardware integration is not required for the current web viewer. Scene logs
-are written to `out/scene_transitions.jsonl` and do not contain binary volume
-chunks.
-
-## Reinforcement Learning (v2, in progress)
-
-The previous RL pipeline (a height-only SAC agent trained on `mass_fraction`,
-camera RL, and a reward model on four global image statistics) has been
-removed: its reward did not measure what is visible on screen.
-
-RL v2 trains one goal-conditioned policy for perceptual instructions
-(relative, compound, absolute, show only, brightness) against a per-tissue
-visibility estimate on real CT volumes, then refines it with human A/B
-preferences collected on a dedicated page. Design:
-[`docs/superpowers/specs/2026-09-15-rl-v2-visibility-rlhf-design.md`](docs/superpowers/specs/2026-09-15-rl-v2-visibility-rlhf-design.md).
-
-### Visibility estimate
-
-`visibility.py` estimates, per anatomical class, how much of a transfer
-function's rendered image that class contributes (`vis`), how bright it
-looks (`bright`), and how much of the frame is covered at all (`coverage`) --
-without running VTK. It resamples a volume once per one of the 6 fixed views
-into a front-to-back cube, then composites that cube for a given transfer
-function; this is what the RL reward and observation are computed from,
-since a real VTK render is too slow to call every training step.
-
-Classes come from TotalSegmentator segmentation masks, collapsed into five
-anatomical groups: `skeleton`, `lungs`, `organs`, `muscle`, `vessels` (label
-ids 1-5; id 0, `other`, is everything TotalSegmentator's 117 structures don't
-cover -- fat, skin, bowel contents, the scanner table -- and is the majority
-of the body: only 7-20% of voxels in a typical scan carry any mask at all).
-The four Slicer CTs and the synthetic phantom carry no TotalSegmentator
-labels, so their samples fall back to coarse Hounsfield bands mapped onto the
-same class names (skeleton >= 300 HU, lungs <= -500 HU, organs -30..300 HU);
-muscle and vessels are never populated by the fallback, since they aren't
-separable by intensity alone. `VisibilityModel.label_source` reports which
-source (`"anatomy"` or `"intensity"`) produced a given model's estimate.
-Vessels are anatomically labeled on every TotalSegmentator scan, but only
-stand out as their own structure on a contrast (angiography) scan -- on a
-plain scan they sit at the same HU as the soft tissue around them, so no
-transfer function can visually single them out. "Show me the vessels" is
-therefore only a meaningful RL goal on contrast scans.
-
-`tools/validate_visibility.py` checks the estimate against real VTK renders.
-For each class a volume's label volume carries, it sweeps 10 transfer
-functions that isolate that class (the peak whose single-peak transfer
-function shows the most of it, height 0.02 -> 1.0, the other peaks jittered
-by a seeded generator), and compares the estimate's `vis * bright` against a
-real reference: mean luminance over the 6 views, normal render minus a
-render with that class's label colour blacked out and its opacity left
-untouched, using VTK's label-map masking
-(`vtkGPUVolumeRayCastMapper.SetMaskInput` + `SetMaskTypeToLabelMap`).
-Blackening rather than deleting a class's voxels keeps occlusion the same --
-deleting opens a hole that reveals whatever sits behind, which is not that
-class's actual contribution to the image. Coverage is checked separately, by
-rank agreement between the estimate's `coverage` and the rendered fraction of
-lit pixels over a global opacity sweep (every peak's height swept together).
-A class whose real contribution barely moves across the sampled transfer
-functions (rendered luminance range below 0.002, the renderer's own noise
-floor) can't be validated this way and is reported unvalidated rather than
-failed.
-
-Measured on three TotalSegmentator volumes (`out/visibility_validation.json`;
-Pearson >= 0.7 required per validated class, rank agreement >= 0.9 for
-coverage -- every validated class passed):
-
-| volume | skeleton | organs | muscle | vessels | lungs | coverage (rank agreement) |
-| --- | --- | --- | --- | --- | --- | --- |
-| ts_s1379 (contrast) | 1.000 | 0.995 | 0.981 | 0.992 | 0.804, unvalidated (range 0.0001) | 1.000 |
-| ts_s1337 | 0.999 | 0.994 | 0.948 | 0.989 | 0.349, unvalidated (range 0.0000) | 1.000 |
-| ts_s0454 | 1.000 | 0.969 | 0.999 | 1.000, unvalidated (range 0.0009) | -- (no lungs label present) | 1.000 |
-
-`lungs` and, on the non-contrast `ts_s0454`, `vessels` fell below the
-0.002 noise floor and are unvalidated rather than failed: lungs sit near air
-HU, so a transfer-function peak aimed at them barely changes mean luminance
-against the scan's own dark background, and `ts_s0454`'s vessels are a small,
-non-contrast structure that stays a thin sliver of the rendered image either
-way.
+Run everything from the repository root — the code uses relative paths such as
+`out/` and `static/`. First Whisper use downloads and caches a model.
 
 ## Tests
 
 ```bash
-python -m pytest -q -m "not slow"
-python -m pytest -q
+python -m pytest -q -m "not slow"    # fast suite
+python -m pytest -q                  # everything
 ```
 
-## Project Layout
+## Layout
 
-- Root files: rendering, transfer functions, parser, and web UI server
-- `static/`: web UI and local 3D viewer
-- `rl/`: RL v2 (in progress)
-- `plots/`: training-curve plotting
-- `tools/`: maintenance scripts (e.g. `COMMANDS.md` generator)
-- `data/`: datasets and parser evaluation phrases
-- `docs/`, `slides/`: architecture notes, thesis material, design specs and plans
-- `out/`: runtime state, logs, images, models, and reports
-- `tests/`: automated tests
+| Path | What lives there |
+|---|---|
+| `server.py`, `static/` | web UI, voice, local 3D viewer, collection page |
+| `commands.py`, `asr.py` | instruction parsing (rule + LLM), speech |
+| `transfer.py`, `render.py`, `views.py` | transfer functions, VTK rendering, the six standard views |
+| `visibility.py`, `goals.py` | what a render shows; instructions and how they are scored |
+| `rl/` | environments, the one-shot policy, baselines, evaluation |
+| `datasets.py`, `totalseg.py` | volumes, splits, anatomical labels |
+| `tools/` | data selection, cache building, validation, reports |
+| `docs/` | design specs, plans, and `rl-v2-pipeline.typ` (the full write-up) |
+
+## Reading further
+
+- `docs/rl-v2-pipeline.typ` — the pipeline end to end, every measurement, every
+  caveat, and the reproduction commands.
+- `docs/superpowers/specs/2026-09-15-rl-v2-visibility-rlhf-design.md` — the
+  design this was built from.
+- `docs/architecture.typ`, `docs/rl-math.pdf` — earlier architecture and
+  mathematical notes; they describe the previous pipeline.
