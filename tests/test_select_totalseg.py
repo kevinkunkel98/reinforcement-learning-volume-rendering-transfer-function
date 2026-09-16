@@ -1,7 +1,8 @@
 import pytest
 
 from tools.select_totalseg import (
-    SPLIT_COUNTS, passes_extent_filter, region_for_study_type, select_and_split,
+    CLASS_NAMES, SPLIT_COUNTS, build_label_volume, class_for_structure,
+    passes_extent_filter, region_for_study_type, select_and_split,
 )
 
 
@@ -55,6 +56,46 @@ def test_select_and_split_raises_when_region_too_small():
         select_and_split(_candidates("thorax", 4), {"thorax": (3, 1, 1)}, seed=0)
 
 
+def test_class_for_structure_maps_prefixes():
+    assert class_for_structure("rib_left_4") == "skeleton"
+    assert class_for_structure("lung_upper_lobe_left") == "lungs"
+    assert class_for_structure("aorta") == "vessels"
+    assert class_for_structure("autochthon_left") == "muscle"
+    assert class_for_structure("liver") == "organs"
+    assert class_for_structure("unknown_thing") is None
+
+
+def test_build_label_volume_assigns_ids():
+    shape = (4, 4, 4)
+    mask_a = np.zeros(shape, dtype=bool)
+    mask_a[0, 0, 0] = True
+    mask_b = np.zeros(shape, dtype=bool)
+    mask_b[1, 1, 1] = True
+    mask_c = np.zeros(shape, dtype=bool)
+    mask_c[2, 2, 2] = True
+    masks = {"rib_left_1": mask_a, "liver": mask_b, "unknown": mask_c}
+
+    labels = build_label_volume(masks, shape)
+
+    assert labels.dtype == np.uint8
+    assert labels[0, 0, 0] == CLASS_NAMES.index("skeleton") + 1
+    assert labels[1, 1, 1] == CLASS_NAMES.index("organs") + 1
+    assert labels[2, 2, 2] == 0
+
+
+def test_build_label_volume_later_class_wins_on_overlap():
+    shape = (2, 2, 2)
+    rib = np.zeros(shape, dtype=bool)
+    rib[0, 0, 0] = True
+    aorta = np.zeros(shape, dtype=bool)
+    aorta[0, 0, 0] = True
+    masks = {"rib_left_1": rib, "aorta": aorta}
+
+    labels = build_label_volume(masks, shape)
+
+    assert labels[0, 0, 0] == CLASS_NAMES.index("vessels") + 1
+
+
 import gzip
 import hashlib
 import json
@@ -70,9 +111,20 @@ from tools.select_totalseg import build_manifest
 META_HEADER = "image_id;age;gender;institute;study_type;split;manufacturer;scanner_model;kvp;pathology;pathology_location"
 
 
-def _nifti_gz(shape, zoom):
-    image = nib.Nifti1Image(np.zeros(shape, dtype=np.int16), np.diag([zoom, zoom, zoom, 1.0]))
+def _nifti_gz(shape, zoom, data=None):
+    if data is None:
+        data = np.zeros(shape, dtype=np.int16)
+    image = nib.Nifti1Image(data, np.diag([zoom, zoom, zoom, 1.0]))
     return gzip.compress(image.to_bytes())
+
+
+def _mask_gz(shape, zoom, corner):
+    # A 12x12x12 block (1728 voxels) clears MIN_LABEL_VOXELS, so the mask
+    # counts as "present" the same way a real anatomical structure would.
+    data = np.zeros(shape, dtype=np.uint8)
+    x, y, z = corner
+    data[x:x + 12, y:y + 12, z:z + 12] = 1
+    return _nifti_gz(shape, zoom, data)
 
 
 def _fake_zip(path):
@@ -88,7 +140,10 @@ def _fake_zip(path):
         zf.writestr("meta.csv", "﻿" + "\n".join(meta) + "\n")
         for sid, _, shape in rows:
             zf.writestr(f"{sid}/ct.nii.gz", _nifti_gz(shape, 1.5))
-            zf.writestr(f"{sid}/segmentations/liver.nii.gz", b"not read")
+            zf.writestr(f"{sid}/segmentations/rib_left_1.nii.gz",
+                        _mask_gz(shape, 1.5, (0, 0, 0)))
+            zf.writestr(f"{sid}/segmentations/liver.nii.gz",
+                        _mask_gz(shape, 1.5, (20, 20, 20)))
 
 
 def test_build_manifest_selects_extracts_and_describes(tmp_path):
@@ -113,6 +168,12 @@ def test_build_manifest_selects_extracts_and_describes(tmp_path):
     assert first["sha256"] == hashlib.sha256(Path(first["path"]).read_bytes()).hexdigest()
     assert len(first["sha256"]) == 64
     assert not (out_dir / "s0005").exists()     # pelvis not in split_counts
+    assert os.path.exists(first["labels_path"])
+    assert first["classes_present"] == ["organs", "skeleton"]
+    assert first["contrast"] is False
+    labels = np.asarray(nib.load(first["labels_path"]).dataobj)
+    assert labels[0, 0, 0] == CLASS_NAMES.index("skeleton") + 1
+    assert labels[20, 20, 20] == CLASS_NAMES.index("organs") + 1
     assert manifest["source"]["zenodo_record"] == "10047263"
     assert manifest["selection"]["seed"] == 0
     assert manifest["selection"]["n_candidates"] == 4

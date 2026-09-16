@@ -50,6 +50,67 @@ SPLIT_COUNTS = {
 MIN_INPLANE_MM = 250.0
 MIN_SUPERIOR_INFERIOR_MM = 150.0
 
+# A class counts as "present" in a subject only once its mask clears this many
+# voxels, so stray single-voxel segmentation noise doesn't count as coverage.
+MIN_LABEL_VOXELS = 1000
+
+CLASS_NAMES = ("skeleton", "lungs", "organs", "muscle", "vessels")   # label ids 1..5; 0 = other
+
+CLASS_RULES = {
+    "skeleton": ("rib_", "vertebrae_", "hip_", "femur_", "humerus_", "scapula_",
+                 "clavicula_", "sacrum", "sternum", "skull", "costal_cartilages", "patella",
+                 "tibia", "fibula", "carpal", "metacarpal", "phalanges", "tarsal", "metatarsal"),
+    "lungs": ("lung_",),
+    "organs": ("liver", "spleen", "kidney_", "stomach", "pancreas", "gallbladder", "colon",
+               "small_bowel", "duodenum", "esophagus", "urinary_bladder", "prostate",
+               "adrenal_gland_", "thyroid_gland", "brain", "spinal_cord", "trachea"),
+    "muscle": ("autochthon_", "gluteus_", "iliopsoas_"),
+    "vessels": ("aorta", "heart", "atrial_appendage", "brachiocephalic_", "common_carotid_",
+                "subclavian_", "pulmonary_", "vena_cava", "portal_vein", "iliac_artery",
+                "iliac_vena", "superior_vena_cava", "inferior_vena_cava"),
+}
+
+
+def class_for_structure(structure: str):
+    """Which anatomical class a TotalSegmentator structure belongs to, or None."""
+    for name in CLASS_NAMES:
+        if any(structure.startswith(prefix) or structure == prefix.rstrip("_")
+               for prefix in CLASS_RULES[name]):
+            return name
+    return None
+
+
+def build_label_volume(masks: dict, shape) -> np.ndarray:
+    """Collapse {structure name: boolean mask} into one uint8 label volume.
+
+    Ids are 1..len(CLASS_NAMES) in CLASS_NAMES order, 0 for everything else
+    ("other": fat, skin, bowel contents, the scanner table). Classes later in
+    CLASS_NAMES overwrite earlier ones where masks overlap.
+    """
+    labels = np.zeros(shape, dtype=np.uint8)
+    for index, name in enumerate(CLASS_NAMES, start=1):
+        for structure, mask in masks.items():
+            if class_for_structure(structure) == name:
+                labels[mask] = index
+    return labels
+
+
+def _subject_label_volume(zf, subject_id, shape):
+    """Read every mask of one subject and collapse it into a label volume."""
+    masks = {}
+    prefix = f"{subject_id}/segmentations/"
+    for name in zf.namelist():
+        if not name.startswith(prefix) or not name.endswith(".nii.gz"):
+            continue
+        structure = name[len(prefix):-len(".nii.gz")]
+        if class_for_structure(structure) is None:
+            continue
+        image = nib.Nifti1Image.from_bytes(gzip.decompress(zf.read(name)))
+        mask = np.asarray(image.dataobj) > 0
+        if mask.shape == tuple(shape):
+            masks[structure] = mask
+    return build_label_volume(masks, tuple(shape)), image.affine
+
 
 def region_for_study_type(study_type: str) -> str:
     try:
@@ -140,8 +201,24 @@ def build_manifest(zip_path, out_dir=DEFAULT_OUT_DIR, seed=0, split_counts=SPLIT
             with zf.open(f"{sid}/ct.nii.gz") as src, open(tmp_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
             os.replace(tmp_path, path)
+
+            labels, affine = _subject_label_volume(zf, sid, info[sid]["shape"])
+            labels_path = os.path.join(out_dir, sid, "labels.nii.gz")
+            labels_tmp_path = labels_path + ".tmp"
+            with open(labels_tmp_path, "wb") as f:
+                f.write(gzip.compress(nib.Nifti1Image(labels, affine).to_bytes()))
+            os.replace(labels_tmp_path, labels_path)
+            class_counts = {name: int(np.count_nonzero(labels == index))
+                             for index, name in enumerate(CLASS_NAMES, start=1)}
+            classes_present = sorted(name for name, count in class_counts.items()
+                                     if count >= MIN_LABEL_VOXELS)
+            print(f"  {sid}: " + ", ".join(f"{name}={count}" for name, count in class_counts.items()))
+
             subjects.append({"id": sid, "name": f"ts_{sid}", "split": assignment[sid],
-                             **info[sid], "path": os.path.relpath(path), "sha256": _sha256_file(path)})
+                             **info[sid], "path": os.path.relpath(path), "sha256": _sha256_file(path),
+                             "labels_path": os.path.relpath(labels_path),
+                             "classes_present": classes_present,
+                             "contrast": "angiography" in info[sid]["study_type"].lower()})
     return {
         "source": {
             "dataset": "TotalSegmentator small subset v2.0.1",
