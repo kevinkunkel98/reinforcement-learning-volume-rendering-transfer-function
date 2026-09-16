@@ -355,8 +355,24 @@ change.
 
 ### Environment (`VisibilityTFEnv`)
 
+**Starting transfer function.** RL v2 does not start from `default_params()`.
+Its peaks sit at fat/soft/spongy/bone intensities, and peak centres are not in
+the action space, so lungs (≈ −870 HU) would be permanently unreachable and the
+fat peak no longer corresponds to any class. RL v2 starts from peaks at
+**−800 (lungs), 40 (organs and muscle), 300 (vessels), 900 (skeleton)**.
+Measured on ts_s1379: a narrow peak at −800 HU takes lung visibility from
+0.0003 to 0.055 (≈190×), while the same peak at width 100 collapses the image
+to zero — air outside the body sits at −1000 HU and becomes opaque too, so
+lungs are only reachable through a narrow peak. The chat UI keeps its own
+default transfer function unchanged.
+
+**"Nothing visible" guard.** The reward penalises both failure modes, not just
+an empty frame: coverage below 0.01 (nothing drawn) *and* total class
+visibility below 0.001 while coverage is high (an opaque wall of air hiding
+everything, which the lung experiment above produces).
+
 - **Reset:** training volume chosen uniformly; goal from `sample_goal`; start TF
-  = `default_params()` plus uniform noise ±0.3 on heights and ±0.2 on widths
+  = the RL v2 starting transfer function above, plus uniform noise ±0.3 on heights and ±0.2 on widths
   (normalized units, clipped to [−1, 1]), and one uniform ±0.2 per peak added
   to its r, g, b in unit space (clipped to [0, 1]).
 - **Action (12):** per peak: height, width, brightness, each in [−1, 1], scaled
