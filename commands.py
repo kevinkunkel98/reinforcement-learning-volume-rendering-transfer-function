@@ -275,6 +275,28 @@ def parse_command(text: str, parser: str = "rule", model: str = "qwen2.5:7b") ->
     return parse_command_rule(text)
 
 
+def parse_command_with_meta(text: str, parser: str = "rule", model: str = "qwen2.5:7b"):
+    """`parse_command`, plus which parser actually produced the command.
+
+    `parse_command_llm` falls back to the rule parser whenever Ollama is
+    unreachable or answers with an invalid schema, and only says so on the
+    server's stdout -- so a viewer with the llm toggle on could show a rule
+    parse and call it an LLM one. Returns `(cmd, meta)` with meta =
+    {"parser_requested", "parser_used", "parser_fallback"}, where
+    `parser_fallback` is the reason string when llm was asked for and rule
+    answered, and None otherwise."""
+    meta = {"parser_requested": parser, "parser_used": parser, "parser_fallback": None}
+    if parser != "llm":
+        return parse_command_rule(text), meta
+
+    reasons = []
+    cmd = parse_command_llm(text, model=model, _on_fallback=reasons.append)
+    if reasons:
+        meta["parser_used"] = "rule"
+        meta["parser_fallback"] = reasons[0]
+    return cmd, meta
+
+
 def _peak_center_hu(params: np.ndarray, i: int) -> float:
     return peak_internal(params, i)["center"]
 
@@ -564,6 +586,15 @@ def _validate_cmd(obj) -> bool:
         subs = obj["compound"]
         if not isinstance(subs, list) or not subs:
             return False
+        # A one-clause compound is only a wrapper -- `_normalise_cmd` unwraps
+        # it right after this -- so judge it as the command it will become.
+        # Without this, "show only the lungs" (which qwen2.5:7b returns as a
+        # single-element compound) failed validation, because a compound
+        # sub-command may only be a set/relative clause, and the viewer fell
+        # back to the rule parser on a parse that was already correct.
+        if len(subs) == 1:
+            return _validate_single_cmd(subs[0]) or _validate_set_cmd(subs[0]) \
+                or _validate_relative_cmd(subs[0])
         return all(_validate_set_cmd(sub) or _validate_relative_cmd(sub) for sub in subs)
     if isinstance(obj, dict) and set(obj.keys()) == {"camera"}:
         return _validate_camera_cmd(obj)
@@ -590,7 +621,12 @@ def _log_llm_request(text, model, host, raw_response, parsed_cmd, final_cmd, fal
     })
 
 
-def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = OLLAMA_HOST) -> dict:
+def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = None,
+                       _on_fallback=None) -> dict:
+    # `host` defaults at call time, not at import time, so a test (or a
+    # deployment) that points OLLAMA_HOST somewhere else is honoured by
+    # callers that never pass it explicitly.
+    host = host if host is not None else OLLAMA_HOST
     body = _json.dumps({
         "model": model,
         "system": _SYSTEM_PROMPT,
@@ -624,7 +660,10 @@ def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = OLLAMA_H
     except (URLError, OSError, ValueError, KeyError) as exc:
         print(f"[llm-parser] falling back to rule parser: {exc}")
         final = parse_command_rule(text)
-        _log_llm_request(text, model, host, None, None, final, f"request failed: {exc}")
+        reason = f"request failed: {exc}"
+        _log_llm_request(text, model, host, None, None, final, reason)
+        if _on_fallback:
+            _on_fallback(reason)
         return final
 
     # The model sometimes echoes an alias ("bones") instead of the canonical
@@ -655,7 +694,10 @@ def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = OLLAMA_H
     if not _validate_cmd(cmd):
         print(f"[llm-parser] falling back to rule parser: invalid schema {cmd!r}")
         final = parse_command_rule(text)
-        _log_llm_request(text, model, host, raw_response, cmd, final, f"invalid schema: {cmd!r}")
+        reason = f"invalid schema: {cmd!r}"
+        _log_llm_request(text, model, host, raw_response, cmd, final, reason)
+        if _on_fallback:
+            _on_fallback(reason)
         return final
 
     # Validate first, then unwrap: a one-clause compound is checked as the

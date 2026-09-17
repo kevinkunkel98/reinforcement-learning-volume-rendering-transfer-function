@@ -56,12 +56,11 @@
           </div>
         </div>
 
-        <div id="telemetry">
-          <div class="telem-item" data-tissue="air"><span class="telem-label">LUFT</span><span class="telem-value" id="telem-air">—</span></div>
-          <div class="telem-item" data-tissue="fat"><span class="telem-label">FETT</span><span class="telem-value" id="telem-fat">—</span></div>
+        <div id="telemetry" data-readout="visibility">
+          <div class="telem-item" data-tissue="skeleton"><span class="telem-label">SKELETT</span><span class="telem-value" id="telem-skeleton">—</span></div>
+          <div class="telem-item" data-tissue="lungs"><span class="telem-label">LUNGE</span><span class="telem-value" id="telem-lungs">—</span></div>
           <div class="telem-item" data-tissue="soft"><span class="telem-label">WEICHGEW.</span><span class="telem-value" id="telem-soft">—</span></div>
-          <div class="telem-item" data-tissue="spongy"><span class="telem-label">SPONGIOSA</span><span class="telem-value" id="telem-spongy">—</span></div>
-          <div class="telem-item" data-tissue="bone"><span class="telem-label">KORTIKALIS</span><span class="telem-value" id="telem-bone">—</span></div>
+          <div class="telem-item" data-tissue="vessels"><span class="telem-label">GEFÄSSE</span><span class="telem-value" id="telem-vessels">—</span></div>
         </div>
       </section>
 
@@ -69,15 +68,15 @@
         <div id="messages">
           <div id="empty-state">
             <p>Describe what you want to see.</p>
-            <p class="hint">e.g. "increase opacity for bone strongly"</p>
+            <p class="hint">e.g. "show only the lungs", "a bit less soft tissue", "brighten the bone"</p>
           </div>
         </div>
 
         <div id="composer">
           <div id="toolbar">
             <div id="parser-toggle-group" class="toggle-group" data-toggle-group="parser" role="radiogroup" aria-label="Command parser">
-              <button type="button" class="toggle-item" data-value="rule" data-state="on">rule</button>
-              <button type="button" class="toggle-item" data-value="llm" data-state="off">llm</button>
+              <button type="button" class="toggle-item" data-value="rule" data-state="off">rule</button>
+              <button type="button" class="toggle-item" data-value="llm" data-state="on">llm</button>
             </div>
             <button id="search-toggle-btn" class="toggle" data-active="false" data-tooltip="Hill-climb search">search</button>
             <div id="search-options" hidden>
@@ -97,7 +96,7 @@
                 <span></span><span></span><span></span><span></span><span></span>
               </div>
             </button>
-            <textarea id="text-input" rows="1" placeholder="increase opacity for bone strongly"></textarea>
+            <textarea id="text-input" rows="1" placeholder="a bit less soft tissue"></textarea>
             <button id="send-btn" aria-label="Send" data-tooltip="Send" disabled>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
             </button>

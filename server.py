@@ -30,7 +30,8 @@ from pydantic import BaseModel
 from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 import collect
-from commands import COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command, parse_command
+from commands import (COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command,
+                       parse_command, parse_command_with_meta)
 from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import goals
@@ -53,7 +54,12 @@ AUDIO_DIR = "out/audio"
 # checkpoint: importing this module (and starting the server) must not
 # require a finished training run, and every command after the first pays no
 # reload cost.
-POLICY_PATH = "out/rl_v2/oneshot_v2_seed0/best.zip"
+# v3, not v2: the v2 seeds were trained before the observation fixes (the
+# reachable-ceiling probe sat on the retired band layout's fat peak, and the
+# colour action wrote one scalar to r, g and b). Held-out attainment is
+# indistinguishable between the two (+0.1732 vs +0.1743, p = 0.85), but the
+# viewer should demonstrate the pipeline the thesis describes.
+POLICY_PATH = "out/rl_v2/oneshot_v3_seed0/best.zip"
 _policy_state = {"loaded": False, "policy": None}
 
 
@@ -118,9 +124,45 @@ def _masses(params):
     return {t: opacity_mass(params, lo, hi) for t, (lo, hi) in TISSUE_BANDS.items()}
 
 
+def _class_visibility(params, model_for_volume=visibility.for_volume):
+    """Share of the rendered image each goal class contributes, for the
+    viewer's readout.
+
+    `_masses` measures opacity over the retired fat/air/spongy bands -- peak
+    geometry, not anatomy, and in a vocabulary no instruction can target any
+    more. This is what the policy and the preference collector are scored on
+    instead. Classes this volume cannot support (`vessels` without contrast)
+    report None rather than a 0.0 the viewer would draw as "hidden"."""
+    try:
+        model = model_for_volume(_dataset_name)
+        vis = goals.aggregate(model.features(np.asarray(params, dtype=np.float64)))["vis"]
+        supported = set(goals.goal_classes_for_volume(_dataset_name))
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        print(f"[telemetry] no visibility model for {_dataset_name}: {exc}")
+        return {goal_class: None for goal_class in goals.GOAL_CLASSES}
+    return {goal_class: (float(vis[goal_class]) if goal_class in supported else None)
+            for goal_class in goals.GOAL_CLASSES}
+
+
+_frame_bounds_cache = {"dataset": None, "bounds": None}
+
+
+def _frame_bounds():
+    """The framing every step of this dataset's conversation is rendered in.
+
+    Measured once, from the dataset's *default* transfer function, so a
+    command that hides a tissue doesn't also re-zoom the picture -- the whole
+    point of a before/after pair is that only the tissue changed."""
+    volume, spacing = get_volume()
+    if _frame_bounds_cache["dataset"] != _dataset_name:
+        _frame_bounds_cache["dataset"] = _dataset_name
+        _frame_bounds_cache["bounds"] = render_module.frame_bounds(volume, default_params(), spacing)
+    return _frame_bounds_cache["bounds"]
+
+
 def _render_image_b64(params, camera):
     volume, spacing = get_volume()
-    img = grab(render(volume, params, spacing=spacing, camera=camera))
+    img = grab(render(volume, params, spacing=spacing, camera=camera, frame_bounds=_frame_bounds()))
     buf = io.BytesIO()
     Image.fromarray(img).save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode(), img, buf.getvalue()
@@ -149,7 +191,7 @@ def _scene_event_id(before, after, event_id=None):
 
 
 def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera,
-                  mode="exact", message=None):
+                  mode="exact", message=None, parser_meta=None):
     image_b64, img, png_bytes = _render_image_b64(params, camera)
     image_path = _save_image_file(session_id, f"step_{step_id}", png_bytes)
     return {
@@ -162,10 +204,12 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
         "image_b64": image_b64,
         "image_path": image_path,
         "masses": _masses(params),
+        "class_visibility": _class_visibility(params),
         "features": features(img),
         "search": search,
         "mode": mode,
         "message": message,
+        **(parser_meta or {"parser_requested": None, "parser_used": None, "parser_fallback": None}),
     }
 
 
@@ -301,7 +345,7 @@ class Session:
         return new_params, goal["text"]
 
     def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10, mode=None):
-        cmd = parse_command(text, parser=parser, model=model)  # raises ValueError on failure
+        cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)  # raises ValueError on failure
 
         current_params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
         current_camera = dict(self.history[self.cursor].get("camera", DEFAULT_CAMERA))
@@ -310,7 +354,7 @@ class Session:
             new_camera = apply_camera_command(cmd["camera"], current_camera)
             step = _render_step(current_params, text, cmd, False,
                                  self.history[-1]["id"] + 1, self.session_id, new_camera,
-                                 mode="camera")
+                                 mode="camera", parser_meta=parser_meta)
             self.history = self.history[:self.cursor + 1] + [step]
             self.cursor = len(self.history) - 1
             self.save()
@@ -337,9 +381,14 @@ class Session:
             new_params = apply_command(cmd, current_params)
             actual_mode, search_flag = "exact", False
 
+        if parser_meta["parser_fallback"] and not message:
+            # The viewer asked for the LLM parser and got a rule parse; say so
+            # in the same channel policy-mode fallbacks already use.
+            message = f"LLM parse rejected, used the rule parser -- {parser_meta['parser_fallback']}"
+
         step = _render_step(new_params, text, cmd, search_flag,
                              self.history[-1]["id"] + 1, self.session_id, current_camera,
-                             mode=actual_mode, message=message)
+                             mode=actual_mode, message=message, parser_meta=parser_meta)
         if actual_mode == "exact":
             self._log_command(cmd, current_params, new_params, step)
 

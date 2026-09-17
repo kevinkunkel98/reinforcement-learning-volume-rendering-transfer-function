@@ -718,3 +718,27 @@ def test_llm_request_pins_temperature_and_seed():
     options = captured["body"].get("options", {})
     assert options.get("temperature") == 0
     assert "seed" in options
+
+
+def test_one_clause_compound_holding_a_show_only_is_not_a_fallback(capsys):
+    """qwen2.5:7b answers "show only the lungs" with the show_only clause
+    wrapped in a one-element compound. `_normalise_cmd` unwraps exactly that
+    shape, but validation used to run first and reject it -- a compound
+    sub-command may only be a set/relative clause -- so a correct parse was
+    thrown away and the rule parser silently answered instead."""
+    payload = {"compound": [
+        {"target": ["lungs"], "attribute": None, "direction": "show_only", "strength": None},
+    ]}
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        cmd = parse_command_llm("show only the lungs")
+    assert cmd["direction"] == "show_only"
+    assert cmd["target"] == "lungs" or cmd["target"] == ["lungs"]
+    assert "falling back to rule parser" not in capsys.readouterr().out
+
+
+def test_multi_clause_compound_still_rejects_a_show_only_sub_command():
+    from commands import _validate_cmd
+    assert not _validate_cmd({"compound": [
+        {"target": ["lungs"], "attribute": None, "direction": "show_only", "strength": None},
+        {"target": "skeleton", "attribute": "opacity", "direction": "set", "level": "low"},
+    ]})

@@ -43,6 +43,18 @@ def _visible_bounds(volume: np.ndarray, params: np.ndarray, spacing) -> list | N
     return bounds
 
 
+def frame_bounds(volume: np.ndarray, params: np.ndarray, spacing) -> list | None:
+    """Framing for a whole conversation, measured once.
+
+    `_visible_bounds` depends on the transfer function, so resetting the
+    camera to it on every render re-frames the picture each time a command
+    changes opacity -- the two steps a user wants to compare end up at
+    different zoom and pan. Callers that render a sequence measure this once
+    (from the sequence's starting transfer function) and pass it to `render`
+    as `frame_bounds`, so only the camera commands move the camera."""
+    return _visible_bounds(volume, np.asarray(params, dtype=np.float64), spacing)
+
+
 def _make_mapper(vtk_image):
     global _MAPPER_ANNOUNCED, MAPPER_NAME
     mapper = vtk.vtkGPUVolumeRayCastMapper()
@@ -145,7 +157,8 @@ def _get_pipeline(volume: np.ndarray, spacing):
     return prop, renderer, win
 
 
-def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), camera: dict | None = None) -> vtk.vtkRenderWindow:
+def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), camera: dict | None = None,
+            frame_bounds: list | None = None) -> vtk.vtkRenderWindow:
     prop, renderer, win = _get_pipeline(volume, spacing)
 
     ctf, otf = vector_to_vtk(params)
@@ -167,7 +180,19 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), came
             cam.SetParallelScale(float(cam_state["parallel_scale"]))
     else:
         cam.SetParallelProjection(False)
-        bounds = _visible_bounds(volume, params, spacing)
+        # Azimuth/Elevation/Zoom are *relative* to wherever the camera already
+        # is, and _get_pipeline keeps one renderer (and one camera) alive per
+        # volume -- so without re-seating the camera first, the same camera
+        # dict rendered twice gives two different pictures, the rotation
+        # accumulating by azimuth degrees per render. Seat it on VTK's own
+        # default orientation so a camera dict means one fixed viewpoint.
+        cam.SetPosition(0.0, 0.0, 1.0)
+        cam.SetFocalPoint(0.0, 0.0, 0.0)
+        cam.SetViewUp(0.0, 1.0, 0.0)
+        # A caller-supplied framing wins: it pins the picture across transfer
+        # function changes (see frame_bounds above). Without one, fall back to
+        # framing whatever this transfer function makes visible.
+        bounds = frame_bounds if frame_bounds is not None else _visible_bounds(volume, params, spacing)
         if bounds is not None:
             renderer.ResetCamera(bounds)
         else:

@@ -70,3 +70,64 @@ def test_same_camera_renders_deterministically():
     first = grab(render(volume, params, (1.0, 1.0, 1.0), camera))
     second = grab(render(volume, params, (1.0, 1.0, 1.0), camera))
     assert np.array_equal(first, second)
+
+
+def _camera_state(win):
+    cam = win.GetRenderers().GetFirstRenderer().GetActiveCamera()
+    return np.array(list(cam.GetPosition()) + list(cam.GetFocalPoint()))
+
+
+def test_relative_camera_reframes_with_the_transfer_function_without_frame_bounds():
+    # The behaviour this documents is the problem: with no frame_bounds, the
+    # camera is reset to whatever the *current* transfer function makes
+    # visible, so two steps of one conversation are framed differently and
+    # can't be compared side by side.
+    volume = build_phantom(size=48)
+    everything = default_params()
+    almost_nothing = default_params()
+    for i in range(4):
+        almost_nothing[i * 6 + 2] = -0.98  # crush every peak's height
+    camera = {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}
+
+    wide = _camera_state(render(volume, everything, camera=camera))
+    narrow = _camera_state(render(volume, almost_nothing, camera=camera))
+    assert not np.allclose(wide, narrow)
+
+
+def test_frame_bounds_pins_the_camera_across_transfer_function_changes():
+    volume = build_phantom(size=48)
+    everything = default_params()
+    almost_nothing = default_params()
+    for i in range(4):
+        almost_nothing[i * 6 + 2] = -0.98
+    camera = {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}
+    bounds = render_module.frame_bounds(volume, everything, (1.0, 1.0, 1.0))
+
+    wide = _camera_state(render(volume, everything, camera=camera, frame_bounds=bounds))
+    narrow = _camera_state(render(volume, almost_nothing, camera=camera, frame_bounds=bounds))
+    assert np.allclose(wide, narrow)
+
+
+def test_frame_bounds_still_honours_camera_movement():
+    volume = build_phantom(size=48)
+    params = default_params()
+    bounds = render_module.frame_bounds(volume, params, (1.0, 1.0, 1.0))
+    straight = _camera_state(render(volume, params, camera={"azimuth": 0.0, "elevation": 0.0, "zoom": 1.0},
+                                     frame_bounds=bounds))
+    rotated = _camera_state(render(volume, params, camera={"azimuth": 90.0, "elevation": 0.0, "zoom": 1.0},
+                                    frame_bounds=bounds))
+    assert not np.allclose(straight, rotated)
+
+
+def test_same_camera_dict_renders_the_same_viewpoint_every_time():
+    # render() reuses one renderer per volume and Azimuth/Elevation are
+    # relative, so without re-seating the camera the rotation accumulated:
+    # each command in a conversation quietly spun the volume another 30
+    # degrees, making before/after steps impossible to compare.
+    volume = build_phantom(size=48)
+    params = default_params()
+    camera = {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}
+    first = _camera_state(render(volume, params, camera=camera))
+    for _ in range(3):
+        again = _camera_state(render(volume, params, camera=camera))
+        assert np.allclose(first, again)

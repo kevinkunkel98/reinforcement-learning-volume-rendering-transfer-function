@@ -152,3 +152,38 @@ def test_styles_cover_viewer_loading_error_and_fallback_states():
         assert selector in css
     assert "@media (max-width: 444px)" in css
     assert "min-width: 0" in css
+
+
+def test_telemetry_reads_out_the_four_goal_classes_not_retired_bands():
+    html = read("index.html")
+    for goal_class in ("skeleton", "lungs", "soft", "vessels"):
+        assert f'id="telem-{goal_class}"' in html
+    for retired in ("air", "fat", "spongy", "bone"):
+        assert f'id="telem-{retired}"' not in html
+
+
+def test_app_reads_class_visibility_for_the_telemetry():
+    app = read("app.js")
+    assert "class_visibility" in app
+    assert '"air", "fat"' not in app
+
+
+def test_viewer_parses_with_the_llm_but_applies_the_command_exactly():
+    # Policy mode answers "show only bones" with soft tissue still dominant
+    # (43.1% soft vs 4.9% skeleton on ct_chest); exact application isolates
+    # the class the user named. The policy proposes, it does not execute.
+    app = read("app.js")
+    assert re.search(r"config\s*=\s*\{[^}]*parser:\s*\"llm\"", app)
+    assert re.search(r"config\s*=\s*\{[^}]*mode:\s*\"exact\"", app)
+    html = read("index.html")
+    assert re.search(r'id="policy-toggle-btn"[^>]*data-active="false"', html)
+
+
+def test_viewer_leaves_the_camera_alone_when_a_step_does_not_move_it():
+    viewer = read("viewer.js")
+    assert "lastRequestedCamera" in viewer
+    assert "sameCameraRequest" in viewer
+    # the guard must run before the camera is re-seated
+    guard = viewer.index("if (sameCameraRequest(value)) return;")
+    reseat = viewer.index("appliedCameraState = toRendererCamera(value);", guard)
+    assert guard < reseat

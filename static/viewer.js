@@ -37,6 +37,7 @@
     renderWindow = undefined;
     renderer = undefined;
     camera = undefined;
+    lastRequestedCamera = null;
     volume = undefined;
     mapper = undefined;
     imageData = undefined;
@@ -193,8 +194,26 @@
     };
   }
 
+  // The camera the *server* last asked for. A step whose camera is unchanged
+  // (every transfer-function command -- only camera commands and dataset
+  // switches change it) must leave the camera exactly where it is, including
+  // wherever the user has dragged it to: re-seating it would re-frame the
+  // picture that the user is trying to compare against the previous step.
+  let lastRequestedCamera = null;
+
+  function sameCameraRequest(value) {
+    try {
+      return lastRequestedCamera !== null
+        && JSON.stringify(value) === JSON.stringify(lastRequestedCamera);
+    } catch (err) {
+      return false;
+    }
+  }
+
   function setCamera(value) {
     if (!camera || !value) return;
+    if (sameCameraRequest(value)) return;
+    lastRequestedCamera = JSON.parse(JSON.stringify(value));
     appliedCameraState = toRendererCamera(value);
     renderer.resetCamera();
     cameraBaseScale = camera.getParallelScale();

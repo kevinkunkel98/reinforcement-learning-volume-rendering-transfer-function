@@ -16,6 +16,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.responses import Response
 
+import goals
 import server
 from rl.baselines import CONTROLLABLE
 from server import Session
@@ -591,3 +592,61 @@ def test_command_records_its_mode():
     search_state = s.command("increase opacity for bone strongly", parser="rule",
                               search=True, steps=3)
     assert search_state["current"]["mode"] == "search"
+
+
+# --- viewer telemetry and parser provenance (RL v2 vocabulary) -------------
+# The viewer's readout and its parser badge have to speak the same four goal
+# classes the policy does. `masses` (opacity over the retired fat/air/spongy
+# bands) stays in the step for the search tests above, but it is no longer
+# what the UI shows.
+
+def test_step_reports_visibility_for_the_four_goal_classes():
+    s = _fresh_session()
+    vis = s.state()["current"]["class_visibility"]
+    assert set(vis) == set(goals.GOAL_CLASSES)
+    # every supported class reports a number; unsupported ones (vessels on a
+    # volume without contrast) report None rather than a misleading 0.0
+    assert vis["skeleton"] is not None and vis["skeleton"] >= 0.0
+
+
+def test_step_visibility_tracks_a_command_that_hides_a_class():
+    s = _fresh_session()
+    before = s.state()["current"]["class_visibility"]["skeleton"]
+    after = s.command("show only lungs", parser="rule")["current"]["class_visibility"]["skeleton"]
+    assert after < before
+
+
+def test_llm_parser_fallback_is_reported_to_the_viewer(monkeypatch):
+    # Ollama down: the command still executes via the rule parser, but the UI
+    # must be able to say so instead of silently claiming an LLM parse.
+    monkeypatch.setattr("commands.OLLAMA_HOST", "http://127.0.0.1:1", raising=False)
+    s = _fresh_session()
+    step = s.command("more bone", parser="llm")["current"]
+    assert step["parser_requested"] == "llm"
+    assert step["parser_used"] == "rule"
+    assert step["parser_fallback"]
+
+
+def test_rule_parser_reports_itself_without_a_fallback_reason():
+    s = _fresh_session()
+    step = s.command("more bone", parser="rule")["current"]
+    assert step["parser_requested"] == "rule"
+    assert step["parser_used"] == "rule"
+    assert step["parser_fallback"] is None
+
+
+def test_policy_path_points_at_a_checkpoint_trained_on_the_corrected_observation():
+    # v2 was trained with the lung ceiling probed at the retired band layout's
+    # fat peak and with the colour action collapsing r=g=b (fixed in 62b5720 /
+    # cc167af). The viewer must not demo that checkpoint when a v3 one exists.
+    assert "oneshot_v3" in server.POLICY_PATH
+
+
+def test_framing_is_measured_once_per_dataset_not_per_command():
+    # The viewer's before/after comparison only works if the camera holds
+    # still while the transfer function changes.
+    server._frame_bounds_cache["dataset"] = None
+    s = _fresh_session()
+    first = server._frame_bounds()
+    s.command("show only lungs", parser="rule")
+    assert server._frame_bounds() is first

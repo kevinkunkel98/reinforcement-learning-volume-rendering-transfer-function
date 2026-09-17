@@ -2,7 +2,14 @@ const state = { current: null, cursor: 0, total: 1, dataset: null };
 // mode is the source of truth for which of the three ways a command is
 // answered ("exact" | "search" | "policy"); `search` is kept in sync for the
 // request body / UI toggle state the search-options panel reads.
-const config = { parser: "rule", search: false, mode: "exact" };
+// The LLM parser is the default (it handles phrasings the rule grammar can't,
+// and falls back to the rule parser when Ollama is down), but the command is
+// APPLIED exactly by default, not answered by the policy. Measured on
+// "show only bones" (ct_chest): exact isolates it -- skeleton 16.7%, lungs
+// 0.0% -- while the policy leaves soft tissue dominant at 43.1% and the
+// skeleton at 4.9%. The policy's held-out attainment is +0.169; it proposes a
+// direction, it does not execute an instruction. Policy stays one click away.
+const config = { parser: "llm", search: false, mode: "exact" };
 
 const el = (id) => document.getElementById(id);
 const messagesEl = el("messages");
@@ -134,15 +141,21 @@ async function refresh(data) {
     await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera);
   }
 
-  updateTelemetry(state.current.masses);
+  updateTelemetry(state.current.class_visibility);
   return data;
 }
 
-function updateTelemetry(masses) {
-  if (!masses) return;
-  for (const tissue of ["air", "fat", "soft", "spongy", "bone"]) {
-    const v = masses[tissue];
-    el(`telem-${tissue}`).textContent = v === undefined ? "—" : v.toFixed(1);
+// The readout is per-goal-class visibility (share of the rendered image), the
+// same quantity the policy is scored on -- not opacity mass over the retired
+// fat/air/spongy bands. A class this volume cannot support (vessels without
+// contrast) arrives as null and stays a dash.
+function updateTelemetry(classVisibility) {
+  if (!classVisibility) return;
+  for (const goalClass of ["skeleton", "lungs", "soft", "vessels"]) {
+    const v = classVisibility[goalClass];
+    const node = el(`telem-${goalClass}`);
+    if (!node) continue;
+    node.textContent = (v === undefined || v === null) ? "—" : `${(v * 100).toFixed(1)}%`;
   }
 }
 
@@ -167,13 +180,21 @@ function appendMessage(step) {
   text.textContent = step.cmd_text;
   div.appendChild(text);
 
-  if (step.search || step.mode === "policy") {
+  const tagNames = [];
+  if (step.mode === "policy") tagNames.push("policy");
+  else if (step.search) tagNames.push("search");
+  // parser_used, not the toggle: an llm request that fell back must not be
+  // labelled "llm".
+  if (step.parser_used) tagNames.push(step.parser_used);
+  if (tagNames.length) {
     const tags = document.createElement("div");
     tags.className = "msg-tags";
-    const t = document.createElement("span");
-    t.className = "tag";
-    t.textContent = step.mode === "policy" ? "policy" : "search";
-    tags.appendChild(t);
+    for (const name of tagNames) {
+      const t = document.createElement("span");
+      t.className = "tag";
+      t.textContent = name;
+      tags.appendChild(t);
+    }
     div.appendChild(tags);
   }
 
