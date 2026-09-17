@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 import pytest
 
+import commands
 from commands import parse_command_rule, apply_command, parse_command_llm
 from transfer import default_params, peak_internal, N_PEAKS
 
@@ -251,12 +252,26 @@ def test_parse_command_llm_compound_response():
 
 
 def test_parse_command_llm_compound_normalizes_alias_targets(capsys):
+    """A one-clause compound is folded to the bare command the rule parser
+    would produce for the same sentence (`_normalise_cmd`), with its alias
+    target ("bones") still normalised to the canonical class."""
     payload = {"compound": [
         {"target": "bones", "attribute": "opacity", "direction": "set", "level": "low"},
     ]}
     with patch("commands.urlopen", return_value=_fake_response(payload)):
         cmd = parse_command_llm("low opacity for the bones")
-    assert cmd["compound"][0]["target"] == "skeleton"
+    assert cmd["target"] == "skeleton"
+    assert "falling back to rule parser" not in capsys.readouterr().out
+
+
+def test_parse_command_llm_normalizes_alias_targets_inside_a_real_compound(capsys):
+    payload = {"compound": [
+        {"target": "bones", "attribute": "opacity", "direction": "set", "level": "low"},
+        {"target": "pulmonary", "attribute": "opacity", "direction": "set", "level": "high"},
+    ]}
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        cmd = parse_command_llm("low opacity for the bones, high for the pulmonary tissue")
+    assert [sub["target"] for sub in cmd["compound"]] == ["skeleton", "lungs"]
     assert "falling back to rule parser" not in capsys.readouterr().out
 
 
@@ -635,3 +650,71 @@ def test_parse_width_and_centre_commands_still_parse_unchanged():
     assert cmd["target"] == "skeleton"
     assert cmd["attribute"] == "center"
     assert cmd["direction"] == "increase"
+
+
+# --- LLM parser normalisation and determinism ---------------------------------
+
+def test_single_element_compound_is_unwrapped():
+    """The rule parser already folds a one-clause sentence to a bare command
+    (`parse_command_rule`: `subcommands[0] if len(subcommands) == 1`), and the
+    LLM is asked for the same shape but often wraps one clause in a compound
+    anyway. Downstream code -- goals.goal_from_command, the eval harness --
+    then sees a different shape for a semantically identical instruction."""
+    got = commands._normalise_cmd({"compound": [
+        {"target": "skeleton", "attribute": "opacity",
+         "direction": "increase", "strength": "moderately"}]})
+
+    assert got == {"target": "skeleton", "attribute": "opacity",
+                   "direction": "increase", "strength": "moderately"}
+
+
+def test_multi_element_compound_is_left_alone():
+    cmd = {"compound": [
+        {"target": "skeleton", "attribute": "opacity",
+         "direction": "increase", "strength": "moderately"},
+        {"target": "soft", "attribute": "opacity",
+         "direction": "decrease", "strength": "slightly"}]}
+
+    assert commands._normalise_cmd(cmd) == cmd
+
+
+def test_plain_command_is_left_alone():
+    cmd = {"target": "lungs", "attribute": "opacity",
+           "direction": "decrease", "strength": "slightly"}
+
+    assert commands._normalise_cmd(cmd) == cmd
+
+
+def test_llm_request_pins_temperature_and_seed():
+    """Parsing must be reproducible: the same instruction has to yield the same
+    command every time, or the viewer answers a spoken command differently on
+    a retry and the parser evaluation is not reproducible. Ollama's default
+    temperature is 0.8."""
+    captured = {}
+
+    class _FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return json.dumps({"response": json.dumps(
+                {"target": "skeleton", "attribute": "opacity",
+                 "direction": "increase", "strength": "moderately"})}).encode()
+
+    def _fake_urlopen(req, timeout=None):
+        captured["body"] = json.loads(req.data.decode())
+        return _FakeResponse()
+
+    original = commands.urlopen
+    commands.urlopen = _fake_urlopen
+    try:
+        commands.parse_command_llm("make the bone pop")
+    finally:
+        commands.urlopen = original
+
+    options = captured["body"].get("options", {})
+    assert options.get("temperature") == 0
+    assert "seed" in options

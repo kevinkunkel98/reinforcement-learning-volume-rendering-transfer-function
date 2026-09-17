@@ -457,6 +457,10 @@ increase). If something is hiding, dominating, or should be reduced, that is
 Never output numeric values. "reset" has target=null, attribute=null, strength=null.
 "show_only" has strength=null.
 
+The four directions above are the only ones that exist. There is no "hide"
+direction: hiding a class completely is "decrease" with strength "strongly",
+and showing only some classes is "show_only" naming the ones to keep.
+
 When the user gives two or more instructions in one sentence, respond with a
 compound command instead: a list of single-class sub-commands, each either a
 relative change (with "direction": "increase"|"decrease" and "strength", like
@@ -540,6 +544,21 @@ def _validate_single_cmd(obj) -> bool:
     return True
 
 
+def _normalise_cmd(obj):
+    """A compound of one sub-command is that sub-command.
+
+    `parse_command_rule` already folds a single clause this way, but the LLM
+    frequently wraps one clause in a compound regardless of the prompt. Left
+    alone, the same instruction reaches `goals.goal_from_command` in two
+    different shapes depending on which parser produced it.
+    """
+    if isinstance(obj, dict) and set(obj.keys()) == {"compound"}:
+        subs = obj["compound"]
+        if isinstance(subs, list) and len(subs) == 1 and isinstance(subs[0], dict):
+            return subs[0]
+    return obj
+
+
 def _validate_cmd(obj) -> bool:
     if isinstance(obj, dict) and set(obj.keys()) == {"compound"}:
         subs = obj["compound"]
@@ -582,6 +601,13 @@ def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = OLLAMA_H
         # idle unload means any gap between commands pays an 8-10s reload cost
         # on the next one, which is what made this feel slow in practice.
         "keep_alive": "30m",
+        # Parsing must be reproducible: the same instruction has to produce the
+        # same command every time, or the viewer answers a retry differently
+        # and a parser evaluation cannot be repeated. Ollama's default is 0.8,
+        # which made the same phrase parse correctly on one run and wrongly on
+        # the next -- two of the seven "failures" in the first evaluation of
+        # this parser were only sampling noise.
+        "options": {"temperature": 0, "seed": 0},
     }).encode()
     req = Request(f"{host}/api/generate", data=body,
                    headers={"Content-Type": "application/json"})
@@ -632,5 +658,9 @@ def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = OLLAMA_H
         _log_llm_request(text, model, host, raw_response, cmd, final, f"invalid schema: {cmd!r}")
         return final
 
+    # Validate first, then unwrap: a one-clause compound is checked as the
+    # compound the model actually returned, and only then folded to the shape
+    # the rule parser would have produced for the same sentence.
+    cmd = _normalise_cmd(cmd)
     _log_llm_request(text, model, host, raw_response, cmd, cmd, None)
     return cmd
