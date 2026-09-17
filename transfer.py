@@ -79,23 +79,19 @@ def anatomical_params() -> np.ndarray:
 
 
 def default_params() -> np.ndarray:
-    """One peak seeded near fat/soft/spongy/bone, ascending heights."""
-    specs = [
-        ("fat", 60.0, 0.05, (0.95, 0.90, 0.60)),
-        ("soft", 40.0, 0.15, (0.85, 0.35, 0.35)),
-        ("spongy", 80.0, 0.30, (0.90, 0.80, 0.60)),
-        ("bone", 280.0, 0.60, (0.95, 0.95, 0.90)),
-    ]
-    params = np.zeros(TOTAL_PARAMS, dtype=np.float64)
-    for i, (tissue, width, height, rgb) in enumerate(specs):
-        base = i * PARAMS_PER_PEAK
-        params[base + 0] = _from_range(TISSUE_HU[tissue], *CENTER_RANGE)
-        params[base + 1] = _from_range(width, *WIDTH_RANGE)
-        params[base + 2] = _from_unit(height)
-        params[base + 3] = _from_unit(rgb[0])
-        params[base + 4] = _from_unit(rgb[1])
-        params[base + 5] = _from_unit(rgb[2])
-    return params
+    """The transfer function everything starts from: the anatomical layout.
+
+    This used to be a separate band layout (peaks at fat/soft/spongy/bone),
+    which left the viewer starting from a different geometry than the policy
+    was trained in. Since the peak *centres are fixed* -- no command and no
+    policy action moves them -- a viewer session seeded with the band layout
+    gave peak 0 a centre at fat (-100 HU) while the policy, trained on
+    `anatomical_params`, treats peak 0 as lungs (-800 HU). "More lungs" in
+    policy mode then adjusted the fat peak and could not touch the lungs at
+    all. The parser retired fat/air/spongy as tissue names for the same
+    reason, so there is no longer anything the band layout is for.
+    """
+    return anatomical_params()
 
 
 def _opacity_and_color_at(params: np.ndarray, hu: np.ndarray):
