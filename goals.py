@@ -21,19 +21,23 @@ import math
 import numpy as np
 
 import totalseg
+import transfer
 from transfer import PARAMS_PER_PEAK, TOTAL_PARAMS, CENTER_RANGE, WIDTH_RANGE, _from_range, _from_unit
 
 GOAL_CLASSES = ("skeleton", "lungs", "soft", "vessels")
 MEASURED_FOR_GOAL = {"skeleton": ("skeleton",), "lungs": ("lungs",),
                      "soft": ("organs", "muscle"), "vessels": ("vessels",)}
 
-# RL v2 peak order, by the class each peak is seeded for
-PEAK_CENTRES_HU = {"lungs": -800.0, "soft": 40.0, "vessels": 300.0, "skeleton": 900.0}
-PEAK_INDEX = {"lungs": 0, "soft": 1, "vessels": 2, "skeleton": 3}
-PEAK_WIDTHS_HU = {"lungs": 60.0, "soft": 80.0, "vessels": 80.0, "skeleton": 280.0}
-PEAK_HEIGHTS = {"lungs": 0.05, "soft": 0.15, "vessels": 0.3, "skeleton": 0.6}
-PEAK_COLOURS = {"lungs": (0.55, 0.70, 0.95), "soft": (0.85, 0.35, 0.35),
-                "vessels": (0.90, 0.45, 0.40), "skeleton": (0.95, 0.95, 0.90)}
+# RL v2 peak order, by the class each peak is seeded for. Defined in transfer,
+# because visibility.solo_max must probe at these same centres and cannot
+# import goals (goals imports visibility). Keeping a second copy here is what
+# let solo_max drift onto the retired band layout's fat peak and report every
+# volume's lungs as unreachable.
+PEAK_CENTRES_HU = transfer.ANATOMICAL_CENTRES_HU
+PEAK_INDEX = transfer.ANATOMICAL_PEAK_INDEX
+PEAK_WIDTHS_HU = transfer.ANATOMICAL_WIDTHS_HU
+PEAK_HEIGHTS = transfer.ANATOMICAL_HEIGHTS
+PEAK_COLOURS = transfer.ANATOMICAL_COLOURS
 
 EPSILON = 1e-3           # floor inside log10, so "invisible" is finite
 KAPPA = 1.5              # brightness weight: 0.2 brightness ~= 0.3 log10 visibility
@@ -45,18 +49,11 @@ ABSOLUTE_LEVEL = {"low": 0.1, "medium": 0.4, "high": 0.8}                      #
 
 
 def starting_params() -> np.ndarray:
-    """RL v2's starting transfer function: one peak per goal class."""
-    params = np.zeros(TOTAL_PARAMS, dtype=np.float64)
-    for goal_class, index in PEAK_INDEX.items():
-        base = index * PARAMS_PER_PEAK
-        params[base + 0] = _from_range(PEAK_CENTRES_HU[goal_class], *CENTER_RANGE)
-        params[base + 1] = _from_range(PEAK_WIDTHS_HU[goal_class], *WIDTH_RANGE)
-        params[base + 2] = _from_unit(PEAK_HEIGHTS[goal_class])
-        r, g, b = PEAK_COLOURS[goal_class]
-        params[base + 3] = _from_unit(r)
-        params[base + 4] = _from_unit(g)
-        params[base + 5] = _from_unit(b)
-    return params
+    """RL v2's starting transfer function: one peak per goal class.
+
+    The same layout `visibility.solo_max` probes at, so "what the instruction
+    asks for" and "what this volume can reach" are measured in one geometry."""
+    return transfer.anatomical_params()
 
 
 def aggregate(features: dict) -> dict:

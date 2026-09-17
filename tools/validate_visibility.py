@@ -39,7 +39,7 @@ import render
 import totalseg
 import views
 import visibility
-from transfer import CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, _from_unit, default_params, vector_to_vtk
+from transfer import CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, _from_unit, anatomical_params, vector_to_vtk
 
 CONTRIBUTION_FLOOR = 0.002       # luminance range below this is renderer noise
 DEFAULT_THRESHOLD = 0.7          # Pearson correlation required per validated class
@@ -81,7 +81,7 @@ def _best_peak(model: "visibility.VisibilityModel", name: str) -> int:
     sweep_params sweeps to isolate that class."""
     best_peak, best_vis = 0, -1.0
     for peak in range(N_PEAKS):
-        params = default_params().copy()
+        params = anatomical_params().copy()
         for i in range(N_PEAKS):
             params[i * PARAMS_PER_PEAK + 2] = 1.0 if i == peak else -1.0
         vis = model.features(params)["vis"][name]
@@ -95,7 +95,7 @@ def sweep_params(rng: np.random.Generator, peak: int, n: int = N_TRIALS) -> list
     other peaks' height/width jittered by `rng`."""
     functions = []
     for height in np.linspace(0.02, 1.0, n):
-        params = default_params().copy()
+        params = anatomical_params().copy()
         for i in range(N_PEAKS):
             if i == peak:
                 params[i * PARAMS_PER_PEAK + 2] = _from_unit(float(height))
@@ -113,7 +113,7 @@ def sweep_global_opacity(n: int = N_TRIALS) -> list:
     for the coverage check -- no single class is isolated here."""
     functions = []
     for height in np.linspace(0.0, 1.0, n):
-        params = default_params().copy()
+        params = anatomical_params().copy()
         for i in range(N_PEAKS):
             params[i * PARAMS_PER_PEAK + 2] = _from_unit(float(height))
         functions.append(params)

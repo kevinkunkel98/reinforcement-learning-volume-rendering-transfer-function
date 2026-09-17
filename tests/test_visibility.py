@@ -220,3 +220,29 @@ def test_for_volume_builds_once_then_loads(tmp_path, monkeypatch):
     second = visibility.for_volume("fake")
     assert len(calls) == 1
     assert first.features(_params([0, 0, 0, 0.5])) == second.features(_params([0, 0, 0, 0.5]))
+
+
+def test_solo_max_probes_at_the_anatomical_peak_centres():
+    """solo_max is the ceiling used for absolute levels ("high lungs" = 0.8 x
+    solo_max) and fed to the policy as the achievable ceiling. It probes with
+    single-peak transfer functions, and those must sit at the centres the rest
+    of the system uses (transfer.anatomical_params: lungs -800 HU), not at the
+    retired band layout's (default_params: peak 0 at -100 HU, i.e. fat). With
+    the fat centre, a volume made entirely of lung parenchyma reports a lung
+    ceiling of ~0 and every lung instruction becomes unsatisfiable.
+    """
+    n = 24
+    volume = np.full((n, n, n), -800.0, dtype=np.float32)   # lung parenchyma throughout
+    labels = np.full((n, n, n), visibility.CLASSES.index("lungs") + 1, dtype=np.uint8)
+    model = _model(volume, labels=labels)
+
+    assert model.solo_max("lungs") > 0.1, "lungs unreachable: probe peak is not at lung HU"
+
+
+def test_solo_max_still_finds_bone():
+    n = 24
+    volume = np.full((n, n, n), 900.0, dtype=np.float32)
+    labels = np.full((n, n, n), visibility.CLASSES.index("skeleton") + 1, dtype=np.uint8)
+    model = _model(volume, labels=labels)
+
+    assert model.solo_max("skeleton") > 0.1

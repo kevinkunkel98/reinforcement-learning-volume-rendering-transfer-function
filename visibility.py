@@ -24,7 +24,7 @@ import os
 import numpy as np
 import torch
 
-from transfer import CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, default_params, _opacity_and_color_at
+from transfer import CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, anatomical_params, _opacity_and_color_at
 from views import N_VIEWS, view_directions
 
 CLASSES = ("skeleton", "lungs", "organs", "muscle", "vessels")
@@ -188,7 +188,7 @@ class VisibilityModel:
         if name not in self._solo_max:
             best = 0.0
             for peak in range(N_PEAKS):
-                params = default_params().copy()
+                params = anatomical_params().copy()
                 for i in range(N_PEAKS):
                     params[i * PARAMS_PER_PEAK + 2] = 1.0 if i == peak else -1.0
                 best = max(best, self.features(params)["vis"][name])

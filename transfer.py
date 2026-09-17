@@ -48,6 +48,36 @@ def peak_internal(params: np.ndarray, i: int) -> dict:
     }
 
 
+# The anatomical peak layout: one peak per goal class, at the Hounsfield value
+# of that tissue. This is the layout the whole RL v2 system works in -- the
+# policy moves each peak's height, width and colour while the *centres stay
+# fixed* -- so anything asking "what can this transfer function reach" must
+# probe here. `default_params` below is the retired intensity-band layout
+# (fat/soft/spongy/bone) kept for the viewer's reset; its peak 0 sits at fat
+# (-100 HU), which is nowhere near lung parenchyma (-800 HU).
+ANATOMICAL_PEAK_INDEX = {"lungs": 0, "soft": 1, "vessels": 2, "skeleton": 3}
+ANATOMICAL_CENTRES_HU = {"lungs": -800.0, "soft": 40.0, "vessels": 300.0, "skeleton": 900.0}
+ANATOMICAL_WIDTHS_HU = {"lungs": 60.0, "soft": 80.0, "vessels": 80.0, "skeleton": 280.0}
+ANATOMICAL_HEIGHTS = {"lungs": 0.05, "soft": 0.15, "vessels": 0.3, "skeleton": 0.6}
+ANATOMICAL_COLOURS = {"lungs": (0.55, 0.70, 0.95), "soft": (0.85, 0.35, 0.35),
+                      "vessels": (0.90, 0.45, 0.40), "skeleton": (0.95, 0.95, 0.90)}
+
+
+def anatomical_params() -> np.ndarray:
+    """One peak per goal class at its tissue's Hounsfield value."""
+    params = np.zeros(TOTAL_PARAMS, dtype=np.float64)
+    for goal_class, index in ANATOMICAL_PEAK_INDEX.items():
+        base = index * PARAMS_PER_PEAK
+        params[base + 0] = _from_range(ANATOMICAL_CENTRES_HU[goal_class], *CENTER_RANGE)
+        params[base + 1] = _from_range(ANATOMICAL_WIDTHS_HU[goal_class], *WIDTH_RANGE)
+        params[base + 2] = _from_unit(ANATOMICAL_HEIGHTS[goal_class])
+        r, g, b = ANATOMICAL_COLOURS[goal_class]
+        params[base + 3] = _from_unit(r)
+        params[base + 4] = _from_unit(g)
+        params[base + 5] = _from_unit(b)
+    return params
+
+
 def default_params() -> np.ndarray:
     """One peak seeded near fat/soft/spongy/bone, ascending heights."""
     specs = [
