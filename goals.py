@@ -228,6 +228,41 @@ def goal_classes_for_volume(name: str) -> list:
     return supported
 
 
+# A goal class is worth asking about only if a transfer function can actually
+# make it visible. `model.solo_max` is that ceiling: the share of the image the
+# class reaches under the best single-peak transfer function. Below this, the
+# whole reachable range is thinner than a rater can see -- on ts_s1371 the lung
+# ceiling is 0.00033, so "a bit more lungs" (x1.4) asks someone to rank a
+# change of about 0.01% of the pixels. Measurable, invisible, unanswerable.
+#
+# 0.005 = half a percent of the image. Surveyed over the 30 selected volumes it
+# excludes lungs on 26 of them (median ceiling 0.0015) and vessels on 3, while
+# keeping skeleton and soft everywhere (medians 0.121 and 0.073) -- i.e. it
+# removes what no rater could judge and nothing else. This dataset is
+# abdomen/pelvis-heavy, so most scans hold only clipped lung bases behind an
+# opaque body wall; it is a property of the selection, not of the measurement.
+VISIBLE_CEILING = 0.005
+
+
+def class_ceiling(model, goal_class: str) -> float:
+    """The most of `goal_class` any single-peak transfer function can show,
+    summed over the measured classes behind it (`soft` is organs + muscle, so
+    neither alone need clear the threshold)."""
+    return sum(model.solo_max(m) for m in MEASURED_FOR_GOAL[goal_class])
+
+
+def reachable_goal_classes(name: str, model) -> list:
+    """`goal_classes_for_volume` narrowed to the classes a render can actually
+    show on this volume (ceiling >= `VISIBLE_CEILING`).
+
+    Instruction sampling uses this rather than label presence: a class can be
+    labelled in the volume and still be impossible to see, which produces
+    instructions no method can satisfy and no rater can judge -- they pollute
+    preference collection and drag every held-out score toward zero equally.
+    """
+    return [c for c in goal_classes_for_volume(name) if class_ceiling(model, c) >= VISIBLE_CEILING]
+
+
 def _class_word(goal_class: str, rng) -> str:
     return rng.choice(CLASS_WORDS[goal_class])
 
@@ -330,7 +365,7 @@ def sample_instruction(name, model, start_features, rng) -> dict:
     turned into a requested change from the start state, so "high skeleton"
     means the same thing on every volume.
     """
-    classes = goal_classes_for_volume(name)
+    classes = reachable_goal_classes(name, model)
     kind = _sample_kind(rng)
     if kind == "relative":
         targets, text = _sample_relative(classes, rng)
@@ -435,14 +470,31 @@ def goal_from_command(command: dict, model, start_features: dict, volume: str = 
 
     Raises ValueError for commands that are not goals (width, centre, camera,
     reset -- those are applied exactly by `commands.apply_command`), and for
-    goals the volume cannot support (vessels on a plain scan, a class the
-    scan does not contain).
+    goals the volume cannot support: vessels on a plain scan, a class the scan
+    does not contain, and a class the scan contains but cannot show (see
+    `reachable_goal_classes` -- asking for lungs on an abdomen scan).
     """
+    goal = _goal_from_command(command, model, start_features, volume)
+    if volume is not None:
+        for goal_class in goal["targets"]:
+            ceiling = class_ceiling(model, goal_class)
+            if ceiling < VISIBLE_CEILING:
+                raise ValueError(
+                    f"{goal_class!r} cannot be shown on volume {volume!r} -- the most any "
+                    f"transfer function reaches is {ceiling:.5f} of the image "
+                    f"(below {VISIBLE_CEILING}), so the change would be invisible")
+    return goal
+
+
+def _goal_from_command(command: dict, model, start_features: dict, volume) -> dict:
+    """`goal_from_command` without the reachability check, which the public
+    entry point applies once to the finished targets so a compound command is
+    checked as a whole."""
     if "camera" in command:
         raise ValueError(_NOT_A_GOAL.format(what="a camera command"))
 
     if "compound" in command:
-        sub_goals = [goal_from_command(sub, model, start_features, volume)
+        sub_goals = [_goal_from_command(sub, model, start_features, volume)
                      for sub in command["compound"]]
         targets = {}
         for sub_goal in sub_goals:

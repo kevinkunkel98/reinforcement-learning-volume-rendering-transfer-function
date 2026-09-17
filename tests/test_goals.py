@@ -442,3 +442,104 @@ def test_goal_from_command_class_absent_from_volume_raises(monkeypatch):
     cmd = {"target": "lungs", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
     with pytest.raises(ValueError):
         goals.goal_from_command(cmd, model, start, volume="fake")
+
+
+# --- reachability gate --------------------------------------------------------
+
+class _PerClassModel:
+    """A model whose solo_max differs per measured class, so a goal class can
+    be labelled-present yet unreachable -- the real case on this dataset, where
+    26 of 30 volumes are abdomen/pelvis scans whose lungs are clipped bases
+    behind an opaque body wall (ceiling ~0.0015, i.e. 0.15% of the image)."""
+
+    def __init__(self, per_class):
+        self._per_class = per_class
+
+    def solo_max(self, name):
+        return self._per_class.get(name, 0.0)
+
+
+def _reachable_everything():
+    return {m: 0.1 for m in visibility.CLASSES}
+
+
+def test_unreachable_class_is_not_a_goal_class(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    per_class = _reachable_everything()
+    per_class["lungs"] = 0.0003          # below VISIBLE_CEILING: invisible in a render
+    model = _PerClassModel(per_class)
+
+    got = goals.reachable_goal_classes("ts_fake", model)
+
+    assert "lungs" not in got
+    assert "skeleton" in got and "soft" in got
+
+
+def test_reachable_classes_match_goal_classes_when_everything_is_visible(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _PerClassModel(_reachable_everything())
+
+    assert goals.reachable_goal_classes("ts_fake", model) == goals.goal_classes_for_volume("ts_fake")
+
+
+def test_reachability_sums_the_measured_classes_behind_a_goal_class(monkeypatch):
+    """`soft` is organs + muscle: neither alone need clear the threshold."""
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    per_class = {m: 0.0 for m in visibility.CLASSES}
+    per_class["skeleton"] = 0.1
+    per_class["organs"] = goals.VISIBLE_CEILING * 0.6
+    per_class["muscle"] = goals.VISIBLE_CEILING * 0.6
+    model = _PerClassModel(per_class)
+
+    assert "soft" in goals.reachable_goal_classes("ts_fake", model)
+
+
+def test_sampled_instructions_never_name_an_unreachable_class(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    per_class = _reachable_everything()
+    per_class["lungs"] = 0.0003
+    model = _PerClassModel(per_class)
+    rng = np.random.default_rng(0)
+    start = {"vis": {c: 0.01 for c in goals.GOAL_CLASSES},
+             "bright": {c: 0.5 for c in goals.GOAL_CLASSES}, "coverage": 0.5}
+
+    for _ in range(200):
+        instruction = goals.sample_instruction("ts_fake", model, start, rng)
+        assert "lungs" not in instruction["targets"], instruction["text"]
+        assert "lung" not in instruction["text"], instruction["text"]
+
+
+def test_goal_from_command_rejects_a_class_the_scan_cannot_show(monkeypatch):
+    """Typing "more lungs" on an abdomen scan must say so rather than build a
+    goal nothing can reach -- otherwise policy mode silently returns a transfer
+    function that cannot possibly satisfy the request."""
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    per_class = _reachable_everything()
+    per_class["lungs"] = 0.0003
+    model = _PerClassModel(per_class)
+    start = {"vis": {c: 0.01 for c in goals.GOAL_CLASSES},
+             "bright": {c: 0.5 for c in goals.GOAL_CLASSES}, "coverage": 0.5}
+    command = {"target": "lungs", "attribute": "opacity",
+               "direction": "increase", "strength": "slightly"}
+
+    with pytest.raises(ValueError, match="lungs"):
+        goals.goal_from_command(command, model, start, volume="ts_fake")
+
+
+def test_goal_from_command_allows_a_class_the_scan_can_show(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _PerClassModel(_reachable_everything())
+    start = {"vis": {c: 0.01 for c in goals.GOAL_CLASSES},
+             "bright": {c: 0.5 for c in goals.GOAL_CLASSES}, "coverage": 0.5}
+    command = {"target": "skeleton", "attribute": "opacity",
+               "direction": "increase", "strength": "slightly"}
+
+    got = goals.goal_from_command(command, model, start, volume="ts_fake")
+
+    assert "skeleton" in got["targets"]
