@@ -33,6 +33,17 @@ instructions over the 20 training volumes):
 
 ## Why the old numbers cannot be reused
 
+> **Correction, written after the run.** This section was wrong. The episode
+> set did *not* change: B3, B4 and B5 score bit-identically (to four decimals,
+> over 200 episodes) before and after the fixes, which deterministic search
+> baselines could not do on different episodes. The gate removes nothing on the
+> test split once the ceiling is measured correctly, so the sampled
+> instructions coincide. The old and new figures are therefore directly
+> comparable, and the decomposition of the published +0.194 in the README
+> depends on that. The reasoning below stands as the precaution it was — it
+> cost one extra evaluation arm and would have been necessary had the gate
+> bitten — but its premise did not hold.
+
 `rl.vis_eval.fixed_episodes` is deterministic given the code, but the sampler
 changed, so the episode set it produces now is not the one behind the recorded
 +0.194 / +0.218 / +0.660. Comparing a new figure against those would confound
