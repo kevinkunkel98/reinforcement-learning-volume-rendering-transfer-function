@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 
 from tools.flag_assisted_rows import flag_rows, main
 
@@ -68,3 +70,29 @@ def test_cli_rewrite_is_atomic_and_preserves_all_rows(tmp_path, monkeypatch):
     assert [row["timestamp"] for row in written] == [row["timestamp"] for row in rows]
     # No stray temp file left behind in the directory.
     assert list(tmp_path.iterdir()) == [pref_path]
+
+
+def test_cli_rewrite_preserves_file_permissions(tmp_path, monkeypatch):
+    # tempfile.NamedTemporaryFile creates its file at mode 0600 regardless of
+    # umask, and os.replace does not carry over the destination's permissions
+    # -- so a naive rewrite silently narrows the world-readable preference
+    # file to owner-only on every run. The rewrite must go through a fixed
+    # path + ".tmp" opened with plain open(), which respects umask instead.
+    pref_path = tmp_path / "vis_preferences.jsonl"
+    with open(pref_path, "w") as f:
+        f.write(json.dumps(_row("2026-09-17T13:20:00")) + "\n")
+    os.chmod(pref_path, 0o644)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "flag_assisted_rows.py",
+            "--path", str(pref_path),
+            "--start", "2026-09-17T13:00:00",
+            "--end", "2026-09-17T16:00:00",
+        ],
+    )
+    main()
+
+    mode = stat.S_IMODE(os.stat(pref_path).st_mode)
+    assert mode == 0o644

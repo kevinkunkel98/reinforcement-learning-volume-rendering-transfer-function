@@ -10,7 +10,6 @@ import argparse
 import datetime
 import json
 import os
-import tempfile
 
 PREF_PATH = "out/vis_preferences.jsonl"
 
@@ -42,13 +41,15 @@ def main():
         rows = [json.loads(line) for line in f if line.strip()]
     flagged = flag_rows(rows, args.start, args.end)
 
-    # Written through a temporary file in the same directory: a half-written
-    # preference file would lose judgments that cannot be re-collected.
-    directory = os.path.dirname(os.path.abspath(args.path))
-    with tempfile.NamedTemporaryFile("w", dir=directory, delete=False) as tmp:
+    # Written through path + ".tmp" then os.replace, same as collect_images.py
+    # and visibility.py: a half-written preference file would lose judgments
+    # that cannot be re-collected. Plain open() (unlike NamedTemporaryFile,
+    # which always creates at 0600) respects umask, so the world-readable
+    # file doesn't get quietly narrowed to owner-only on every run.
+    temporary = args.path + ".tmp"
+    with open(temporary, "w") as f:
         for row in flagged:
-            tmp.write(json.dumps(row) + "\n")
-        temporary = tmp.name
+            f.write(json.dumps(row) + "\n")
     os.replace(temporary, args.path)
     print(f"{sum(r['assisted'] for r in flagged)}/{len(flagged)} rows flagged assisted")
 
