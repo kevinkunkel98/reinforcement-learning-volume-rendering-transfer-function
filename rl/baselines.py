@@ -42,6 +42,27 @@ def _controllable_dims() -> tuple:
 CONTROLLABLE = _controllable_dims()
 
 
+def apply_controllable(start_params: np.ndarray, action) -> np.ndarray:
+    """`start_params` with each controllable group set to its action value.
+
+    A group's value is its *mean* -- the same quantity the observation reports
+    for it (`rl.oneshot_env.build_observation`'s `controllable`), so an action
+    round-trips through the observation unchanged. Each index keeps its offset
+    from that mean, which matters only for the (r, g, b) group: the offsets are
+    the peak's hue. Writing the scalar into all three channels instead (the
+    original decode) forced r = g = b, so every policy render came out grey
+    while the baselines -- which add a delta and so keep their offsets -- stayed
+    coloured. A rater could then tell which candidate was the policy's at a
+    glance, which is fatal for a blind preference comparison.
+    """
+    params = np.asarray(start_params, dtype=np.float64).copy()
+    for group, value in zip(CONTROLLABLE, action):
+        offset = float(np.mean([params[i] for i in group]))
+        for index in group:
+            params[index] = float(value) + (params[index] - offset)
+    return np.clip(params, -1.0, 1.0)
+
+
 def _nearest_key(value: float, table: dict) -> str:
     """The key of `table` whose value is closest to abs(value) -- recovers
     the strength/level word a sampled instruction's numeric delta came

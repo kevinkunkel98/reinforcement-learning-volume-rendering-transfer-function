@@ -124,21 +124,32 @@ def test_action_writes_parameters_directly_not_a_delta(monkeypatch):
 
     env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
 
+    # A group's value is its mean (what the observation reports for it), so an
+    # action of 0 lands the group at 0 regardless of where it started.
     for group in CONTROLLABLE:
-        for index in group:
-            assert env._params[index] == pytest.approx(0.0)
+        assert float(np.mean([env._params[i] for i in group])) == pytest.approx(0.0)
 
 
-def test_nonzero_action_is_written_verbatim_into_every_group_index(monkeypatch):
+def test_nonzero_action_sets_each_group_mean_and_keeps_the_peak_coloured(monkeypatch):
+    """The action sets each group's mean; within the (r, g, b) group the
+    channel offsets around that mean -- the peak's hue -- survive. Writing the
+    scalar into all three channels instead made every policy render grey, which
+    identified the policy's candidate on sight during preference collection
+    (see `rl.baselines.apply_controllable`)."""
     env = _make_env(monkeypatch, volume_ids=("fake_a",))
     env.reset(seed=0)
-    action = np.linspace(-1.0, 1.0, ACTION_SIZE, dtype=np.float32)
+    # Clear of ±1 so no colour channel saturates -- clipping one would shift
+    # its group's mean off the action value (`test_large_actions_are_clipped`).
+    action = np.linspace(-0.4, 0.4, ACTION_SIZE, dtype=np.float32)
 
     env.step(action)
 
     for value, group in zip(action, CONTROLLABLE):
-        for index in group:
-            assert env._params[index] == pytest.approx(float(value))
+        got = [env._params[i] for i in group]
+        assert float(np.mean(got)) == pytest.approx(float(value), abs=1e-6)
+        start = [env._start_params[i] for i in group]
+        if max(start) - min(start) > 1e-9:
+            assert max(got) - min(got) > 1e-9, "peak went grey"
 
 
 def test_large_actions_are_clipped_to_unit_range(monkeypatch):

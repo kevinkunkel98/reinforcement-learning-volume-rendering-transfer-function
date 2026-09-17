@@ -22,7 +22,7 @@ from gymnasium import spaces
 
 import goals
 import visibility
-from rl.baselines import CONTROLLABLE
+from rl.baselines import CONTROLLABLE, apply_controllable
 
 OBSERVATION_SIZE = 57   # 16 goal + 16 histogram + 4 log10 visibility + 4 brightness + 4 log10 solo_max ceiling
                          # + 12 start parameters + 1 coverage
@@ -175,10 +175,7 @@ class OneShotEnv(gym.Env):
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
-        params = self._start_params.copy()
-        for group, value in zip(CONTROLLABLE, action):
-            for index in group:
-                params[index] = float(value)
+        params = apply_controllable(self._start_params, action)
         self._params = params
 
         raw_features = self._model.features(params)

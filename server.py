@@ -36,7 +36,7 @@ from evaluate import jsonl_append, objective
 import goals
 import render as render_module
 from render import features, grab, render
-from rl.baselines import CONTROLLABLE
+from rl.baselines import CONTROLLABLE, apply_controllable
 from rl.oneshot_env import build_observation
 from search import propose_step, resize_step
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
@@ -297,10 +297,7 @@ class Session:
         observation = build_observation(goal["goal"], model.histogram, start_agg, solo_max_log, controllable)
 
         action = _predict_action(policy, observation)
-        new_params = current_params.copy()
-        for group, value in zip(CONTROLLABLE, action):
-            for index in group:
-                new_params[index] = float(value)
+        new_params = apply_controllable(current_params, action)
         return new_params, goal["text"]
 
     def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10, mode=None):

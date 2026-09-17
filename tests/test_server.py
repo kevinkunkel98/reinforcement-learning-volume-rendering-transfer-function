@@ -477,7 +477,10 @@ def ts_session(monkeypatch):
 
 def test_policy_mode_applies_the_policys_action(ts_session):
     s = ts_session
-    action = np.linspace(-0.9, 0.9, len(CONTROLLABLE))
+    # Stays clear of ±1 so no colour channel saturates: a peak's channels sit
+    # at their hue offsets around the group mean, and clipping one of them
+    # would shift that mean off the action value (see the clipping test).
+    action = np.linspace(-0.4, 0.4, len(CONTROLLABLE))
     s.policy_provider = lambda: _StubPolicy(action)
 
     before_params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
@@ -487,8 +490,9 @@ def test_policy_mode_applies_the_policys_action(ts_session):
     assert state["current"]["message"] is None
     params = np.array(state["current"]["params"], dtype=np.float64)
     for group, value in zip(CONTROLLABLE, action):
-        for index in group:
-            assert params[index] == pytest.approx(float(value))
+        # Each group lands on the action value as its mean; the (r, g, b)
+        # group keeps its channel offsets so the render stays coloured.
+        assert float(np.mean([params[i] for i in group])) == pytest.approx(float(value), abs=1e-6)
     controllable_indices = {i for group in CONTROLLABLE for i in group}
     for i in range(len(before_params)):
         if i not in controllable_indices:

@@ -19,7 +19,7 @@ import os
 import numpy as np
 
 import goals
-from rl.baselines import BASELINES, CONTROLLABLE
+from rl.baselines import BASELINES, CONTROLLABLE, apply_controllable
 from rl.oneshot_env import build_observation
 
 SOURCES = ("policy", "policy", "B1_current_executor", "B3_hill_climb_10", "B5_occlusion_rule", "perturbation")
@@ -45,11 +45,7 @@ def _observation_for(model, start_params: np.ndarray, instruction: dict, start_a
 
 
 def _apply_action(start_params: np.ndarray, action: np.ndarray) -> np.ndarray:
-    params = start_params.copy()
-    for group, value in zip(CONTROLLABLE, action):
-        for index in group:
-            params[index] = float(value)
-    return params
+    return apply_controllable(start_params, action)
 
 
 def _predict(policy, observation: np.ndarray, rng: np.random.Generator, deterministic: bool) -> np.ndarray:

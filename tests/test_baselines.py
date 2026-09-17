@@ -223,3 +223,51 @@ def test_every_baseline_returns_valid_params():
         assert result.shape == (24,), name
         assert np.all(np.isfinite(result)), name
         assert np.all(result >= -1.0) and np.all(result <= 1.0), name
+
+
+def test_apply_controllable_sets_each_group_to_the_action_value():
+    """A single-index group (width, height) takes the action value exactly --
+    the behaviour every caller relied on before colour was separated out."""
+    start = goals.starting_params()
+    action = np.linspace(-1.0, 1.0, len(baselines.CONTROLLABLE))
+    params = baselines.apply_controllable(start, action)
+    for group, value in zip(baselines.CONTROLLABLE, action):
+        if len(group) == 1:
+            assert params[group[0]] == pytest.approx(value)
+
+
+def test_apply_controllable_keeps_each_peak_coloured():
+    """The (r, g, b) group is one action value meaning the peak's *brightness*.
+    Writing that scalar into all three channels makes every render grey, which
+    told a rater at a glance which candidate came from the policy -- the
+    collected pairs were not blind. The channel offsets around the group mean
+    are the peak's hue and must survive."""
+    start = goals.starting_params()
+    action = np.zeros(len(baselines.CONTROLLABLE))
+    params = baselines.apply_controllable(start, action)
+    for peak in range(transfer.N_PEAKS):
+        base = peak * transfer.PARAMS_PER_PEAK
+        start_rgb = [start[base + 3], start[base + 4], start[base + 5]]
+        got_rgb = [params[base + 3], params[base + 4], params[base + 5]]
+        if max(start_rgb) - min(start_rgb) > 1e-9:
+            assert max(got_rgb) - min(got_rgb) > 1e-9, f"peak {peak} went grey"
+        offset = np.mean(start_rgb)
+        for start_channel, got_channel in zip(start_rgb, got_rgb):
+            assert got_channel == pytest.approx(start_channel - offset, abs=1e-9)
+
+
+def test_apply_controllable_round_trips_through_the_observation():
+    """What the observation reports for a group (its mean) is what an action
+    of that value reproduces, so the policy's action space is unchanged."""
+    start = goals.starting_params()
+    action = np.linspace(-0.4, 0.4, len(baselines.CONTROLLABLE))
+    params = baselines.apply_controllable(start, action)
+    got = [float(np.mean([params[i] for i in group])) for group in baselines.CONTROLLABLE]
+    assert got == pytest.approx(list(action), abs=1e-9)
+
+
+def test_apply_controllable_clips_to_the_parameter_range():
+    start = goals.starting_params()
+    action = np.full(len(baselines.CONTROLLABLE), 1.0)
+    params = baselines.apply_controllable(start, action)
+    assert params.min() >= -1.0 and params.max() <= 1.0
