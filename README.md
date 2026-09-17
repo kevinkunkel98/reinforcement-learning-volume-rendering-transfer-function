@@ -80,33 +80,38 @@ per structure. The policy sees the instruction, the scan's intensity histogram,
 what is currently visible and what is *achievable* on this scan, and outputs a
 transfer function in a single forward pass.
 
-> **These numbers are being re-measured and should not be quoted.** They were
-> produced before four defects were found (see `git log`): the policy's renders
-> were forced grey, instructions were sampled without checking the scan could
-> show the tissue, the reachable-ceiling probe sat on the wrong peak, and the
-> viewer started from a different peak layout than the policy was trained on.
-> The third of those fed the policy's own observation, so the checkpoints below
-> were trained on a wrong input. The evaluation episode set changed with the
-> fix, so these figures are not comparable to the re-run either; both the old
-> and new checkpoints will be scored on identical episodes.
-
-Measured on 200 instructions over six patients it never saw:
+Measured on 200 instructions over six patients it never saw, median over three
+training seeds:
 
 | Method | Evaluations used | Median attainment | Improved |
 |---|---|---|---|
 | hill-climb (thorough) | 200 | +0.660 | 100 % |
-| **policy + 3 refinements** | **4** | **+0.218** | 69 % |
+| **policy + 3 refinements** | **4** | **+0.230** | 71 % |
 | hill-climb (cheap) | 10 | +0.205 | 90 % |
-| **policy alone** | **0** | **+0.194** | 67 % |
+| **policy alone** | **0** | **+0.169** | 69 % |
 | do nothing | 0 | 0.000 | — |
-| today's rule-based executor | 0 | −0.020 | 37 % |
-| random | 0 | −0.024 | 44 % |
+| today's rule-based executor | 0 | −0.022 | 36 % |
+| random | 0 | −0.028 | 43 % |
+| occlusion heuristic | 0 | −0.150 | 33 % |
 
 Attainment is 1 when the instruction is satisfied, 0 when nothing changed,
 negative when the result got worse. The policy beats every non-search baseline at
 p < 0.001, and a learned proposal plus three refinement steps edges past cheap
-search at less than half the cost. It is not yet as *reliable* as search (67 % vs
+search at less than half the cost. It is not yet as *reliable* as search (71 % vs
 90 % of instructions improved) — that gap is the honest headline.
+
+An earlier version of this table reported +0.194 for the policy alone. That
+number was inflated by two defects found since, and the correction is worth
+recording. Scored on the *same* 200 episodes, the same checkpoint gives +0.194
+with the observation and colour decode it was trained with, +0.167 once the
+reachable-ceiling channel in its observation is measured at the right peak, and
++0.158 once its action stops collapsing every peak's colour to grey. Retraining
+on the corrected observation recovers +0.169 — no better than the old
+checkpoint scored under the same corrected conditions
+(paired Wilcoxon p = 0.85, three seeds), which suggests that ceiling channel
+earns less of its place in the observation than assumed. See
+`docs/experiments/2026-09-16-retrain-after-measurement-fixes.md`, written
+before the run.
 
 ```bash
 python -m rl.oneshot_train --timesteps 150000 --seed 0 --out out/rl_v2/seed0
