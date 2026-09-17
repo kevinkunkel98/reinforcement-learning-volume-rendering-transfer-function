@@ -56,12 +56,17 @@ It is validated against VTK by rendering each state twice: once normally, once
 with one structure's *colour* blacked out and its opacity untouched. The
 difference is exactly that structure's contribution.
 
-| | skeleton | organs | muscle | vessels | coverage |
-|---|---|---|---|---|---|
-| correlation with real renders | **1.00** | 0.97–0.99 | 0.95–1.00 | 0.99 | 1.00 |
+| | skeleton | lungs | organs | muscle | vessels | coverage |
+|---|---|---|---|---|---|---|
+| correlation with real renders | 0.89–0.99 | 0.69–0.97 | 0.94–1.00 | 0.92–0.97 | 0.98–0.99 | 1.00 |
 
-Lungs sit below the renderer's noise floor and are reported as unvalidated rather
-than quietly counted — see `docs/rl-v2-pipeline.typ` for the caveats that belong
+Measured over six volumes. Lungs were previously reported here as unvalidated,
+"below the renderer's noise floor". That was wrong, and the cause is worth
+stating: the probe that decides how much of a class a transfer function can
+reach was built from the retired intensity-band layout, whose first peak sits
+at fat (−100 HU) rather than lung parenchyma (−800 HU). Measured through the
+correct peak, lungs validate like any other class on five of six volumes
+(0.69 on the sixth). See `docs/rl-v2-pipeline.typ` for the caveats that belong
 with every number here.
 
 ```bash
@@ -74,6 +79,16 @@ An instruction becomes a target: a requested change in visibility and brightness
 per structure. The policy sees the instruction, the scan's intensity histogram,
 what is currently visible and what is *achievable* on this scan, and outputs a
 transfer function in a single forward pass.
+
+> **These numbers are being re-measured and should not be quoted.** They were
+> produced before four defects were found (see `git log`): the policy's renders
+> were forced grey, instructions were sampled without checking the scan could
+> show the tissue, the reachable-ceiling probe sat on the wrong peak, and the
+> viewer started from a different peak layout than the policy was trained on.
+> The third of those fed the policy's own observation, so the checkpoints below
+> were trained on a wrong input. The evaluation episode set changed with the
+> fix, so these figures are not comparable to the re-run either; both the old
+> and new checkpoints will be scored on identical episodes.
 
 Measured on 200 instructions over six patients it never saw:
 
