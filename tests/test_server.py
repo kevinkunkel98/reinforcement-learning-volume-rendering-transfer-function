@@ -513,7 +513,7 @@ def test_policy_mode_camera_command_still_moves_camera(ts_session):
 
 def test_policy_mode_without_checkpoint_falls_back_to_exact_and_says_so():
     s = _fresh_session()
-    # The default policy_provider looks for out/rl_v2/oneshot_v2_seed0/best.zip
+    # The default policy_provider looks for out/rl_v2/oneshot_v3_seed0/best.zip
     # relative to cwd; this test's cwd (tmp_path, via _isolate_cwd) has none.
     state = s.command("increase opacity for bone strongly", mode="policy")
 
@@ -551,10 +551,12 @@ def ct_chest_session(monkeypatch):
     test's `_load_policy()` call (e.g. the "no checkpoint" test above) may
     have already cached a `None` policy from a cwd with no checkpoint."""
     import datasets
+    import policy
     monkeypatch.setattr(datasets, "DATA_DIR", os.path.join(_REPO_ROOT, "data"))
-    monkeypatch.setattr(server, "POLICY_PATH", os.path.join(_REPO_ROOT, "out/rl_v2/oneshot_v2_seed0/best.zip"))
-    server._policy_state["loaded"] = False
-    server._policy_state["policy"] = None
+    # policy.py owns the path now, so patch it there -- patching the re-export
+    # on `server` would leave the loader reading the unpatched original.
+    monkeypatch.setattr(policy, "POLICY_PATH", os.path.join(_REPO_ROOT, "out/rl_v2/oneshot_v3_seed0/best.zip"))
+    policy.reset_cache()
     original_dataset = server._dataset_name
     s = _fresh_session()
     s.switch_dataset("ct_chest")
@@ -562,8 +564,7 @@ def ct_chest_session(monkeypatch):
         yield s
     finally:
         server.set_dataset(original_dataset)
-        server._policy_state["loaded"] = False
-        server._policy_state["policy"] = None
+        policy.reset_cache()
 
 
 def test_policy_mode_on_ct_chest_produces_a_real_policy_answer(ct_chest_session):
@@ -650,3 +651,16 @@ def test_framing_is_measured_once_per_dataset_not_per_command():
     first = server._frame_bounds()
     s.command("show only lungs", parser="rule")
     assert server._frame_bounds() is first
+
+
+def test_collector_and_viewer_load_the_same_checkpoint():
+    # These were separate constants until 2026-09-17, and they drifted: the
+    # viewer moved to v3 when the observation fixes landed and the collector
+    # kept sampling v2, so every preference pair compared candidates from the
+    # superseded checkpoint.
+    import collect
+    import policy
+
+    assert server.POLICY_PATH == policy.POLICY_PATH
+    assert collect.POLICY_PATH == policy.POLICY_PATH
+    assert "oneshot_v3" in policy.POLICY_PATH

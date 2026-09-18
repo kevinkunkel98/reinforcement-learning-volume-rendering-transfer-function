@@ -30,6 +30,7 @@ import visibility
 from collect_images import grid_data_url
 from datasets import _dataset_version, volumes_for_split
 from evaluate import jsonl_append
+import policy as policy_module
 from rl.candidates import anchor_items, sample_item
 
 PREF_PATH = "out/vis_preferences.jsonl"
@@ -41,21 +42,11 @@ REPEAT_RATE = 0.10          # share of items that are a repeat of an earlier one
 REPEAT_MIN_GAP = 20         # a repeat is shown only >= this many items after the original
 ANCHOR_RATE = 0.20          # share of items drawn from the shared anchor pool (roughly one in five)
 
-POLICY_PATH = "out/rl_v2/oneshot_v2_seed0/best.zip"
-_policy_state = {"loaded": False, "policy": None}
-
-
-def _load_policy():
-    """The trained one-shot policy, loaded from `POLICY_PATH` on first use
-    and cached after -- lazily, so the page still works (falling back to the
-    non-policy sources, see `rl.candidates.sample_item`) before or without a
-    finished training run."""
-    if not _policy_state["loaded"]:
-        _policy_state["loaded"] = True
-        if os.path.exists(POLICY_PATH):
-            from stable_baselines3 import SAC
-            _policy_state["policy"] = SAC.load(POLICY_PATH)
-    return _policy_state["policy"]
+# Re-exported so existing callers and tests keep working; `policy.py` owns the
+# value. These were two separate constants until they drifted apart -- see that
+# module's docstring.
+POLICY_PATH = policy_module.POLICY_PATH
+_load_policy = policy_module.load_policy
 
 
 def _to_displayed(raw: dict) -> dict:

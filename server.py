@@ -35,6 +35,7 @@ from commands import (COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, a
 from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import goals
+import policy as policy_module
 import render as render_module
 from render import features, grab, render
 from rl.baselines import CONTROLLABLE, apply_controllable
@@ -59,17 +60,11 @@ AUDIO_DIR = "out/audio"
 # colour action wrote one scalar to r, g and b). Held-out attainment is
 # indistinguishable between the two (+0.1732 vs +0.1743, p = 0.85), but the
 # viewer should demonstrate the pipeline the thesis describes.
-POLICY_PATH = "out/rl_v2/oneshot_v3_seed0/best.zip"
-_policy_state = {"loaded": False, "policy": None}
-
-
-def _load_policy():
-    if not _policy_state["loaded"]:
-        _policy_state["loaded"] = True
-        if os.path.exists(POLICY_PATH):
-            from stable_baselines3 import SAC
-            _policy_state["policy"] = SAC.load(POLICY_PATH)
-    return _policy_state["policy"]
+# `policy.py` owns the checkpoint path; these are re-exports so the existing
+# call sites and tests keep working.
+POLICY_PATH = policy_module.POLICY_PATH
+_policy_state = policy_module._state
+_load_policy = policy_module.load_policy
 
 
 def _predict_action(policy, observation: np.ndarray) -> np.ndarray:
