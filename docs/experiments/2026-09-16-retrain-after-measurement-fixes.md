@@ -172,3 +172,64 @@ n = 3 seeds. With this much seed-to-seed variance, only a large effect would
 be detectable; "no difference" here means "no difference we could see", not
 "no difference". More seeds would settle the lung trend (p = 0.081) one way or
 the other, and that is a good use of a GPU cluster.
+
+---
+
+## Addendum, 2026-09-17: this experiment's measurement was stale
+
+Every number above was produced by a batch job that started before the ceiling
+fix in `62b5720` landed (22:48 on 2026-09-16) and wrote its result files at
+03:25-03:26 the next morning. Python had already imported the pre-fix
+`goals.py`/`visibility.py`, so the whole batch scored on the code it loaded, not
+the code in the tree. The files' timestamps say otherwise, which is how this went
+unnoticed for a day.
+
+Confirmed by checking out `a0b009a` (the commit before the fix) into a worktree
+and re-scoring the same v3 seed-0 checkpoint against it: median +0.142,
+per-kind mean for absolute instructions -22.2 -- reproducing the stored
++0.164 / -23.5 almost exactly, while the current code gives +0.231 / +0.35 on the
+identical episodes.
+
+### What the conclusion becomes
+
+Re-measured on the corrected pipeline, same checkpoints, same 200 held-out
+episodes:
+
+| | seed-averaged median | per-seed |
+|---|---|---|
+| v2 (pre-fix observation) | +0.2008 | 0.193 / 0.247 / 0.249 |
+| v3 (corrected observation) | +0.2863 | 0.231 / 0.307 / 0.275 |
+
+Paired Wilcoxon over seed-averaged per-episode attainment: **p = 0.0064**, v3
+ahead on 59 % of episodes. The pre-registered prediction that retraining would
+help was therefore right, and the null reported above was an artefact.
+
+Per instruction kind, the gain lands where the mechanism predicts:
+
+| kind | v2 | v3 | delta |
+|---|---|---|---|
+| absolute | +0.366 | +0.489 | +0.122 |
+| brightness | +0.345 | +0.411 | +0.066 |
+| relative | +0.185 | +0.239 | +0.054 |
+| compound | +0.017 | +0.055 | +0.038 |
+| show_only | +0.164 | +0.181 | +0.017 |
+
+Absolute instructions are the ones whose targets are set from the reachable
+ceiling, and they gain most from the channel that `62b5720` fixed. The reading
+recorded above -- that the log10 reachable-ceiling channel "is doing less work in
+the observation than assumed" -- is withdrawn. It does the work; the measurement
+could not see it.
+
+### Caveat that still stands
+
+Three checkpoints per arm. The p-value is a paired test over 200 episodes, not
+over training runs, so it speaks to consistency across instructions rather than
+across seeds. The honest sentence is: on these seeds, the corrected observation
+improves median attainment by about 0.086, concentrated in absolute instructions.
+
+### What changed so this cannot recur
+
+`provenance.py` records the git commit, whether the tree was dirty, and a
+fingerprint of the *imported* scoring modules into every result file, captured at
+import time rather than write time. `rl/vis_eval.py` prints a staleness banner
+when a result's fingerprint no longer matches the code on disk.

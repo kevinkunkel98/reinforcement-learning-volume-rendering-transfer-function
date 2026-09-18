@@ -1,4 +1,4 @@
-# Status — 2026-09-17
+# Status — 2026-09-17 (updated 21:50)
 
 MVP due in ~4 days. The software is essentially built; the thesis argument
 depends on data that does not exist yet.
@@ -23,19 +23,24 @@ Median over three seeds:
 
 | Method | Evaluations | Median attainment | Improved |
 |---|---|---|---|
-| hill-climb (thorough) | 200 | +0.660 | 100 % |
-| **policy + 3 refinements** | **4** | **+0.230** | 71 % |
-| hill-climb (cheap) | 10 | +0.205 | 90 % |
-| **policy alone** | **0** | **+0.169** | 69 % |
+| hill-climb (thorough) | 200 | +0.730 | 100 % |
+| **policy + 3 refinements** | **4** | **+0.316** | 76 % |
+| **policy alone** | **0** | **+0.275** | 73 % |
+| hill-climb (cheap) | 10 | +0.263 | 93 % |
 | do nothing | 0 | 0.000 | — |
-| rule-based executor | 0 | −0.022 | 36 % |
-| random | 0 | −0.028 | 43 % |
-| occlusion heuristic | 0 | −0.150 | 33 % |
+| rule-based executor | 0 | −0.022 | 37 % |
+| random | 0 | −0.040 | 39 % |
+| occlusion heuristic | 0 | −0.191 | 30 % |
 
-The claim that survives: a learned proposal plus three refinements beats
-10-evaluation search at 4 evaluations, and the policy beats every non-search
-baseline at p < 0.001. Search is still both better and more reliable; the
-argument for a policy is cost per instruction, not peak quality.
+The claim that survives: the policy answers with **no evaluations at all** at the
+level of a hill-climber allowed ten, and beats every non-search baseline at
+p < 0.001. Search is still better and more reliable (93 % of instructions
+improved against 73 %); the argument for a policy is cost per instruction, not
+peak quality.
+
+Per seed, the paired comparison against cheap search splits — seed 0 favours
+search (p = 3.0e-04), seeds 1 and 2 favour the policy (p = 0.054, p = 0.029) — so
+"matches cheap search" is defensible and "beats" is not.
 
 ### Four defects found and fixed
 
@@ -58,19 +63,31 @@ the same checkpoint on the same 200 episodes decomposes cleanly:
 | colour no longer collapsed to grey | +0.158 |
 | retrained on the corrected observation | +0.169 |
 
-### Retraining changed nothing measurable
+### Retraining did help — the earlier null was a stale measurement
 
-v2 vs v3, identical episodes: **+0.1732 vs +0.1743, p = 0.85**. Lung episodes
-only: +0.025, p = 0.081 — predicted direction, not significant. No regression.
+Reported yesterday as **+0.1732 vs +0.1743, p = 0.85, no detectable change**.
+That batch ran on pre-fix scoring code: the job started before `62b5720` landed
+at 22:48 and wrote its files at 03:26, carrying numbers from the code it had
+imported. Re-measured on the corrected pipeline, same checkpoints, same
+episodes:
 
-Predictions were written before the run
-(`docs/experiments/2026-09-16-retrain-after-measurement-fixes.md`), and most
-failed. The useful reading: the log₁₀ reachable-ceiling channel earns less of
-its place in the observation than assumed — a policy trained believing lungs
-were unreachable everywhere performs the same as one trained with the truth.
+| | seed-averaged median | per-seed |
+|---|---|---|
+| v2 (pre-fix observation) | +0.2008 | 0.193 / 0.247 / 0.249 |
+| v3 (corrected observation) | **+0.2863** | 0.231 / 0.307 / 0.275 |
 
-Caveat: n = 3, and seed spread exceeds the gap between arms. "No difference"
-means "none detectable".
+Paired Wilcoxon **p = 0.0064**, v3 ahead on 59 % of episodes. The gain is
+largest on absolute instructions (+0.122), which are exactly the ones whose
+targets come from the reachable ceiling that `62b5720` fixed — mechanism and
+measurement agree.
+
+The reading recorded yesterday (that the ceiling channel earns less of its place
+than assumed) is **withdrawn**: it earns its place, and the stale ruler could not
+see it. See the addendum in
+`docs/experiments/2026-09-16-retrain-after-measurement-fixes.md`.
+
+Caveat: three checkpoints per arm, and the p-value is a paired test over 200
+episodes rather than over training runs.
 
 ### Lungs now validate
 

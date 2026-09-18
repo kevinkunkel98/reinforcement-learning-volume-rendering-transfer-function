@@ -85,33 +85,50 @@ training seeds:
 
 | Method | Evaluations used | Median attainment | Improved |
 |---|---|---|---|
-| hill-climb (thorough) | 200 | +0.660 | 100 % |
-| **policy + 3 refinements** | **4** | **+0.230** | 71 % |
-| hill-climb (cheap) | 10 | +0.205 | 90 % |
-| **policy alone** | **0** | **+0.169** | 69 % |
+| hill-climb (thorough) | 200 | +0.730 | 100 % |
+| **policy + 3 refinements** | **4** | **+0.316** | 76 % |
+| **policy alone** | **0** | **+0.275** | 73 % |
+| hill-climb (cheap) | 10 | +0.263 | 93 % |
 | do nothing | 0 | 0.000 | — |
-| today's rule-based executor | 0 | −0.022 | 36 % |
-| random | 0 | −0.028 | 43 % |
-| occlusion heuristic | 0 | −0.150 | 33 % |
+| today's rule-based executor | 0 | −0.022 | 37 % |
+| random | 0 | −0.040 | 39 % |
+| occlusion heuristic | 0 | −0.191 | 30 % |
 
 Attainment is 1 when the instruction is satisfied, 0 when nothing changed,
 negative when the result got worse. The policy beats every non-search baseline at
-p < 0.001, and a learned proposal plus three refinement steps edges past cheap
-search at less than half the cost. It is not yet as *reliable* as search (71 % vs
-90 % of instructions improved) — that gap is the honest headline.
+p < 0.001, and with no evaluations at all it matches a hill-climber allowed ten of
+them. It is not yet as *reliable* as search (73 % vs 93 % of instructions
+improved) — that gap is the honest headline. Per seed the paired comparison
+against cheap search splits: seed 0 favours search (p = 3.0e-04), seeds 1 and 2
+favour the policy (p = 0.054, p = 0.029), so "matches" is the defensible claim
+and "beats" is not.
 
-An earlier version of this table reported +0.194 for the policy alone. That
-number was inflated by two defects found since, and the correction is worth
-recording. Scored on the *same* 200 episodes, the same checkpoint gives +0.194
-with the observation and colour decode it was trained with, +0.167 once the
-reachable-ceiling channel in its observation is measured at the right peak, and
-+0.158 once its action stops collapsing every peak's colour to grey. Retraining
-on the corrected observation recovers +0.169 — no better than the old
-checkpoint scored under the same corrected conditions
-(paired Wilcoxon p = 0.85, three seeds), which suggests that ceiling channel
-earns less of its place in the observation than assumed. See
-`docs/experiments/2026-09-16-retrain-after-measurement-fixes.md`, written
-before the run.
+This table was wrong twice, and both corrections are worth recording.
+
+The first: an early version reported +0.194 for the policy alone, inflated by a
+colour decode that collapsed every peak to grey and by a reachable-ceiling probe
+that sat on the retired band layout's fat peak rather than lung parenchyma.
+
+The second was a measurement accident rather than a defect in the system. The
+batch that produced the previously published figures (+0.169 for the policy) was
+started before the ceiling fix in `62b5720` landed and finished six hours after
+it, so every number in it was computed by the code the job had loaded at import
+time. Re-measured on the corrected pipeline, the same three checkpoints score
++0.275 median rather than +0.169 — and so do the baselines, which rose in step
+(cheap search +0.205 -> +0.263, thorough search +0.660 -> +0.730). That the
+baselines moved together is the evidence that the ruler was bent, not the policy.
+`provenance.py` now records the git commit and a fingerprint of the imported
+scoring code in every result file so this cannot recur silently.
+
+The same accident produced a null result that does not survive correction.
+Retraining on the corrected observation was reported as changing nothing
+(+0.1732 vs +0.1743, p = 0.85). Re-measured: v2 +0.201 against v3 +0.286
+seed-averaged median, paired Wilcoxon **p = 0.0064**, v3 ahead on 59 % of
+episodes. The gain concentrates in absolute instructions (+0.122), which are
+exactly the ones that read the reachable-ceiling channel — so that channel earns
+its place after all, contrary to what
+`docs/experiments/2026-09-16-retrain-after-measurement-fixes.md` concluded from
+the stale numbers.
 
 ```bash
 python -m rl.oneshot_train --timesteps 150000 --seed 0 --out out/rl_v2/seed0
