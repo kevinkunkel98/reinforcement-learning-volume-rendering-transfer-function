@@ -75,12 +75,32 @@ class OneShotEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, volume_ids, model_for_volume=visibility.for_volume):
+    HINDSIGHT_MAX_MENTIONS = 2
+
+    # A hindsight target whose largest class delta is below this asks for
+    # effectively nothing: the goal is trivially already met, `_start_distance`
+    # sits at the attainment floor, and the episode carries no gradient. Resample
+    # instead. 0.05 log10 units is a factor of ~1.12 -- a third of the smallest
+    # spoken strength ("slightly", 0.15), so nothing an instruction could ask
+    # for is excluded.
+    HINDSIGHT_MIN_DELTA = 0.05
+    HINDSIGHT_MAX_TRIES = 20
+
+    def __init__(self, volume_ids, model_for_volume=visibility.for_volume,
+                 hindsight_ratio: float = 0.0):
         super().__init__()
         if not volume_ids:
             raise ValueError("volume_ids must not be empty")
         self.volume_ids = list(volume_ids)
         self._model_for_volume = model_for_volume
+        # A sampled instruction can be unanswerable on the volume it lands on
+        # ("a bit more lungs" on a pelvis scan, where the lung ceiling is a
+        # fraction of a percent of the image): the episode teaches nothing and
+        # pollutes evaluation. This share of episodes inverts the sampling
+        # instead -- draw a *reachable* target transfer function, measure what
+        # it achieved, and make that the goal -- so every such episode has a
+        # demonstrated solution, the action that produced the target.
+        self.hindsight_ratio = float(hindsight_ratio)
         self._model_cache = {}
         self._solo_max_log_cache = {}
 
@@ -95,6 +115,9 @@ class OneShotEnv(gym.Env):
         self._instruction = None
         self._start_agg = None
         self._start_distance = None
+        # Set by reset() in both branches, so a hindsight episode can never
+        # leave its oracle action behind for a later instruction episode.
+        self._hindsight_action = None
 
     def _get_model(self, volume: str):
         # visibility.for_volume() already caches to disk; this in-memory cache
@@ -147,7 +170,46 @@ class OneShotEnv(gym.Env):
 
     def _info(self, attainment: float, useless: bool) -> dict:
         return {"attainment": attainment, "kind": self._instruction["kind"],
-                "volume": self._volume, "text": self._instruction["text"], "useless": useless}
+                "volume": self._volume, "text": self._instruction["text"], "useless": useless,
+                "goal_source": "hindsight" if self._hindsight_action is not None else "instruction"}
+
+    def hindsight_action(self):
+        """The action that produced this episode's target, or None when the
+        episode came from an instruction. Test and distillation hook."""
+        return None if self._hindsight_action is None else self._hindsight_action.copy()
+
+    def _sample_hindsight_goal(self, rng, model, start_params, start_agg):
+        """(instruction-shaped dict, action) from a reachable target."""
+        for _ in range(self.HINDSIGHT_MAX_TRIES):
+            action = rng.uniform(-1.0, 1.0, size=len(CONTROLLABLE))
+            target_params = apply_controllable(start_params, action)
+            target_agg = goals.aggregate(model.features(target_params))
+
+            deltas = {}
+            for goal_class in goals.GOAL_CLASSES:
+                start_vis = start_agg["vis"][goal_class]
+                target_vis = target_agg["vis"][goal_class]
+                # Same convention as goals.progress, so the goal the policy is
+                # handed and the change the reward measures are one quantity.
+                deltas[goal_class] = math.log10(target_vis + goals.EPSILON) \
+                    - math.log10(start_vis + goals.EPSILON)
+
+            ranked = sorted(goals.GOAL_CLASSES, key=lambda c: -abs(deltas[c]))
+            if abs(deltas[ranked[0]]) >= self.HINDSIGHT_MIN_DELTA:
+                break
+        # A real instruction names one or two classes, never all four; a
+        # hindsight goal that mentioned every class would shift the observation
+        # distribution the policy sees away from the one it is evaluated on.
+        count = int(rng.integers(1, self.HINDSIGHT_MAX_MENTIONS + 1))
+        targets = {c: {"vis": deltas[c]} for c in ranked[:count]}
+
+        instruction = {
+            "kind": "hindsight",
+            "text": None,
+            "targets": targets,
+            "goal": goals.goal_vector(targets),
+        }
+        return instruction, action
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -158,7 +220,10 @@ class OneShotEnv(gym.Env):
         start_params = self._sample_start_params(rng)
         raw_features = model.features(start_params)
         start_agg = goals.aggregate(raw_features)
-        instruction = goals.sample_instruction(volume, model, start_agg, rng)
+        if rng.random() < self.hindsight_ratio:
+            instruction, hindsight_action = self._sample_hindsight_goal(rng, model, start_params, start_agg)
+        else:
+            instruction, hindsight_action = goals.sample_instruction(volume, model, start_agg, rng), None
         start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
         self._volume = volume
@@ -168,6 +233,7 @@ class OneShotEnv(gym.Env):
         self._instruction = instruction
         self._start_agg = start_agg
         self._start_distance = start_distance
+        self._hindsight_action = hindsight_action
 
         obs = self._build_observation()
         info = self._info(self._attainment(start_agg), goals.is_useless(raw_features))

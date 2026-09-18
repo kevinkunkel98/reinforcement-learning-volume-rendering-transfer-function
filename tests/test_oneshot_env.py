@@ -215,8 +215,9 @@ def test_info_has_the_expected_keys(monkeypatch):
 
     obs, reward, terminated, truncated, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
 
-    assert set(info.keys()) == {"attainment", "kind", "volume", "text", "useless"}
+    assert set(info.keys()) == {"attainment", "kind", "volume", "text", "useless", "goal_source"}
     assert info["volume"] == "fake_a"
+    assert info["goal_source"] == "instruction"   # hindsight_ratio defaults to 0
     assert info["kind"] == env._instruction["kind"]
     assert info["text"] == env._instruction["text"]
 
@@ -245,3 +246,37 @@ def test_sampled_instruction_only_targets_supported_classes(monkeypatch):
         obs, info = env.reset(seed=seed)
         supported = set(goals.goal_classes_for_volume(info["volume"]))
         assert set(env._instruction["targets"].keys()) <= supported
+
+
+# --- hindsight goals: derived from a reachable target, not invented ------------
+
+def test_hindsight_episodes_are_solvable_by_the_action_that_made_them():
+    # The goal is derived from a target the action space can reach, so the
+    # action that produced the target must score near-perfect attainment.
+    # Anything less means the goal encoding and the reward disagree.
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
+    env.reset(seed=0)
+    oracle = env.hindsight_action()
+    _obs, _reward, _done, _truncated, info = env.step(oracle)
+    assert info["attainment"] > 0.8
+
+
+def test_hindsight_ratio_zero_keeps_sampling_instructions():
+    env = OneShotEnv(["synthetic"], hindsight_ratio=0.0)
+    _obs, info = env.reset(seed=0)
+    assert info["goal_source"] == "instruction"
+    assert env.hindsight_action() is None
+
+
+def test_hindsight_episodes_report_their_source():
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
+    _obs, info = env.reset(seed=0)
+    assert info["goal_source"] == "hindsight"
+
+
+def test_hindsight_goal_mentions_at_least_one_class():
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
+    env.reset(seed=1)
+    goal = env._instruction["goal"]
+    mentioned = goal[4:8]  # the m[4] block of goals.goal_vector
+    assert mentioned.sum() >= 1.0
