@@ -1,9 +1,11 @@
+import json
 import math
 
 import numpy as np
 import pytest
 
 import goals
+import provenance
 import transfer
 from rl import vis_eval
 from rl.baselines import CONTROLLABLE
@@ -490,16 +492,79 @@ def test_compare_aggregates_per_kind_and_handles_a_failed_baseline_episode():
     assert summary["policy"]["mean_clipped"] == pytest.approx((0.8 + 0.6 + 0.4) / 3.0)
     assert summary["policy"]["share_positive"] == pytest.approx(1.0)
     assert summary["policy"]["n"] == 3
-    assert summary["policy"]["by_kind"]["relative"] == pytest.approx(0.7)
-    assert summary["policy"]["by_kind"]["compound"] == pytest.approx(0.4)
+    relative = summary["policy"]["by_kind"]["relative"]
+    assert relative["median"] == pytest.approx(0.7)
+    assert relative["mean"] == pytest.approx(0.7)
+    assert relative["share_positive"] == pytest.approx(1.0)
+    assert relative["n"] == 2
+    assert summary["policy"]["by_kind"]["compound"]["median"] == pytest.approx(0.4)
     assert summary["B0_do_nothing"]["median"] == pytest.approx(0.0)
     assert summary["B0_do_nothing"]["mean_raw"] == pytest.approx(0.0)
     assert summary["B0_do_nothing"]["n"] == 2   # the None episode is dropped
-    assert summary["B0_do_nothing"]["by_kind"]["compound"] is None
+    empty = summary["B0_do_nothing"]["by_kind"]["compound"]
+    assert empty["n"] == 0 and empty["median"] is None and empty["mean"] is None
 
     comparison_row = comparison["comparisons"]["B0_do_nothing"]
     assert comparison_row["n"] == 2   # only the two episodes with both sides present
     assert 0.0 <= comparison_row["p_value"] <= 1.0
+
+
+def test_summarize_reports_the_median_per_kind_not_just_the_mean():
+    # The incident this guards: attainment is unbounded below, so one
+    # pathological episode dragged a kind's mean to -23.5 while its median was
+    # comfortably positive, and the kind read as broken for an hour.
+    rows = [{"attainment": value, "kind": "relative"}
+            for value in (0.5, 0.6, 0.4, 0.55, -100.0)]
+
+    by_kind = vis_eval._summarize(rows)["by_kind"]["relative"]
+
+    assert by_kind["median"] == pytest.approx(0.5)
+    assert by_kind["mean"] == pytest.approx(sum((0.5, 0.6, 0.4, 0.55, -100.0)) / 5.0)
+    assert by_kind["share_positive"] == pytest.approx(0.8)
+    assert by_kind["n"] == 5
+
+
+# --- reading by_kind out of old and new result files -----------------------------
+
+def test_kind_stats_normalises_the_new_dict_shape():
+    stats = vis_eval.kind_stats({"median": 0.5, "mean": -2.0, "share_positive": 0.6, "n": 10})
+    assert stats == {"median": 0.5, "mean": -2.0, "share_positive": 0.6, "n": 10}
+
+
+def test_kind_stats_reads_an_old_float_valued_entry_as_a_mean_only():
+    # out/rl_v2/*.json written before this change store a bare mean per kind.
+    # A median cannot be recovered from one, so it must stay None rather than
+    # be quietly filled in with the mean.
+    stats = vis_eval.kind_stats(-23.5)
+    assert stats["mean"] == pytest.approx(-23.5)
+    assert stats["median"] is None
+    assert stats["share_positive"] is None
+    assert stats["n"] is None
+
+
+def test_kind_stats_reads_an_old_empty_kind():
+    assert vis_eval.kind_stats(None) == {"median": None, "mean": None,
+                                          "share_positive": None, "n": None}
+
+
+def test_print_table_handles_a_file_mixing_old_float_and_new_dict_kinds(capsys):
+    comparison = {
+        "summary": {
+            "policy": {"median": 0.5, "mean_clipped": 0.5, "mean_raw": 0.5,
+                        "share_positive": 1.0, "n": 2,
+                        "by_kind": {"relative": {"median": 0.5, "mean": 0.4,
+                                                  "share_positive": 1.0, "n": 2},
+                                    "compound": -23.5,          # old float shape
+                                    "show_only": None}},        # old empty kind
+        },
+        "comparisons": {},
+    }
+
+    vis_eval._print_table(comparison)
+
+    out = capsys.readouterr().out
+    assert "-23.500" in out       # the old mean is still shown, not dropped
+    assert "0.500" in out
 
 
 def test_compare_uses_the_given_policy_name():
@@ -532,3 +597,88 @@ def test_cli_refine_defaults_to_off():
 def test_cli_refine_can_be_set():
     args = vis_eval.parse_args(["--policy", "some/path.zip", "--refine", "10"])
     assert args.refine == 10
+
+
+# --- provenance ------------------------------------------------------------------
+
+def _stub_run(monkeypatch):
+    """Enough of a run for `main` to reach the writing path without touching a
+    checkpoint, a volume or a baseline."""
+    episode = {"volume": "stub_a", "start_params": None,
+               "instruction": {"kind": "relative", "goal": {}}}
+    monkeypatch.setattr(vis_eval, "fixed_episodes", lambda *a, **k: [episode])
+    monkeypatch.setattr(vis_eval, "run_policy",
+                        lambda *a, **k: [{"attainment": 0.5, "kind": "relative"}])
+    monkeypatch.setattr(vis_eval, "BASELINES", {})
+
+
+def test_main_records_the_import_time_provenance_in_the_result_file(tmp_path, monkeypatch):
+    # The incident: a job started before a scoring fix wrote its file hours
+    # after the fix landed. The file must name the code it actually ran.
+    _stub_run(monkeypatch)
+    out = tmp_path / "eval.json"
+
+    vis_eval.main(["--policy", "p.zip", "--out", str(out)])
+
+    written = json.loads(out.read_text())["provenance"]
+    assert written == provenance.IMPORT_TIME_PROVENANCE
+    assert written["scoring_fingerprint"] == provenance.IMPORT_TIME_PROVENANCE["scoring_fingerprint"]
+
+
+def _comparison_with(provenance_record) -> dict:
+    return {
+        "summary": {"policy": {"median": 0.5, "mean_clipped": 0.5, "mean_raw": 0.5,
+                                "share_positive": 1.0, "n": 1,
+                                "by_kind": {"relative": {"median": 0.5, "mean": 0.5,
+                                                          "share_positive": 1.0, "n": 1}}}},
+        "comparisons": {},
+        "provenance": provenance_record,
+    }
+
+
+def test_print_table_warns_loudly_when_the_recorded_scoring_code_is_stale(capsys):
+    stale = {**provenance.IMPORT_TIME_PROVENANCE, "scoring_fingerprint": "000000000000"}
+
+    vis_eval._print_table(_comparison_with(stale))
+
+    out = capsys.readouterr().out
+    assert "STALE" in out
+    assert "000000000000" in out
+
+
+def test_print_table_is_quiet_when_the_provenance_matches(capsys):
+    vis_eval._print_table(_comparison_with(dict(provenance.IMPORT_TIME_PROVENANCE)))
+    assert "STALE" not in capsys.readouterr().out
+
+
+def test_print_table_warns_when_a_result_carries_no_provenance_at_all(capsys):
+    comparison = _comparison_with(None)
+    del comparison["provenance"]
+
+    vis_eval._print_table(comparison)
+
+    assert "STALE" in capsys.readouterr().out
+
+
+def test_show_loads_a_result_file_and_warns_that_it_is_stale(tmp_path, capsys):
+    path = tmp_path / "eval_rerun.json"
+    stale = {**provenance.IMPORT_TIME_PROVENANCE, "scoring_fingerprint": "deadbeefcafe"}
+    path.write_text(json.dumps(_comparison_with(stale)))
+
+    vis_eval.main(["--show", str(path)])
+
+    out = capsys.readouterr().out
+    assert "STALE" in out
+    assert "deadbeefcafe" in out
+
+
+def test_show_does_not_need_a_policy(tmp_path):
+    path = tmp_path / "eval.json"
+    path.write_text(json.dumps(_comparison_with(dict(provenance.IMPORT_TIME_PROVENANCE))))
+    args = vis_eval.parse_args(["--show", str(path)])
+    assert args.show == str(path)
+
+
+def test_cli_still_requires_a_policy_when_not_showing_a_file():
+    with pytest.raises(SystemExit):
+        vis_eval.parse_args([])

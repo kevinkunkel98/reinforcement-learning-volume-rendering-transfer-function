@@ -13,10 +13,17 @@ gets the identical `(model, start_params, instruction)` and is scored with
 `goals.attainment` -- so policy and baselines are measured identically.
 `compare` reports robust attainment stats per method (median, mean clipped to
 [-1, 1], raw mean, share of episodes that improved on doing nothing -- see
-`goals.summarise_attainment`) overall, a plain mean per instruction kind, and
-a paired Wilcoxon signed-rank test of the policy against each baseline (on
-the raw, unclipped paired values), computed directly (`scipy` is not
-installed in this environment).
+`goals.summarise_attainment`) overall and per instruction kind, and a paired
+Wilcoxon signed-rank test of the policy against each baseline (on the raw,
+unclipped paired values), computed directly (`scipy` is not installed in this
+environment).
+
+Every result file carries a `provenance` block (see `provenance.py`) naming
+the commit and the scoring code that produced it, and both the run and
+
+    .venv/bin/python -m rl.vis_eval --show out/rl_v2/eval_test.json
+
+warn loudly when those numbers no longer match the code in this checkout.
 """
 import argparse
 import json
@@ -27,6 +34,7 @@ import numpy as np
 
 import datasets
 import goals
+import provenance
 import visibility
 from rl.baselines import BASELINES, hill_climb
 from rl.oneshot_env import OneShotEnv
@@ -327,24 +335,50 @@ def _summarize(rows: list) -> dict:
     # Robust stats (median, mean_clipped, mean_raw, share_positive, n) from
     # goals.summarise_attainment -- attainment is unbounded below, so a plain
     # mean is misleading (see that function's docstring). The per-kind
-    # breakdown stays a plain mean: those buckets are small, and they exist
-    # to spot which instruction kinds the method struggles with, not to
-    # stand alone as a headline number.
+    # breakdown used to be a plain mean, on the grounds that it only had to
+    # spot weak kinds; it did the opposite. One episode at -100 on an easy
+    # goal made a kind whose median was +0.51 read as -23.5, and an hour went
+    # into chasing a kind that was fine. So each kind now reports median
+    # first, with the mean kept beside it rather than dropped.
     attainments = [row["attainment"] for row in rows]
     stats = goals.summarise_attainment(attainments)
     by_kind = {}
     for kind in EVAL_KINDS:
         values = [row["attainment"] for row in rows if row["kind"] == kind and row["attainment"] is not None]
-        by_kind[kind] = float(np.mean(values)) if values else None
+        if not values:
+            by_kind[kind] = {"median": None, "mean": None, "share_positive": None, "n": 0}
+            continue
+        array = np.asarray(values, dtype=np.float64)
+        by_kind[kind] = {"median": float(np.median(array)),
+                         "mean": float(np.mean(array)),
+                         "share_positive": float(np.mean(array > 0.0)),
+                         "n": int(array.size)}
     return {**stats, "by_kind": by_kind}
 
 
+def kind_stats(value) -> dict:
+    """One `by_kind` entry as `{"median", "mean", "share_positive", "n"}`,
+    whatever shape it was written in.
+
+    Result files in `out/rl_v2/` written before per-kind medians existed store
+    a bare float (the mean) per kind, or `None` for a kind with no episodes.
+    A median cannot be recovered from a mean, so those fields stay `None`
+    instead of being quietly filled in with the mean -- the point of this
+    whole exercise is not to let an old number pass for a current one."""
+    if isinstance(value, dict):
+        return {key: value.get(key) for key in ("median", "mean", "share_positive", "n")}
+    if value is None:
+        return {"median": None, "mean": None, "share_positive": None, "n": None}
+    return {"median": None, "mean": float(value), "share_positive": None, "n": None}
+
+
 def compare(results: dict, policy_name: str = "policy") -> dict:
-    """Mean attainment per method (overall and per instruction kind), plus a
-    paired Wilcoxon signed-rank test of `results[policy_name]` against every
-    other method in `results`. Episodes where either side's `attainment` is
-    `None` (a failed baseline, or a start state that already meets the goal)
-    are dropped from that pair's test and from that method's means."""
+    """Robust attainment stats per method (overall and per instruction kind),
+    plus a paired Wilcoxon signed-rank test of `results[policy_name]` against
+    every other method in `results`. Episodes where either side's
+    `attainment` is `None` (a failed baseline, or a start state that already
+    meets the goal) are dropped from that pair's test and from that method's
+    statistics."""
     summary = {name: _summarize(rows) for name, rows in results.items()}
 
     policy_rows = results[policy_name]
@@ -369,13 +403,42 @@ def _fmt(value) -> str:
     return "n/a" if value is None else f"{value:.3f}"
 
 
+def _fmt_count(value) -> str:
+    return "n/a" if value is None else f"{value:d}"
+
+
+def check_provenance(result: dict) -> dict:
+    """Compare a result's recorded `provenance` block against the code
+    running now (see `provenance.compare`). A result with no block at all is
+    reported stale -- an untraceable file is the exact thing that cost a
+    week."""
+    return provenance.compare(result.get("provenance"))
+
+
 def _print_table(comparison: dict) -> None:
+    report = check_provenance(comparison)
+    banner = provenance.format_staleness(report)
+    if banner:
+        print(banner)
+        print()
+
     summary = comparison["summary"]
     print(f"{'method':22s} {'median':>8s} {'mean_clip':>10s} {'mean_raw':>10s} {'share+':>8s} {'n':>6s}")
     for name in sorted(summary):
         entry = summary[name]
         print(f"{name:22s} {_fmt(entry['median']):>8s} {_fmt(entry['mean_clipped']):>10s} "
               f"{_fmt(entry['mean_raw']):>10s} {_fmt(entry['share_positive']):>8s} {entry['n']:6d}")
+
+    # Per kind, median first: the mean is kept beside it (and is all an older
+    # result file has), but it is the number that misreads a heavy negative
+    # tail as a broken instruction kind.
+    print()
+    print(f"{'method':22s} {'kind':12s} {'median':>8s} {'mean':>10s} {'share+':>8s} {'n':>6s}")
+    for name in sorted(summary):
+        for kind, raw in summary[name].get("by_kind", {}).items():
+            stats = kind_stats(raw)
+            print(f"{name:22s} {kind:12s} {_fmt(stats['median']):>8s} {_fmt(stats['mean']):>10s} "
+                  f"{_fmt(stats['share_positive']):>8s} {_fmt_count(stats['n']):>6s}")
 
     print()
     print(f"{'baseline':22s} {'p-value':>10s} {'n pairs':>8s}")
@@ -384,10 +447,25 @@ def _print_table(comparison: dict) -> None:
         p_value = "n/a" if entry["p_value"] is None else f"{entry['p_value']:.4f}"
         print(f"{name:22s} {p_value:>10s} {entry['n']:8d}")
 
+    if banner:
+        print()
+        print("!!! the numbers above are STALE -- see the warning at the top of this table")
+
+
+def load_result(path: str) -> dict:
+    """A result file as written by `main`, for re-printing it later. The
+    printing path checks its provenance, so re-reading an old file is how the
+    staleness warning reaches a human who did not run the job."""
+    with open(path) as stream:
+        return json.load(stream)
+
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--policy", required=True, help="path to an SB3 checkpoint (e.g. best.zip)")
+    parser.add_argument("--policy", help="path to an SB3 checkpoint (e.g. best.zip)")
+    parser.add_argument("--show", type=str, default=None,
+                         help="re-print an existing result file instead of evaluating, "
+                              "checking its provenance against the current code")
     parser.add_argument("--split", default="val", choices=("train", "val", "test", "out_of_source"))
     parser.add_argument("--episodes", type=int, default=DEFAULT_EPISODES)
     parser.add_argument("--seed", type=int, default=0)
@@ -398,11 +476,18 @@ def parse_args(argv=None):
                          help="visibility-evaluation budget to refine the one-shot policy's proposal "
                               "with a hill_climb search (0 = off, default: %(default)s); adds a "
                               "policy_plus_refine row to the comparison")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.show is None and not args.policy:
+        parser.error("--policy is required unless --show is given")
+    return args
 
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.show:
+        _print_table(load_result(args.show))
+        return
+
     episodes = fixed_episodes(args.split, args.episodes, seed=args.seed, formulation=args.formulation)
 
     results = {"policy": run_policy(args.policy, episodes, formulation=args.formulation)}
@@ -412,15 +497,21 @@ def main(argv=None):
     for name in BASELINES:
         results[name] = run_baseline(name, episodes)
 
-    comparison = compare(results)
-    _print_table(comparison)
+    # The import-time record, not a fresh one: this job scored with the code
+    # it loaded when it started, which may be hours old by now. Printing the
+    # table with that record in place is also what catches a scoring fix that
+    # landed mid-run -- the fingerprint no longer matches the file on disk,
+    # and the run says so before anyone quotes it.
+    result = {"policy": args.policy, "split": args.split, "episodes": args.episodes,
+              "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
+              "provenance": provenance.IMPORT_TIME_PROVENANCE,
+              **compare(results)}
+    _print_table(result)
 
     out = args.out or DEFAULT_OUT_TEMPLATE.format(split=args.split)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as stream:
-        json.dump({"policy": args.policy, "split": args.split, "episodes": args.episodes,
-                    "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
-                    **comparison}, stream, indent=2)
+        json.dump(result, stream, indent=2)
     print(f"\n[vis_eval] wrote {out}")
 
 
