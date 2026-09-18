@@ -1,25 +1,25 @@
-# Status — 2026-09-17 (updated 21:50)
+# Status — 2026-09-18
 
-MVP due in ~4 days. The software is essentially built; the thesis argument
-depends on data that does not exist yet.
+MVP due in 4 days. The software is built and the thesis result is stronger than
+it was yesterday, because yesterday's numbers were measured with broken code.
+What is missing is presentation, not results.
 
 ## Where things stand
 
 | | state |
 |---|---|
 | Measurement (`visibility.py`) | validated against real renders, all five classes |
-| Policy | 3 seeds trained on the corrected pipeline (`oneshot_v3_seed{0,1,2}`) |
-| Held-out evaluation | done, 200 episodes, 3 seeds, baselines B0–B5 |
-| Language → goal → policy | built; LLM parser measured for the first time |
-| Preference collection page | built, multi-rater, blind, running at `127.0.0.1:8000/collect` |
-| **Preference judgments collected** | **0 rows** ← the critical path |
-| Tests | 530 passing |
+| Policy | 3 seeds on the corrected pipeline (`oneshot_v3_seed{0,1,2}`) |
+| Held-out evaluation | re-measured, 200 episodes, 3 seeds, baselines B0–B5, provenance recorded |
+| Language → goal → policy | works end to end in the viewer; LLM parser default |
+| Figures | frontier, reliability, per-kind curves, qualitative before/after |
+| Preference collection | running at `127.0.0.1:8000/collect` |
+| **Clean preference judgments** | **0** — the 54 collected are quarantined as a pilot |
+| Tests | 602 passing |
 
-## Results
+## Results (re-measured 2026-09-17)
 
-### Held-out attainment (test split, 200 instructions, 6 unseen patients)
-
-Median over three seeds:
+200 instructions, six unseen patients, median over three seeds:
 
 | Method | Evaluations | Median attainment | Improved |
 |---|---|---|---|
@@ -32,138 +32,89 @@ Median over three seeds:
 | random | 0 | −0.040 | 39 % |
 | occlusion heuristic | 0 | −0.191 | 30 % |
 
-The claim that survives: the policy answers with **no evaluations at all** at the
-level of a hill-climber allowed ten, and beats every non-search baseline at
-p < 0.001. Search is still better and more reliable (93 % of instructions
-improved against 73 %); the argument for a policy is cost per instruction, not
-peak quality.
+**The claim:** the policy answers with no evaluations at the level of a
+hill-climber allowed ten, and beats every non-search baseline at p < 0.001.
+Search remains more reliable (93 % vs 73 % of instructions improved). Per seed
+the paired test against cheap search splits — seed 0 favours search
+(p = 3.0e-04), seeds 1 and 2 favour the policy (p = 0.054, p = 0.029) — so
+"matches" is defensible and "beats" is not.
 
-Per seed, the paired comparison against cheap search splits — seed 0 favours
-search (p = 3.0e-04), seeds 1 and 2 favour the policy (p = 0.054, p = 0.029) — so
-"matches cheap search" is defensible and "beats" is not.
+Per instruction kind (median, seed 1): absolute +0.50, brightness +0.48,
+relative +0.30, show-only +0.20, **compound +0.09**. Compound instructions are
+25 % of the mix and the policy essentially fails them — the clearest capability
+gap, and the one a user notices first.
 
-### Four defects found and fixed
+## What happened yesterday, and what it cost
 
-| commit | defect | consequence |
-|---|---|---|
-| `cc167af` | policy's colour action wrote one scalar to r, g and b | every policy render grey → preference pairs were **not blind** |
-| `a0b009a` | instructions sampled from label presence, not reachability | raters shown unanswerable items |
-| `62b5720` | reachable-ceiling probe sat on the retired band layout's fat peak (−100 HU, not −800) | **the policy's own observation** was wrong for lungs; lungs failed render validation |
-| `40895be` | viewer started from a different peak layout than the policy trained on | "more lungs" in policy mode adjusted the fat peak |
+The published figures came from an evaluation batch that **started before the
+ceiling fix in `62b5720` landed and wrote its files six hours after it**, so it
+scored with the code it had imported. Confirmed by checking out the pre-fix
+commit and reproducing the stored numbers exactly.
 
-### The published +0.194 was inflated
+Two published conclusions were wrong:
 
-Episodes did not change (B3/B4/B5 score bit-identically before and after), so
-the same checkpoint on the same 200 episodes decomposes cleanly:
+1. Policy attainment was +0.169; it is +0.275. Every baseline moved up with it,
+   which is what identifies the fault as the ruler rather than the method.
+2. "Retraining changed nothing, p = 0.85" is reversed: v2 +0.201 against v3
+   +0.286 seed-averaged median, **paired Wilcoxon p = 0.0064**, v3 ahead on 59 %
+   of episodes, with the gain concentrated in absolute instructions (+0.122) —
+   the ones that read the ceiling channel `62b5720` fixed. The experiment doc's
+   conclusion that the channel "earns less of its place than assumed" is
+   withdrawn in an addendum.
 
-| | median |
-|---|---|
-| as originally published | +0.194 |
-| ceiling measured at the right peak | +0.167 |
-| colour no longer collapsed to grey | +0.158 |
-| retrained on the corrected observation | +0.169 |
-
-### Retraining did help — the earlier null was a stale measurement
-
-Reported yesterday as **+0.1732 vs +0.1743, p = 0.85, no detectable change**.
-That batch ran on pre-fix scoring code: the job started before `62b5720` landed
-at 22:48 and wrote its files at 03:26, carrying numbers from the code it had
-imported. Re-measured on the corrected pipeline, same checkpoints, same
-episodes:
-
-| | seed-averaged median | per-seed |
-|---|---|---|
-| v2 (pre-fix observation) | +0.2008 | 0.193 / 0.247 / 0.249 |
-| v3 (corrected observation) | **+0.2863** | 0.231 / 0.307 / 0.275 |
-
-Paired Wilcoxon **p = 0.0064**, v3 ahead on 59 % of episodes. The gain is
-largest on absolute instructions (+0.122), which are exactly the ones whose
-targets come from the reachable ceiling that `62b5720` fixed — mechanism and
-measurement agree.
-
-The reading recorded yesterday (that the ceiling channel earns less of its place
-than assumed) is **withdrawn**: it earns its place, and the stale ruler could not
-see it. See the addendum in
-`docs/experiments/2026-09-16-retrain-after-measurement-fixes.md`.
-
-Caveat: three checkpoints per arm, and the p-value is a paired test over 200
-episodes rather than over training runs.
-
-### Lungs now validate
-
-Previously reported as unvalidatable, "below the renderer's noise floor" — that
-was the wrong probe peak, not the renderer.
-
-| volume | lungs | others |
-|---|---|---|
-| ts_s1245 / ts_s0425 / ts_s0407 | 0.974 / 0.972 / 0.965 | 0.89–1.00 |
-| ts_s0811 / ts_s0357 | 0.890 / 0.869 | |
-| ts_s0363 | 0.689 (only failure) | |
-
-### LLM parser, measured for the first time
-
-Plan 8's evaluation step had been skipped because Ollama wasn't running.
-
-| parser | score on 21 free-form phrases |
-|---|---|
-| rule | 0 / 21 |
-| qwen2.5:7b as found | 14 / 21 |
-| qwen2.5:7b after fixes | **20 / 21** |
-
-Most of that jump was measurement error removed, not capability added: no
-temperature was set (default 0.8, so results weren't reproducible), and four
-"failures" were correct answers wrapped in a single-element compound.
-
----
+`provenance.py` now records the git commit and a fingerprint of the *imported*
+scoring modules in every result file, captured at import time. `rl.vis_eval
+--show` prints a staleness banner when that fingerprint no longer matches disk.
 
 ## Today
 
-### 1. Collect preference judgments — everything else is secondary
+### 1. Figures are done — review them
 
 ```bash
-python server.py    # then http://127.0.0.1:8000/collect   (already running)
+python -m plots.held_out_results      # frontier, reliability, per-kind curves
+python -m plots.qualitative           # before/after renders, VTK
 ```
 
-- Target ≥ 300 for a usable reward model; 2000 later with supervisors.
-- ~2.4 s per item to generate, so budget thinking time plus that.
-- Keys: **A** / **B** / **E** equal / **S** skip. Prefer **E** over guessing —
-  a forced coin-flip is noise the reward model will try to fit.
-- Rows append to `out/vis_preferences.jsonl` immediately; stopping and
-  resuming is safe.
+`plots/output/` is gitignored; regenerate rather than commit. The per-kind
+curves are the most informative: relative and compound start deeply negative and
+are **still climbing at 150k steps**, which is the visual evidence that no run
+has converged.
 
-This is the only task that cannot be parallelised, accelerated, or done at the
-last minute. Zero rows exist.
+### 2. Write-up
 
-### 2. Known rough edge, decide before collecting far
+`docs/rl-v2-pipeline.typ`, the README, this file and the slides all carry the
+corrected numbers. `docs/REPRODUCE.md` has every command from raw data to the
+table. The methods chapter has a real story: four defects found by the
+validation apparatus, plus a measurement incident the apparatus eventually
+caught itself.
 
-Pairs where **both** candidates fail the instruction still get shown. Skipping
-them is correct but burns attention. Filtering so at least one candidate
-substantially achieves the goal is ~30 min of work. Worth doing first if the
-skip rate feels high in the first 20 items.
+### 3. Rate, whenever there is a spare twenty minutes
 
-### 3. If the cluster is available
+The clean evaluation set starts at zero. Nothing about the MVP depends on it,
+but every judgment shortens the improvement month.
 
-Run more seeds (10 rather than 3) while you rate. Needs only:
+## Cheapest improvements, in order
 
-- `out/cache/visibility/` (72 MB) and `data/totalseg_manifest.json` — **not**
-  the 4.1 GB of CT data, and **not** VTK
-- watch out: Python 3.14 CUDA wheels are thin; test a 2000-step job first
+1. **Train longer.** No run has converged. No new code, ~3 h per seed.
+2. **Fix compound instructions**, or train the multi-step formulation where two
+   constraints do not have to be satisfied in one shot.
+3. **Distil search into the policy** — supervised pretraining on hill-climb
+   solutions before RL. Standard way to close an amortisation gap.
+4. **Make `visibility.py` differentiable.** The index cube is constant with
+   respect to the transfer function; only `transfer_tables` needs porting to
+   torch. Gives an analytic ceiling, a teacher for distillation, and an honest
+   new baseline.
 
-This would settle the lung trend (p = 0.081) one way or the other.
+## Known issues
 
-## Backlog — after the MVP
-
-- Figures: learning curves, per-kind bar chart, qualitative before/after renders
-- `docs/rl-v2-pipeline.typ` tables still carry pre-fix numbers (README is updated)
-- Held-out phrase set for the parser — the 21 phrases are now a development
-  set, so 20/21 is not a publishable figure
-- `qwen2.5:32b` comparison — a real latency/accuracy trade-off for VR speech
-- DINOv2 → Bradley-Terry reward model → RLHF fine-tune → blind A/B
-- Candidate-generation filter, chest-CT re-selection
-
-## For the write-up
-
-The four defects are good methods material, not an embarrassment: the
-validation apparatus caught problems that would have invalidated the preference
-data, and the pre-registration makes the null result defensible. That is a
-stronger methods chapter than a clean run with no story.
+- **`plots/training_curves.py` defaults to `out/rl_logs`**, the retired
+  pipeline's directory. Pass `--run-dir out/rl_v2/oneshot_v3_seed0` or fix the
+  default before regenerating that figure for the thesis.
+- **The "policy, no ceiling input" ablation row** was dropped from the pipeline
+  document: it was measured in the stale batch and has not been re-run.
+- **`evaluate.objective`** has branches for camera, compound, width, brightness
+  and show-only that no production path reaches — only the opacity branch is
+  live. Deliberate forward contract or dead code; needs a decision.
+- **Anchor-pool and image caches** under `out/cache/` are serialisation
+  contracts across raters. Do not change their key formats without invalidating
+  them deliberately.
