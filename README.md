@@ -294,5 +294,12 @@ python -m pytest -q                  # everything
   caveat, and the reproduction commands.
 - `docs/superpowers/specs/2026-09-15-rl-v2-visibility-rlhf-design.md` — the
   design this was built from.
-- `docs/architecture.typ`, `docs/rl-math.pdf` — earlier architecture and
-  mathematical notes; they describe the previous pipeline.
+- `docs/REPRODUCE.md` — every command from raw data to the held-out table, with
+  the real timings and what each stage writes.
+- `docs/experiments/` — dated experiment records, predictions written before the
+  run, and the addendum recording the stale-measurement incident.
+
+Documents describing the previous pipeline (`docs/architecture.typ`,
+`docs/rl-write-test.typ`, `docs/rl-math.pdf`, `architecture-mvp.drawio`) were
+removed on 2026-09-18; they described the retired `mass_fraction` vocabulary and
+are in git history if needed.
