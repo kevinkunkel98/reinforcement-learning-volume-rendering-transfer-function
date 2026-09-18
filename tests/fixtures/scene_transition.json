@@ -7,20 +7,72 @@
     "dataset": "ct_cardio",
     "dataset_version": "sha256:x",
     "volume": {
-      "dimensions": [4, 5, 6],
-      "spacing": [0.7, 0.7, 1.0],
+      "dimensions": [
+        4,
+        5,
+        6
+      ],
+      "spacing": [
+        0.7,
+        0.7,
+        1.0
+      ],
       "scalar_type": "float32",
       "orientation": "dataset-normalized"
     },
-    "transfer_function": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "transfer_function": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
     "camera": {
-      "position": [0, 0, 1],
-      "focal_point": [0, 0, 0],
-      "view_up": [0, 1, 0],
+      "position": [
+        0,
+        0,
+        1
+      ],
+      "focal_point": [
+        0,
+        0,
+        0
+      ],
+      "view_up": [
+        0,
+        1,
+        0
+      ],
       "zoom": 1.0
     },
-    "goal": {"target": "bone", "direction": "increase"},
-    "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
+    "goal": {
+      "target": "skeleton",
+      "direction": "increase"
+    },
+    "command": {
+      "attribute": "opacity",
+      "target": "skeleton",
+      "direction": "increase"
+    },
     "parent_step_id": null,
     "carried_forward": false
   },
@@ -32,20 +84,72 @@
     "dataset": "ct_cardio",
     "dataset_version": "sha256:x",
     "volume": {
-      "dimensions": [4, 5, 6],
-      "spacing": [0.7, 0.7, 1.0],
+      "dimensions": [
+        4,
+        5,
+        6
+      ],
+      "spacing": [
+        0.7,
+        0.7,
+        1.0
+      ],
       "scalar_type": "float32",
       "orientation": "dataset-normalized"
     },
-    "transfer_function": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "transfer_function": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
     "camera": {
-      "position": [0, 0, 1],
-      "focal_point": [0, 0, 0],
-      "view_up": [0, 1, 0],
+      "position": [
+        0,
+        0,
+        1
+      ],
+      "focal_point": [
+        0,
+        0,
+        0
+      ],
+      "view_up": [
+        0,
+        1,
+        0
+      ],
       "zoom": 1.0
     },
-    "goal": {"target": "bone", "direction": "increase"},
-    "command": {"attribute": "opacity", "target": "bone", "direction": "increase"},
+    "goal": {
+      "target": "skeleton",
+      "direction": "increase"
+    },
+    "command": {
+      "attribute": "opacity",
+      "target": "skeleton",
+      "direction": "increase"
+    },
     "parent_step_id": 1,
     "carried_forward": true
   }

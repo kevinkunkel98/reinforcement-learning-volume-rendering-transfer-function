@@ -28,10 +28,10 @@ def valid_scene(**overrides):
             "view_up": [0, 1, 0],
             "zoom": 1.0,
         },
-        "goal": {"target": "bone", "direction": "increase"},
+        "goal": {"target": "skeleton", "direction": "increase"},
         "command": {
             "attribute": "opacity",
-            "target": "bone",
+            "target": "skeleton",
             "direction": "increase",
         },
     }
@@ -72,7 +72,7 @@ def test_normalize_scene_preserves_goal_camera_and_transfer_function():
         {"camera": {"position": [0, 0], "focal_point": [0, 0, 0], "view_up": [0, 1, 0], "zoom": 1}},
         {"camera": {"position": [0, 0, 1], "focal_point": [0, 0, 0], "view_up": [0, 1, 0], "zoom": 0}},
         {"goal": {"target": "", "direction": "increase"}},
-        {"command": {"attribute": "color", "target": "bone", "direction": "increase"}},
+        {"command": {"attribute": "color", "target": "skeleton", "direction": "increase"}},
     ],
 )
 def test_normalize_scene_rejects_invalid_contract(change):
@@ -109,7 +109,7 @@ def test_normalize_scene_rejects_non_json_numbers_and_wrong_shapes():
             normalize_scene(scene)
 
 
-@pytest.mark.parametrize("target", ["air", "fat", "soft", "spongy", "bone"])
+@pytest.mark.parametrize("target", ["skeleton", "lungs", "soft", "vessels"])
 @pytest.mark.parametrize("direction", ["increase", "decrease"])
 def test_normalize_scene_accepts_canonical_tissues_and_directions(target, direction):
     scene = valid_scene(
@@ -123,10 +123,10 @@ def test_normalize_scene_accepts_canonical_tissues_and_directions(target, direct
     assert normalized["command"]["target"] == target
 
 
-@pytest.mark.parametrize("field,value", [("goal", {"target": "bones", "direction": "increase"}),
-                                          ("goal", {"target": "bone", "direction": "up"}),
+@pytest.mark.parametrize("field,value", [("goal", {"target": "spongy", "direction": "increase"}),
+                                          ("goal", {"target": "skeleton", "direction": "up"}),
                                           ("command", {"attribute": "opacity", "target": "marrow", "direction": "increase"}),
-                                          ("command", {"attribute": "opacity", "target": "bone", "direction": "up"})])
+                                          ("command", {"attribute": "opacity", "target": "skeleton", "direction": "up"})])
 def test_normalize_scene_rejects_noncanonical_tissues_and_directions(field, value):
     scene = valid_scene(**{field: value})
 
@@ -300,12 +300,12 @@ def test_scene_transition_allows_dataset_volume_changes_and_goal_changes():
     after = valid_scene(
         scene_id="s:1",
         parent_scene_id="s:0",
-        goal={"target": "fat", "direction": "decrease"},
+        goal={"target": "vessels", "direction": "decrease"},
         volume={**valid_scene()["volume"], "spacing": [0.8, 0.7, 1.0]},
     )
 
     transition = scene_transition(before, after)
-    assert transition["goal"] == {"target": "fat", "direction": "decrease"}
+    assert transition["goal"] == {"target": "vessels", "direction": "decrease"}
     assert transition["volume"]["spacing"] == [0.8, 0.7, 1.0]
 
 
@@ -328,3 +328,21 @@ def test_normalize_scene_does_not_mutate_input():
     normalize_scene(source)
 
     assert source == original
+
+
+def test_the_four_goal_classes_are_accepted_as_scene_targets():
+    # _TISSUES was the retired HU-band vocabulary (air/fat/soft/spongy/bone), so
+    # every scene transition naming skeleton, lungs or vessels -- three of the
+    # four classes the parser actually emits -- was rejected with a 400. The
+    # live log confirms it: out/scene_transitions.jsonl has never held one.
+    import goals
+    from scene_schema import _TISSUES
+
+    for goal_class in goals.GOAL_CLASSES:
+        assert goal_class in _TISSUES, f"{goal_class} is a goal class the parser emits"
+
+
+def test_retired_band_names_are_no_longer_canonical_targets():
+    from scene_schema import _TISSUES
+
+    assert not ({"air", "fat", "spongy"} & _TISSUES)
