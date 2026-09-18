@@ -5,7 +5,7 @@ import pytest
 
 import goals
 import transfer
-from rl.baselines import CONTROLLABLE
+from rl.baselines import CONTROLLABLE, apply_controllable
 from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, USELESS_PENALTY, OneShotEnv
 
 
@@ -250,15 +250,48 @@ def test_sampled_instruction_only_targets_supported_classes(monkeypatch):
 
 # --- hindsight goals: derived from a reachable target, not invented ------------
 
-def test_hindsight_episodes_are_solvable_by_the_action_that_made_them():
-    # The goal is derived from a target the action space can reach, so the
-    # action that produced the target must score near-perfect attainment.
-    # Anything less means the goal encoding and the reward disagree.
+def _mentioned_residual(goal, start_agg, final_agg) -> float:
+    """The part of `goals.distance` the goal actually asks for: sum m*|c - d|,
+    without the keep term on the classes it does not mention."""
+    c, _b = goals.progress(start_agg, final_agg)
+    n = len(goals.GOAL_CLASSES)
+    d, m = goal[0:n], goal[n:2 * n]
+    return sum(m[i] * abs(c[goal_class] - d[i]) for i, goal_class in enumerate(goals.GOAL_CLASSES))
+
+
+def test_hindsight_goal_is_exactly_what_the_target_achieved():
+    # The invariant the construction actually guarantees: at the target, the
+    # requested change and the measured change are the same number. Deliberately
+    # not an attainment threshold -- attainment also carries goals.distance's
+    # keep term for the unmentioned classes, which the target is charged for and
+    # which no encoding can drive to zero. A sign error or a units mismatch
+    # against goals.progress would show up here immediately, and exactly.
     env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
-    env.reset(seed=0)
-    oracle = env.hindsight_action()
-    _obs, _reward, _done, _truncated, info = env.step(oracle)
-    assert info["attainment"] > 0.8
+    for seed in range(10):
+        env.reset(seed=seed)
+        target_params = apply_controllable(env._start_params, env.hindsight_action())
+        target_agg = goals.aggregate(env._model.features(target_params))
+        residual = _mentioned_residual(env._instruction["goal"], env._start_agg, target_agg)
+        assert residual < 1e-9, f"seed {seed}: goal and reward disagree by {residual}"
+
+
+def test_hindsight_oracle_beats_a_random_action_by_a_clear_margin():
+    # The signal claim: the demonstrated solution is worth demonstrating. A
+    # margin at the median rather than a fixed threshold, so the test keeps
+    # meaning if the keep penalty (and so the absolute attainment) moves.
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
+    noise = np.random.default_rng(0)
+    oracle_scores, random_scores = [], []
+    for seed in range(10):
+        env.reset(seed=seed)
+        _obs, _reward, _done, _truncated, info = env.step(env.hindsight_action())
+        oracle_scores.append(info["attainment"])
+
+        env.reset(seed=seed)   # the same episode, a different action
+        _obs, _reward, _done, _truncated, info = env.step(noise.uniform(-1.0, 1.0, ACTION_SIZE))
+        random_scores.append(info["attainment"])
+
+    assert np.median(oracle_scores) > np.median(random_scores) + 0.5
 
 
 def test_hindsight_ratio_zero_keeps_sampling_instructions():

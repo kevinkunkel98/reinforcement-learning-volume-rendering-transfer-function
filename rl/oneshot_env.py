@@ -34,6 +34,27 @@ REWARD_CLIP = 1.0
 # uniform per controllable group -- matches VisibilityTFEnv's reset noise.
 START_NOISE = 0.3
 
+# Hindsight target noise, in the same normalized parameter units as
+# START_NOISE: the target transfer function is the start's controllable values
+# plus U(-HINDSIGHT_NOISE, HINDSIGHT_NOISE) per group, not a uniform draw over
+# the whole action space. A uniform draw lands far from the start and asks for
+# visibility changes of a factor of ~40 (median 1.62 log10, up to the full 3.0
+# floor-to-visible range), while a real instruction asks for 0.15 to 1.0
+# (goals.VISIBILITY_STRENGTH and goals.HIDE_STRENGTH) -- training on the former
+# and evaluating on the latter is a goal-distribution shift. It also moves
+# every peak at once, including those of the classes the goal does not mention,
+# which goals.distance then charges as keep-term drift, so the target itself
+# could not score near 1.
+#
+# 0.25 is calibrated, not round: swept over 200 synthetic episodes each, the
+# median largest |delta| runs 0.19 (s=0.1), 0.36 (0.2), 0.44 (0.25), 0.53
+# (0.3), 0.97 (0.5). 0.25 puts the median inside the band real instructions
+# ask for and at the plateau of the share that lands in [0.15, 1.0] (62%,
+# against 63% at 0.3 and 52% at 0.15), while giving the cleanest oracle --
+# median attainment 0.985 for the action that produced the target, against
+# 0.729 under the uniform draw this replaced.
+HINDSIGHT_NOISE = 0.25
+
 # Generous finite bound for the observation Box: every packed quantity (goal
 # components, log-vis/brightness within a handful of units, start params and
 # coverage in/near [-1, 1]) stays well inside it.
@@ -180,8 +201,10 @@ class OneShotEnv(gym.Env):
 
     def _sample_hindsight_goal(self, rng, model, start_params, start_agg):
         """(instruction-shaped dict, action) from a reachable target."""
+        start_controllable = np.asarray(self._controllable_values(start_params))
         for _ in range(self.HINDSIGHT_MAX_TRIES):
-            action = rng.uniform(-1.0, 1.0, size=len(CONTROLLABLE))
+            noise = rng.uniform(-HINDSIGHT_NOISE, HINDSIGHT_NOISE, size=len(CONTROLLABLE))
+            action = np.clip(start_controllable + noise, -1.0, 1.0)
             target_params = apply_controllable(start_params, action)
             target_agg = goals.aggregate(model.features(target_params))
 
