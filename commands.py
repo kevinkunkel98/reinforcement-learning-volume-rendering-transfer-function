@@ -269,12 +269,6 @@ def parse_command_rule(text: str) -> dict:
     raise ValueError(f"rule parser cannot parse: {text!r}")
 
 
-def parse_command(text: str, parser: str = "rule", model: str = "qwen2.5:7b") -> dict:
-    if parser == "llm":
-        return parse_command_llm(text, model=model)
-    return parse_command_rule(text)
-
-
 def parse_command_with_meta(text: str, parser: str = "rule", model: str = "qwen2.5:7b"):
     """`parse_command`, plus which parser actually produced the command.
 

@@ -31,7 +31,7 @@ from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 import collect
 from commands import (COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command,
-                       parse_command, parse_command_with_meta)
+                       parse_command_with_meta)
 from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
 from evaluate import jsonl_append, objective
 import goals
