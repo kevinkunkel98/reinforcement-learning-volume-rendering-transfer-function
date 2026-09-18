@@ -1,30 +1,36 @@
 #import "../helpers.typ": *
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SLIDE — Kontinuierliches Online-Lernen
+// SLIDE — Die Zielgröße ist selbst nur ein Stellvertreter
 // ══════════════════════════════════════════════════════════════════════════════
-== Kontinuierliches Online-Lernen
+== Die Zielgröße ist selbst nur ein Stellvertreter
 
-#v(0.05em)
-Statt 200k-Batch: fortlaufendes Training auf einer Umgebung, alle 5000
-Schritte gegen dieselben 20 Test-Episoden neu bewertet (`rl/online_train.py`).
+#v(0.1em)
+`visibility.py` misst, *wie viel* einer Klasse im Bild ankommt — nicht, ob ein
+Mensch das Bild für gelungen hält.
 
 #v(0.3em)
 #table(
   columns: (auto, 1fr),
   stroke: none,
-  row-gutter: 0.5em,
+  row-gutter: 0.45em,
   column-gutter: 0.8em,
   inset: (x: 0pt, y: 2pt),
-  [*Budget*], [50 000 Schritte, eine Umgebung statt vier parallel],
-  [*Verlauf*], [0.199 (5k) $arrow.r$ 0.347 (15k) $arrow.r$ 0.346 (50k) `mass_fraction`],
-  [*Konvergenz*], [Schritte-bis-90% fällt von 17.4 auf 3.2],
-  [*Budget-Anteil*], [nur 25 % der Umgebungsschritte des Offline-Laufs (200k)],
+  [*Erhebung*], [Blindvergleich zweier Kandidaten zu derselben Instruktion, je sechs Ansichten],
+  [*Tasten*], [A · B · E (gleich) · S (überspringen)],
+  [*Kontrolle*], [Jedes zehnte Paar wiederholt ein früheres seitenvertauscht],
+  [*Pilot*], [54 Urteile, als Pilot markiert und von jeder Auswertung ausgeschlossen],
 )
 
 #v(0.3em)
+#thm-box([Erster Befund, noch ohne Aussagekraft], [
+  Im Pilot stimmte die Metrik in *21 von 38* entschiedenen Paaren mit dem
+  Urteil überein (55 %, 95 %-KI 0.40–0.70) — kaum über Zufall. Genau diese
+  Lücke rechtfertigt ein gelerntes Reward-Modell.
+], fill: rgb("#fff3d6"), stroke-color: amber)
+
+#v(0.2em)
 #remark[
-  - Mit ¼ des Offline-Budgets fast exakt zwischen Policy (0.344) und Hill-Climb (0.347)
-  - Klare Konvergenz, kein Zufall — dasselbe SAC lernt auch fortlaufend, nicht nur im Batch
-  - Voraussetzung für Nachlernen aus echtem Feedback (nächste Folie)
+  Nach Instruktionsart: relative Änderungen 79 %, "show only" und
+  zusammengesetzte Kommandos um 43 %.
 ]
