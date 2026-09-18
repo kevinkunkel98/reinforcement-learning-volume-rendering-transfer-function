@@ -343,33 +343,48 @@ never saw, every method scored on the same episodes:
     align: (left, center, center, center, center, center),
     stroke: (x, y) => if y == 0 { (bottom: 0.8pt + navy) } else { (bottom: 0.3pt + luma(200)) },
     table.header[*Method*][*Evals*][*Median*][*Mean (clipped)*][*Share +*][*vs policy*],
-    [B4 hill-climb], [200], [+0.660], [+0.604], [100 %], [better, $p < 0.001$],
-    [*policy + refinement*], [*4*], [*+0.218*], [+0.130], [69 %], [better, $p < 0.001$],
-    [B3 hill-climb], [10], [+0.205], [+0.301], [90 %], [better, $p < 0.001$],
-    [*policy*], [*0*], [*+0.194*], [+0.101], [67 %], [—],
-    [policy, no ceiling input], [0], [+0.168], [+0.087], [64 %], [ablation],
-    [B0 do nothing], [0], [0.000], [0.000], [—], [worse, $p = 0.0002$],
-    [B1 today's executor], [0], [#sym.minus 0.020], [#sym.minus 0.158], [37 %], [worse, $p < 0.001$],
-    [B2 random], [0], [#sym.minus 0.024], [#sym.minus 0.105], [44 %], [worse, $p < 0.001$],
-    [B5 strip-everything], [0], [#sym.minus 0.150], [#sym.minus 0.284], [33 %], [worse, $p < 0.001$],
+    [B4 hill-climb], [200], [+0.730], [+0.643], [100 %], [better, $p < 0.001$],
+    [*policy + refinement*], [*4*], [*+0.316*], [+0.254], [76 %], [—],
+    [*policy*], [*0*], [*+0.275*], [+0.205], [73 %], [—],
+    [B3 hill-climb], [10], [+0.263], [+0.318], [93 %], [split by seed, see below],
+    [B0 do nothing], [0], [0.000], [0.000], [—], [worse, $p < 0.001$],
+    [B1 today's executor], [0], [#sym.minus 0.022], [#sym.minus 0.172], [37 %], [worse, $p < 0.001$],
+    [B2 random], [0], [#sym.minus 0.040], [#sym.minus 0.078], [39 %], [worse, $p < 0.001$],
+    [B5 strip-everything], [0], [#sym.minus 0.191], [#sym.minus 0.290], [30 %], [worse, $p < 0.001$],
   ),
   caption: [200 fixed episodes on the six held-out test subjects, every method
-  scored on the same episodes. Paired Wilcoxon signed-rank, two-sided. "Evals"
-  counts visibility evaluations spent per instruction; the policy needs one to
-  build its input features and none to search.],
+  scored on the same episodes, median over three training seeds. Paired Wilcoxon
+  signed-rank, two-sided. "Evals" counts visibility evaluations spent per
+  instruction; the policy needs one to build its input features and none to
+  search. Re-measured 2026-09-17 after an evaluation batch was found to have run
+  on pre-fix scoring code; see the provenance note below.],
 )
 
 What this supports, stated plainly: the learned policy *generalises to unseen
 patients* and beats doing nothing, today's rule-based executor, a random policy
 and the hand-written heuristic, all at $p < 0.001$.
 
-#finding[A learned proposal followed by three refinement evaluations edges out
-the 10-evaluation hill-climber on the median (+0.218 vs +0.205) at less than half
-the budget. Learned initialisation plus short search beats search from scratch.]
+#finding[The policy reaches the 10-evaluation hill-climber's median while
+spending no evaluations at all (+0.275 vs +0.263), and a learned proposal plus
+three refinements exceeds it at 4 evaluations (+0.316). Per seed the paired
+comparison splits -- seed 0 favours search ($p = 3.0 times 10^(-4)$), seeds 1 and
+2 favour the policy ($p = 0.054$, $p = 0.029$) -- so the defensible claim is that
+the policy *matches* cheap search at a fraction of its cost, not that it beats
+it.]
+
+#caveat[Every figure in this table was wrong until 2026-09-17. The batch that
+produced the previously reported numbers started before the reachable-ceiling fix
+landed and wrote its files six hours after it, so it scored with the code it had
+imported rather than the code in the tree. Re-measuring moved the policy from
++0.194 to +0.275 and every baseline with it, which is what identifies the fault
+as the ruler rather than the method. `provenance.py` now records the git commit
+and a fingerprint of the imported scoring modules in every result file, and
+`rl.vis_eval --show` refuses to print one silently when that fingerprint no
+longer matches.]
 
 #caveat[Reliability is the remaining gap and it is not small: the hill-climber
-improves 90 % of episodes, the policy 67 % and the hybrid 69 %, and the
-hill-climber's clipped mean (+0.301) is still the better figure. The fair claim
+improves 93 % of episodes, the policy 73 % and the hybrid 76 %, and the
+hill-climber's clipped mean (+0.318) is still the better figure. The fair claim
 is that the policy matches cheap search *in the middle of the distribution* while
 being cheaper, not that it is better overall. Its worst episodes remain worse.]
 
