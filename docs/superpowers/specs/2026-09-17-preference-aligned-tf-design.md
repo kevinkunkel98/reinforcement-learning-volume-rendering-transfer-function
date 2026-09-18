@@ -179,3 +179,36 @@ same pipeline, are what would upgrade it.
 7. Blind A/B.
 
 Steps 1 and 2 are useful whatever happens to the rest.
+
+## Measured after implementation (2026-09-17)
+
+The distribution-shift check the design required is done, on the synthetic
+volume, 200 episodes per arm. Hindsight targets are drawn as the start's
+controllable values plus U(-0.25, 0.25) per group (`HINDSIGHT_NOISE`),
+calibrated so the median requested change lands in the band real instructions
+ask for.
+
+| largest |delta| per episode (log10) | median | p90 | share > 1.0 |
+|---|---|---|---|
+| hindsight | 0.44 | 2.38 | 28 % |
+| `goals.sample_instruction` | 0.60 | 1.00 | 2 % |
+
+The medians agree. The tails do not, and this is not a step-size artefact:
+shrinking the noise further pulls the median out of band while leaving the tail
+in place. The cause is the `goals.EPSILON` floor — a perturbation that takes a
+class from effectively invisible to visible produces a large log10 delta however
+small the parameter step was. So hindsight training over-represents "make an
+invisible class appear", which instructions rarely ask for.
+
+Recorded rather than tuned away. The mitigation is the mixture the design
+already requires: stage 1 mixes hindsight with instruction-derived episodes and
+reports attainment per source, using the `goal_source` field in the env's info
+dict. If a floor-crossing rejection turns out to be needed, that is the honest
+lever, not the noise scale.
+
+A second measurement worth keeping: the action that produces a hindsight target
+scores median attainment 0.985 (p10 0.818), against a median of -2.343 for a
+random action on the same episodes. The shortfall from 1.0 is `goals.distance`'s
+keep term on classes the goal does not mention, whose peaks the target also
+moved. The mentioned term is exactly 0 at the target, so the goal encoding and
+the reward measure one quantity.
