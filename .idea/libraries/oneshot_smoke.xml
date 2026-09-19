@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="oneshot_smoke">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/oneshot_smoke/checkpoint_1000.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/oneshot_smoke/best.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/oneshot_smoke/checkpoint_2000.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

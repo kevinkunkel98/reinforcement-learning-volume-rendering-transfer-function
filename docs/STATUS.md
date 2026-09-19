@@ -19,7 +19,10 @@ What is missing is presentation, not results.
 
 ## Results (re-measured 2026-09-17)
 
-200 instructions, six unseen patients, median over three seeds:
+200 instructions, six unseen patients. Attainment is the median of the three
+seeds' medians; "improved" is their mean. The baseline rows do not vary by seed
+— the episode seed is fixed at 0, so every arm is scored on identical episodes
+and only the policy differs between the three files.
 
 | Method | Evaluations | Median attainment | Improved |
 |---|---|---|---|
@@ -41,7 +44,8 @@ the paired test against cheap search splits — seed 0 favours search
 
 Per instruction kind (median, seed 1): absolute +0.50, brightness +0.48,
 relative +0.30, show-only +0.20, **compound +0.09**. Compound instructions are
-25 % of the mix and the policy essentially fails them — the clearest capability
+25 % of the sampled mix (43 of the 200 test episodes) and the policy essentially
+fails them — the clearest capability
 gap, and the one a user notices first.
 
 ## What happened yesterday, and what it cost

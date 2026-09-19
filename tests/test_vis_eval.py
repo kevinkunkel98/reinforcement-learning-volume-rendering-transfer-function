@@ -682,3 +682,46 @@ def test_show_does_not_need_a_policy(tmp_path):
 def test_cli_still_requires_a_policy_when_not_showing_a_file():
     with pytest.raises(SystemExit):
         vis_eval.parse_args([])
+
+
+# --- episodes_detail ------------------------------------------------------------
+
+def test_episodes_detail_tags_every_row_with_the_episode_it_came_from():
+    episodes = [{"volume": "ts_s0454"}, {"volume": "ts_s0477"}]
+    results = {"policy": [{"attainment": 0.4, "kind": "absolute"},
+                          {"attainment": -0.1, "kind": "compound"}],
+               "B0_do_nothing": [{"attainment": 0.0, "kind": "absolute"},
+                                 {"attainment": 0.0, "kind": "compound"}]}
+
+    detail = vis_eval.episodes_detail(results, episodes)
+
+    assert detail["policy"] == [
+        {"attainment": 0.4, "kind": "absolute", "volume": "ts_s0454"},
+        {"attainment": -0.1, "kind": "compound", "volume": "ts_s0477"},
+    ]
+    assert [row["volume"] for row in detail["B0_do_nothing"]] == ["ts_s0454", "ts_s0477"]
+
+
+def test_episodes_detail_refuses_rows_that_do_not_line_up_with_the_episodes():
+    episodes = [{"volume": "ts_s0454"}, {"volume": "ts_s0477"}]
+    results = {"policy": [{"attainment": 0.4, "kind": "absolute"}]}
+
+    with pytest.raises(ValueError, match="policy"):
+        vis_eval.episodes_detail(results, episodes)
+
+
+def test_main_writes_one_row_per_episode_for_every_method(tmp_path, monkeypatch):
+    episodes = [{"volume": "ts_s0454"}, {"volume": "ts_s0477"}]
+    rows = [{"attainment": 0.5, "kind": "absolute"}, {"attainment": 0.1, "kind": "relative"}]
+    monkeypatch.setattr(vis_eval, "fixed_episodes", lambda *a, **k: episodes)
+    monkeypatch.setattr(vis_eval, "run_policy", lambda *a, **k: rows)
+    monkeypatch.setattr(vis_eval, "run_baseline", lambda name, eps, **k: rows)
+    monkeypatch.setattr(vis_eval, "BASELINES", {"B0_do_nothing": None})
+    out = tmp_path / "eval.json"
+
+    vis_eval.main(["--policy", "stub.zip", "--split", "test", "--episodes", "2",
+                   "--out", str(out)])
+
+    written = json.loads(out.read_text())
+    assert written["episodes_detail"]["policy"][0]["volume"] == "ts_s0454"
+    assert len(written["episodes_detail"]["B0_do_nothing"]) == 2

@@ -57,9 +57,12 @@ AUDIO_DIR = "out/audio"
 # reload cost.
 # v3, not v2: the v2 seeds were trained before the observation fixes (the
 # reachable-ceiling probe sat on the retired band layout's fat peak, and the
-# colour action wrote one scalar to r, g and b). Held-out attainment is
-# indistinguishable between the two (+0.1732 vs +0.1743, p = 0.85), but the
-# viewer should demonstrate the pipeline the thesis describes.
+# colour action wrote one scalar to r, g and b). Retraining on the corrected
+# observation does move held-out attainment: v3 +0.286 against v2 +0.201 on the
+# seed-averaged per-episode median, paired Wilcoxon p = 0.0064. The earlier
+# reading -- indistinguishable, +0.1732 vs +0.1743, p = 0.85 -- came from the
+# stale evaluation batch of 2026-09-17 and is withdrawn. The viewer should
+# demonstrate the pipeline the thesis describes in any case.
 # `policy.py` owns the checkpoint path; these are re-exports so the existing
 # call sites and tests keep working.
 POLICY_PATH = policy_module.POLICY_PATH

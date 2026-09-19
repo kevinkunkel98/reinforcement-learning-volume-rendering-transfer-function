@@ -372,6 +372,35 @@ def kind_stats(value) -> dict:
     return {"median": None, "mean": float(value), "share_positive": None, "n": None}
 
 
+def episodes_detail(results: dict, episodes: list) -> dict:
+    """Every method's per-episode rows, each tagged with the volume the
+    episode ran on: `{method: [{"attainment", "kind", "volume"}, ...]}`.
+
+    `summary` and `comparisons` are aggregates, and an aggregate cannot be
+    re-aggregated a different way. The v2-vs-v3 comparison in the write-up
+    needs the median of the *seed-averaged per-episode* attainment, which is
+    not recoverable from a stored median -- so it had to be recomputed by
+    re-running the policy, and for a while was quoted from a session that no
+    longer existed. Writing the rows themselves means any later question
+    ("per patient?", "lungs only?", "paired against which arm?") is answered
+    from the file rather than from another evaluation run.
+
+    Raises if a method's rows do not line up with `episodes`: the pairing is
+    positional, so a length mismatch means the rows describe some other run
+    and every per-episode statistic drawn from them would be silently
+    misaligned."""
+    detail = {}
+    for name, rows in results.items():
+        if len(rows) != len(episodes):
+            raise ValueError(
+                f"{name}: {len(rows)} rows for {len(episodes)} episodes -- "
+                "per-episode rows are paired by position and must match")
+        detail[name] = [{"attainment": row["attainment"], "kind": row["kind"],
+                         "volume": episode["volume"]}
+                        for row, episode in zip(rows, episodes)]
+    return detail
+
+
 def compare(results: dict, policy_name: str = "policy") -> dict:
     """Robust attainment stats per method (overall and per instruction kind),
     plus a paired Wilcoxon signed-rank test of `results[policy_name]` against
@@ -505,6 +534,7 @@ def main(argv=None):
     result = {"policy": args.policy, "split": args.split, "episodes": args.episodes,
               "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
               "provenance": provenance.IMPORT_TIME_PROVENANCE,
+              "episodes_detail": episodes_detail(results, episodes),
               **compare(results)}
     _print_table(result)
 

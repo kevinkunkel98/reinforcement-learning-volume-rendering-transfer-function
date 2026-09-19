@@ -323,7 +323,8 @@ Reward is the attainment of that single output.
   ),
   caption: [Validation median attainment (share of episodes beating do-nothing in
   brackets). The same SAC that degraded in the ten-step formulation improves
-  monotonically here.],
+  here, though not monotonically: both columns oscillate after 70k, which is the
+  40-episode validation set's noise as much as the policy's.],
 )
 
 #finding[Telling the policy what is achievable matters. `solo_max` per class —
@@ -376,8 +377,10 @@ it.]
 produced the previously reported numbers started before the reachable-ceiling fix
 landed and wrote its files six hours after it, so it scored with the code it had
 imported rather than the code in the tree. Re-measuring moved the policy from
-+0.194 to +0.275 and every baseline with it, which is what identifies the fault
-as the ruler rather than the method. `provenance.py` now records the git commit
++0.169 to +0.275 and every baseline with it, which is what identifies the fault
+as the ruler rather than the method. (+0.194 was the *earlier* incident's
+figure -- a colour decode that collapsed every peak to grey and a ceiling probe
+on the retired band layout -- and is not what this batch reported.) `provenance.py` now records the git commit
 and a fingerprint of the imported scoring modules in every result file, and
 `rl.vis_eval --show` refuses to print one silently when that fingerprint no
 longer matches.]

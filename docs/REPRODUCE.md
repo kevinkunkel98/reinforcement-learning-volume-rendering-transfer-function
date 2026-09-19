@@ -139,6 +139,33 @@ Re-print a stored result without recomputing it:
 .venv/bin/python -m rl.vis_eval --show out/rl_v2/eval_rerun_v3_seed0.json
 ```
 
+### Comparing two training configurations
+
+The v2-against-v3 numbers in the README and in
+`docs/experiments/2026-09-16-retrain-after-measurement-fixes.md` are **not** the
+table above aggregated differently — they are a paired test over episodes, and
+they come from here:
+
+```bash
+.venv/bin/python -m tools.compare_runs \
+    --a "out/rl_v2/eval_detail_v2_seed*.json" \
+    --b "out/rl_v2/eval_detail_v3_seed*.json"
+```
+
+It reads the per-episode rows each result file stores under `episodes_detail`
+and never re-runs a policy, so the comparison cannot drift from the files the
+table is built on.
+
+Two statistics are in play and crossing them inflates the gap:
+
+| statistic | v2 | v3 | gap |
+|---|---|---|---|
+| median of the three seeds' medians (the table above) | +0.247 | +0.275 | +0.028 |
+| median of the seed-averaged per-episode attainment | +0.201 | +0.286 | +0.086 |
+
+The paired Wilcoxon (p = 0.0064) belongs to the second row, because the pairing
+is per episode. Quote a gap with the statistic that produced it.
+
 ### Provenance — read this before quoting any number
 
 Every result file records the git commit, whether the tree was dirty, and a
@@ -152,6 +179,14 @@ started before a scoring fix landed and wrote its files six hours after it, so
 the published figures were computed by code that no longer existed. The
 corrected numbers were 60 % higher. Result files written before `8ff1f6d` carry
 no provenance block and `--show` will say so.
+
+The fingerprint covers the whole of each scoring module, not just the lines that
+compute a score, so an edit that cannot change a number still invalidates older
+files — adding `episodes_detail` to `rl/vis_eval.py` did exactly that. The check
+is deliberately blunt in that direction: it would rather send you back to a
+re-run than let a changed module pass unnoticed. When a re-run reproduces the
+old numbers exactly, that is the evidence the edit was cosmetic; record it and
+move on.
 
 ---
 

@@ -1,0 +1,15 @@
+<component name="libraryTable">
+  <library name="seed0">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/seed0/checkpoint_100000.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/seed0/checkpoint_80000.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/seed0/checkpoint_40000.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/seed0/checkpoint_120000.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/seed0/checkpoint_60000.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/seed0/best.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/seed0/checkpoint_20000.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

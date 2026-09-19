@@ -1,0 +1,12 @@
+<component name="libraryTable">
+  <library name="oneshot_seed1">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/oneshot_seed1/checkpoint_30000.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/oneshot_seed1/checkpoint_20000.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/oneshot_seed1/best.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_v2/oneshot_seed1/checkpoint_10000.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

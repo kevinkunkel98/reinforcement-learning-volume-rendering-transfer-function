@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="rl_models">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/out/rl_models/sac_tf_agent.zip!/" />
+      <root url="jar://$PROJECT_DIR$/out/rl_models/sac_tf_reward_model_agent.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

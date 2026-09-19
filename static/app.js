@@ -7,8 +7,9 @@ const state = { current: null, cursor: 0, total: 1, dataset: null };
 // APPLIED exactly by default, not answered by the policy. Measured on
 // "show only bones" (ct_chest): exact isolates it -- skeleton 16.7%, lungs
 // 0.0% -- while the policy leaves soft tissue dominant at 43.1% and the
-// skeleton at 4.9%. The policy's held-out attainment is +0.169; it proposes a
-// direction, it does not execute an instruction. Policy stays one click away.
+// skeleton at 4.9%. The policy's held-out attainment is +0.275 (median of
+// three seeds; the seed-0 checkpoint this viewer loads is +0.231); it proposes
+// a direction, it does not execute an instruction. Policy stays one click away.
 const config = { parser: "llm", search: false, mode: "exact" };
 
 const el = (id) => document.getElementById(id);
