@@ -222,6 +222,57 @@ def test_for_volume_builds_once_then_loads(tmp_path, monkeypatch):
     assert first.features(_params([0, 0, 0, 0.5])) == second.features(_params([0, 0, 0, 0.5]))
 
 
+def _stub_for_volume(monkeypatch, tmp_path, version="v1"):
+    monkeypatch.setattr(visibility, "CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(visibility, "_load_volume",
+                         lambda name: (_slab_volume(50.0, 900.0), (2.0, 2.0, 2.0)))
+    monkeypatch.setattr(visibility, "_volume_version", lambda name: version)
+    monkeypatch.setattr(visibility, "_has_labels", lambda name: False)
+
+
+def test_for_volume_returns_the_same_instance_so_solo_max_stays_warm(tmp_path, monkeypatch):
+    """`solo_max` memoises on the instance, but a fresh instance per call threw
+    that memo away every time -- four single-peak probes, ~190 ms, repaid on
+    every policy answer. Reusing the instance is what makes the memo work."""
+    visibility.clear_model_cache()
+    _stub_for_volume(monkeypatch, tmp_path)
+
+    first = visibility.for_volume("fake")
+    first.solo_max("skeleton")
+    second = visibility.for_volume("fake")
+
+    assert second is first
+    assert "skeleton" in second._solo_max
+
+
+def test_for_volume_rebuilds_when_the_volume_version_changes(tmp_path, monkeypatch):
+    """The cache must not outlive the data it describes."""
+    visibility.clear_model_cache()
+    _stub_for_volume(monkeypatch, tmp_path, version="v1")
+    first = visibility.for_volume("fake")
+
+    monkeypatch.setattr(visibility, "_volume_version", lambda name: "v2")
+    second = visibility.for_volume("fake")
+
+    assert second is not first
+
+
+def test_model_cache_is_bounded(tmp_path, monkeypatch):
+    """Training sweeps every volume in a split; an unbounded cache would hold
+    all of them at ~6 MB each."""
+    visibility.clear_model_cache()
+    _stub_for_volume(monkeypatch, tmp_path)
+
+    names = [f"vol{i}" for i in range(visibility.MODEL_CACHE_SIZE + 2)]
+    for name in names:
+        visibility.for_volume(name)
+
+    assert len(visibility._MODEL_CACHE) == visibility.MODEL_CACHE_SIZE
+    # the oldest is gone, the newest retained
+    assert not any(key[0] == names[0] for key in visibility._MODEL_CACHE)
+    assert any(key[0] == names[-1] for key in visibility._MODEL_CACHE)
+
+
 def test_solo_max_probes_at_the_anatomical_peak_centres():
     """solo_max is the ceiling used for absolute levels ("high lungs" = 0.8 x
     solo_max) and fed to the policy as the achievable ceiling. It probes with

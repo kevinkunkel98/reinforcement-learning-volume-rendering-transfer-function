@@ -18,6 +18,7 @@ lungs and organs -- muscle and vessels are never populated by the fallback.
 It is an estimate, not a renderer: no shading, no perspective, a coarse grid.
 tools/validate_visibility.py measures how well it tracks real VTK renders.
 """
+import collections
 import hashlib
 import os
 
@@ -249,14 +250,50 @@ def _load_labels(name: str):
     return totalseg.load_labels(name)
 
 
+# Keep a few built models in memory, most-recently-used last.
+#
+# `solo_max` memoises its four single-peak probes on the instance (~190 ms the
+# first time), but returning a fresh instance per call threw that memo away on
+# every call -- and `for_volume` is called on every render for the viewer's
+# readout and on every policy answer. Reusing the instance is what makes the
+# memo do its job.
+#
+# Bounded because training sweeps every volume in a split and a model is about
+# 6 MB (two 6x80x80x80 arrays); MODEL_CACHE_SIZE keeps the working set for a
+# viewer session (one volume, occasionally switched) without pinning a whole
+# split. The key carries the volume version and the resolved cache directory,
+# so a model never outlives the data it describes.
+MODEL_CACHE_SIZE = 4
+_MODEL_CACHE = collections.OrderedDict()
+
+
+def clear_model_cache() -> None:
+    """Drop every in-memory model. For tests that patch what a volume is."""
+    _MODEL_CACHE.clear()
+
+
 def for_volume(name: str, cache_dir: str = None) -> VisibilityModel:
-    """The visibility model of a volume, from the cache when possible."""
+    """The visibility model of a volume, from memory or the on-disk cache when
+    possible.
+
+    Returns a *shared* instance: callers must treat it as read-only. Nothing
+    assigns to a model after `__init__` except `solo_max`'s own memo, which is
+    what the sharing exists to preserve."""
     version = _volume_version(name)
-    cached = VisibilityModel.load_cache(name, version, cache_dir)
-    if cached is not None:
-        return cached
-    volume, spacing = _load_volume(name)
-    labels = _load_labels(name) if _has_labels(name) else None
-    model = VisibilityModel.from_volume(volume, spacing, labels=labels, volume_id=name)
-    model.save_cache(version, cache_dir)
+    key = (name, version, os.path.abspath(cache_dir or CACHE_DIR))
+    if key in _MODEL_CACHE:
+        _MODEL_CACHE.move_to_end(key)
+        return _MODEL_CACHE[key]
+
+    model = VisibilityModel.load_cache(name, version, cache_dir)
+    if model is None:
+        volume, spacing = _load_volume(name)
+        labels = _load_labels(name) if _has_labels(name) else None
+        model = VisibilityModel.from_volume(volume, spacing, labels=labels, volume_id=name)
+        model.save_cache(version, cache_dir)
+
+    _MODEL_CACHE[key] = model
+    _MODEL_CACHE.move_to_end(key)
+    while len(_MODEL_CACHE) > MODEL_CACHE_SIZE:
+        _MODEL_CACHE.popitem(last=False)
     return model
