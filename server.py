@@ -211,31 +211,31 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
     }
 
 
-def run_policy_arm(model, policy, cmd, current_params):
-    """Run the one-shot policy on the goal `cmd` asks for, with the volume
-    model and the loaded checkpoint passed in rather than resolved from a
-    Session -- so the comparison endpoint and `Session._run_policy` share one
-    implementation and cannot drift apart.
+def run_policy_arm(model, policy, instruction, start_agg, start_params):
+    """Run the one-shot policy on an already-built goal.
 
-    Builds the same observation layout `rl.candidates` builds for a standalone
-    policy query (`rl.oneshot_env.build_observation`). Returns
-    `(new_params, goal_text)`. Raises `ValueError` when `policy` is None, or
-    when `goals.goal_from_command` rejects the command (camera, reset, width,
-    centre) or a goal this volume cannot support."""
+    The caller owns `instruction` (`goals.goal_from_command`) and `start_agg`,
+    so a caller comparing several arms builds each exactly once -- recomputing
+    them here would put another `model.features` (~17 ms) inside the policy
+    arm's own timing, which is the one number the comparison panel exists to
+    show. Builds the same observation layout `rl.candidates` builds for a
+    standalone policy query (`rl.oneshot_env.build_observation`).
+
+    Returns the new parameters. Raises `ValueError` when `policy` is None;
+    `model.features`/`model.solo_max` may also raise `FileNotFoundError` or
+    `KeyError` when the volume has no visibility cache."""
     if policy is None:
         raise ValueError(
             "no trained policy checkpoint found -- applied the command directly instead")
 
-    start_agg = goals.aggregate(model.features(current_params))
-    goal = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
-
     solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
                      for c in goals.GOAL_CLASSES]
-    controllable = [float(np.mean([current_params[i] for i in group])) for group in CONTROLLABLE]
-    observation = build_observation(goal["goal"], model.histogram, start_agg, solo_max_log, controllable)
+    controllable = [float(np.mean([start_params[i] for i in group])) for group in CONTROLLABLE]
+    observation = build_observation(instruction["goal"], model.histogram, start_agg,
+                                     solo_max_log, controllable)
 
     action = _predict_action(policy, observation)
-    return apply_controllable(current_params, action), goal["text"]
+    return apply_controllable(start_params, action)
 
 
 class Session:
@@ -342,10 +342,24 @@ class Session:
         return current
 
     def _run_policy(self, cmd, current_params):
-        """mode="policy": resolve the checkpoint and volume model off this
-        session and hand them to `run_policy_arm`, which owns the logic."""
-        return run_policy_arm(self.model_for_volume(_dataset_name),
-                              self.policy_provider(), cmd, current_params)
+        """mode="policy": resolve the checkpoint and the volume model, build
+        the goal, and hand them to `run_policy_arm`.
+
+        The `policy is None` check stays ahead of `model_for_volume`: that call
+        is not total (`visibility.for_volume` raises `FileNotFoundError` when a
+        volume has no cache, which is why `_class_visibility` guards it), and
+        `command()` catches only `ValueError`. Resolving the model first would
+        turn a graceful "no checkpoint, applied directly" fallback into an
+        unhandled exception out of the route. The `ValueError` raised here is
+        what `command()` catches to fall back to exact application."""
+        policy = self.policy_provider()
+        if policy is None:
+            raise ValueError(
+                "no trained policy checkpoint found -- applied the command directly instead")
+        model = self.model_for_volume(_dataset_name)
+        start_agg = goals.aggregate(model.features(current_params))
+        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
+        return run_policy_arm(model, policy, instruction, start_agg, current_params), instruction["text"]
 
     def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10, mode=None):
         cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)  # raises ValueError on failure

@@ -536,6 +536,65 @@ def test_policy_mode_non_goal_command_falls_back_with_message(ts_session):
     assert state["current"]["message"]
 
 
+def test_run_policy_arm_matches_session_run_policy(ts_session):
+    """`Session._run_policy` is a thin delegation to `run_policy_arm` -- call
+    both with the same inputs and pin that they cannot drift apart."""
+    s = ts_session
+    action = np.linspace(-0.4, 0.4, len(CONTROLLABLE))
+    s.policy_provider = lambda: _StubPolicy(action)
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    model = s.model_for_volume(server._dataset_name)
+    policy = s.policy_provider()
+    start_agg = goals.aggregate(model.features(params))
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+
+    delegated_params, delegated_text = s._run_policy(cmd, params.copy())
+    direct_params = server.run_policy_arm(model, policy, instruction, start_agg, params.copy())
+
+    assert delegated_params.tolist() == pytest.approx(direct_params.tolist())
+    assert delegated_text == instruction["text"]
+    for group, value in zip(CONTROLLABLE, action):
+        assert float(np.mean([direct_params[i] for i in group])) == pytest.approx(float(value), abs=1e-6)
+
+
+def test_run_policy_arm_without_a_checkpoint_raises_the_user_visible_message(ts_session):
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    start_agg = goals.aggregate(model.features(params))
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+
+    with pytest.raises(ValueError) as exc:
+        server.run_policy_arm(model, None, instruction, start_agg, params)
+
+    # This message ends up in the step's user-visible `message` field, so its
+    # exact wording matters, not just that some ValueError was raised.
+    assert str(exc.value) == "no trained policy checkpoint found -- applied the command directly instead"
+
+
+def test_policy_mode_falls_back_to_exact_when_the_volume_has_no_visibility_cache():
+    """Regression: `model_for_volume` (`visibility.for_volume`) is not total --
+    it raises `FileNotFoundError` for a volume with no visibility cache -- and
+    `Session.command` only catches `ValueError`. The no-checkpoint check must
+    run before `model_for_volume` is ever called, or this propagates instead
+    of falling back to exact application."""
+    if os.path.exists(TEST_SESSION_PATH):
+        os.remove(TEST_SESSION_PATH)
+
+    def _raise(name):
+        raise FileNotFoundError(f"no visibility cache for {name}")
+
+    s = Session(TEST_SESSION_PATH, policy_provider=lambda: None, model_for_volume=_raise)
+
+    state = s.command("more bone", mode="policy")
+
+    assert state["current"]["mode"] == "exact"
+    assert state["current"]["message"]
+
+
 @pytest.fixture
 def ct_chest_session(monkeypatch):
     """A fresh Session switched to the real `ct_chest` Slicer CT -- the chat
@@ -664,21 +723,3 @@ def test_collector_and_viewer_load_the_same_checkpoint():
     assert server.POLICY_PATH == policy.POLICY_PATH
     assert collect.POLICY_PATH == policy.POLICY_PATH
     assert "oneshot_v3" in policy.POLICY_PATH
-
-
-# --- Task 1: run_policy_arm --------------------------------------------------
-
-def test_run_policy_arm_applies_the_action_without_a_session(ts_session):
-    """The policy arm is callable with its dependencies passed in, so the
-    comparison endpoint can run it without constructing a Session."""
-    s = ts_session
-    action = np.linspace(-0.4, 0.4, len(CONTROLLABLE))
-    model = s.model_for_volume(server._dataset_name)
-    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
-    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
-
-    new_params, goal_text = server.run_policy_arm(model, _StubPolicy(action), cmd, params)
-
-    for group, value in zip(CONTROLLABLE, action):
-        assert float(np.mean([new_params[i] for i in group])) == pytest.approx(float(value), abs=1e-6)
-    assert isinstance(goal_text, str) and goal_text
