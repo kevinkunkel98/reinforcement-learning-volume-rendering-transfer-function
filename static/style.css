@@ -1009,3 +1009,82 @@ select:focus-visible {
   #start-panel { max-width: 100%; }
   #collect-controls { flex-wrap: wrap; }
 }
+
+/* ==========================================================================
+   Comparison panel — one instruction, four answers, one start state
+   ========================================================================== */
+
+/* Goal-class hues: categorical identity, assigned in fixed order and never
+   cycled. Validated against this sheet's --background (#09090b): lightness
+   band, chroma floor, CVD separation (worst adjacent pair ΔE 8.4 protan),
+   normal-vision floor (19.8) and contrast all pass. Every bar is also
+   direct-labelled with its class name, so identity never rests on colour. */
+:root {
+  --class-skeleton: #3987e5;
+  --class-lungs:    #d95926;
+  --class-soft:     #199e70;
+  --class-vessels:  #c98500;
+}
+
+/* shadcn Separator */
+.separator { height: 1px; background: hsl(var(--border)); border: 0; margin: 0; }
+
+/* shadcn Skeleton */
+.skeleton {
+  background: hsl(var(--muted));
+  border-radius: calc(var(--radius) - 2px);
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* shadcn Progress, used as the per-class visibility bar. The tick marks where
+   that class started, so "did the named class move and did the others stay
+   put" is one glance -- which is the keep-tolerance term in goals.distance
+   made visible. */
+.progress {
+  position: relative; height: 7px; width: 100%;
+  background: hsl(var(--secondary)); border-radius: 9999px;
+}
+.progress-fill {
+  position: absolute; left: 0; top: 0; height: 100%;
+  border-radius: 9999px; background: var(--progress-color, hsl(var(--primary)));
+}
+.progress-tick {
+  position: absolute; top: -3px; width: 2px; height: 13px;
+  background: hsl(var(--muted-foreground)); border-radius: 1px;
+}
+
+/* shadcn Table, for the per-class rows */
+.table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.table td { padding: 0.25rem 0; vertical-align: middle; }
+.table .table-label { color: hsl(var(--muted-foreground)); white-space: nowrap; padding-right: 0.5rem; }
+.table .table-value { font-family: var(--mono); text-align: right; padding-left: 0.5rem; white-space: nowrap; }
+
+/* Layout: replaces #single-view inside #viewport, so the chat panel and
+   composer never move when it opens. */
+#compare-view { display: flex; flex-direction: column; gap: 0.7rem; height: 100%; overflow-y: auto; }
+#compare-header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+#compare-goal { color: hsl(var(--muted-foreground)); font-size: 0.85rem; }
+#compare-goal strong { color: hsl(var(--foreground)); font-weight: 600; }
+#compare-columns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; align-items: start; }
+@media (max-width: 1100px) { #compare-columns { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px)  { #compare-columns { grid-template-columns: 1fr; } }
+
+.compare-arm { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.7rem; }
+.compare-arm-name { font-size: 0.65rem; letter-spacing: 0.09em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.compare-arm-image { width: 100%; aspect-ratio: 1; object-fit: contain; background: #000; border-radius: calc(var(--radius) - 2px); display: block; }
+
+/* Hero number: attainment is one headline per arm, so it is a number, not a
+   chart. The sign is printed, so colour never carries the meaning alone. */
+.compare-attainment { font-family: var(--mono); font-size: 1.45rem; line-height: 1.1; }
+.compare-attainment[data-sign="positive"] { color: hsl(var(--success)); }
+.compare-attainment[data-sign="negative"] { color: hsl(var(--destructive)); }
+.compare-attainment-label { font-size: 0.65rem; color: hsl(var(--muted-foreground)); letter-spacing: 0.04em; }
+.compare-cost { font-size: 0.72rem; color: hsl(var(--muted-foreground)); font-family: var(--mono); }
+.compare-unavailable { font-size: 0.78rem; color: hsl(var(--muted-foreground)); padding: 0.8rem 0; }
+
+/* An arm that returned its own input did not move -- without saying so, the
+   column reads as "this arm agrees with the start", which is the opposite
+   claim. */
+.compare-nomove { font-size: 0.68rem; color: hsl(var(--amber, var(--muted-foreground))); }

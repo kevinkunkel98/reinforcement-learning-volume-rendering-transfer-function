@@ -695,3 +695,124 @@ function showToast(message, variant = "default") {
 updateSendState();
 loadDatasets();
 loadState();
+
+// --- four-mode comparison -----------------------------------------------------
+// Answers the instruction four ways from the current step without advancing the
+// session, so the amortisation claim -- the policy reaching search's
+// neighbourhood while spending no visibility evaluations -- is on one screen
+// instead of spread across four interactions the viewer has to hold in memory.
+
+const CLASS_ORDER = ["skeleton", "lungs", "soft", "vessels"];
+const CLASS_LABEL = { skeleton: "skeleton", lungs: "lungs", soft: "soft tissue", vessels: "vessels" };
+const ARM_ORDER = ["exact", "search_cheap", "search_thorough", "policy"];
+const ARM_LABEL = {
+  exact: "exact",
+  search_cheap: "search · 10",
+  search_thorough: "search · 200",
+  policy: "policy",
+};
+
+const compareView = el("compare-view");
+const compareColumns = el("compare-columns");
+const compareGoal = el("compare-goal");
+
+function showCompare(on) {
+  el("single-view").hidden = on;
+  compareView.hidden = !on;
+}
+
+const pct = (v) => `${Math.min(100, Math.max(0, (v || 0) * 100)).toFixed(1)}%`;
+
+function armSkeleton(name) {
+  return `<div class="card compare-arm">
+    <span class="compare-arm-name">${ARM_LABEL[name]}</span>
+    <div class="skeleton compare-arm-image"></div>
+    <div class="skeleton" style="height:1.45rem;width:5rem"></div>
+    <div class="skeleton" style="height:0.72rem;width:7rem"></div>
+  </div>`;
+}
+
+function classBars(visibility, start) {
+  return `<table class="table">${CLASS_ORDER.map((c) => {
+    const value = visibility && visibility[c] != null ? visibility[c] : null;
+    const from = start && start[c] != null ? start[c] : 0;
+    if (value === null) {
+      return `<tr><td class="table-label">${CLASS_LABEL[c]}</td>
+        <td colspan="2" class="table-value">&mdash;</td></tr>`;
+    }
+    return `<tr>
+      <td class="table-label">${CLASS_LABEL[c]}</td>
+      <td style="width:100%">
+        <div class="progress">
+          <div class="progress-fill" style="width:${pct(value)};--progress-color:var(--class-${c})"></div>
+          <div class="progress-tick" style="left:${pct(from)}"></div>
+        </div>
+      </td>
+      <td class="table-value">${(value * 100).toFixed(1)}%</td>
+    </tr>`;
+  }).join("")}</table>`;
+}
+
+function armCard(name, arm, start) {
+  if (!arm || arm.unavailable) {
+    return `<div class="card compare-arm">
+      <span class="compare-arm-name">${ARM_LABEL[name]}</span>
+      <p class="compare-unavailable">${arm ? arm.unavailable : "no result"}</p>
+    </div>`;
+  }
+  const sign = arm.attainment >= 0 ? "positive" : "negative";
+  const shown = `${arm.attainment >= 0 ? "+" : "−"}${Math.abs(arm.attainment).toFixed(3)}`;
+  const evals = `${arm.evaluations} eval${arm.evaluations === 1 ? "" : "s"}`;
+  // An arm that returned its own input did not move. Without saying so, the
+  // column reads as "this arm agrees with the start" -- the opposite claim.
+  const noMove = arm.unchanged
+    ? `<div class="compare-nomove">did not move &mdash; ${evals} found no improving step</div>`
+    : "";
+  return `<div class="card compare-arm">
+    <span class="compare-arm-name">${ARM_LABEL[name]}</span>
+    <img class="compare-arm-image" src="data:image/png;base64,${arm.image_b64}" alt="${ARM_LABEL[name]} result" />
+    <div>
+      <div class="compare-attainment" data-sign="${sign}">${shown}</div>
+      <div class="compare-attainment-label">ATTAINMENT</div>
+    </div>
+    <div class="compare-cost">${evals} · ${arm.elapsed_ms} ms</div>
+    ${noMove}
+    <hr class="separator" />
+    ${classBars(arm.class_visibility, start)}
+  </div>`;
+}
+
+async function runCompare() {
+  const text = textInput.value.trim();
+  if (!text) return;
+  showCompare(true);
+  compareGoal.innerHTML = `<strong>"${text}"</strong>`;
+  compareColumns.innerHTML = ARM_ORDER.map(armSkeleton).join("");
+
+  let payload;
+  try {
+    const res = await fetch("/api/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, parser: config.parser }),
+    });
+    payload = await res.json();
+    if (!res.ok) throw new Error(payload.detail || "compare failed");
+  } catch (err) {
+    compareColumns.innerHTML = `<p class="compare-unavailable">${err.message}</p>`;
+    return;
+  }
+
+  if (!payload.applicable) {
+    compareColumns.innerHTML =
+      `<p class="compare-unavailable">${payload.reason}<br />The comparison answers visibility instructions; camera and reset commands have nothing to score.</p>`;
+    return;
+  }
+
+  compareGoal.innerHTML = `<strong>"${payload.text}"</strong> &rarr; ${payload.goal_text}`;
+  const start = payload.start ? payload.start.class_visibility : null;
+  compareColumns.innerHTML = ARM_ORDER.map((name) => armCard(name, payload.arms[name], start)).join("");
+}
+
+el("compare-btn").addEventListener("click", runCompare);
+el("compare-close").addEventListener("click", () => showCompare(false));

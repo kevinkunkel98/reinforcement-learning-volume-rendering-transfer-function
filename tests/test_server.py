@@ -868,6 +868,11 @@ def test_compare_route_reports_a_camera_command_as_not_applicable(ts_session, mo
     assert result["applicable"] is False
     assert result["reason"]
     assert "arms" not in result
+    # The reason is shown in the panel: no module paths, no dumped dicts.
+    assert "commands.apply_command" not in result["reason"]
+    assert "{" not in result["reason"]
+    # The developer-facing text is still available, just not as the copy.
+    assert "commands.apply_command" in result["detail"]
 
 
 def test_compare_route_rejects_an_unparseable_instruction(ts_session, monkeypatch):

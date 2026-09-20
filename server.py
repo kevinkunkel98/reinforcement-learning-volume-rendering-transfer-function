@@ -681,11 +681,18 @@ async def compare_route(req: CompareRequest):
     except ValueError as exc:
         # Camera, reset, width and centre commands are not goals, and neither
         # is a goal this volume cannot support (lungs on an abdominal scan).
-        return {"applicable": False, "reason": str(exc), "text": req.text, **parser_meta}
-    except (FileNotFoundError, KeyError):
+        #
+        # `str(exc)` is developer copy -- it names `commands.apply_command` and
+        # can carry a dumped command dict. The panel shows `reason`, so that is
+        # written for a reader; `detail` keeps the original for debugging.
+        return {"applicable": False,
+                "reason": "this instruction is not a visibility goal, so there is "
+                          "nothing to score four ways",
+                "detail": str(exc), "text": req.text, **parser_meta}
+    except (FileNotFoundError, KeyError) as exc:
         return {"applicable": False,
                 "reason": "this volume has no visibility cache, so it cannot be scored",
-                "text": req.text, **parser_meta}
+                "detail": f"{type(exc).__name__}: {exc}", "text": req.text, **parser_meta}
 
     arms = compare_arms(volume_model, session.policy_provider(), cmd, instruction,
                          start_params, camera, cheap=req.cheap, thorough=req.thorough)

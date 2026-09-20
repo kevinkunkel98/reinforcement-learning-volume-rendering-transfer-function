@@ -54,6 +54,14 @@
               <button id="reset-btn" class="btn btn-secondary btn-sm" data-tooltip="Reset the transfer function to its default">Reset</button>
             </div>
           </div>
+
+          <div id="compare-view" hidden>
+            <div id="compare-header">
+              <span id="compare-goal">&mdash;</span>
+              <button id="compare-close" class="btn btn-secondary btn-sm" data-tooltip="Back to the single view">Close</button>
+            </div>
+            <div id="compare-columns"></div>
+          </div>
         </div>
 
         <div id="telemetry" data-readout="visibility">
@@ -83,6 +91,7 @@
               <input id="steps-input" type="number" value="10" min="1" max="200" aria-label="Search steps" title="Visibility evaluations spent hill-climbing, not UI steps -- a full sweep needs about 25" />
             </div>
             <button id="policy-toggle-btn" class="toggle" data-active="false" data-tooltip="Answer with the trained policy">policy</button>
+            <button id="compare-btn" class="btn btn-outline btn-sm" data-tooltip="Answer four ways and compare">compare</button>
           </div>
 
           <div id="input-row">
