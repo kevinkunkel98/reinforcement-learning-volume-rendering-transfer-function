@@ -8,6 +8,7 @@ itself is thin enough to verify by running the real server (see the plan's Task 
 """
 import os
 import asyncio
+import time
 import json
 
 import numpy as np
@@ -775,6 +776,46 @@ def test_compare_arms_degrades_one_arm_without_killing_the_others(ts_session):
     assert arms["policy"]["unavailable"]
     assert arms["exact"]["attainment"] is not None
     assert arms["search_cheap"]["attainment"] is not None
+
+
+def test_compare_arms_times_only_the_arm_not_the_render(ts_session, monkeypatch):
+    """`elapsed_ms` is what the arm cost to answer, not what it cost to draw.
+
+    The timing column exists to show that the policy answers for free while
+    thorough search costs seconds. Rendering is the same price for every arm,
+    so folding it in inflates the cheap arms towards the expensive one and
+    makes the policy's number stop being the policy's number."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+    real_render = server._render_image_b64
+
+    def _slow_render(p, c):
+        time.sleep(1.0)
+        return real_render(p, c)
+
+    monkeypatch.setattr(server, "_render_image_b64", _slow_render)
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    # A full second of render per arm must not appear in any arm's cost.
+    # For scale: a real render+encode is ~620 ms, while the policy arm's own
+    # work is ~210 ms (dominated by the solo_max ceiling probes) and exact is
+    # near-instant -- so folding the render in would have flattened three of
+    # the four columns onto each other.
+    assert arms["policy"]["elapsed_ms"] < 500
+    assert arms["exact"]["elapsed_ms"] < 500
+
+
+def test_compare_arms_gives_a_degraded_arm_the_same_keys(ts_session):
+    """A consumer iterating the arms must not have to special-case a failed
+    one before reading a field every other arm has."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, None, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    assert set(arms["policy"]) == set(arms["exact"]) | {"unavailable"}
+    assert arms["policy"]["params"] is None
 
 
 def test_compare_arms_does_not_leak_raw_exception_text_into_a_reason(ts_session, monkeypatch):

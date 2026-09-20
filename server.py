@@ -295,7 +295,20 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
     whole comparison -- losing one column should not end a live demo."""
     start_agg = goals.aggregate(model.features(start_params))
 
-    def _finish(params, evaluations, started):
+    def _answer(fn):
+        """Run one arm and time *only* the answering.
+
+        The timing column exists to show that the policy answers for free
+        while thorough search costs seconds. Scoring and rendering cost the
+        same for every arm, so folding them in inflates the cheap arms towards
+        the expensive one and the policy's number stops being the policy's
+        number -- the same mistake `run_policy_arm`'s seam was shaped to
+        avoid, one layer up."""
+        started = time.perf_counter()
+        params = fn()
+        return params, int((time.perf_counter() - started) * 1000)
+
+    def _finish(params, evaluations, elapsed_ms):
         final_agg = goals.aggregate(model.features(params))
         image_b64, _img, _png = _render_image_b64(params, camera)
         return {
@@ -310,10 +323,10 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
             # things. At B3's budget the search arm can legitimately land here.
             "unchanged": bool(np.array_equal(params, start_params)),
             "evaluations": evaluations,
-            "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            "elapsed_ms": elapsed_ms,
         }
 
-    def _unavailable(exc, started):
+    def _unavailable(exc, elapsed_ms):
         # `str(exc)` is not user-facing copy. A KeyError stringifies to the
         # bare repr of its key ("'lungs'"), and goal_from_command yields a
         # dumped Python dict. In a single-view toast that is merely scruffy;
@@ -322,33 +335,27 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
             reason = f"not applicable -- {exc}"
         else:
             reason = "unavailable -- this volume has no visibility cache"
-        return {"unavailable": reason, "attainment": None, "class_visibility": None,
-                "image_b64": None, "evaluations": None, "unchanged": None,
-                "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+        # Same keys as a successful arm, so a consumer iterating the arms
+        # never has to special-case a failed one before reading a field.
+        return {"params": None, "unavailable": reason, "attainment": None,
+                "class_visibility": None, "image_b64": None, "evaluations": None,
+                "unchanged": None, "elapsed_ms": elapsed_ms}
 
-    arms = {}
-
-    started = time.perf_counter()
-    try:
-        arms["exact"] = _finish(apply_command(cmd, start_params), 0, started)
-    except (ValueError, FileNotFoundError, KeyError) as exc:
-        arms["exact"] = _unavailable(exc, started)
-
-    for name, budget in (("search_cheap", cheap), ("search_thorough", thorough)):
+    def _arm(fn, evaluations):
         started = time.perf_counter()
         try:
-            arms[name] = _finish(
-                run_search_arm(model, start_params, instruction, budget), budget, started)
+            params, elapsed_ms = _answer(fn)
+            return _finish(params, evaluations, elapsed_ms)
         except (ValueError, FileNotFoundError, KeyError) as exc:
-            arms[name] = _unavailable(exc, started)
+            return _unavailable(exc, int((time.perf_counter() - started) * 1000))
 
-    started = time.perf_counter()
-    try:
-        arms["policy"] = _finish(
-            run_policy_arm(model, policy, instruction, start_agg, start_params), 0, started)
-    except (ValueError, FileNotFoundError, KeyError) as exc:
-        arms["policy"] = _unavailable(exc, started)
-
+    arms = {"exact": _arm(lambda: apply_command(cmd, start_params), 0)}
+    for name, budget in (("search_cheap", cheap), ("search_thorough", thorough)):
+        arms[name] = _arm(
+            lambda budget=budget: run_search_arm(model, start_params, instruction, budget),
+            budget)
+    arms["policy"] = _arm(
+        lambda: run_policy_arm(model, policy, instruction, start_agg, start_params), 0)
     return arms
 
 
