@@ -262,6 +262,96 @@ def run_search_arm(model, start_params, instruction, evaluations):
     return hill_climb(model, start_params, instruction, evaluations=evaluations)
 
 
+# The two search budgets the thesis reports: B3 (cheap, 10) and B4 (thorough,
+# 200). Showing both is what makes a no-move B3 column legible -- beside a B4
+# that did move and a policy that answered instantly, "10 evaluations buys
+# little here" reads as the finding rather than as a broken column.
+#
+# `hill_climb` spends 1 evaluation on the start state and 1 per proposal, and a
+# full coordinate sweep is 12 groups x 2 signs = 24, so B3 explores less than
+# half a sweep. Measured on ct_chest / "show only the lungs": B3 130 ms,
+# B4 2.7 s -- the whole panel is under three seconds.
+COMPARE_BUDGET_CHEAP = 10
+COMPARE_BUDGET_THOROUGH = 200
+
+
+def compare_arms(model, policy, cmd, instruction, start_params, camera,
+                  cheap=COMPARE_BUDGET_CHEAP, thorough=COMPARE_BUDGET_THOROUGH):
+    """Answer one parsed command four ways from the same start state.
+
+    `exact` applies the command directly (0 evaluations), `search_cheap` and
+    `search_thorough` run the hill-climb the thesis measures as B3 and B4, and
+    `policy` runs the trained one-shot policy (0 evaluations). Every arm is
+    scored with `goals.attainment` against the *shared* start aggregate, which
+    is what makes these numbers mean what the held-out table means.
+
+    `model` and `instruction` must come from a single read of the active
+    dataset, not two independent resolutions at different layers -- otherwise
+    an arm could be scored against a goal built for a different volume.
+
+    Does not touch session history: comparing is a side quest, not a step.
+
+    An arm that raises is reported as `unavailable` rather than failing the
+    whole comparison -- losing one column should not end a live demo."""
+    start_agg = goals.aggregate(model.features(start_params))
+
+    def _finish(params, evaluations, started):
+        final_agg = goals.aggregate(model.features(params))
+        image_b64, _img, _png = _render_image_b64(params, camera)
+        return {
+            "params": params.tolist(),
+            "image_b64": image_b64,
+            "class_visibility": _class_visibility(params),
+            "attainment": float(goals.attainment(instruction["goal"], start_agg, final_agg)),
+            # An arm that returned its own input is not an arm that *agrees*
+            # with the start -- it is an arm that did not move, and rendered
+            # side by side those two read identically (same image, same
+            # attainment, a confident evaluation count) while meaning opposite
+            # things. At B3's budget the search arm can legitimately land here.
+            "unchanged": bool(np.array_equal(params, start_params)),
+            "evaluations": evaluations,
+            "elapsed_ms": int((time.perf_counter() - started) * 1000),
+        }
+
+    def _unavailable(exc, started):
+        # `str(exc)` is not user-facing copy. A KeyError stringifies to the
+        # bare repr of its key ("'lungs'"), and goal_from_command yields a
+        # dumped Python dict. In a single-view toast that is merely scruffy;
+        # in a column someone is reading closely it is unreadable.
+        if isinstance(exc, ValueError):
+            reason = f"not applicable -- {exc}"
+        else:
+            reason = "unavailable -- this volume has no visibility cache"
+        return {"unavailable": reason, "attainment": None, "class_visibility": None,
+                "image_b64": None, "evaluations": None, "unchanged": None,
+                "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+
+    arms = {}
+
+    started = time.perf_counter()
+    try:
+        arms["exact"] = _finish(apply_command(cmd, start_params), 0, started)
+    except (ValueError, FileNotFoundError, KeyError) as exc:
+        arms["exact"] = _unavailable(exc, started)
+
+    for name, budget in (("search_cheap", cheap), ("search_thorough", thorough)):
+        started = time.perf_counter()
+        try:
+            arms[name] = _finish(
+                run_search_arm(model, start_params, instruction, budget), budget, started)
+        except (ValueError, FileNotFoundError, KeyError) as exc:
+            arms[name] = _unavailable(exc, started)
+
+    started = time.perf_counter()
+    try:
+        arms["policy"] = _finish(
+            run_policy_arm(model, policy, instruction, start_agg, start_params), 0, started)
+    except (ValueError, FileNotFoundError, KeyError) as exc:
+        arms["policy"] = _unavailable(exc, started)
+
+    return arms
+
+
 class Session:
     """All command/history logic, independent of FastAPI."""
 

@@ -695,6 +695,106 @@ def test_search_mode_actually_reduces_distance_to_the_goal(ts_session):
     assert end_distance < start_distance
 
 
+# --- compare_arms: one command, four answers, one start ----------------------
+
+def _compare_inputs(s):
+    """The shared context `compare_arms` takes: model, start params, camera,
+    parsed command, start aggregate and goal -- built once, exactly as the
+    route will build them, so every arm is scored against the same start."""
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    camera = dict(s.history[s.cursor]["camera"])
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    start_agg = goals.aggregate(model.features(params))
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+    return model, policy_stub(), cmd, instruction, params, camera
+
+
+def policy_stub():
+    return _StubPolicy(np.zeros(len(CONTROLLABLE)))
+
+
+def test_compare_arms_runs_four_arms_from_the_same_start(ts_session):
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    assert set(arms) == {"exact", "search_cheap", "search_thorough", "policy"}
+    assert arms["exact"]["evaluations"] == 0
+    assert arms["search_cheap"]["evaluations"] == 4
+    assert arms["search_thorough"]["evaluations"] == 8
+    assert arms["policy"]["evaluations"] == 0
+    for name, arm in arms.items():
+        assert arm["attainment"] is not None, name
+        assert set(arm["class_visibility"]) == set(goals.GOAL_CLASSES), name
+        assert arm["image_b64"] and not arm["image_b64"].startswith("data:"), name
+        assert arm["elapsed_ms"] >= 0, name
+        assert arm["unchanged"] in (True, False), name
+
+
+def test_compare_arms_scores_every_arm_against_the_shared_start(ts_session):
+    """The point of one start state: an arm's attainment must be what it would
+    be if that arm alone had answered, not something relative to another arm."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+    start_agg = goals.aggregate(model.features(params))
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    for name, arm in arms.items():
+        replayed = np.array(arm["params"], dtype=np.float64)
+        expected = goals.attainment(instruction["goal"], start_agg,
+                                     goals.aggregate(model.features(replayed)))
+        assert arm["attainment"] == pytest.approx(expected), name
+
+
+def test_compare_arms_marks_an_arm_that_did_not_move(ts_session, monkeypatch):
+    """An arm returning its own input is not an arm agreeing with the start --
+    it is an arm that did not move, and the panel must not read those the same.
+    At B3's budget the search arm can legitimately land here: 10 evaluations is
+    less than half of one 24-evaluation coordinate sweep."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+    monkeypatch.setattr(server, "run_search_arm",
+                         lambda model, start_params, instruction, evaluations: start_params.copy())
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    assert arms["search_cheap"]["unchanged"] is True
+    assert arms["search_thorough"]["unchanged"] is True
+
+
+def test_compare_arms_degrades_one_arm_without_killing_the_others(ts_session):
+    """Losing one column must not end a live demo."""
+    model, _policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, None, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    assert arms["policy"]["unavailable"]
+    assert arms["exact"]["attainment"] is not None
+    assert arms["search_cheap"]["attainment"] is not None
+
+
+def test_compare_arms_does_not_leak_raw_exception_text_into_a_reason(ts_session, monkeypatch):
+    """`str(exc)` is not user-facing copy: a KeyError stringifies to the bare
+    repr of its key. In a column an examiner is reading closely, "'lungs'" is
+    not an explanation."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    def _raise_key_error(*args, **kwargs):
+        raise KeyError("lungs")
+
+    monkeypatch.setattr(server, "run_search_arm", _raise_key_error)
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    reason = arms["search_cheap"]["unavailable"]
+    assert reason != "'lungs'"
+    assert "visibility cache" in reason
+
+
 @pytest.fixture
 def ct_chest_session(monkeypatch):
     """A fresh Session switched to the real `ct_chest` Slicer CT -- the chat
