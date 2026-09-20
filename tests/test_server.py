@@ -664,3 +664,21 @@ def test_collector_and_viewer_load_the_same_checkpoint():
     assert server.POLICY_PATH == policy.POLICY_PATH
     assert collect.POLICY_PATH == policy.POLICY_PATH
     assert "oneshot_v3" in policy.POLICY_PATH
+
+
+# --- Task 1: run_policy_arm --------------------------------------------------
+
+def test_run_policy_arm_applies_the_action_without_a_session(ts_session):
+    """The policy arm is callable with its dependencies passed in, so the
+    comparison endpoint can run it without constructing a Session."""
+    s = ts_session
+    action = np.linspace(-0.4, 0.4, len(CONTROLLABLE))
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+
+    new_params, goal_text = server.run_policy_arm(model, _StubPolicy(action), cmd, params)
+
+    for group, value in zip(CONTROLLABLE, action):
+        assert float(np.mean([new_params[i] for i in group])) == pytest.approx(float(value), abs=1e-6)
+    assert isinstance(goal_text, str) and goal_text

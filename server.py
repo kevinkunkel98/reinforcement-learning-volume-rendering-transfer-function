@@ -211,6 +211,33 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
     }
 
 
+def run_policy_arm(model, policy, cmd, current_params):
+    """Run the one-shot policy on the goal `cmd` asks for, with the volume
+    model and the loaded checkpoint passed in rather than resolved from a
+    Session -- so the comparison endpoint and `Session._run_policy` share one
+    implementation and cannot drift apart.
+
+    Builds the same observation layout `rl.candidates` builds for a standalone
+    policy query (`rl.oneshot_env.build_observation`). Returns
+    `(new_params, goal_text)`. Raises `ValueError` when `policy` is None, or
+    when `goals.goal_from_command` rejects the command (camera, reset, width,
+    centre) or a goal this volume cannot support."""
+    if policy is None:
+        raise ValueError(
+            "no trained policy checkpoint found -- applied the command directly instead")
+
+    start_agg = goals.aggregate(model.features(current_params))
+    goal = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
+
+    solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
+                     for c in goals.GOAL_CLASSES]
+    controllable = [float(np.mean([current_params[i] for i in group])) for group in CONTROLLABLE]
+    observation = build_observation(goal["goal"], model.histogram, start_agg, solo_max_log, controllable)
+
+    action = _predict_action(policy, observation)
+    return apply_controllable(current_params, action), goal["text"]
+
+
 class Session:
     """All command/history logic, independent of FastAPI."""
 
@@ -315,32 +342,10 @@ class Session:
         return current
 
     def _run_policy(self, cmd, current_params):
-        """mode="policy": build the goal `cmd` asks for (`goals.
-        goal_from_command`) and run the cached one-shot policy on it, the
-        same observation layout `rl.candidates` builds for a standalone
-        policy query (`rl.oneshot_env.build_observation`). Returns
-        `(new_params, goal_text)`. Raises `ValueError` -- caught by
-        `command()`, which falls back to exact application -- when no
-        checkpoint is loaded, or `goal_from_command`/the volume's model
-        raises for a non-goal command (camera, reset, width, centre) or a
-        goal this volume can't support."""
-        policy = self.policy_provider()
-        if policy is None:
-            raise ValueError(
-                "no trained policy checkpoint found -- applied the command directly instead")
-
-        model = self.model_for_volume(_dataset_name)
-        start_agg = goals.aggregate(model.features(current_params))
-        goal = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
-
-        solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
-                         for c in goals.GOAL_CLASSES]
-        controllable = [float(np.mean([current_params[i] for i in group])) for group in CONTROLLABLE]
-        observation = build_observation(goal["goal"], model.histogram, start_agg, solo_max_log, controllable)
-
-        action = _predict_action(policy, observation)
-        new_params = apply_controllable(current_params, action)
-        return new_params, goal["text"]
+        """mode="policy": resolve the checkpoint and volume model off this
+        session and hand them to `run_policy_arm`, which owns the logic."""
+        return run_policy_arm(self.model_for_volume(_dataset_name),
+                              self.policy_provider(), cmd, current_params)
 
     def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10, mode=None):
         cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)  # raises ValueError on failure
