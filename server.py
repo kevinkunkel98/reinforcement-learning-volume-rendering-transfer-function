@@ -648,6 +648,53 @@ async def command(req: CommandRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+class CompareRequest(BaseModel):
+    text: str
+    parser: str = "rule"
+    model: str = "qwen2.5:7b"
+    cheap: int = COMPARE_BUDGET_CHEAP
+    thorough: int = COMPARE_BUDGET_THOROUGH
+
+
+@app.post("/api/compare")
+async def compare_route(req: CompareRequest):
+    """Answer one instruction four ways without advancing the session.
+
+    Parses once and builds the goal once, so all four arms answer the
+    identical parsed command: a bad parse then makes all four wrong together
+    and the panel shows a parsing problem, not a policy problem. `model` and
+    `instruction` come from a single read of the active dataset for the same
+    reason -- an arm scored against a goal built for a different volume would
+    be quietly meaningless."""
+    try:
+        cmd, parser_meta = parse_command_with_meta(req.text, parser=req.parser, model=req.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    start_params = np.array(session.history[session.cursor]["params"], dtype=np.float64)
+    camera = dict(session.history[session.cursor].get("camera", DEFAULT_CAMERA))
+
+    try:
+        volume_model = session.model_for_volume(_dataset_name)
+        start_agg = goals.aggregate(volume_model.features(start_params))
+        instruction = goals.goal_from_command(cmd, volume_model, start_agg, volume=_dataset_name)
+    except ValueError as exc:
+        # Camera, reset, width and centre commands are not goals, and neither
+        # is a goal this volume cannot support (lungs on an abdominal scan).
+        return {"applicable": False, "reason": str(exc), "text": req.text, **parser_meta}
+    except (FileNotFoundError, KeyError):
+        return {"applicable": False,
+                "reason": "this volume has no visibility cache, so it cannot be scored",
+                "text": req.text, **parser_meta}
+
+    arms = compare_arms(volume_model, session.policy_provider(), cmd, instruction,
+                         start_params, camera, cheap=req.cheap, thorough=req.thorough)
+    return {"applicable": True, "text": req.text, "goal_text": instruction["text"],
+            "budgets": {"cheap": req.cheap, "thorough": req.thorough}, "arms": arms,
+            "start": {"class_visibility": _class_visibility(start_params)},
+            **parser_meta}
+
+
 @app.post("/api/scenes/transition")
 async def scene_transition_route(payload: dict):
     try:

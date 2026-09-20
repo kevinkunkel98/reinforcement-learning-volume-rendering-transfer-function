@@ -836,6 +836,66 @@ def test_compare_arms_does_not_leak_raw_exception_text_into_a_reason(ts_session,
     assert "visibility cache" in reason
 
 
+# --- the /api/compare route ---------------------------------------------------
+
+def test_compare_route_leaves_session_history_untouched(ts_session, monkeypatch):
+    """Comparing is a side quest, not a step: the panel answers four ways from
+    where the session already is, and leaves it exactly there."""
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+    before_len, before_cursor = len(s.history), s.cursor
+
+    result = asyncio.run(server.compare_route(
+        server.CompareRequest(text="more bone", parser="rule", cheap=4, thorough=8)))
+
+    assert result["applicable"] is True
+    assert set(result["arms"]) == {"exact", "search_cheap", "search_thorough", "policy"}
+    assert len(s.history) == before_len
+    assert s.cursor == before_cursor
+
+
+def test_compare_route_reports_a_camera_command_as_not_applicable(ts_session, monkeypatch):
+    """Camera, reset, width and centre are not goals, so there is nothing to
+    score four ways -- say so rather than erroring."""
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+
+    result = asyncio.run(server.compare_route(
+        server.CompareRequest(text="rotate right", parser="rule", cheap=4, thorough=8)))
+
+    assert result["applicable"] is False
+    assert result["reason"]
+    assert "arms" not in result
+
+
+def test_compare_route_rejects_an_unparseable_instruction(ts_session, monkeypatch):
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.compare_route(
+            server.CompareRequest(text="qwertyuiop", parser="rule", cheap=4, thorough=8)))
+
+    assert exc.value.status_code == 400
+
+
+def test_compare_route_reports_the_start_state_beside_the_arms(ts_session, monkeypatch):
+    """The panel draws a tick at each class's starting visibility, so "did the
+    mentioned class move and did the others stay put" is one glance."""
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+
+    result = asyncio.run(server.compare_route(
+        server.CompareRequest(text="more bone", parser="rule", cheap=4, thorough=8)))
+
+    assert set(result["start"]["class_visibility"]) == set(goals.GOAL_CLASSES)
+    assert result["budgets"] == {"cheap": 4, "thorough": 8}
+
+
 @pytest.fixture
 def ct_chest_session(monkeypatch):
     """A fresh Session switched to the real `ct_chest` Slicer CT -- the chat
