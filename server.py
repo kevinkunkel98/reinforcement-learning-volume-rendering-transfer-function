@@ -30,17 +30,15 @@ from pydantic import BaseModel
 from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 import collect
-from commands import (COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command,
-                       parse_command_with_meta)
+from commands import COMMAND_REFERENCE, apply_command, parse_command_with_meta
 from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
-from evaluate import jsonl_append, objective
+from evaluate import jsonl_append
 import goals
 import policy as policy_module
 import render as render_module
 from render import features, grab, render
-from rl.baselines import CONTROLLABLE, apply_controllable
+from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
 from rl.oneshot_env import build_observation
-from search import propose_step, resize_step
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
 from transfer import TISSUE_BANDS, default_params, opacity_mass
 import visibility
@@ -49,6 +47,8 @@ LOG_PATH = "out/log.jsonl"
 SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
 _SCENE_WRITE_LOCK = threading.Lock()
 AUDIO_DIR = "out/audio"
+NO_POLICY_CHECKPOINT_MESSAGE = (
+    "no trained policy checkpoint found -- applied the command directly instead")
 
 # --- Task 3: the one-shot policy, for mode="policy" --------------------------
 # Loaded lazily and cached, the same pattern collect.py uses for the same
@@ -225,8 +225,7 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params):
     `model.features`/`model.solo_max` may also raise `FileNotFoundError` or
     `KeyError` when the volume has no visibility cache."""
     if policy is None:
-        raise ValueError(
-            "no trained policy checkpoint found -- applied the command directly instead")
+        raise ValueError(NO_POLICY_CHECKPOINT_MESSAGE)
 
     solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
                      for c in goals.GOAL_CLASSES]
@@ -321,26 +320,6 @@ class Session:
             "verdict": None,
         })
 
-    def _run_objective_search(self, cmd, params, steps):
-        sign = 1.0 if cmd["direction"] == "increase" else -1.0
-        step = STRENGTH_WORDS[cmd["strength"] or "moderately"]
-        current = params.copy()
-        _, idx = _find_or_create_peak(current, cmd["target"])
-        for _ in range(steps):
-            proposed = propose_step(current, idx, sign, step)
-            verdict = objective(current, proposed, cmd)
-            jsonl_append(LOG_PATH, {
-                "timestamp": datetime.datetime.now().isoformat(), "command": cmd,
-                "params_before": current.tolist(), "params_after": proposed.tolist(),
-                "features_before": None, "features_after": None, "verdict": verdict,
-            })
-            if verdict == 1:
-                current = proposed
-            step = resize_step(step, accepted=(verdict == 1))
-            if step < 0.01:
-                break
-        return current
-
     def _run_policy(self, cmd, current_params):
         """mode="policy": resolve the checkpoint and the volume model, build
         the goal, and hand them to `run_policy_arm`.
@@ -354,8 +333,7 @@ class Session:
         what `command()` catches to fall back to exact application."""
         policy = self.policy_provider()
         if policy is None:
-            raise ValueError(
-                "no trained policy checkpoint found -- applied the command directly instead")
+            raise ValueError(NO_POLICY_CHECKPOINT_MESSAGE)
         model = self.model_for_volume(_dataset_name)
         start_agg = goals.aggregate(model.features(current_params))
         instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
@@ -391,9 +369,17 @@ class Session:
                 message = str(exc)
                 new_params = apply_command(cmd, current_params)
                 actual_mode, search_flag = "exact", False
-        elif effective_mode == "search" and cmd.get("attribute") == "opacity" and cmd.get("direction") in ("increase", "decrease"):
-            new_params = self._run_objective_search(cmd, current_params, steps)
-            actual_mode, search_flag = "search", True
+        elif effective_mode == "search":
+            try:
+                model = self.model_for_volume(_dataset_name)
+                start_agg = goals.aggregate(model.features(current_params))
+                instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
+                new_params = hill_climb(model, current_params, instruction, evaluations=steps)
+                actual_mode, search_flag = "search", True
+            except ValueError as exc:
+                message = str(exc)
+                new_params = apply_command(cmd, current_params)
+                actual_mode, search_flag = "exact", False
         else:
             new_params = apply_command(cmd, current_params)
             actual_mode, search_flag = "exact", False

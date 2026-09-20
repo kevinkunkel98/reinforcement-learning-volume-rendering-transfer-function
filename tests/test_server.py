@@ -333,10 +333,11 @@ def test_objective_search_keeps_current_camera():
 
 
 def test_search_requested_for_non_opacity_attribute_falls_back_to_direct_apply():
-    # "sharpen bone" parses to attribute="width", direction="decrease". search.propose_step
-    # is hardcoded to mutate the height/opacity parameter, so search must not run for width
-    # (or brightness/center) commands even when search=True is requested -- the command
-    # should still be applied directly, just without the hill-climbing loop.
+    # "sharpen bone" parses to attribute="width", direction="decrease", which
+    # goals.goal_from_command does not recognize as a goal (only show_only,
+    # opacity and brightness commands are) -- so search=True still falls back
+    # to exact application, just via the goal-construction ValueError rather
+    # than the old opacity/direction-only gate.
     s = _fresh_session()
     state = s.command("sharpen bone", parser="rule", search=True, steps=5)
     assert state["current"]["cmd_dict"]["attribute"] == "width"
@@ -443,7 +444,16 @@ def _use_real_totalseg_manifest(monkeypatch):
     are repo-root-relative, so patch `totalseg.subject` (every other totalseg
     lookup routes through it) to resolve them against the real repo root, for
     the one real TotalSegmentator volume (`ts_s1379`) the policy-mode tests
-    below exercise."""
+    below exercise.
+
+    `totalseg.has_labels` is the one lookup that does *not* route through
+    `subject()` -- it reads `_subjects()` (keyed on the repo-root-relative
+    `MANIFEST_PATH`) directly, so from a chdir'd tmp_path it always finds no
+    manifest and reports no labels. That silently switches
+    `visibility.for_volume` onto its intensity-only fallback, under which
+    `vessels` has no ceiling at all -- invisible unless a test happens to ask
+    about vessels (e.g. via "show only"). Patched here too so `ts_session`
+    exercises the real anatomy-labelled model throughout."""
     import totalseg
     with open(os.path.join(_REPO_ROOT, "data/totalseg_manifest.json")) as f:
         subjects = {s["name"]: s for s in json.load(f)["subjects"]}
@@ -456,6 +466,9 @@ def _use_real_totalseg_manifest(monkeypatch):
         return entry
 
     monkeypatch.setattr(totalseg, "subject", _subject)
+    monkeypatch.setattr(totalseg, "has_labels",
+                         lambda name: bool(_subject(name).get("labels_path")
+                                           and os.path.exists(_subject(name)["labels_path"])))
 
 
 @pytest.fixture
@@ -572,7 +585,7 @@ def test_run_policy_arm_without_a_checkpoint_raises_the_user_visible_message(ts_
 
     # This message ends up in the step's user-visible `message` field, so its
     # exact wording matters, not just that some ValueError was raised.
-    assert str(exc.value) == "no trained policy checkpoint found -- applied the command directly instead"
+    assert str(exc.value) == server.NO_POLICY_CHECKPOINT_MESSAGE
 
 
 def test_policy_mode_falls_back_to_exact_when_the_volume_has_no_visibility_cache():
@@ -593,6 +606,25 @@ def test_policy_mode_falls_back_to_exact_when_the_volume_has_no_visibility_cache
 
     assert state["current"]["mode"] == "exact"
     assert state["current"]["message"]
+
+
+def test_search_mode_searches_on_a_non_opacity_instruction(ts_session, monkeypatch):
+    """The old objective search only fired for opacity increase/decrease, so
+    "show only the lungs" silently fell through to exact application while the
+    UI still showed search as active. It must now actually search."""
+    s = ts_session
+    calls = {}
+
+    def _spy(model, start_params, instruction, evaluations=200, initial_step=0.2):
+        calls["evaluations"] = evaluations
+        return np.asarray(start_params, dtype=np.float64).copy()
+
+    monkeypatch.setattr(server, "hill_climb", _spy)
+
+    state = s.command("show only the lungs", mode="search", steps=10)
+
+    assert calls["evaluations"] == 10
+    assert state["current"]["mode"] == "search"
 
 
 @pytest.fixture
