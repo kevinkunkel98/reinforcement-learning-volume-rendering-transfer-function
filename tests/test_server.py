@@ -314,7 +314,7 @@ def test_new_command_after_going_back_truncates_forward_history():
     assert state["current"]["cmd_dict"]["target"] == "lungs"
 
 
-def test_objective_search_appends_one_final_step():
+def test_search_appends_one_final_step():
     s = _fresh_session()
     state = s.command("increase opacity for bone strongly", parser="rule",
                        search=True, steps=5)
@@ -323,7 +323,7 @@ def test_objective_search_appends_one_final_step():
     assert state["current"]["masses"]["bone"] > 220.0
 
 
-def test_objective_search_keeps_current_camera():
+def test_search_keeps_current_camera():
     s = _fresh_session()
     s.command("rotate right")
     cam = s.history[s.cursor]["camera"]
@@ -441,34 +441,35 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _use_real_totalseg_manifest(monkeypatch):
     """`_isolate_cwd` chdirs into a scratch tmp_path so these tests never write
     into the real project's out/; `totalseg`'s manifest and volume/label paths
-    are repo-root-relative, so patch `totalseg.subject` (every other totalseg
-    lookup routes through it) to resolve them against the real repo root, for
-    the one real TotalSegmentator volume (`ts_s1379`) the policy-mode tests
-    below exercise.
+    are repo-root-relative, so patch `totalseg._subjects` -- the one function
+    `subject`, `has_labels`, `classes_present`, `is_contrast`,
+    `available_names` and `split_names` all read -- to resolve them against
+    the real repo root, for the one real TotalSegmentator volume
+    (`ts_s1379`) the policy-mode tests below exercise.
 
-    `totalseg.has_labels` is the one lookup that does *not* route through
-    `subject()` -- it reads `_subjects()` (keyed on the repo-root-relative
-    `MANIFEST_PATH`) directly, so from a chdir'd tmp_path it always finds no
-    manifest and reports no labels. That silently switches
-    `visibility.for_volume` onto its intensity-only fallback, under which
-    `vessels` has no ceiling at all -- invisible unless a test happens to ask
-    about vessels (e.g. via "show only"). Patched here too so `ts_session`
-    exercises the real anatomy-labelled model throughout."""
+    Patching `subject` alone (an earlier version of this fixture) left
+    `has_labels` reading `_subjects()` directly: from a chdir'd tmp_path it
+    always found no manifest and reported no labels, which silently switched
+    `visibility.for_volume` onto its intensity-only fallback -- under which
+    `vessels` has no ceiling at all, invisible unless a test happens to ask
+    about vessels (e.g. via "show only"). It also left `available_names`/
+    `split_names` returning `[]`, so `datasets.list_datasets()` omitted every
+    ts_* volume inside `ts_session`. Patching `_subjects` fixes the whole
+    family at once, and `subject()` keeps raising `ValueError` on an unknown
+    name (its own, un-patched behaviour) rather than a `KeyError`."""
     import totalseg
     with open(os.path.join(_REPO_ROOT, "data/totalseg_manifest.json")) as f:
-        subjects = {s["name"]: s for s in json.load(f)["subjects"]}
+        subjects = json.load(f)["subjects"]
 
-    def _subject(name):
-        entry = dict(subjects[name])
+    def _absolute(entry):
+        entry = dict(entry)
         entry["path"] = os.path.join(_REPO_ROOT, entry["path"])
         if entry.get("labels_path"):
             entry["labels_path"] = os.path.join(_REPO_ROOT, entry["labels_path"])
         return entry
 
-    monkeypatch.setattr(totalseg, "subject", _subject)
-    monkeypatch.setattr(totalseg, "has_labels",
-                         lambda name: bool(_subject(name).get("labels_path")
-                                           and os.path.exists(_subject(name)["labels_path"])))
+    resolved = {s["name"]: _absolute(s) for s in subjects}
+    monkeypatch.setattr(totalseg, "_subjects", lambda: resolved)
 
 
 @pytest.fixture
@@ -584,8 +585,11 @@ def test_run_policy_arm_without_a_checkpoint_raises_the_user_visible_message(ts_
         server.run_policy_arm(model, None, instruction, start_agg, params)
 
     # This message ends up in the step's user-visible `message` field, so its
-    # exact wording matters, not just that some ValueError was raised.
-    assert str(exc.value) == server.NO_POLICY_CHECKPOINT_MESSAGE
+    # exact wording matters, not just that some ValueError was raised. The
+    # literal is intentional here (not `server.NO_POLICY_CHECKPOINT_MESSAGE`)
+    # -- comparing the code to itself would keep this test green through an
+    # accidental wording change.
+    assert str(exc.value) == "no trained policy checkpoint found -- applied the command directly instead"
 
 
 def test_policy_mode_falls_back_to_exact_when_the_volume_has_no_visibility_cache():
@@ -625,6 +629,70 @@ def test_search_mode_searches_on_a_non_opacity_instruction(ts_session, monkeypat
 
     assert calls["evaluations"] == 10
     assert state["current"]["mode"] == "search"
+
+
+def test_search_mode_falls_back_to_exact_when_the_volume_has_no_visibility_cache():
+    """The search twin of
+    test_policy_mode_falls_back_to_exact_when_the_volume_has_no_visibility_cache:
+    `model_for_volume` (`visibility.for_volume`) is not total -- it raises
+    `FileNotFoundError` for a volume with no visibility cache -- and the old
+    search branch caught only `ValueError`, so this escaped as an unhandled
+    exception (a 500) instead of falling back to exact application."""
+    if os.path.exists(TEST_SESSION_PATH):
+        os.remove(TEST_SESSION_PATH)
+
+    def _raise(name):
+        raise FileNotFoundError(f"no visibility cache for {name}")
+
+    s = Session(TEST_SESSION_PATH, model_for_volume=_raise)
+
+    state = s.command("increase opacity for bone strongly", mode="search", steps=10)
+
+    assert state["current"]["mode"] == "exact"
+    assert state["current"]["message"]
+
+
+def test_search_mode_reports_when_the_budget_is_too_small_to_move():
+    """`hill_climb` spends 1 evaluation scoring the start state and 1 per
+    proposal; a full coordinate sweep is 12 groups x 2 signs = 24, so a
+    budget below ~25 (the UI's `#steps-input` allows as little as 1) can
+    return the start state completely untouched. `search` must say so rather
+    than report mode="search" with no visible effect and no explanation --
+    the exact failure this task exists to eliminate. Uses the default
+    dataset's intensity model (not `ts_session`): whether 5 evaluations
+    happen to find an improving move is data-dependent, and this combination
+    is pinned to not move."""
+    s = _fresh_session()
+
+    state = s.command("increase opacity for bone strongly", mode="search", steps=5)
+
+    assert state["current"]["mode"] == "search"
+    assert state["current"]["message"] == (
+        "search spent 5 evaluations without improving on the start; "
+        "a full sweep needs about 25")
+
+
+def test_search_mode_actually_reduces_distance_to_the_goal(ts_session):
+    """A stubbed `hill_climb` (as in
+    test_search_mode_searches_on_a_non_opacity_instruction) can return the
+    start state unchanged and still look like a pass if the only assertion
+    is a mass threshold `transfer.default_params()` already clears at rest.
+    This drives the real hill-climb with a budget past a full sweep (~24
+    evaluations) and checks it actually gets closer to the goal."""
+    s = ts_session
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    current_params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    model = s.model_for_volume(server._dataset_name)
+    start_agg = goals.aggregate(model.features(current_params))
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+    start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
+
+    state = s.command("more bone", mode="search", steps=25)
+
+    new_params = np.array(state["current"]["params"], dtype=np.float64)
+    new_agg = goals.aggregate(model.features(new_params))
+    end_distance = goals.distance(instruction["goal"], start_agg, new_agg)
+    assert end_distance < start_distance
 
 
 @pytest.fixture

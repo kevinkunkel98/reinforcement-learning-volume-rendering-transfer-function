@@ -237,6 +237,31 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params):
     return apply_controllable(start_params, action)
 
 
+def run_search_arm(model, start_params, instruction, evaluations):
+    """Run the hill-climb baseline (`rl.baselines.hill_climb`) on an
+    already-built goal -- the search twin of `run_policy_arm`.
+
+    The caller owns `instruction` (`goals.goal_from_command`), the same
+    reason `run_policy_arm` takes a pre-built `instruction`/`start_agg`
+    rather than recomputing them: a caller comparing several arms builds the
+    goal exactly once instead of putting another `model.features` call
+    inside the arm's own timing.
+
+    `evaluations` is a budget on `model.features` calls inside `hill_climb`,
+    not a count of accepted moves: one evaluation scores the start state,
+    and each remaining one tries a single +-step on one of the 12
+    controllable groups. A full sweep (12 groups x 2 signs) costs ~24 --
+    below that, `hill_climb` can run out of budget before trying every
+    direction once and return the start state completely untouched. This
+    function does not detect that case; the caller (`Session._run_search`)
+    does, because only it knows the params it started from.
+
+    Returns the new parameters. `model.features`/`model.solo_max` may raise
+    `FileNotFoundError` or `KeyError` when the volume has no visibility
+    cache."""
+    return hill_climb(model, start_params, instruction, evaluations=evaluations)
+
+
 class Session:
     """All command/history logic, independent of FastAPI."""
 
@@ -339,6 +364,20 @@ class Session:
         instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
         return run_policy_arm(model, policy, instruction, start_agg, current_params), instruction["text"]
 
+    def _run_search(self, cmd, current_params, steps):
+        """mode="search": resolve the volume model, build the goal, and hand
+        them to `run_search_arm` -- the search twin of `_run_policy`.
+
+        Unlike `_run_policy` there is no checkpoint to check for ahead of
+        `model_for_volume`, so this calls it directly; `command()` widens its
+        `except` to `(ValueError, FileNotFoundError, KeyError)` instead
+        (`visibility.for_volume` raises `FileNotFoundError` for a volume with
+        no cache, same as it does for the policy branch)."""
+        model = self.model_for_volume(_dataset_name)
+        start_agg = goals.aggregate(model.features(current_params))
+        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
+        return run_search_arm(model, current_params, instruction, steps), instruction["text"]
+
     def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10, mode=None):
         cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)  # raises ValueError on failure
 
@@ -371,12 +410,20 @@ class Session:
                 actual_mode, search_flag = "exact", False
         elif effective_mode == "search":
             try:
-                model = self.model_for_volume(_dataset_name)
-                start_agg = goals.aggregate(model.features(current_params))
-                instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
-                new_params = hill_climb(model, current_params, instruction, evaluations=steps)
+                new_params, _goal_text = self._run_search(cmd, current_params, steps)
                 actual_mode, search_flag = "search", True
-            except ValueError as exc:
+                if np.array_equal(new_params, current_params):
+                    # hill_climb ran -- search_flag stays True -- but a
+                    # budget short of a full sweep (12 groups x 2 signs, plus
+                    # 1 to score the start = ~25 evaluations) can spend its
+                    # whole budget without finding a single improving move
+                    # and return the start state untouched. Silence here is
+                    # exactly the "search toggle active, nothing happened"
+                    # failure this task exists to eliminate, so say so.
+                    full_sweep = 2 * len(CONTROLLABLE) + 1
+                    message = (f"search spent {steps} evaluations without improving on the "
+                               f"start; a full sweep needs about {full_sweep}")
+            except (ValueError, FileNotFoundError, KeyError) as exc:
                 message = str(exc)
                 new_params = apply_command(cmd, current_params)
                 actual_mode, search_flag = "exact", False
