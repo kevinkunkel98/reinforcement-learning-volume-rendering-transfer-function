@@ -9,6 +9,10 @@ colour and opacity — is rewritten so the render answers.
   <img src="docs/screenshots/chat-ui-ct-skull.png" width="70%" alt="Chat UI on a real CT skull scan, bone tissue isolated" />
 </p>
 
+> The screenshot above predates the RL v2 vocabulary — it still shows the
+> retired `LUFT / FETT / SPONGIOSA / KORTIKALIS` intensity bands. The live
+> readout is the four goal classes the policy is scored on.
+
 The research question underneath: **can that transfer function be learned?** Not
 hand-tuned per scan, not hill-climbed for a hundred seconds per command, but
 produced by a policy that has seen enough patients to know what "show the ribs"
@@ -19,6 +23,55 @@ This repository is a master's thesis in progress. It contains a working voice
 UI, a measurement of what a rendering actually shows that is validated against
 real renders, a learned policy that follows instructions on patients it has never
 seen, and the apparatus for learning from human preferences.
+
+---
+
+## See the claim, don't take it on trust
+
+Type an instruction and press **compare**. The same instruction is answered four
+ways from the same starting point — applied directly, hill-climbed at 10
+evaluations and at 200, and by the policy — with each answer's render, its
+attainment, and what it cost side by side.
+
+<p align="center">
+  <img src="docs/screenshots/compare-panel.png" width="90%" alt="Four columns answering one instruction: exact, search at 10 evaluations, search at 200, and the trained policy, each with its render, attainment and cost" />
+</p>
+
+On `ts_s0477`, a patient the policy has never seen, from the default transfer
+function:
+
+| instruction | exact | search · 10 | search · 200 | **policy** |
+|---|---|---|---|---|
+| more bone | −0.001 | +0.348 | +0.582 | **+0.627** |
+| brighten the skeleton | +0.025 | +0.000 | +0.941 | **+0.819** |
+
+Read the cost column, not the clock: exact and the policy spend **zero**
+visibility evaluations, cheap search spends ten, thorough search two hundred. On
+"more bone" the policy beats both searches outright. On brightness, ten
+evaluations of hill-climbing achieve *nothing* — it has not yet reached the
+colour dimensions — while the policy lands it for free.
+
+One comparison is a single episode, and the thesis's claim is a median. So
+press **sweep 20**: twenty instructions sampled from the same grammar, and what
+each method does across all of them.
+
+<p align="center">
+  <img src="docs/screenshots/sweep-panel.png" width="90%" alt="Median attainment and improve-rate for exact, cheap search and the policy across twenty sampled instructions" />
+</p>
+
+| sweep seed | exact | search · 10 | **policy** |
+|---|---|---|---|
+| 0 | −0.209 (37 %) | +0.342 (100 %) | **+0.425 (85 %)** |
+| 1 | −0.263 (22 %) | +0.387 (100 %) | **+0.405 (95 %)** |
+| 2 | +0.041 (60 %) | +0.384 (100 %) | **+0.340 (85 %)** |
+
+Five seconds, deterministic in its seed. The search arms call
+`rl.baselines.hill_climb` at the budgets the held-out table reports, and
+attainment is `goals.attainment` — the panel computes the same quantities as
+the thesis, so a demo cannot quietly disagree with it.
+
+Both panels start from wherever the session is. Press **Reset** first if you
+want numbers measured from the default transfer function.
 
 ---
 
@@ -309,8 +362,10 @@ python -m pytest -q                  # everything
 
 ## Reading further
 
-- `docs/rl-v2-pipeline.typ` — the pipeline end to end, every measurement, every
-  caveat, and the reproduction commands.
+- `docs/rl-paper.typ` — the whole thing as a paper: problem, method, setup,
+  results, the measurement incident, and what the thesis delivers.
+- `docs/rl-v2-pipeline.typ` — the working log behind it, including the two
+  formulations that failed and the validation detail the paper compresses.
 - `docs/superpowers/specs/2026-09-15-rl-v2-visibility-rlhf-design.md` — the
   design this was built from.
 - `docs/REPRODUCE.md` — every command from raw data to the held-out table, with
@@ -320,5 +375,7 @@ python -m pytest -q                  # everything
 
 Documents describing the previous pipeline (`docs/architecture.typ`,
 `docs/rl-write-test.typ`, `docs/rl-math.pdf`, `architecture-mvp.drawio`) were
-removed on 2026-09-18; they described the retired `mass_fraction` vocabulary and
-are in git history if needed.
+removed on 2026-09-18; they described the retired `mass_fraction` vocabulary.
+The execution plans and design notes for features that have since shipped —
+camera control, the command grammar, the local 3D viewer, and the RL v2 phase
+plans — were removed on 2026-09-20. All of it is in git history.
