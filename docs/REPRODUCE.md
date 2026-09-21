@@ -228,10 +228,25 @@ If Ollama is unreachable the parser falls back to the rule parser, and the step
 records `parser_used` so the interface can say which one answered.
 
 Switch answering modes in the toolbar: **exact** (apply the parsed command
-directly), **search** (hill-climb), **policy** (the trained checkpoint at
-`server.POLICY_PATH`). Exact is the default because the policy does not isolate
-tissues well — on "show only bones" exact gives 16.7 % skeleton visibility
-against the policy's 4.9 %.
+directly), **search** (`rl.baselines.hill_climb`, budget from the steps input),
+**policy** (the trained checkpoint at `server.POLICY_PATH`). Exact is the
+default because the policy does not isolate tissues well — on "show only bones"
+exact gives 16.7 % skeleton visibility against the policy's 4.9 %.
+
+Two buttons answer with several methods at once, without advancing the session:
+
+| button | what it does | cost |
+|---|---|---|
+| **compare** | one instruction, four arms from the same start: exact, hill-climb at 10 (B3) and 200 (B4), policy | ~3 s |
+| **sweep 20** | twenty sampled instructions, median attainment and improve-rate per method | ~5 s |
+
+Both reuse the code the held-out table is built from — `rl.baselines.hill_climb`
+at the reported budgets, `goals.attainment` against a shared start aggregate —
+so a demo cannot quietly disagree with the thesis.
+
+Both start from wherever the session currently is. Press **Reset** first if you
+want the numbers measured from the default transfer function; sweeping after a
+command measures from that command's result, which is a different question.
 
 ---
 

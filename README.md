@@ -218,7 +218,26 @@ with the trained one-shot policy instead of applying the command exactly —
 it turns the parsed command into a goal vector (`goals.goal_from_command`)
 and runs the policy in a single forward pass, falling back to exact
 application when there is no trained checkpoint or the command is not a goal
-(camera, reset, width, brightness, centre). Commands name one of four
+(camera, reset, width, brightness, centre).
+
+**compare** answers the same instruction four ways at once from the same start
+state — applied directly, hill-climbed at 10 evaluations (B3) and at 200 (B4),
+and by the policy — and reports each arm's attainment, evaluation count, wall
+clock and per-class effect beside its render. The search arms call
+`rl.baselines.hill_climb` and attainment is `goals.attainment`, so the panel
+computes the same quantities as the held-out table rather than a lookalike. It
+plots whichever channel the instruction names: "brighten the skeleton" is a
+brightness goal and barely moves visibility, so plotting visibility would show
+four near-identical bars beside attainments ranging from +0.00 to +0.94.
+
+**sweep 20** runs twenty instructions sampled from the same grammar and reports
+each method's median attainment and how often it improved on doing nothing.
+One comparison is a single draw; the thesis's claim is a median, and the
+reliability gap means roughly one instruction in four has the policy not
+improving. Five seconds, deterministic in its seed. Thorough search is left out
+of the sweep — 200 evaluations across twenty instructions is about a minute.
+
+Commands name one of four
 anatomical classes — `skeleton`, `lungs`, `soft` (organs and muscle
 together), `vessels` (contrast scans only):
 
