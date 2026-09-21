@@ -394,6 +394,75 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
     return arms
 
 
+SWEEP_EPISODES = 20
+
+
+def sweep_arms(model, policy, volume, start_params, episodes=SWEEP_EPISODES, seed=0,
+                thorough=None):
+    """Run the arms over many sampled instructions and summarise each.
+
+    A single comparison is one draw from a distribution: the thesis reports a
+    median over 200 held-out episodes, and the reliability gap means roughly
+    one instruction in four has the policy not improving. Showing one draw
+    invites a reader to generalise from an anecdote in either direction. This
+    reports what the arms do across `episodes` instructions sampled from the
+    same grammar the policy was trained and scored on.
+
+    Every episode starts from `start_params` -- the state the viewer is
+    actually in -- so the question is "from this view, across many different
+    instructions, what does each method do".
+
+    Thorough search is excluded unless a budget is passed: 200 evaluations per
+    episode is about 2.7 s, which at 20 episodes is a minute of waiting. The
+    cheap arm is the baseline the amortisation claim is about."""
+    rng = np.random.default_rng(seed)
+    # `sample_instruction` takes the AGGREGATED features, keyed by goal class,
+    # as every other caller passes (rl/oneshot_env.py, rl/vis_env.py,
+    # rl/candidates.py). Raw `model.features` is keyed by material, and three
+    # of the four goal classes share a material name -- so the wrong shape
+    # survives most instructions and raises KeyError('soft') on the one goal
+    # class that does not.
+    start_agg = goals.aggregate(model.features(start_params))
+
+    budgets = {"search_cheap": COMPARE_BUDGET_CHEAP}
+    if thorough:
+        budgets["search_thorough"] = thorough
+
+    scores = {name: [] for name in ("exact", "policy", *budgets)}
+    kinds = []
+    for _ in range(episodes):
+        instruction = goals.sample_instruction(volume, model, start_agg, rng)
+        kinds.append(instruction["kind"])
+
+        def _score(params):
+            return float(goals.attainment(
+                instruction["goal"], start_agg, goals.aggregate(model.features(params))))
+
+        # `apply_command` takes a *parsed* command, not an instruction, so the
+        # sampled text goes through the same parser the viewer uses. That keeps
+        # this arm the same thing the single comparison calls "exact"; running
+        # `rl.baselines.current_executor` here instead would silently make the
+        # sweep measure a different implementation than the panel.
+        try:
+            parsed, _meta = parse_command_with_meta(instruction["text"], parser="rule")
+            scores["exact"].append(_score(apply_command(parsed, start_params)))
+        except (ValueError, KeyError, FileNotFoundError):
+            scores["exact"].append(None)
+        for name, budget in budgets.items():
+            scores[name].append(_score(
+                run_search_arm(model, start_params, instruction, budget)))
+        try:
+            scores["policy"].append(_score(
+                run_policy_arm(model, policy, instruction, start_agg, start_params)))
+        except (ValueError, KeyError, FileNotFoundError):
+            scores["policy"].append(None)
+
+    return {"episodes": episodes, "seed": seed, "volume": volume,
+            "kinds": sorted(set(kinds)),
+            "arms": {name: goals.summarise_attainment(values)
+                      for name, values in scores.items()}}
+
+
 class Session:
     """All command/history logic, independent of FastAPI."""
 
@@ -737,6 +806,25 @@ async def compare_route(req: CompareRequest):
             "start": {"class_visibility": _class_visibility(start_params),
                        "class_brightness": _class_brightness(start_params)},
             **parser_meta}
+
+
+class SweepRequest(BaseModel):
+    episodes: int = SWEEP_EPISODES
+    seed: int = 0
+    thorough: int | None = None
+
+
+@app.post("/api/compare/sweep")
+async def sweep_route(req: SweepRequest):
+    """What the arms do across many instructions, not just the one you typed."""
+    start_params = np.array(session.history[session.cursor]["params"], dtype=np.float64)
+    try:
+        model = session.model_for_volume(_dataset_name)
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400,
+                            detail=f"this volume cannot be scored: {type(exc).__name__}")
+    return sweep_arms(model, session.policy_provider(), _dataset_name, start_params,
+                       episodes=req.episodes, seed=req.seed, thorough=req.thorough)
 
 
 @app.post("/api/scenes/transition")

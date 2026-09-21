@@ -874,6 +874,73 @@ def test_compare_route_says_which_channel_to_plot(ts_session, monkeypatch):
     assert set(result["start"]["class_brightness"]) == set(goals.GOAL_CLASSES)
 
 
+# --- sweep_arms: the distribution, not one draw -------------------------------
+
+def test_sweep_arms_summarises_every_arm_over_many_instructions(ts_session):
+    """One comparison is a single draw from a distribution; the thesis claim is
+    a median over many. The sweep is what makes the panel show the claim."""
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    result = server.sweep_arms(model, policy_stub(), server._dataset_name, params,
+                                episodes=4, seed=0)
+
+    assert set(result["arms"]) == {"exact", "search_cheap", "policy"}
+    for name, arm in result["arms"].items():
+        assert arm["n"] == 4, name
+        assert arm["median"] is not None, name
+        assert 0.0 <= arm["share_positive"] <= 1.0, name
+    assert result["episodes"] == 4
+
+
+def test_sweep_arms_is_deterministic_in_its_seed(ts_session):
+    """A demo that gives different numbers each press is not evidence."""
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    first = server.sweep_arms(model, policy_stub(), server._dataset_name, params, episodes=3, seed=7)
+    second = server.sweep_arms(model, policy_stub(), server._dataset_name, params, episodes=3, seed=7)
+
+    assert first["arms"]["policy"]["median"] == second["arms"]["policy"]["median"]
+
+
+def test_sweep_arms_can_include_thorough_search_when_asked(ts_session):
+    """Excluded by default: 200 evaluations x 20 episodes is about a minute."""
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    result = server.sweep_arms(model, policy_stub(), server._dataset_name, params,
+                                episodes=2, seed=0, thorough=4)
+
+    assert "search_thorough" in result["arms"]
+    assert result["arms"]["search_thorough"]["n"] == 2
+
+
+def test_sweep_arms_handles_absolute_instructions(ts_session, monkeypatch):
+    """`goals.sample_instruction` wants the *aggregated* features, keyed by goal
+    class, not the raw per-material ones. Only the "absolute" branch indexes
+    them by goal class, so passing the wrong shape survives most seeds and then
+    raises KeyError('soft') on about one instruction in ten."""
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    monkeypatch.setattr(goals, "_sample_kind", lambda rng: "absolute")
+    # Raw features are keyed by MATERIAL (skeleton, lungs, organs, muscle,
+    # vessels) and three goal classes share those names -- so the wrong shape
+    # only raises when the sampler picks `soft`, the one goal class that has no
+    # material of the same name. Force it.
+    monkeypatch.setattr(goals, "reachable_goal_classes", lambda name, model: ["soft"])
+
+    result = server.sweep_arms(model, policy_stub(), server._dataset_name, params,
+                                episodes=2, seed=0)
+
+    assert result["kinds"] == ["absolute"]
+    assert result["arms"]["policy"]["n"] == 2
+
+
 # --- the /api/compare route ---------------------------------------------------
 
 def test_compare_route_leaves_session_history_untouched(ts_session, monkeypatch):

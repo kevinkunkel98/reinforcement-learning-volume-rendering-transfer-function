@@ -1114,3 +1114,14 @@ select:focus-visible {
 .reply-dot { width: 7px; height: 7px; border-radius: 999px; flex: none; }
 .reply-class { color: hsl(var(--muted-foreground)); }
 .reply-numbers { font-family: var(--mono); font-size: 11.5px; margin-left: auto; }
+
+/* Sweep: the three arms the amortisation claim is about. Distinct from the
+   goal-class hues -- these are methods, not tissues. */
+:root {
+  --sweep-exact:        #71717a;
+  --sweep-search_cheap: #a1a1aa;
+  --sweep-policy:       #3987e5;
+}
+.sweep-table td { padding: 0.35rem 0; }
+.sweep-table .table-value[data-sign="positive"] { color: hsl(var(--success)); }
+.sweep-table .table-value[data-sign="negative"] { color: hsl(var(--destructive)); }

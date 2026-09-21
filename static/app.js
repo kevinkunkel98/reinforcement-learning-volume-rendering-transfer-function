@@ -913,3 +913,70 @@ async function runCompare() {
 
 el("compare-btn").addEventListener("click", runCompare);
 el("compare-close").addEventListener("click", () => showCompare(false));
+
+// --- the sweep: the distribution, not one draw --------------------------------
+// One comparison is a single episode. The claim the thesis makes is a median
+// over many, and the reliability gap means about one instruction in four has
+// the policy not improving -- so a single press invites generalising from an
+// anecdote, in either direction. This runs many sampled instructions and shows
+// the spread.
+
+const SWEEP_ARMS = ["exact", "search_cheap", "policy"];
+
+function sweepRow(name, arm, best) {
+  if (!arm || arm.n === 0) {
+    return `<tr><td class="table-label">${ARM_LABEL[name]}</td>
+      <td colspan="3" class="table-value">&mdash;</td></tr>`;
+  }
+  const median = arm.median;
+  const width = Math.min(100, Math.max(0, (median / best) * 100));
+  const sign = median >= 0 ? "positive" : "negative";
+  return `<tr>
+    <td class="table-label">${ARM_LABEL[name]}</td>
+    <td style="width:100%">
+      <div class="progress">
+        <div class="progress-fill" style="width:${width}%;--progress-color:var(--sweep-${name})"></div>
+      </div>
+    </td>
+    <td class="table-value" data-sign="${sign}">${median >= 0 ? "+" : "−"}${Math.abs(median).toFixed(3)}</td>
+    <td class="table-value">${Math.round(arm.share_positive * 100)}%</td>
+  </tr>`;
+}
+
+async function runSweep() {
+  showCompare(true);
+  compareGoal.innerHTML = `<strong>20 sampled instructions</strong> &mdash; what each method does across the grammar, not on one phrase`;
+  compareColumns.innerHTML = `<div class="card compare-arm" style="grid-column:1/-1">
+    <div class="skeleton" style="height:1rem;width:14rem"></div>
+    <div class="skeleton" style="height:0.8rem;width:100%"></div>
+    <div class="skeleton" style="height:0.8rem;width:100%"></div>
+    <div class="skeleton" style="height:0.8rem;width:100%"></div>
+  </div>`;
+
+  let payload;
+  try {
+    const res = await fetch("/api/compare/sweep", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ episodes: 20, seed: 0 }),
+    });
+    payload = await res.json();
+    if (!res.ok) throw new Error(payload.detail || "sweep failed");
+  } catch (err) {
+    compareColumns.innerHTML = `<p class="compare-unavailable">${err.message}</p>`;
+    return;
+  }
+
+  const best = Math.max(...SWEEP_ARMS.map((n) => (payload.arms[n] ? payload.arms[n].median : 0)), 0.001);
+  compareGoal.innerHTML =
+    `<strong>${payload.episodes} sampled instructions</strong> on ${payload.volume} &mdash; median attainment and how often each method improved on doing nothing`;
+  compareColumns.innerHTML = `<div class="card compare-arm" style="grid-column:1/-1">
+    <table class="table sweep-table">
+      <tr><td></td><td></td><td class="table-value">median</td><td class="table-value">improved</td></tr>
+      ${SWEEP_ARMS.map((n) => sweepRow(n, payload.arms[n], best)).join("")}
+    </table>
+    <p class="compare-unavailable">Search at 200 evaluations is left out here: it costs about a minute over 20 instructions. Use compare for a single instruction to see it.</p>
+  </div>`;
+}
+
+el("sweep-btn").addEventListener("click", runSweep);
