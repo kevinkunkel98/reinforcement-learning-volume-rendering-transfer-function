@@ -30,17 +30,15 @@ from pydantic import BaseModel
 from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 import collect
-from commands import (COMMAND_REFERENCE, STRENGTH_WORDS, _find_or_create_peak, apply_command,
-                       parse_command_with_meta)
+from commands import COMMAND_REFERENCE, apply_command, parse_command_with_meta
 from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
-from evaluate import jsonl_append, objective
+from evaluate import jsonl_append
 import goals
 import policy as policy_module
 import render as render_module
 from render import features, grab, render
-from rl.baselines import CONTROLLABLE, apply_controllable
+from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
 from rl.oneshot_env import build_observation
-from search import propose_step, resize_step
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
 from transfer import TISSUE_BANDS, default_params, opacity_mass
 import visibility
@@ -49,6 +47,8 @@ LOG_PATH = "out/log.jsonl"
 SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
 _SCENE_WRITE_LOCK = threading.Lock()
 AUDIO_DIR = "out/audio"
+NO_POLICY_CHECKPOINT_MESSAGE = (
+    "no trained policy checkpoint found -- applied the command directly instead")
 
 # --- Task 3: the one-shot policy, for mode="policy" --------------------------
 # Loaded lazily and cached, the same pattern collect.py uses for the same
@@ -142,6 +142,40 @@ def _class_visibility(params, model_for_volume=visibility.for_volume):
             for goal_class in goals.GOAL_CLASSES}
 
 
+def _class_brightness(params, model_for_volume=visibility.for_volume):
+    """Mean brightness of each goal class, the companion to
+    `_class_visibility`.
+
+    `goals.distance` scores two channels -- how much of the image a class
+    contributes (`vis`) and how bright it appears (`bright`, weighted KAPPA) --
+    and an instruction names one or the other. "Brighten the skeleton" barely
+    moves visibility, so a panel plotting visibility alone shows four columns
+    with near-identical bars and attainment from 0.00 to 0.94, and reads as
+    self-contradictory."""
+    try:
+        model = model_for_volume(_dataset_name)
+        bright = goals.aggregate(model.features(np.asarray(params, dtype=np.float64)))["bright"]
+        supported = set(goals.goal_classes_for_volume(_dataset_name))
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        print(f"[telemetry] no visibility model for {_dataset_name}: {exc}")
+        return {goal_class: None for goal_class in goals.GOAL_CLASSES}
+    return {goal_class: (float(bright[goal_class]) if goal_class in supported else None)
+            for goal_class in goals.GOAL_CLASSES}
+
+
+def goal_channels(goal) -> dict:
+    """Which channel each goal class is named on, from the 16-value goal
+    vector: targets and masks for `vis`, then targets and masks for `bright`.
+
+    The panel plots the channel the instruction is actually about."""
+    n = len(goals.GOAL_CLASSES)
+    vis_mask, bright_mask = goal[n:2 * n], goal[3 * n:4 * n]
+    return {
+        "vis": [c for i, c in enumerate(goals.GOAL_CLASSES) if vis_mask[i]],
+        "bright": [c for i, c in enumerate(goals.GOAL_CLASSES) if bright_mask[i]],
+    }
+
+
 _frame_bounds_cache = {"dataset": None, "bounds": None}
 
 
@@ -209,6 +243,224 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
         "message": message,
         **(parser_meta or {"parser_requested": None, "parser_used": None, "parser_fallback": None}),
     }
+
+
+def run_policy_arm(model, policy, instruction, start_agg, start_params):
+    """Run the one-shot policy on an already-built goal.
+
+    The caller owns `instruction` (`goals.goal_from_command`) and `start_agg`,
+    so a caller comparing several arms builds each exactly once -- recomputing
+    them here would put another `model.features` (~17 ms) inside the policy
+    arm's own timing, which is the one number the comparison panel exists to
+    show. Builds the same observation layout `rl.candidates` builds for a
+    standalone policy query (`rl.oneshot_env.build_observation`).
+
+    Returns the new parameters. Raises `ValueError` when `policy` is None;
+    `model.features`/`model.solo_max` may also raise `FileNotFoundError` or
+    `KeyError` when the volume has no visibility cache."""
+    if policy is None:
+        raise ValueError(NO_POLICY_CHECKPOINT_MESSAGE)
+
+    solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
+                     for c in goals.GOAL_CLASSES]
+    controllable = [float(np.mean([start_params[i] for i in group])) for group in CONTROLLABLE]
+    observation = build_observation(instruction["goal"], model.histogram, start_agg,
+                                     solo_max_log, controllable)
+
+    action = _predict_action(policy, observation)
+    return apply_controllable(start_params, action)
+
+
+def run_search_arm(model, start_params, instruction, evaluations):
+    """Run the hill-climb baseline (`rl.baselines.hill_climb`) on an
+    already-built goal -- the search twin of `run_policy_arm`.
+
+    The caller owns `instruction` (`goals.goal_from_command`), the same
+    reason `run_policy_arm` takes a pre-built `instruction`/`start_agg`
+    rather than recomputing them: a caller comparing several arms builds the
+    goal exactly once instead of putting another `model.features` call
+    inside the arm's own timing.
+
+    `evaluations` is a budget on `model.features` calls inside `hill_climb`,
+    not a count of accepted moves: one evaluation scores the start state,
+    and each remaining one tries a single +-step on one of the 12
+    controllable groups. A full sweep (12 groups x 2 signs) costs ~24 --
+    below that, `hill_climb` can run out of budget before trying every
+    direction once and return the start state completely untouched. This
+    function does not detect that case; the caller (`Session._run_search`)
+    does, because only it knows the params it started from.
+
+    Returns the new parameters. `model.features`/`model.solo_max` may raise
+    `FileNotFoundError` or `KeyError` when the volume has no visibility
+    cache."""
+    return hill_climb(model, start_params, instruction, evaluations=evaluations)
+
+
+# The two search budgets the thesis reports: B3 (cheap, 10) and B4 (thorough,
+# 200). Showing both is what makes a no-move B3 column legible -- beside a B4
+# that did move and a policy that answered instantly, "10 evaluations buys
+# little here" reads as the finding rather than as a broken column.
+#
+# `hill_climb` spends 1 evaluation on the start state and 1 per proposal, and a
+# full coordinate sweep is 12 groups x 2 signs = 24, so B3 explores less than
+# half a sweep. Measured on ct_chest / "show only the lungs": B3 130 ms,
+# B4 2.7 s -- the whole panel is under three seconds.
+COMPARE_BUDGET_CHEAP = 10
+COMPARE_BUDGET_THOROUGH = 200
+
+
+def compare_arms(model, policy, cmd, instruction, start_params, camera,
+                  cheap=COMPARE_BUDGET_CHEAP, thorough=COMPARE_BUDGET_THOROUGH):
+    """Answer one parsed command four ways from the same start state.
+
+    `exact` applies the command directly (0 evaluations), `search_cheap` and
+    `search_thorough` run the hill-climb the thesis measures as B3 and B4, and
+    `policy` runs the trained one-shot policy (0 evaluations). Every arm is
+    scored with `goals.attainment` against the *shared* start aggregate, which
+    is what makes these numbers mean what the held-out table means.
+
+    `model` and `instruction` must come from a single read of the active
+    dataset, not two independent resolutions at different layers -- otherwise
+    an arm could be scored against a goal built for a different volume.
+
+    Does not touch session history: comparing is a side quest, not a step.
+
+    An arm that raises is reported as `unavailable` rather than failing the
+    whole comparison -- losing one column should not end a live demo."""
+    start_agg = goals.aggregate(model.features(start_params))
+
+    def _answer(fn):
+        """Run one arm and time *only* the answering.
+
+        The timing column exists to show that the policy answers for free
+        while thorough search costs seconds. Scoring and rendering cost the
+        same for every arm, so folding them in inflates the cheap arms towards
+        the expensive one and the policy's number stops being the policy's
+        number -- the same mistake `run_policy_arm`'s seam was shaped to
+        avoid, one layer up."""
+        started = time.perf_counter()
+        params = fn()
+        return params, int((time.perf_counter() - started) * 1000)
+
+    def _finish(params, evaluations, elapsed_ms):
+        final_agg = goals.aggregate(model.features(params))
+        image_b64, _img, _png = _render_image_b64(params, camera)
+        return {
+            "params": params.tolist(),
+            "image_b64": image_b64,
+            "class_visibility": _class_visibility(params),
+            "class_brightness": _class_brightness(params),
+            "attainment": float(goals.attainment(instruction["goal"], start_agg, final_agg)),
+            # An arm that returned its own input is not an arm that *agrees*
+            # with the start -- it is an arm that did not move, and rendered
+            # side by side those two read identically (same image, same
+            # attainment, a confident evaluation count) while meaning opposite
+            # things. At B3's budget the search arm can legitimately land here.
+            "unchanged": bool(np.array_equal(params, start_params)),
+            "evaluations": evaluations,
+            "elapsed_ms": elapsed_ms,
+        }
+
+    def _unavailable(exc, elapsed_ms):
+        # `str(exc)` is not user-facing copy. A KeyError stringifies to the
+        # bare repr of its key ("'lungs'"), and goal_from_command yields a
+        # dumped Python dict. In a single-view toast that is merely scruffy;
+        # in a column someone is reading closely it is unreadable.
+        if isinstance(exc, ValueError):
+            reason = f"not applicable -- {exc}"
+        else:
+            reason = "unavailable -- this volume has no visibility cache"
+        # Same keys as a successful arm, so a consumer iterating the arms
+        # never has to special-case a failed one before reading a field.
+        return {"params": None, "unavailable": reason, "attainment": None,
+                "class_visibility": None, "class_brightness": None, "image_b64": None,
+                "evaluations": None, "unchanged": None, "elapsed_ms": elapsed_ms}
+
+    def _arm(fn, evaluations):
+        started = time.perf_counter()
+        try:
+            params, elapsed_ms = _answer(fn)
+            return _finish(params, evaluations, elapsed_ms)
+        except (ValueError, FileNotFoundError, KeyError) as exc:
+            return _unavailable(exc, int((time.perf_counter() - started) * 1000))
+
+    arms = {"exact": _arm(lambda: apply_command(cmd, start_params), 0)}
+    for name, budget in (("search_cheap", cheap), ("search_thorough", thorough)):
+        arms[name] = _arm(
+            lambda budget=budget: run_search_arm(model, start_params, instruction, budget),
+            budget)
+    arms["policy"] = _arm(
+        lambda: run_policy_arm(model, policy, instruction, start_agg, start_params), 0)
+    return arms
+
+
+SWEEP_EPISODES = 20
+
+
+def sweep_arms(model, policy, volume, start_params, episodes=SWEEP_EPISODES, seed=0,
+                thorough=None):
+    """Run the arms over many sampled instructions and summarise each.
+
+    A single comparison is one draw from a distribution: the thesis reports a
+    median over 200 held-out episodes, and the reliability gap means roughly
+    one instruction in four has the policy not improving. Showing one draw
+    invites a reader to generalise from an anecdote in either direction. This
+    reports what the arms do across `episodes` instructions sampled from the
+    same grammar the policy was trained and scored on.
+
+    Every episode starts from `start_params` -- the state the viewer is
+    actually in -- so the question is "from this view, across many different
+    instructions, what does each method do".
+
+    Thorough search is excluded unless a budget is passed: 200 evaluations per
+    episode is about 2.7 s, which at 20 episodes is a minute of waiting. The
+    cheap arm is the baseline the amortisation claim is about."""
+    rng = np.random.default_rng(seed)
+    # `sample_instruction` takes the AGGREGATED features, keyed by goal class,
+    # as every other caller passes (rl/oneshot_env.py, rl/vis_env.py,
+    # rl/candidates.py). Raw `model.features` is keyed by material, and three
+    # of the four goal classes share a material name -- so the wrong shape
+    # survives most instructions and raises KeyError('soft') on the one goal
+    # class that does not.
+    start_agg = goals.aggregate(model.features(start_params))
+
+    budgets = {"search_cheap": COMPARE_BUDGET_CHEAP}
+    if thorough:
+        budgets["search_thorough"] = thorough
+
+    scores = {name: [] for name in ("exact", "policy", *budgets)}
+    kinds = []
+    for _ in range(episodes):
+        instruction = goals.sample_instruction(volume, model, start_agg, rng)
+        kinds.append(instruction["kind"])
+
+        def _score(params):
+            return float(goals.attainment(
+                instruction["goal"], start_agg, goals.aggregate(model.features(params))))
+
+        # `apply_command` takes a *parsed* command, not an instruction, so the
+        # sampled text goes through the same parser the viewer uses. That keeps
+        # this arm the same thing the single comparison calls "exact"; running
+        # `rl.baselines.current_executor` here instead would silently make the
+        # sweep measure a different implementation than the panel.
+        try:
+            parsed, _meta = parse_command_with_meta(instruction["text"], parser="rule")
+            scores["exact"].append(_score(apply_command(parsed, start_params)))
+        except (ValueError, KeyError, FileNotFoundError):
+            scores["exact"].append(None)
+        for name, budget in budgets.items():
+            scores[name].append(_score(
+                run_search_arm(model, start_params, instruction, budget)))
+        try:
+            scores["policy"].append(_score(
+                run_policy_arm(model, policy, instruction, start_agg, start_params)))
+        except (ValueError, KeyError, FileNotFoundError):
+            scores["policy"].append(None)
+
+    return {"episodes": episodes, "seed": seed, "volume": volume,
+            "kinds": sorted(set(kinds)),
+            "arms": {name: goals.summarise_attainment(values)
+                      for name, values in scores.items()}}
 
 
 class Session:
@@ -294,53 +546,38 @@ class Session:
             "verdict": None,
         })
 
-    def _run_objective_search(self, cmd, params, steps):
-        sign = 1.0 if cmd["direction"] == "increase" else -1.0
-        step = STRENGTH_WORDS[cmd["strength"] or "moderately"]
-        current = params.copy()
-        _, idx = _find_or_create_peak(current, cmd["target"])
-        for _ in range(steps):
-            proposed = propose_step(current, idx, sign, step)
-            verdict = objective(current, proposed, cmd)
-            jsonl_append(LOG_PATH, {
-                "timestamp": datetime.datetime.now().isoformat(), "command": cmd,
-                "params_before": current.tolist(), "params_after": proposed.tolist(),
-                "features_before": None, "features_after": None, "verdict": verdict,
-            })
-            if verdict == 1:
-                current = proposed
-            step = resize_step(step, accepted=(verdict == 1))
-            if step < 0.01:
-                break
-        return current
-
     def _run_policy(self, cmd, current_params):
-        """mode="policy": build the goal `cmd` asks for (`goals.
-        goal_from_command`) and run the cached one-shot policy on it, the
-        same observation layout `rl.candidates` builds for a standalone
-        policy query (`rl.oneshot_env.build_observation`). Returns
-        `(new_params, goal_text)`. Raises `ValueError` -- caught by
-        `command()`, which falls back to exact application -- when no
-        checkpoint is loaded, or `goal_from_command`/the volume's model
-        raises for a non-goal command (camera, reset, width, centre) or a
-        goal this volume can't support."""
+        """mode="policy": resolve the checkpoint and the volume model, build
+        the goal, and hand them to `run_policy_arm`.
+
+        The `policy is None` check stays ahead of `model_for_volume`: that call
+        is not total (`visibility.for_volume` raises `FileNotFoundError` when a
+        volume has no cache, which is why `_class_visibility` guards it), and
+        `command()` catches only `ValueError`. Resolving the model first would
+        turn a graceful "no checkpoint, applied directly" fallback into an
+        unhandled exception out of the route. The `ValueError` raised here is
+        what `command()` catches to fall back to exact application."""
         policy = self.policy_provider()
         if policy is None:
-            raise ValueError(
-                "no trained policy checkpoint found -- applied the command directly instead")
-
+            raise ValueError(NO_POLICY_CHECKPOINT_MESSAGE)
         model = self.model_for_volume(_dataset_name)
         start_agg = goals.aggregate(model.features(current_params))
-        goal = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
+        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
+        return run_policy_arm(model, policy, instruction, start_agg, current_params), instruction["text"]
 
-        solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
-                         for c in goals.GOAL_CLASSES]
-        controllable = [float(np.mean([current_params[i] for i in group])) for group in CONTROLLABLE]
-        observation = build_observation(goal["goal"], model.histogram, start_agg, solo_max_log, controllable)
+    def _run_search(self, cmd, current_params, steps):
+        """mode="search": resolve the volume model, build the goal, and hand
+        them to `run_search_arm` -- the search twin of `_run_policy`.
 
-        action = _predict_action(policy, observation)
-        new_params = apply_controllable(current_params, action)
-        return new_params, goal["text"]
+        Unlike `_run_policy` there is no checkpoint to check for ahead of
+        `model_for_volume`, so this calls it directly; `command()` widens its
+        `except` to `(ValueError, FileNotFoundError, KeyError)` instead
+        (`visibility.for_volume` raises `FileNotFoundError` for a volume with
+        no cache, same as it does for the policy branch)."""
+        model = self.model_for_volume(_dataset_name)
+        start_agg = goals.aggregate(model.features(current_params))
+        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
+        return run_search_arm(model, current_params, instruction, steps), instruction["text"]
 
     def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10, mode=None):
         cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)  # raises ValueError on failure
@@ -372,9 +609,25 @@ class Session:
                 message = str(exc)
                 new_params = apply_command(cmd, current_params)
                 actual_mode, search_flag = "exact", False
-        elif effective_mode == "search" and cmd.get("attribute") == "opacity" and cmd.get("direction") in ("increase", "decrease"):
-            new_params = self._run_objective_search(cmd, current_params, steps)
-            actual_mode, search_flag = "search", True
+        elif effective_mode == "search":
+            try:
+                new_params, _goal_text = self._run_search(cmd, current_params, steps)
+                actual_mode, search_flag = "search", True
+                if np.array_equal(new_params, current_params):
+                    # hill_climb ran -- search_flag stays True -- but a
+                    # budget short of a full sweep (12 groups x 2 signs, plus
+                    # 1 to score the start = ~25 evaluations) can spend its
+                    # whole budget without finding a single improving move
+                    # and return the start state untouched. Silence here is
+                    # exactly the "search toggle active, nothing happened"
+                    # failure this task exists to eliminate, so say so.
+                    full_sweep = 2 * len(CONTROLLABLE) + 1
+                    message = (f"search spent {steps} evaluations without improving on the "
+                               f"start; a full sweep needs about {full_sweep}")
+            except (ValueError, FileNotFoundError, KeyError) as exc:
+                message = str(exc)
+                new_params = apply_command(cmd, current_params)
+                actual_mode, search_flag = "exact", False
         else:
             new_params = apply_command(cmd, current_params)
             actual_mode, search_flag = "exact", False
@@ -497,6 +750,81 @@ async def command(req: CommandRequest):
         return session.command(req.text, req.parser, req.model, req.search, req.steps, req.mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+class CompareRequest(BaseModel):
+    text: str
+    parser: str = "rule"
+    model: str = "qwen2.5:7b"
+    cheap: int = COMPARE_BUDGET_CHEAP
+    thorough: int = COMPARE_BUDGET_THOROUGH
+
+
+@app.post("/api/compare")
+async def compare_route(req: CompareRequest):
+    """Answer one instruction four ways without advancing the session.
+
+    Parses once and builds the goal once, so all four arms answer the
+    identical parsed command: a bad parse then makes all four wrong together
+    and the panel shows a parsing problem, not a policy problem. `model` and
+    `instruction` come from a single read of the active dataset for the same
+    reason -- an arm scored against a goal built for a different volume would
+    be quietly meaningless."""
+    try:
+        cmd, parser_meta = parse_command_with_meta(req.text, parser=req.parser, model=req.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    start_params = np.array(session.history[session.cursor]["params"], dtype=np.float64)
+    camera = dict(session.history[session.cursor].get("camera", DEFAULT_CAMERA))
+
+    try:
+        volume_model = session.model_for_volume(_dataset_name)
+        start_agg = goals.aggregate(volume_model.features(start_params))
+        instruction = goals.goal_from_command(cmd, volume_model, start_agg, volume=_dataset_name)
+    except ValueError as exc:
+        # Camera, reset, width and centre commands are not goals, and neither
+        # is a goal this volume cannot support (lungs on an abdominal scan).
+        #
+        # `str(exc)` is developer copy -- it names `commands.apply_command` and
+        # can carry a dumped command dict. The panel shows `reason`, so that is
+        # written for a reader; `detail` keeps the original for debugging.
+        return {"applicable": False,
+                "reason": "this instruction is not a visibility goal, so there is "
+                          "nothing to score four ways",
+                "detail": str(exc), "text": req.text, **parser_meta}
+    except (FileNotFoundError, KeyError) as exc:
+        return {"applicable": False,
+                "reason": "this volume has no visibility cache, so it cannot be scored",
+                "detail": f"{type(exc).__name__}: {exc}", "text": req.text, **parser_meta}
+
+    arms = compare_arms(volume_model, session.policy_provider(), cmd, instruction,
+                         start_params, camera, cheap=req.cheap, thorough=req.thorough)
+    return {"applicable": True, "text": req.text, "goal_text": instruction["text"],
+            "budgets": {"cheap": req.cheap, "thorough": req.thorough}, "arms": arms,
+            "channels": goal_channels(instruction["goal"]),
+            "start": {"class_visibility": _class_visibility(start_params),
+                       "class_brightness": _class_brightness(start_params)},
+            **parser_meta}
+
+
+class SweepRequest(BaseModel):
+    episodes: int = SWEEP_EPISODES
+    seed: int = 0
+    thorough: int | None = None
+
+
+@app.post("/api/compare/sweep")
+async def sweep_route(req: SweepRequest):
+    """What the arms do across many instructions, not just the one you typed."""
+    start_params = np.array(session.history[session.cursor]["params"], dtype=np.float64)
+    try:
+        model = session.model_for_volume(_dataset_name)
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400,
+                            detail=f"this volume cannot be scored: {type(exc).__name__}")
+    return sweep_arms(model, session.policy_provider(), _dataset_name, start_params,
+                       episodes=req.episodes, seed=req.seed, thorough=req.thorough)
 
 
 @app.post("/api/scenes/transition")

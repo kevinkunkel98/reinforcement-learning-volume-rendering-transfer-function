@@ -13,6 +13,12 @@ const state = { current: null, cursor: 0, total: 1, dataset: null };
 const config = { parser: "llm", search: false, mode: "exact" };
 
 const el = (id) => document.getElementById(id);
+
+// The four goal classes, in a fixed order, shared by the chat replies and the
+// comparison panel so a class keeps the same name and hue everywhere.
+const CLASS_ORDER = ["skeleton", "lungs", "soft", "vessels"];
+const CLASS_LABEL = { skeleton: "skeleton", lungs: "lungs", soft: "soft tissue", vessels: "vessels" };
+
 const messagesEl = el("messages");
 const emptyState = el("empty-state");
 const textInput = el("text-input");
@@ -203,6 +209,66 @@ function appendMessage(step) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// The system's turn in the conversation. It does not chat -- it reports what
+// the render now shows, which is the measurement the whole project is built
+// on. Without it the thread is a list of things the user said, and the effect
+// of each command is invisible.
+const METHOD_SAID = {
+  policy: "the policy answered",
+  search: "search answered",
+  exact: "applied directly",
+  camera: "moved the camera",
+};
+
+function appendReply(step, before) {
+  const div = document.createElement("div");
+  div.className = "msg-reply";
+
+  const method = document.createElement("div");
+  method.className = "reply-method";
+  method.textContent = METHOD_SAID[step.mode] || METHOD_SAID.exact;
+  div.appendChild(method);
+
+  // A fallback or a search that found nothing is the most useful thing the
+  // system can say, so it belongs in the thread, not only in a toast that
+  // disappears.
+  if (step.message) {
+    const note = document.createElement("div");
+    note.className = "reply-note";
+    note.textContent = step.message;
+    div.appendChild(note);
+  }
+
+  const now = step.class_visibility || {};
+  const moved = CLASS_ORDER.filter((c) => {
+    const a = before ? before[c] : null;
+    const b = now[c];
+    return a != null && b != null && Math.abs(b - a) >= 0.0001;
+  });
+
+  if (moved.length) {
+    const list = document.createElement("div");
+    list.className = "reply-deltas";
+    for (const c of moved) {
+      const row = document.createElement("div");
+      row.className = "reply-delta";
+      row.innerHTML = `<span class="reply-dot" style="background:var(--class-${c})"></span>
+        <span class="reply-class">${CLASS_LABEL[c]}</span>
+        <span class="reply-numbers">${(before[c] * 100).toFixed(2)} &rarr; ${(now[c] * 100).toFixed(2)}%</span>`;
+      div.appendChild(list);
+      list.appendChild(row);
+    }
+  } else if (!step.message) {
+    const none = document.createElement("div");
+    none.className = "reply-note";
+    none.textContent = "Nothing moved measurably.";
+    div.appendChild(none);
+  }
+
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 async function loadState() {
   const r = await fetch("/api/state");
   const data = await r.json();
@@ -219,6 +285,9 @@ async function loadState() {
 }
 
 async function sendCommand(text) {
+  // What the render showed before this command, so the reply can report the
+  // change rather than only the new value.
+  const before = state.current ? state.current.class_visibility : null;
   const body = {
     text,
     parser: config.parser,
@@ -240,10 +309,7 @@ async function sendCommand(text) {
   await refresh(data);
   await postSceneTransition(data);
   appendMessage(data.current);
-  // mode="policy" degrades to exact application (no checkpoint, or the
-  // command isn't a goal) and explains why in current.message -- surface it
-  // rather than silently answering with a different mode than requested.
-  if (data.current.message) showToast(data.current.message, "default");
+  appendReply(data.current, before);
 }
 
 function autoResize() {
@@ -695,3 +761,240 @@ function showToast(message, variant = "default") {
 updateSendState();
 loadDatasets();
 loadState();
+
+// --- four-mode comparison -----------------------------------------------------
+// Answers the instruction four ways from the current step without advancing the
+// session, so the amortisation claim -- the policy reaching search's
+// neighbourhood while spending no visibility evaluations -- is on one screen
+// instead of spread across four interactions the viewer has to hold in memory.
+
+const ARM_ORDER = ["exact", "search_cheap", "search_thorough", "policy"];
+const ARM_LABEL = {
+  exact: "exact",
+  search_cheap: "search · 10",
+  search_thorough: "search · 200",
+  policy: "policy",
+};
+
+const compareView = el("compare-view");
+const compareColumns = el("compare-columns");
+const compareGoal = el("compare-goal");
+
+async function showCompare(on) {
+  el("single-view").hidden = on;
+  compareView.hidden = !on;
+  if (on) return;
+
+  // The viewport is a WebGL canvas. Hiding it with `hidden` is display:none,
+  // so it measures 0x0 while the panel is open and comes back blank: vtk
+  // sized itself to nothing and has no reason to redraw. Nudge the layout,
+  // then re-issue the current step so both the canvas and the fallback image
+  // are painted from real state rather than whatever survived being hidden.
+  window.dispatchEvent(new Event("resize"));
+  try {
+    // Fresh state, not `lastState`: back/forward move the cursor without
+    // updating it, so restoring from the cached copy could quietly rewind the
+    // view to a different step than the one the counter shows.
+    const r = await fetch("/api/state");
+    if (r.ok) await refresh(await r.json());
+  } catch (err) {
+    showToast("Could not redraw the view. Step back and forward to restore it.", "destructive");
+  }
+  if (window.volumeViewer && window.volumeViewer.render) window.volumeViewer.render();
+}
+
+const pct = (v) => `${Math.min(100, Math.max(0, (v || 0) * 100)).toFixed(1)}%`;
+
+function armSkeleton(name) {
+  return `<div class="card compare-arm">
+    <span class="compare-arm-name">${ARM_LABEL[name]}</span>
+    <div class="skeleton compare-arm-image"></div>
+    <div class="skeleton" style="height:1.45rem;width:5rem"></div>
+    <div class="skeleton" style="height:0.72rem;width:7rem"></div>
+  </div>`;
+}
+
+// `goals.distance` scores two channels -- how much of the image a class
+// contributes (vis) and how bright it appears (bright) -- and an instruction
+// names one or the other. Plotting visibility for "brighten the skeleton"
+// shows four columns with near-identical bars and attainment from 0.00 to
+// 0.94, which reads as the panel contradicting itself. So plot the channel
+// the instruction is actually about, and say which one.
+const CHANNEL = {
+  vis: { label: "visible", scale: (v) => v * 100, unit: "%", format: (v) => `${(v * 100).toFixed(1)}%` },
+  bright: { label: "brightness", scale: (v) => v * 100, unit: "", format: (v) => v.toFixed(3) },
+};
+
+function classBars(values, start, channel) {
+  const spec = CHANNEL[channel];
+  return `<div class="compare-channel">${spec.label} per class</div>
+  <table class="table">${CLASS_ORDER.map((c) => {
+    const value = values && values[c] != null ? values[c] : null;
+    const from = start && start[c] != null ? start[c] : 0;
+    if (value === null) {
+      return `<tr><td class="table-label">${CLASS_LABEL[c]}</td>
+        <td colspan="2" class="table-value">&mdash;</td></tr>`;
+    }
+    return `<tr>
+      <td class="table-label">${CLASS_LABEL[c]}</td>
+      <td style="width:100%">
+        <div class="progress">
+          <div class="progress-fill" style="width:${pct(spec.scale(value) / 100)};--progress-color:var(--class-${c})"></div>
+          <div class="progress-tick" style="left:${pct(spec.scale(from) / 100)}"></div>
+        </div>
+      </td>
+      <td class="table-value">${spec.format(value)}</td>
+    </tr>`;
+  }).join("")}</table>`;
+}
+
+function armCard(name, arm, start, channel) {
+  if (!arm || arm.unavailable) {
+    return `<div class="card compare-arm">
+      <span class="compare-arm-name">${ARM_LABEL[name]}</span>
+      <p class="compare-unavailable">${arm ? arm.unavailable : "no result"}</p>
+    </div>`;
+  }
+  const sign = arm.attainment >= 0 ? "positive" : "negative";
+  const shown = `${arm.attainment >= 0 ? "+" : "−"}${Math.abs(arm.attainment).toFixed(3)}`;
+  const evals = `${arm.evaluations} eval${arm.evaluations === 1 ? "" : "s"}`;
+  // An arm that returned its own input did not move. Without saying so, the
+  // column reads as "this arm agrees with the start" -- the opposite claim.
+  const noMove = arm.unchanged
+    ? `<div class="compare-nomove">did not move &mdash; ${evals} found no improving step</div>`
+    : "";
+  return `<div class="card compare-arm">
+    <span class="compare-arm-name">${ARM_LABEL[name]}</span>
+    <img class="compare-arm-image" src="data:image/png;base64,${arm.image_b64}" alt="${ARM_LABEL[name]} result" />
+    <div>
+      <div class="compare-attainment" data-sign="${sign}">${shown}</div>
+      <div class="compare-attainment-label">ATTAINMENT</div>
+    </div>
+    <div class="compare-cost">${evals} · ${arm.elapsed_ms} ms</div>
+    ${noMove}
+    <hr class="separator" />
+    ${classBars(channel === "bright" ? arm.class_brightness : arm.class_visibility, start, channel)}
+  </div>`;
+}
+
+async function runCompare() {
+  // `submitText` clears the composer, so after sending an instruction the box
+  // is empty -- and "type it, send it, then compare it" is the natural flow.
+  // Falling back to the step's own instruction is what makes the button work
+  // when a reader expects it to.
+  const typed = textInput.value.trim();
+  const applied = lastState && lastState.current ? lastState.current.cmd_text : null;
+  const text = typed || applied;
+  if (!text) {
+    showToast("Type an instruction, then press compare to answer it four ways.");
+    return;
+  }
+  if (!typed) {
+    // The comparison starts from where the session is now. If that instruction
+    // has already been applied, this compares from *after* it, which is not
+    // the same question -- say so rather than quietly answering a different one.
+    showToast(`Comparing "${text}" from the current step. Step back first to compare it from where it was answered.`);
+  }
+  showCompare(true);
+  compareGoal.innerHTML = `<strong>"${text}"</strong>`;
+  compareColumns.innerHTML = ARM_ORDER.map(armSkeleton).join("");
+
+  let payload;
+  try {
+    const res = await fetch("/api/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, parser: config.parser }),
+    });
+    payload = await res.json();
+    if (!res.ok) throw new Error(payload.detail || "compare failed");
+  } catch (err) {
+    compareColumns.innerHTML = `<p class="compare-unavailable">${err.message}</p>`;
+    return;
+  }
+
+  if (!payload.applicable) {
+    compareColumns.innerHTML =
+      `<p class="compare-unavailable">${payload.reason}<br />The comparison answers visibility instructions; camera and reset commands have nothing to score.</p>`;
+    return;
+  }
+
+  compareGoal.innerHTML = `<strong>"${payload.text}"</strong> &rarr; ${payload.goal_text}`;
+  // If the instruction names brightness at all, that is the channel it is
+  // about -- otherwise visibility.
+  const channel = payload.channels && payload.channels.bright.length ? "bright" : "vis";
+  const start = payload.start
+    ? (channel === "bright" ? payload.start.class_brightness : payload.start.class_visibility)
+    : null;
+  compareColumns.innerHTML = ARM_ORDER.map((name) => armCard(name, payload.arms[name], start, channel)).join("");
+}
+
+el("compare-btn").addEventListener("click", runCompare);
+el("compare-close").addEventListener("click", () => { showCompare(false); });
+
+// --- the sweep: the distribution, not one draw --------------------------------
+// One comparison is a single episode. The claim the thesis makes is a median
+// over many, and the reliability gap means about one instruction in four has
+// the policy not improving -- so a single press invites generalising from an
+// anecdote, in either direction. This runs many sampled instructions and shows
+// the spread.
+
+const SWEEP_ARMS = ["exact", "search_cheap", "policy"];
+
+function sweepRow(name, arm, best) {
+  if (!arm || arm.n === 0) {
+    return `<tr><td class="table-label">${ARM_LABEL[name]}</td>
+      <td colspan="3" class="table-value">&mdash;</td></tr>`;
+  }
+  const median = arm.median;
+  const width = Math.min(100, Math.max(0, (median / best) * 100));
+  const sign = median >= 0 ? "positive" : "negative";
+  return `<tr>
+    <td class="table-label">${ARM_LABEL[name]}</td>
+    <td style="width:100%">
+      <div class="progress">
+        <div class="progress-fill" style="width:${width}%;--progress-color:var(--sweep-${name})"></div>
+      </div>
+    </td>
+    <td class="table-value" data-sign="${sign}">${median >= 0 ? "+" : "−"}${Math.abs(median).toFixed(3)}</td>
+    <td class="table-value">${Math.round(arm.share_positive * 100)}%</td>
+  </tr>`;
+}
+
+async function runSweep() {
+  showCompare(true);
+  compareGoal.innerHTML = `<strong>20 sampled instructions</strong> &mdash; what each method does across the grammar, not on one phrase`;
+  compareColumns.innerHTML = `<div class="card compare-arm" style="grid-column:1/-1">
+    <div class="skeleton" style="height:1rem;width:14rem"></div>
+    <div class="skeleton" style="height:0.8rem;width:100%"></div>
+    <div class="skeleton" style="height:0.8rem;width:100%"></div>
+    <div class="skeleton" style="height:0.8rem;width:100%"></div>
+  </div>`;
+
+  let payload;
+  try {
+    const res = await fetch("/api/compare/sweep", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ episodes: 20, seed: 0 }),
+    });
+    payload = await res.json();
+    if (!res.ok) throw new Error(payload.detail || "sweep failed");
+  } catch (err) {
+    compareColumns.innerHTML = `<p class="compare-unavailable">${err.message}</p>`;
+    return;
+  }
+
+  const best = Math.max(...SWEEP_ARMS.map((n) => (payload.arms[n] ? payload.arms[n].median : 0)), 0.001);
+  compareGoal.innerHTML =
+    `<strong>${payload.episodes} sampled instructions</strong> on ${payload.volume} &mdash; median attainment and how often each method improved on doing nothing`;
+  compareColumns.innerHTML = `<div class="card compare-arm" style="grid-column:1/-1">
+    <table class="table sweep-table">
+      <tr><td></td><td></td><td class="table-value">median</td><td class="table-value">improved</td></tr>
+      ${SWEEP_ARMS.map((n) => sweepRow(n, payload.arms[n], best)).join("")}
+    </table>
+    <p class="compare-unavailable">Search at 200 evaluations is left out here: it costs about a minute over 20 instructions. Use compare for a single instruction to see it.</p>
+  </div>`;
+}
+
+el("sweep-btn").addEventListener("click", runSweep);

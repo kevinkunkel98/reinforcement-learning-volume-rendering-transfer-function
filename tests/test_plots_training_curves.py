@@ -56,5 +56,24 @@ def test_find_latest_run_uses_modification_time_not_lexicographic_order(tmp_path
     os.utime(older, (time.time() - 100, time.time() - 100))
     os.utime(newer, (time.time(), time.time()))
 
-    result = _find_latest_run(str(log_dir))
+    result = _find_latest_run(str(log_dir), run_glob="run_seed*")
     assert result == str(newer)
+
+
+def test_find_latest_run_defaults_to_the_one_shot_runs_not_the_retired_ten_step_logs(tmp_path):
+    """The reported pipeline lives in out/rl_v2/oneshot_v3_seed*; out/rl_logs
+    holds the retired ten-step runs. Defaulting to the latter once put a figure
+    of the wrong experiment in front of a reader."""
+    from plots import training_curves
+
+    log_dir = tmp_path / "rl_v2"
+    log_dir.mkdir()
+    (log_dir / "oneshot_v3_seed0").mkdir()
+    (log_dir / "run_seed1").mkdir()      # a retired ten-step run sitting alongside
+
+    assert training_curves.LOG_DIR == "out/rl_v2"
+    assert _basename(training_curves._find_latest_run(str(log_dir))) == "oneshot_v3_seed0"
+
+
+def _basename(path):
+    return os.path.basename(path.rstrip("/"))

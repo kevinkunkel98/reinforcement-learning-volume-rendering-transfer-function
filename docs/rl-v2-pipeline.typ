@@ -329,9 +329,22 @@ Reward is the attainment of that single output.
 
 #finding[Telling the policy what is achievable matters. `solo_max` per class —
 the most of that anatomy a single-peak transfer function can show on *this*
-volume — lifted the best validation median from +0.266 to +0.322 and reliability
-from 72 % to 85 %. Without it the policy has to infer each scan's ceiling from
-the intensity histogram alone.]
+volume — is what gives an absolute instruction ("make the vessels highly
+visible") a fixed meaning across patients; without it the policy must infer each
+scan's headroom from the intensity histogram alone.
+
+The evidence is the retraining comparison, not this table: repairing the ceiling
+probe gained +0.122 on *absolute* instructions, the ones whose targets are a
+share of that ceiling, against +0.017 on show-only. That the gain lands where the
+mechanism predicts is the argument.]
+
+#caveat[The two columns above are not a clean ablation of the ceiling channel.
+The "+ ceiling input" run is `oneshot_v2_seed0`, trained before the probe was
+repaired — so it carries a *broken* ceiling, not a correct one — and both columns
+were scored during training by pre-fix code. It is also one seed against one
+seed, while the v2 arm's own spread at 140k is 0.322/0.421/0.367, wider than the
+difference being claimed. Read the table as training diagnostics, not as the
+channel's justification.]
 
 = Held-out result
 

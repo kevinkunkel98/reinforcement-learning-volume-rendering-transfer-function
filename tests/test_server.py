@@ -8,6 +8,7 @@ itself is thin enough to verify by running the real server (see the plan's Task 
 """
 import os
 import asyncio
+import time
 import json
 
 import numpy as np
@@ -314,7 +315,7 @@ def test_new_command_after_going_back_truncates_forward_history():
     assert state["current"]["cmd_dict"]["target"] == "lungs"
 
 
-def test_objective_search_appends_one_final_step():
+def test_search_appends_one_final_step():
     s = _fresh_session()
     state = s.command("increase opacity for bone strongly", parser="rule",
                        search=True, steps=5)
@@ -323,7 +324,7 @@ def test_objective_search_appends_one_final_step():
     assert state["current"]["masses"]["bone"] > 220.0
 
 
-def test_objective_search_keeps_current_camera():
+def test_search_keeps_current_camera():
     s = _fresh_session()
     s.command("rotate right")
     cam = s.history[s.cursor]["camera"]
@@ -333,10 +334,11 @@ def test_objective_search_keeps_current_camera():
 
 
 def test_search_requested_for_non_opacity_attribute_falls_back_to_direct_apply():
-    # "sharpen bone" parses to attribute="width", direction="decrease". search.propose_step
-    # is hardcoded to mutate the height/opacity parameter, so search must not run for width
-    # (or brightness/center) commands even when search=True is requested -- the command
-    # should still be applied directly, just without the hill-climbing loop.
+    # "sharpen bone" parses to attribute="width", direction="decrease", which
+    # goals.goal_from_command does not recognize as a goal (only show_only,
+    # opacity and brightness commands are) -- so search=True still falls back
+    # to exact application, just via the goal-construction ValueError rather
+    # than the old opacity/direction-only gate.
     s = _fresh_session()
     state = s.command("sharpen bone", parser="rule", search=True, steps=5)
     assert state["current"]["cmd_dict"]["attribute"] == "width"
@@ -440,22 +442,35 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _use_real_totalseg_manifest(monkeypatch):
     """`_isolate_cwd` chdirs into a scratch tmp_path so these tests never write
     into the real project's out/; `totalseg`'s manifest and volume/label paths
-    are repo-root-relative, so patch `totalseg.subject` (every other totalseg
-    lookup routes through it) to resolve them against the real repo root, for
-    the one real TotalSegmentator volume (`ts_s1379`) the policy-mode tests
-    below exercise."""
+    are repo-root-relative, so patch `totalseg._subjects` -- the one function
+    `subject`, `has_labels`, `classes_present`, `is_contrast`,
+    `available_names` and `split_names` all read -- to resolve them against
+    the real repo root, for the one real TotalSegmentator volume
+    (`ts_s1379`) the policy-mode tests below exercise.
+
+    Patching `subject` alone (an earlier version of this fixture) left
+    `has_labels` reading `_subjects()` directly: from a chdir'd tmp_path it
+    always found no manifest and reported no labels, which silently switched
+    `visibility.for_volume` onto its intensity-only fallback -- under which
+    `vessels` has no ceiling at all, invisible unless a test happens to ask
+    about vessels (e.g. via "show only"). It also left `available_names`/
+    `split_names` returning `[]`, so `datasets.list_datasets()` omitted every
+    ts_* volume inside `ts_session`. Patching `_subjects` fixes the whole
+    family at once, and `subject()` keeps raising `ValueError` on an unknown
+    name (its own, un-patched behaviour) rather than a `KeyError`."""
     import totalseg
     with open(os.path.join(_REPO_ROOT, "data/totalseg_manifest.json")) as f:
-        subjects = {s["name"]: s for s in json.load(f)["subjects"]}
+        subjects = json.load(f)["subjects"]
 
-    def _subject(name):
-        entry = dict(subjects[name])
+    def _absolute(entry):
+        entry = dict(entry)
         entry["path"] = os.path.join(_REPO_ROOT, entry["path"])
         if entry.get("labels_path"):
             entry["labels_path"] = os.path.join(_REPO_ROOT, entry["labels_path"])
         return entry
 
-    monkeypatch.setattr(totalseg, "subject", _subject)
+    resolved = {s["name"]: _absolute(s) for s in subjects}
+    monkeypatch.setattr(totalseg, "_subjects", lambda: resolved)
 
 
 @pytest.fixture
@@ -534,6 +549,461 @@ def test_policy_mode_non_goal_command_falls_back_with_message(ts_session):
 
     assert state["current"]["mode"] == "exact"
     assert state["current"]["message"]
+
+
+def test_run_policy_arm_matches_session_run_policy(ts_session):
+    """`Session._run_policy` is a thin delegation to `run_policy_arm` -- call
+    both with the same inputs and pin that they cannot drift apart."""
+    s = ts_session
+    action = np.linspace(-0.4, 0.4, len(CONTROLLABLE))
+    s.policy_provider = lambda: _StubPolicy(action)
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    model = s.model_for_volume(server._dataset_name)
+    policy = s.policy_provider()
+    start_agg = goals.aggregate(model.features(params))
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+
+    delegated_params, delegated_text = s._run_policy(cmd, params.copy())
+    direct_params = server.run_policy_arm(model, policy, instruction, start_agg, params.copy())
+
+    assert delegated_params.tolist() == pytest.approx(direct_params.tolist())
+    assert delegated_text == instruction["text"]
+    for group, value in zip(CONTROLLABLE, action):
+        assert float(np.mean([direct_params[i] for i in group])) == pytest.approx(float(value), abs=1e-6)
+
+
+def test_run_policy_arm_without_a_checkpoint_raises_the_user_visible_message(ts_session):
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    start_agg = goals.aggregate(model.features(params))
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+
+    with pytest.raises(ValueError) as exc:
+        server.run_policy_arm(model, None, instruction, start_agg, params)
+
+    # This message ends up in the step's user-visible `message` field, so its
+    # exact wording matters, not just that some ValueError was raised. The
+    # literal is intentional here (not `server.NO_POLICY_CHECKPOINT_MESSAGE`)
+    # -- comparing the code to itself would keep this test green through an
+    # accidental wording change.
+    assert str(exc.value) == "no trained policy checkpoint found -- applied the command directly instead"
+
+
+def test_policy_mode_falls_back_to_exact_when_the_volume_has_no_visibility_cache():
+    """Regression: `model_for_volume` (`visibility.for_volume`) is not total --
+    it raises `FileNotFoundError` for a volume with no visibility cache -- and
+    `Session.command` only catches `ValueError`. The no-checkpoint check must
+    run before `model_for_volume` is ever called, or this propagates instead
+    of falling back to exact application."""
+    if os.path.exists(TEST_SESSION_PATH):
+        os.remove(TEST_SESSION_PATH)
+
+    def _raise(name):
+        raise FileNotFoundError(f"no visibility cache for {name}")
+
+    s = Session(TEST_SESSION_PATH, policy_provider=lambda: None, model_for_volume=_raise)
+
+    state = s.command("more bone", mode="policy")
+
+    assert state["current"]["mode"] == "exact"
+    assert state["current"]["message"]
+
+
+def test_search_mode_searches_on_a_non_opacity_instruction(ts_session, monkeypatch):
+    """The old objective search only fired for opacity increase/decrease, so
+    "show only the lungs" silently fell through to exact application while the
+    UI still showed search as active. It must now actually search."""
+    s = ts_session
+    calls = {}
+
+    def _spy(model, start_params, instruction, evaluations=200, initial_step=0.2):
+        calls["evaluations"] = evaluations
+        return np.asarray(start_params, dtype=np.float64).copy()
+
+    monkeypatch.setattr(server, "hill_climb", _spy)
+
+    state = s.command("show only the lungs", mode="search", steps=10)
+
+    assert calls["evaluations"] == 10
+    assert state["current"]["mode"] == "search"
+
+
+def test_search_mode_falls_back_to_exact_when_the_volume_has_no_visibility_cache():
+    """The search twin of
+    test_policy_mode_falls_back_to_exact_when_the_volume_has_no_visibility_cache:
+    `model_for_volume` (`visibility.for_volume`) is not total -- it raises
+    `FileNotFoundError` for a volume with no visibility cache -- and the old
+    search branch caught only `ValueError`, so this escaped as an unhandled
+    exception (a 500) instead of falling back to exact application."""
+    if os.path.exists(TEST_SESSION_PATH):
+        os.remove(TEST_SESSION_PATH)
+
+    def _raise(name):
+        raise FileNotFoundError(f"no visibility cache for {name}")
+
+    s = Session(TEST_SESSION_PATH, model_for_volume=_raise)
+
+    state = s.command("increase opacity for bone strongly", mode="search", steps=10)
+
+    assert state["current"]["mode"] == "exact"
+    assert state["current"]["message"]
+
+
+def test_search_mode_reports_when_the_budget_is_too_small_to_move():
+    """`hill_climb` spends 1 evaluation scoring the start state and 1 per
+    proposal; a full coordinate sweep is 12 groups x 2 signs = 24, so a
+    budget below ~25 (the UI's `#steps-input` allows as little as 1) can
+    return the start state completely untouched. `search` must say so rather
+    than report mode="search" with no visible effect and no explanation --
+    the exact failure this task exists to eliminate. Uses the default
+    dataset's intensity model (not `ts_session`): whether 5 evaluations
+    happen to find an improving move is data-dependent, and this combination
+    is pinned to not move."""
+    s = _fresh_session()
+
+    state = s.command("increase opacity for bone strongly", mode="search", steps=5)
+
+    assert state["current"]["mode"] == "search"
+    assert state["current"]["message"] == (
+        "search spent 5 evaluations without improving on the start; "
+        "a full sweep needs about 25")
+
+
+def test_search_mode_actually_reduces_distance_to_the_goal(ts_session):
+    """A stubbed `hill_climb` (as in
+    test_search_mode_searches_on_a_non_opacity_instruction) can return the
+    start state unchanged and still look like a pass if the only assertion
+    is a mass threshold `transfer.default_params()` already clears at rest.
+    This drives the real hill-climb with a budget past a full sweep (~24
+    evaluations) and checks it actually gets closer to the goal."""
+    s = ts_session
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    current_params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    model = s.model_for_volume(server._dataset_name)
+    start_agg = goals.aggregate(model.features(current_params))
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+    start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
+
+    state = s.command("more bone", mode="search", steps=25)
+
+    new_params = np.array(state["current"]["params"], dtype=np.float64)
+    new_agg = goals.aggregate(model.features(new_params))
+    end_distance = goals.distance(instruction["goal"], start_agg, new_agg)
+    assert end_distance < start_distance
+
+
+# --- compare_arms: one command, four answers, one start ----------------------
+
+def _compare_inputs(s):
+    """The shared context `compare_arms` takes: model, start params, camera,
+    parsed command, start aggregate and goal -- built once, exactly as the
+    route will build them, so every arm is scored against the same start."""
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    camera = dict(s.history[s.cursor]["camera"])
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    start_agg = goals.aggregate(model.features(params))
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+    return model, policy_stub(), cmd, instruction, params, camera
+
+
+def policy_stub():
+    return _StubPolicy(np.zeros(len(CONTROLLABLE)))
+
+
+def test_compare_arms_runs_four_arms_from_the_same_start(ts_session):
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    assert set(arms) == {"exact", "search_cheap", "search_thorough", "policy"}
+    assert arms["exact"]["evaluations"] == 0
+    assert arms["search_cheap"]["evaluations"] == 4
+    assert arms["search_thorough"]["evaluations"] == 8
+    assert arms["policy"]["evaluations"] == 0
+    for name, arm in arms.items():
+        assert arm["attainment"] is not None, name
+        assert set(arm["class_visibility"]) == set(goals.GOAL_CLASSES), name
+        assert arm["image_b64"] and not arm["image_b64"].startswith("data:"), name
+        assert arm["elapsed_ms"] >= 0, name
+        assert arm["unchanged"] in (True, False), name
+
+
+def test_compare_arms_scores_every_arm_against_the_shared_start(ts_session):
+    """The point of one start state: an arm's attainment must be what it would
+    be if that arm alone had answered, not something relative to another arm."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+    start_agg = goals.aggregate(model.features(params))
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    for name, arm in arms.items():
+        replayed = np.array(arm["params"], dtype=np.float64)
+        expected = goals.attainment(instruction["goal"], start_agg,
+                                     goals.aggregate(model.features(replayed)))
+        assert arm["attainment"] == pytest.approx(expected), name
+
+
+def test_compare_arms_marks_an_arm_that_did_not_move(ts_session, monkeypatch):
+    """An arm returning its own input is not an arm agreeing with the start --
+    it is an arm that did not move, and the panel must not read those the same.
+    At B3's budget the search arm can legitimately land here: 10 evaluations is
+    less than half of one 24-evaluation coordinate sweep."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+    monkeypatch.setattr(server, "run_search_arm",
+                         lambda model, start_params, instruction, evaluations: start_params.copy())
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    assert arms["search_cheap"]["unchanged"] is True
+    assert arms["search_thorough"]["unchanged"] is True
+
+
+def test_compare_arms_degrades_one_arm_without_killing_the_others(ts_session):
+    """Losing one column must not end a live demo."""
+    model, _policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, None, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    assert arms["policy"]["unavailable"]
+    assert arms["exact"]["attainment"] is not None
+    assert arms["search_cheap"]["attainment"] is not None
+
+
+def test_compare_arms_times_only_the_arm_not_the_render(ts_session, monkeypatch):
+    """`elapsed_ms` is what the arm cost to answer, not what it cost to draw.
+
+    The timing column exists to show that the policy answers for free while
+    thorough search costs seconds. Rendering is the same price for every arm,
+    so folding it in inflates the cheap arms towards the expensive one and
+    makes the policy's number stop being the policy's number."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+    real_render = server._render_image_b64
+
+    def _slow_render(p, c):
+        time.sleep(1.0)
+        return real_render(p, c)
+
+    monkeypatch.setattr(server, "_render_image_b64", _slow_render)
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    # A full second of render per arm must not appear in any arm's cost.
+    # For scale: a real render+encode is ~620 ms, while the policy arm's own
+    # work is ~210 ms (dominated by the solo_max ceiling probes) and exact is
+    # near-instant -- so folding the render in would have flattened three of
+    # the four columns onto each other.
+    assert arms["policy"]["elapsed_ms"] < 500
+    assert arms["exact"]["elapsed_ms"] < 500
+
+
+def test_compare_arms_gives_a_degraded_arm_the_same_keys(ts_session):
+    """A consumer iterating the arms must not have to special-case a failed
+    one before reading a field every other arm has."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, None, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    assert set(arms["policy"]) == set(arms["exact"]) | {"unavailable"}
+    assert arms["policy"]["params"] is None
+
+
+def test_compare_arms_does_not_leak_raw_exception_text_into_a_reason(ts_session, monkeypatch):
+    """`str(exc)` is not user-facing copy: a KeyError stringifies to the bare
+    repr of its key. In a column an examiner is reading closely, "'lungs'" is
+    not an explanation."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    def _raise_key_error(*args, **kwargs):
+        raise KeyError("lungs")
+
+    monkeypatch.setattr(server, "run_search_arm", _raise_key_error)
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    reason = arms["search_cheap"]["unavailable"]
+    assert reason != "'lungs'"
+    assert "visibility cache" in reason
+
+
+def test_compare_arms_reports_brightness_beside_visibility(ts_session):
+    """A brightness instruction moves the brightness channel, not the
+    visibility one. Plotting only visibility makes four columns whose bars are
+    near-identical while their attainment ranges from 0.00 to 0.94 -- the
+    panel then contradicts itself."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    for name, arm in arms.items():
+        assert set(arm["class_brightness"]) == set(goals.GOAL_CLASSES), name
+
+
+def test_goal_channels_names_which_channel_the_instruction_targets():
+    """The panel plots the channel the instruction is about."""
+    vis_only = np.zeros(4 * len(goals.GOAL_CLASSES))
+    vis_only[len(goals.GOAL_CLASSES) + goals.GOAL_CLASSES.index("skeleton")] = 1.0
+    assert server.goal_channels(vis_only) == {"vis": ["skeleton"], "bright": []}
+
+    bright_only = np.zeros(4 * len(goals.GOAL_CLASSES))
+    bright_only[3 * len(goals.GOAL_CLASSES) + goals.GOAL_CLASSES.index("lungs")] = 1.0
+    assert server.goal_channels(bright_only) == {"vis": [], "bright": ["lungs"]}
+
+
+def test_compare_route_says_which_channel_to_plot(ts_session, monkeypatch):
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+
+    result = asyncio.run(server.compare_route(
+        server.CompareRequest(text="brighten the skeleton", parser="rule", cheap=4, thorough=8)))
+
+    assert result["applicable"] is True
+    assert result["channels"]["bright"] == ["skeleton"]
+    assert set(result["start"]["class_brightness"]) == set(goals.GOAL_CLASSES)
+
+
+# --- sweep_arms: the distribution, not one draw -------------------------------
+
+def test_sweep_arms_summarises_every_arm_over_many_instructions(ts_session):
+    """One comparison is a single draw from a distribution; the thesis claim is
+    a median over many. The sweep is what makes the panel show the claim."""
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    result = server.sweep_arms(model, policy_stub(), server._dataset_name, params,
+                                episodes=4, seed=0)
+
+    assert set(result["arms"]) == {"exact", "search_cheap", "policy"}
+    for name, arm in result["arms"].items():
+        assert arm["n"] == 4, name
+        assert arm["median"] is not None, name
+        assert 0.0 <= arm["share_positive"] <= 1.0, name
+    assert result["episodes"] == 4
+
+
+def test_sweep_arms_is_deterministic_in_its_seed(ts_session):
+    """A demo that gives different numbers each press is not evidence."""
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    first = server.sweep_arms(model, policy_stub(), server._dataset_name, params, episodes=3, seed=7)
+    second = server.sweep_arms(model, policy_stub(), server._dataset_name, params, episodes=3, seed=7)
+
+    assert first["arms"]["policy"]["median"] == second["arms"]["policy"]["median"]
+
+
+def test_sweep_arms_can_include_thorough_search_when_asked(ts_session):
+    """Excluded by default: 200 evaluations x 20 episodes is about a minute."""
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    result = server.sweep_arms(model, policy_stub(), server._dataset_name, params,
+                                episodes=2, seed=0, thorough=4)
+
+    assert "search_thorough" in result["arms"]
+    assert result["arms"]["search_thorough"]["n"] == 2
+
+
+def test_sweep_arms_handles_absolute_instructions(ts_session, monkeypatch):
+    """`goals.sample_instruction` wants the *aggregated* features, keyed by goal
+    class, not the raw per-material ones. Only the "absolute" branch indexes
+    them by goal class, so passing the wrong shape survives most seeds and then
+    raises KeyError('soft') on about one instruction in ten."""
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    monkeypatch.setattr(goals, "_sample_kind", lambda rng: "absolute")
+    # Raw features are keyed by MATERIAL (skeleton, lungs, organs, muscle,
+    # vessels) and three goal classes share those names -- so the wrong shape
+    # only raises when the sampler picks `soft`, the one goal class that has no
+    # material of the same name. Force it.
+    monkeypatch.setattr(goals, "reachable_goal_classes", lambda name, model: ["soft"])
+
+    result = server.sweep_arms(model, policy_stub(), server._dataset_name, params,
+                                episodes=2, seed=0)
+
+    assert result["kinds"] == ["absolute"]
+    assert result["arms"]["policy"]["n"] == 2
+
+
+# --- the /api/compare route ---------------------------------------------------
+
+def test_compare_route_leaves_session_history_untouched(ts_session, monkeypatch):
+    """Comparing is a side quest, not a step: the panel answers four ways from
+    where the session already is, and leaves it exactly there."""
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+    before_len, before_cursor = len(s.history), s.cursor
+
+    result = asyncio.run(server.compare_route(
+        server.CompareRequest(text="more bone", parser="rule", cheap=4, thorough=8)))
+
+    assert result["applicable"] is True
+    assert set(result["arms"]) == {"exact", "search_cheap", "search_thorough", "policy"}
+    assert len(s.history) == before_len
+    assert s.cursor == before_cursor
+
+
+def test_compare_route_reports_a_camera_command_as_not_applicable(ts_session, monkeypatch):
+    """Camera, reset, width and centre are not goals, so there is nothing to
+    score four ways -- say so rather than erroring."""
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+
+    result = asyncio.run(server.compare_route(
+        server.CompareRequest(text="rotate right", parser="rule", cheap=4, thorough=8)))
+
+    assert result["applicable"] is False
+    assert result["reason"]
+    assert "arms" not in result
+    # The reason is shown in the panel: no module paths, no dumped dicts.
+    assert "commands.apply_command" not in result["reason"]
+    assert "{" not in result["reason"]
+    # The developer-facing text is still available, just not as the copy.
+    assert "commands.apply_command" in result["detail"]
+
+
+def test_compare_route_rejects_an_unparseable_instruction(ts_session, monkeypatch):
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.compare_route(
+            server.CompareRequest(text="qwertyuiop", parser="rule", cheap=4, thorough=8)))
+
+    assert exc.value.status_code == 400
+
+
+def test_compare_route_reports_the_start_state_beside_the_arms(ts_session, monkeypatch):
+    """The panel draws a tick at each class's starting visibility, so "did the
+    mentioned class move and did the others stay put" is one glance."""
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+
+    result = asyncio.run(server.compare_route(
+        server.CompareRequest(text="more bone", parser="rule", cheap=4, thorough=8)))
+
+    assert set(result["start"]["class_visibility"]) == set(goals.GOAL_CLASSES)
+    assert result["budgets"] == {"cheap": 4, "thorough": 8}
 
 
 @pytest.fixture

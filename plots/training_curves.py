@@ -12,15 +12,19 @@ import numpy as np
 from plots.read_progress import load_progress
 from plots.style import AMBER, BLUE, NAVY, SAGE, apply_style
 
-LOG_DIR = "out/rl_logs"
+# The one-shot pipeline the thesis reports. `out/rl_logs` holds the retired
+# ten-step runs, and defaulting there once put a figure of the wrong experiment
+# in front of a reader.
+LOG_DIR = "out/rl_v2"
+RUN_GLOB = "oneshot_v3_seed*"
 OUTPUT_DIR = "plots/output"
 
 
-def _find_latest_run(log_dir: str) -> str:
-    candidates = glob.glob(os.path.join(log_dir, "run_seed*"))
+def _find_latest_run(log_dir: str, run_glob: str = RUN_GLOB) -> str:
+    candidates = glob.glob(os.path.join(log_dir, run_glob))
     if not candidates:
         raise FileNotFoundError(
-            f"No run_seed* directories found under {log_dir!r} -- run an SB3 training script first."
+            f"No {run_glob} directories found under {log_dir!r} -- run an SB3 training script first."
         )
     return max(candidates, key=os.path.getmtime)
 
@@ -53,6 +57,9 @@ def plot_training_curves(run_dir: str, output_dir: str = OUTPUT_DIR) -> str:
     ax.plot(x, cols["train/ent_coef"], color=AMBER, linewidth=1.6)
     ax.set_ylabel("Entropy coefficient")
     ax.set_xlabel("Training timesteps")
+    # 150k steps in full digits overruns the axis and the labels collide;
+    # the same "120k" formatter the held-out figures use.
+    ax.xaxis.set_major_formatter(lambda v, _pos: f"{v/1000:.0f}k")
 
     fig.tight_layout()
     os.makedirs(output_dir, exist_ok=True)
@@ -66,7 +73,7 @@ def plot_training_curves(run_dir: str, output_dir: str = OUTPUT_DIR) -> str:
 def main():
     parser = argparse.ArgumentParser(description="Plot SAC training curves for the thesis.")
     parser.add_argument("--run-dir", type=str, default=None,
-                         help="Path to a run_seed* directory (default: most recent under out/rl_logs)")
+                         help=f"Path to a run directory (default: most recent {RUN_GLOB} under {LOG_DIR})")
     parser.add_argument("--out", type=str, default=OUTPUT_DIR)
     args = parser.parse_args()
     run_dir = args.run_dir or _find_latest_run(LOG_DIR)
