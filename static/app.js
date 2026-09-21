@@ -926,11 +926,14 @@ const ARM_LABEL = {
 const compareView = el("compare-view");
 const compareColumns = el("compare-columns");
 const compareGoal = el("compare-goal");
+const compareModal = el("compare-modal");
+let compareFocusTarget = null;
 
 async function showCompare(on) {
-  el("single-view").hidden = on;
-  compareView.hidden = !on;
-  if (on) return;
+  if (on) {
+    if (!compareModal.open) compareModal.showModal();
+    return;
+  }
 
   // The viewport is a WebGL canvas. Hiding it with `hidden` is display:none,
   // so it measures 0x0 while the panel is open and comes back blank: vtk
@@ -948,6 +951,9 @@ async function showCompare(on) {
     showToast("Could not redraw the view. Step back and forward to restore it.", "destructive");
   }
   if (window.volumeViewer && window.volumeViewer.render) window.volumeViewer.render();
+  if (compareModal.open) compareModal.close();
+  compareFocusTarget?.focus();
+  compareFocusTarget = null;
 }
 
 const pct = (v) => `${Math.min(100, Math.max(0, (v || 0) * 100)).toFixed(1)}%`;
@@ -1080,8 +1086,18 @@ async function runCompareImpl() {
   compareColumns.innerHTML = ARM_ORDER.map((name) => armCard(name, payload.arms[name], start, channel)).join("");
 }
 
-el("compare-btn").addEventListener("click", runCompare);
+el("compare-btn").addEventListener("click", (event) => {
+  compareFocusTarget = event.currentTarget;
+  runCompare();
+});
 el("compare-close").addEventListener("click", () => { showCompare(false); });
+compareModal.addEventListener("click", (event) => {
+  if (event.target === compareModal) showCompare(false);
+});
+compareModal.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  showCompare(false);
+});
 
 // --- the sweep: the distribution, not one draw --------------------------------
 // One comparison is a single episode. The claim the thesis makes is a median
@@ -1118,6 +1134,7 @@ function sweepRow(name, arm, best) {
 }
 
 function runSweep() {
+  compareFocusTarget = document.getElementById("sweep-btn");
   return withLoading(() => runSweepImpl());
 }
 

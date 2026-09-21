@@ -57,13 +57,6 @@
             </div>
           </div>
 
-          <div id="compare-view" hidden>
-            <div id="compare-header">
-              <span id="compare-goal">&mdash;</span>
-              <button id="compare-close" class="btn btn-secondary btn-sm" data-tooltip="Back to the single view">Close</button>
-            </div>
-            <div id="compare-columns"></div>
-          </div>
         </div>
 
         <div id="telemetry" data-readout="visibility">
@@ -123,6 +116,19 @@
         <button id="commands-modal-close" class="btn btn-ghost btn-icon" aria-label="Close" data-tooltip="Close">×</button>
       </div>
       <div id="commands-list"></div>
+    </dialog>
+
+    <dialog id="compare-modal" aria-modal="true" aria-labelledby="compare-modal-title">
+      <div id="compare-view">
+        <div id="compare-header">
+          <div>
+            <h2 id="compare-modal-title">Compare renders</h2>
+            <span id="compare-goal">&mdash;</span>
+          </div>
+          <button id="compare-close" class="btn btn-secondary btn-sm" type="button" aria-label="Close comparison">Close</button>
+        </div>
+        <div id="compare-columns"></div>
+      </div>
     </dialog>
 
     <dialog id="about-modal" aria-labelledby="about-modal-title">
