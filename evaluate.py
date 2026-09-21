@@ -1,59 +1,14 @@
-"""+1/-1 objective verdicts for hill-climb search (opacity_mass for opacity commands, always-accept for width/brightness/center), plus a JSONL append helper."""
+"""A JSONL append helper.
+
+This module used to hold `objective`, the +1/-1 verdict a bespoke coordinate
+stepper in `server.py` hill-climbed on, and `_dominance`, the opacity-mass
+share it scored with. That search was never the one the thesis measures -- the
+baselines are `rl.baselines.hill_climb` on `goals.distance` -- and the viewer
+now runs the measured one, so both had no caller and were removed rather than
+left to be re-wired. `search.py`, which held that stepper's move generator,
+went with them.
+"""
 import json
-
-from commands import CLASS_BANDS
-from transfer import opacity_mass
-
-EPS = 1e-4
-
-
-def _dominance(params, target) -> float:
-    """Target band(s)' share of total opacity mass across all bands."""
-    targets = target if isinstance(target, list) else [target]
-    target_mass = sum(opacity_mass(params, *CLASS_BANDS[t]) for t in targets)
-    total = sum(opacity_mass(params, tlo, thi) for tlo, thi in CLASS_BANDS.values())
-    return target_mass / (total + EPS)
-
-
-def objective(params_before, params_after, cmd: dict) -> int:
-    if "camera" in cmd:
-        # Camera moves don't change transfer-function params, so there's
-        # nothing for opacity_mass to measure -- treat as always accepted.
-        return 1
-
-    if "compound" in cmd or cmd["direction"] == "reset":
-        # A compound (multi-tissue absolute-level) command directly sets what
-        # it says -- there's no "wrong direction" to detect the way there is
-        # for a relative increase/decrease, so treat it as always accepted,
-        # the same as reset.
-        return 1
-
-    if cmd.get("attribute") in ("width", "brightness", "center"):
-        # No established exact metric for these attributes (opacity_mass is
-        # opacity-specific) -- treat as always accepted, same as compound/reset.
-        return 1
-
-    if cmd["direction"] == "show_only":
-        # "isolate X" is about X's share of the image, not its raw mass —
-        # crushing every other peak can lower X's own mass while still
-        # making it far more dominant.
-        before_dom = _dominance(params_before, cmd["target"])
-        after_dom = _dominance(params_after, cmd["target"])
-        return 1 if after_dom > before_dom + EPS else -1
-
-    direction = "increase" if cmd["direction"] == "increase" else "decrease"
-    lo, hi = CLASS_BANDS[cmd["target"]]
-    delta_target = opacity_mass(params_after, lo, hi) - opacity_mass(params_before, lo, hi)
-    signed = delta_target if direction == "increase" else -delta_target
-    if signed <= EPS:
-        return -1
-    max_other = 0.0
-    for tissue, (tlo, thi) in CLASS_BANDS.items():
-        if tissue == cmd["target"]:
-            continue
-        d = abs(opacity_mass(params_after, tlo, thi) - opacity_mass(params_before, tlo, thi))
-        max_other = max(max_other, d)
-    return 1 if max_other <= abs(delta_target) else -1
 
 
 def jsonl_append(path: str, entry: dict) -> None:
