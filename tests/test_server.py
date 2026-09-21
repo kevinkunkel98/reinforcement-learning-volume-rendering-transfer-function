@@ -814,7 +814,9 @@ def test_compare_arms_gives_a_degraded_arm_the_same_keys(ts_session):
     arms = server.compare_arms(model, None, cmd, instruction, params, camera,
                                 cheap=4, thorough=8)
 
-    assert set(arms["policy"]) == set(arms["exact"]) | {"unavailable"}
+    # A failed arm carries the successful arm's keys plus its own two: the
+    # reader-facing `unavailable` and the developer-facing `detail`.
+    assert set(arms["policy"]) == set(arms["exact"]) | {"unavailable", "detail"}
     assert arms["policy"]["params"] is None
 
 
@@ -872,6 +874,74 @@ def test_compare_route_says_which_channel_to_plot(ts_session, monkeypatch):
     assert result["applicable"] is True
     assert result["channels"]["bright"] == ["skeleton"]
     assert set(result["start"]["class_brightness"]) == set(goals.GOAL_CLASSES)
+
+
+def test_compare_arms_warms_the_ceiling_before_timing_any_arm(ts_session, monkeypatch):
+    """`model.solo_max` probes four single-peak transfer functions and memoises
+    per model instance -- about 250 ms the first time, free afterwards. Run
+    inside the policy arm's stopwatch it makes the first comparison of a
+    session report the policy as slower than the cheap search it is supposed to
+    beat, for a reason that has nothing to do with the policy. And the first
+    comparison is the one a demo audience watches."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+    model._solo_max.clear()
+    warm_at_arm = {}
+
+    real_arm = server.run_policy_arm
+
+    def _spy(model_, policy_, instruction_, start_agg_, start_params_):
+        warm_at_arm["classes"] = set(model_._solo_max)
+        return real_arm(model_, policy_, instruction_, start_agg_, start_params_)
+
+    monkeypatch.setattr(server, "run_policy_arm", _spy)
+    server.compare_arms(model, policy, cmd, instruction, params, camera, cheap=4, thorough=8)
+
+    measured = {m for c in goals.GOAL_CLASSES for m in goals.MEASURED_FOR_GOAL[c]}
+    assert measured <= warm_at_arm["classes"]
+
+
+def test_compare_arms_does_not_claim_a_fallback_it_did_not_perform(ts_session):
+    """With no checkpoint the policy column is blank. Saying "applied the
+    command directly instead" -- copy written for `Session.command`, which
+    really does fall back -- makes the panel assert something false about its
+    own behaviour, in the column a reader looks at hardest."""
+    model, _policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, None, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    reason = arms["policy"]["unavailable"]
+    assert "applied the command directly" not in reason
+    assert "checkpoint" in reason
+    assert arms["policy"]["detail"]
+
+
+def test_compare_arms_leaves_the_start_state_untouched(ts_session):
+    """One array feeds four arms and is the reference for every `unchanged`
+    flag. It survives today only because three independent callees happen to
+    copy; an in-place clip in any of them would corrupt arms 2-4 silently."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+    before = params.copy()
+
+    server.compare_arms(model, policy, cmd, instruction, params, camera, cheap=4, thorough=8)
+
+    assert np.array_equal(params, before)
+
+
+def test_compare_arms_reports_a_scoring_failure_as_itself(ts_session, monkeypatch):
+    """A render or scoring failure is not a missing visibility cache. Reporting
+    one as the other is a confident, specific, wrong diagnosis with no
+    traceback to follow."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    def _boom(*a, **k):
+        raise KeyError("render exploded")
+
+    monkeypatch.setattr(server, "_render_image_b64", _boom)
+
+    with pytest.raises(KeyError):
+        server.compare_arms(model, policy, cmd, instruction, params, camera,
+                             cheap=4, thorough=8)
 
 
 # --- sweep_arms: the distribution, not one draw -------------------------------
