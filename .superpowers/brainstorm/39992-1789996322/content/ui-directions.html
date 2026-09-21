@@ -1,0 +1,41 @@
+<h2>Viewer UI direction</h2>
+<p class="subtitle">Choose hierarchy first. All existing commands, policies, comparison, sweep, history, and voice behavior remain intact.</p>
+
+<div class="cards">
+  <div class="card" data-choice="canvas" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#09090b;color:#fafafa;padding:14px;font-family:ui-sans-serif,system-ui">
+      <div style="height:18px;border-bottom:1px solid #27272a;display:flex;justify-content:space-between;font-size:9px;color:#a1a1aa"><span>◉ TF/RL CONSOLE</span><span>● LOCAL SESSION</span></div>
+      <div style="display:grid;grid-template-columns:2.3fr 1fr;gap:10px;height:190px;padding-top:10px">
+        <div style="background:#000;border:1px solid #27272a;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#52525b;font-size:10px">VOLUME CANVAS<br><span style="color:#fafafa">ct_skull</span></div>
+        <div style="border:1px solid #27272a;border-radius:7px;padding:10px;background:#111113"><div style="font-size:9px;color:#71717a">COMMAND CONSOLE</div><div style="margin-top:38px;color:#a1a1aa;font-size:9px">Describe what you want to see.</div><div style="position:absolute"></div><div style="margin-top:65px;border:1px solid #3f3f46;border-radius:6px;padding:7px;color:#71717a;font-size:9px">a bit less soft tissue&nbsp; ↑</div></div>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:8px"><span style="background:#27272a;border-radius:4px;padding:4px 7px;font-size:8px">SKELETON 16.7%</span><span style="background:#27272a;border-radius:4px;padding:4px 7px;font-size:8px">LUNGS 0.0%</span><span style="background:#27272a;border-radius:4px;padding:4px 7px;font-size:8px">SOFT 43.1%</span></div>
+    </div>
+    <div class="card-body"><h3>Focused canvas</h3><p>Viewer dominates. Right console owns conversation and modes. Best for demonstrating visualization first.</p></div>
+  </div>
+
+  <div class="card" data-choice="console" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#f4f4f5;color:#18181b;padding:14px;font-family:ui-sans-serif,system-ui">
+      <div style="height:18px;border-bottom:1px solid #d4d4d8;display:flex;justify-content:space-between;font-size:9px;color:#71717a"><span>TF/RL CONSOLE</span><span>LOCAL SESSION</span></div>
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:10px;height:190px;padding-top:10px">
+        <div style="background:#050505;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#71717a;font-size:10px">VOLUME VIEW</div>
+        <div style="background:#fff;border:1px solid #d4d4d8;border-radius:7px;padding:10px"><div style="font-size:9px;font-weight:600">Command</div><div style="margin-top:9px;font-size:9px;color:#71717a">Describe what you want to see.</div><div style="margin-top:29px;display:flex;gap:3px"><span style="border:1px solid #d4d4d8;padding:4px 5px;border-radius:4px;font-size:8px">LLM</span><span style="border:1px solid #a1a1aa;background:#f4f4f5;padding:4px 5px;border-radius:4px;font-size:8px">EXACT</span></div><div style="margin-top:37px;border:1px solid #d4d4d8;border-radius:6px;padding:7px;color:#71717a;font-size:9px">a bit less soft tissue&nbsp; ↑</div></div>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:8px"><span style="background:#fff;border:1px solid #d4d4d8;border-radius:4px;padding:4px 7px;font-size:8px">SKELETON 16.7%</span><span style="background:#fff;border:1px solid #d4d4d8;border-radius:4px;padding:4px 7px;font-size:8px">SOFT 43.1%</span></div>
+    </div>
+    <div class="card-body"><h3>Split command console</h3><p>Light shadcn workspace with explicit command card and segmented execution mode. Best for clarity and onboarding.</p></div>
+  </div>
+
+  <div class="card" data-choice="clinical" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0c1117;color:#e5edf5;padding:14px;font-family:ui-sans-serif,system-ui">
+      <div style="height:18px;border-bottom:1px solid #293542;display:flex;justify-content:space-between;font-size:9px;color:#94a3b8"><span>TF/RL · VOLUME REVIEW</span><span>READY</span></div>
+      <div style="display:grid;grid-template-columns:1.8fr 1fr;gap:10px;height:190px;padding-top:10px">
+        <div style="background:#000;border:1px solid #293542;border-radius:7px;padding:8px"><div style="font-size:8px;color:#64748b">CT / SKULL / 3 OF 3</div><div style="height:150px;display:flex;align-items:center;justify-content:center;color:#475569;font-size:10px">VOLUME CANVAS</div></div>
+        <div style="padding:4px"><div style="font-size:8px;color:#64748b;letter-spacing:.08em">VISIBILITY</div><div style="margin-top:8px;font-size:9px">SKELETON <b style="float:right;color:#60a5fa">16.7%</b></div><div style="height:4px;background:#243244;margin-top:4px;border-radius:4px"><div style="width:60%;height:100%;background:#60a5fa;border-radius:4px"></div></div><div style="margin-top:12px;font-size:9px">SOFT TISSUE <b style="float:right;color:#34d399">43.1%</b></div><div style="height:4px;background:#243244;margin-top:4px;border-radius:4px"><div style="width:75%;height:100%;background:#34d399;border-radius:4px"></div></div><div style="margin-top:30px;border:1px solid #334155;border-radius:6px;padding:7px;color:#94a3b8;font-size:9px">Show only the lungs&nbsp; ↑</div></div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Clinical review</h3><p>Dense but calm diagnostic layout. Visibility becomes a first-class measurement card beside the render.</p></div>
+  </div>
+</div>
+
+<div class="section"><h3>Recommendation</h3><p><strong>Split command console</strong> is safest: cleanest hierarchy, strongest shadcn feel, and easiest to explain. Keep dark canvas inside a lighter shell.</p></div>
