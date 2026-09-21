@@ -10,6 +10,7 @@ testable in-process without going anywhere near that constraint.
 """
 import base64
 import datetime
+import functools
 import hashlib
 import io
 import json
@@ -25,7 +26,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
@@ -329,6 +330,18 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
     whole comparison -- losing one column should not end a live demo."""
     start_agg = goals.aggregate(model.features(start_params))
 
+    # Warm every class's reachable ceiling before any stopwatch starts.
+    # `model.solo_max` probes four single-peak transfer functions and memoises
+    # per model instance -- ~250 ms once, free after. Left inside the policy
+    # arm it makes the FIRST comparison of a session report the policy as
+    # slower than the cheap search it is meant to beat, for a reason that has
+    # nothing to do with the policy, and the first comparison is the one an
+    # audience watches. `goal_from_command` warms only the classes the
+    # instruction mentions, so it does not cover this.
+    for goal_class in goals.GOAL_CLASSES:
+        for material in goals.MEASURED_FOR_GOAL[goal_class]:
+            model.solo_max(material)
+
     def _answer(fn):
         """Run one arm and time *only* the answering.
 
@@ -361,36 +374,46 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
             "elapsed_ms": elapsed_ms,
         }
 
-    def _unavailable(exc, elapsed_ms):
-        # `str(exc)` is not user-facing copy. A KeyError stringifies to the
-        # bare repr of its key ("'lungs'"), and goal_from_command yields a
-        # dumped Python dict. In a single-view toast that is merely scruffy;
-        # in a column someone is reading closely it is unreadable.
-        if isinstance(exc, ValueError):
-            reason = f"not applicable -- {exc}"
-        else:
-            reason = "unavailable -- this volume has no visibility cache"
-        # Same keys as a successful arm, so a consumer iterating the arms
-        # never has to special-case a failed one before reading a field.
-        return {"params": None, "unavailable": reason, "attainment": None,
-                "class_visibility": None, "class_brightness": None, "image_b64": None,
-                "evaluations": None, "unchanged": None, "elapsed_ms": elapsed_ms}
+    def _unavailable(reason, exc, elapsed_ms):
+        # `str(exc)` is not user-facing copy: a KeyError stringifies to the
+        # bare repr of its key, and goal_from_command yields a dumped Python
+        # dict. Worse, reusing `NO_POLICY_CHECKPOINT_MESSAGE` here would have
+        # the column claim the command was "applied directly instead" when
+        # nothing was applied at all -- that message belongs to
+        # `Session.command`, which really does fall back. `reason` is written
+        # for a reader; `detail` keeps the original for debugging.
+        # Same keys as a successful arm, so a consumer iterating the arms never
+        # has to special-case a failed one before reading a field.
+        return {"params": None, "unavailable": reason, "detail": str(exc),
+                "attainment": None, "class_visibility": None, "class_brightness": None,
+                "image_b64": None, "evaluations": None, "unchanged": None,
+                "elapsed_ms": elapsed_ms}
 
-    def _arm(fn, evaluations):
+    def _arm(fn, evaluations, cannot):
+        """Run one arm, reporting `cannot` if it cannot answer.
+
+        Only the *solve* is guarded. A failure in `_finish` -- rendering or
+        scoring -- is not an arm declining to answer, and reporting it as one
+        produces a confident, specific, wrong diagnosis with no traceback to
+        follow. Those propagate."""
         started = time.perf_counter()
         try:
             params, elapsed_ms = _answer(fn)
-            return _finish(params, evaluations, elapsed_ms)
         except (ValueError, FileNotFoundError, KeyError) as exc:
-            return _unavailable(exc, int((time.perf_counter() - started) * 1000))
+            print(f"[compare] {cannot}: {type(exc).__name__}: {exc}")
+            return _unavailable(cannot, exc, int((time.perf_counter() - started) * 1000))
+        return _finish(params, evaluations, elapsed_ms)
 
-    arms = {"exact": _arm(lambda: apply_command(cmd, start_params), 0)}
+    cannot_score = "cannot answer here -- this volume has no visibility cache"
+    arms = {"exact": _arm(functools.partial(apply_command, cmd, start_params), 0,
+                           "this instruction cannot be applied directly")}
     for name, budget in (("search_cheap", cheap), ("search_thorough", thorough)):
         arms[name] = _arm(
-            lambda budget=budget: run_search_arm(model, start_params, instruction, budget),
-            budget)
+            functools.partial(run_search_arm, model, start_params, instruction, budget),
+            budget, cannot_score)
     arms["policy"] = _arm(
-        lambda: run_policy_arm(model, policy, instruction, start_agg, start_params), 0)
+        functools.partial(run_policy_arm, model, policy, instruction, start_agg, start_params),
+        0, "no trained policy checkpoint is loaded, so this arm has no answer")
     return arms
 
 
@@ -756,8 +779,11 @@ class CompareRequest(BaseModel):
     text: str
     parser: str = "rule"
     model: str = "qwen2.5:7b"
-    cheap: int = COMPARE_BUDGET_CHEAP
-    thorough: int = COMPARE_BUDGET_THOROUGH
+    # Bounded because these handlers run on the event loop: a hill-climb of
+    # 100000 evaluations would freeze every other route, the UI and the state
+    # poll for minutes, with no way to cancel it.
+    cheap: int = Field(COMPARE_BUDGET_CHEAP, ge=1, le=500)
+    thorough: int = Field(COMPARE_BUDGET_THOROUGH, ge=1, le=500)
 
 
 @app.post("/api/compare")
@@ -798,7 +824,17 @@ async def compare_route(req: CompareRequest):
                 "reason": "this volume has no visibility cache, so it cannot be scored",
                 "detail": f"{type(exc).__name__}: {exc}", "text": req.text, **parser_meta}
 
-    arms = compare_arms(volume_model, session.policy_provider(), cmd, instruction,
+    try:
+        loaded_policy = session.policy_provider()
+    except Exception as exc:
+        # `SAC.load` raises on a corrupt or version-mismatched checkpoint.
+        # Outside the arm's guard that is an unhandled 500 taking all four
+        # columns down -- the opposite of "losing one column should not end a
+        # live demo".
+        print(f"[compare] policy unavailable: {type(exc).__name__}: {exc}")
+        loaded_policy = None
+
+    arms = compare_arms(volume_model, loaded_policy, cmd, instruction,
                          start_params, camera, cheap=req.cheap, thorough=req.thorough)
     return {"applicable": True, "text": req.text, "goal_text": instruction["text"],
             "budgets": {"cheap": req.cheap, "thorough": req.thorough}, "arms": arms,
@@ -809,9 +845,9 @@ async def compare_route(req: CompareRequest):
 
 
 class SweepRequest(BaseModel):
-    episodes: int = SWEEP_EPISODES
+    episodes: int = Field(SWEEP_EPISODES, ge=1, le=200)
     seed: int = 0
-    thorough: int | None = None
+    thorough: int | None = Field(None, ge=1, le=500)
 
 
 @app.post("/api/compare/sweep")
