@@ -152,8 +152,10 @@ def plot_reliability(results: dict, output_dir: str = OUTPUT_DIR) -> str:
 
 def plot_kind_curves(run_dirs: list, output_dir: str = OUTPUT_DIR) -> str:
     """Per-instruction-kind attainment over training, from each run's
-    eval_progress.csv. Shows both what the policy learns well and that the runs
-    had not converged when the step budget ran out."""
+    eval_progress.csv (the 40-episode validation split, not the held-out test
+    set). Shows what the policy learns well, and that relative and compound
+    plateau well below absolute and brightness rather than still climbing when
+    the step budget runs out."""
     apply_style()
     fig, ax = plt.subplots(figsize=(6.8, 4.2))
     colours = {"relative": NAVY, "compound": "#8a4b8a", "show_only": BLUE,

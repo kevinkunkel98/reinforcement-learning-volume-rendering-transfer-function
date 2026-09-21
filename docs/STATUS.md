@@ -80,9 +80,13 @@ python -m plots.qualitative           # before/after renders, VTK
 ```
 
 `plots/output/` is gitignored; regenerate rather than commit. The per-kind
-curves are the most informative: relative and compound start deeply negative and
-are **still climbing at 150k steps**, which is the visual evidence that no run
-has converged.
+curves are the most informative: relative and compound start deeply negative
+(-0.85, -0.50), climb steeply, and then **plateau well below absolute and
+brightness** — over the final five evaluations relative runs 0.15/0.10/0.14/
+0.18/0.16 on seed 0 and compound falls 0.12 -> 0.04, while seed 0's overall
+validation median peaks at 100k and ends lower. The kinds the policy handles
+badly level off rather than run out of budget, which reads as a capability gap
+in the one-shot formulation.
 
 ### 2. Write-up
 
@@ -99,9 +103,11 @@ but every judgment shortens the improvement month.
 
 ## Cheapest improvements, in order
 
-1. **Train longer.** No run has converged. No new code, ~3 h per seed.
-2. **Fix compound instructions**, or train the multi-step formulation where two
-   constraints do not have to be satisfied in one shot.
+1. **Fix compound instructions** — a quarter of the mix at +0.09, the clearest
+   capability gap and the one a user notices first.
+2. **Train longer.** Worth trying, but no longer the evidence-backed first
+   move: the curves plateau rather than run out of steps. No new code, ~3 h
+   per seed.
 3. **Distil search into the policy** — supervised pretraining on hill-climb
    solutions before RL. Standard way to close an amortisation gap.
 4. **Make `visibility.py` differentiable.** The index cube is constant with
