@@ -16,13 +16,6 @@
         <span id="app-title">TF<span class="thin">/RL</span> CONSOLE</span>
       </div>
       <div id="app-bar-right">
-        <button id="commands-help-btn" class="btn btn-ghost btn-icon" aria-label="Command reference" data-tooltip="Command reference">?</button>
-        <span id="session-indicator"><span class="dot"></span>LOKALE SITZUNG</span>
-      </div>
-    </header>
-
-    <div id="main">
-      <section id="image-panel">
         <div id="dataset-row">
           <label id="dataset-select-label">SAMPLE</label>
           <div id="dataset-select" class="select-root">
@@ -34,7 +27,16 @@
             <div id="dataset-select-popover" class="select-popover" role="listbox" aria-labelledby="dataset-select-label" hidden></div>
           </div>
         </div>
+        <button id="theme-toggle" class="btn btn-ghost btn-sm" type="button"
+                aria-label="Toggle color theme" aria-pressed="false" title="Switch to light theme"><span id="theme-label">Dark mode</span></button>
+        <button id="about-btn" class="btn btn-ghost btn-icon" type="button"
+                aria-label="About this project" aria-haspopup="dialog" data-tooltip="About this project">?</button>
+        <button id="commands-help-btn" class="btn btn-ghost btn-icon" aria-label="Command reference" data-tooltip="Command reference">?</button>
+      </div>
+    </header>
 
+    <div id="main">
+      <section id="image-panel">
         <div id="viewport">
           <div id="single-view">
             <div id="viewport-frame">
@@ -65,10 +67,10 @@
         </div>
 
         <div id="telemetry" data-readout="visibility">
-          <div class="telem-item" data-tissue="skeleton"><span class="telem-label">SKELETT</span><span class="telem-value" id="telem-skeleton">—</span></div>
-          <div class="telem-item" data-tissue="lungs"><span class="telem-label">LUNGE</span><span class="telem-value" id="telem-lungs">—</span></div>
-          <div class="telem-item" data-tissue="soft"><span class="telem-label">WEICHGEW.</span><span class="telem-value" id="telem-soft">—</span></div>
-          <div class="telem-item" data-tissue="vessels"><span class="telem-label">GEFÄSSE</span><span class="telem-value" id="telem-vessels">—</span></div>
+          <div class="telem-item" data-tissue="skeleton"><span class="telem-label">SKELETON</span><span class="telem-value" id="telem-skeleton">—</span></div>
+          <div class="telem-item" data-tissue="lungs"><span class="telem-label">LUNGS</span><span class="telem-value" id="telem-lungs">—</span></div>
+          <div class="telem-item" data-tissue="soft"><span class="telem-label">SOFT TISSUE</span><span class="telem-value" id="telem-soft">—</span></div>
+          <div class="telem-item" data-tissue="vessels"><span class="telem-label">VESSELS</span><span class="telem-value" id="telem-vessels">—</span></div>
         </div>
       </section>
 
@@ -86,11 +88,11 @@
               <button type="button" class="toggle-item" data-value="rule" data-state="off">rule</button>
               <button type="button" class="toggle-item" data-value="llm" data-state="on">llm</button>
             </div>
-            <button id="search-toggle-btn" class="toggle" data-active="false" data-tooltip="Hill-climb search">search</button>
+            <button id="search-toggle-btn" class="toggle" data-active="false" aria-pressed="false" data-tooltip="Hill-climb search">search</button>
             <div id="search-options" hidden>
               <input id="steps-input" type="number" value="10" min="1" max="200" aria-label="Search steps" title="Visibility evaluations spent hill-climbing, not UI steps -- a full sweep needs about 25" />
             </div>
-            <button id="policy-toggle-btn" class="toggle" data-active="false" data-tooltip="Answer with the trained policy">policy</button>
+            <button id="policy-toggle-btn" class="toggle" data-active="false" aria-pressed="false" data-tooltip="Answer with the trained policy">policy</button>
             <button id="compare-btn" class="btn btn-outline btn-sm" data-tooltip="Answer four ways and compare">compare</button>
             <button id="sweep-btn" class="btn btn-outline btn-sm" data-tooltip="Run 20 sampled instructions and show the spread">sweep 20</button>
           </div>
@@ -123,7 +125,40 @@
       <div id="commands-list"></div>
     </dialog>
 
+    <dialog id="about-modal" aria-labelledby="about-modal-title">
+      <article class="about-card">
+        <header class="about-header">
+          <div>
+            <p class="eyebrow">Master's thesis project</p>
+            <h2 id="about-modal-title">Conversational Transfer Functions</h2>
+          </div>
+          <button id="about-modal-close" class="btn btn-ghost btn-icon" type="button"
+                  aria-label="Close About">×</button>
+        </header>
+        <div class="about-body">
+          <p>Explore medical CT volume rendering with typed or spoken instructions.</p>
+          <p>The app maps language to semantic Gaussian peaks for lungs, soft tissue, vessels, and skeleton.</p>
+          <p>Exact application, measured search, and a learned one-shot policy answer commands. The policy is evaluated with scan-aware visibility and brightness measurements.</p>
+          <p>Search is a baseline; policy is a learned one-shot proposal, not a claim of universal superiority. Human preference collection and Vrui/VR integration are planned directions, not completed deployment.</p>
+        </div>
+        <footer class="about-links">
+          <a href="https://github.com/kevinkunkel98/reinforcement-learning-volume-rendering-transfer-function"
+             target="_blank" rel="noreferrer" aria-label="GitHub repository" data-tooltip="GitHub repository">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.61-3.37-1.18-3.37-1.18-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02A9.56 9.56 0 0 1 12 7.2c.85 0 1.71.11 2.51.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+          </a>
+          <a href="https://kevin-kunkel.netlify.app" target="_blank" rel="noreferrer"
+             aria-label="Kevin Kunkel portfolio" data-tooltip="Kevin Kunkel portfolio">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 16l3.2-4.1 2.4 2.5 1.8-2.1L17 16M8 8.5h.01" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+        </footer>
+      </article>
+    </dialog>
+
     <div id="toast-viewport" role="region" aria-live="polite" aria-label="Notifications"></div>
+    <div id="loading-overlay" role="status" aria-live="polite" aria-busy="false" hidden>
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <span>Loading viewer...</span>
+    </div>
   </div>
   <script src="https://unpkg.com/vtk.js@25.11.0"></script>
   <script src="/static/viewer.js"></script>

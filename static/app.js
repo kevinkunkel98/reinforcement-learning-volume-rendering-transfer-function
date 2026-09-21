@@ -13,6 +13,83 @@ const state = { current: null, cursor: 0, total: 1, dataset: null };
 const config = { parser: "llm", search: false, mode: "exact" };
 
 const el = (id) => document.getElementById(id);
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[char]));
+
+function safeStorageGet(kind, key) {
+  try {
+    if (kind === "local") return localStorage.getItem(key);
+    return sessionStorage.getItem(key);
+  } catch (err) {
+    return null;
+  }
+}
+
+function safeStorageSet(kind, key, value) {
+  try {
+    if (kind === "local") localStorage.setItem(key, value);
+    else sessionStorage.setItem(key, value);
+  } catch (err) {
+    // Storage can be unavailable in private or restricted browsing contexts.
+  }
+}
+
+const THEME_KEY = "tf-rl-theme";
+
+function applyTheme(theme) {
+  const resolved = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = resolved;
+  const button = el("theme-toggle");
+  button?.setAttribute("aria-pressed", String(resolved === "dark"));
+  button?.setAttribute("title", `Switch to ${resolved === "dark" ? "light" : "dark"} theme`);
+  const label = button?.querySelector("#theme-label");
+  if (label) label.textContent = `${resolved[0].toUpperCase()}${resolved.slice(1)} mode`;
+}
+
+function initTheme() {
+  const saved = safeStorageGet("local", THEME_KEY);
+  applyTheme(saved === "light" ? "light" : "dark");
+  el("theme-toggle")?.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    safeStorageSet("local", THEME_KEY, next);
+    applyTheme(next);
+  });
+}
+
+function initAboutDialog() {
+  const modal = el("about-modal");
+  const closeButton = el("about-modal-close");
+  if (!modal || !closeButton) return;
+
+  let returnFocus = el("about-btn");
+  const close = () => {
+    if (modal.open) modal.close();
+  };
+
+  el("about-btn")?.addEventListener("click", () => {
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : el("about-btn");
+    modal.showModal();
+  });
+  closeButton.addEventListener("click", close);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) close();
+  });
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+    }
+  });
+  modal.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    close();
+  });
+  modal.addEventListener("close", () => returnFocus?.focus());
+}
+
+initTheme();
+initAboutDialog();
 
 // The four goal classes, in a fixed order, shared by the chat replies and the
 // comparison panel so a class keeps the same name and hue everywhere.
@@ -23,18 +100,37 @@ const messagesEl = el("messages");
 const emptyState = el("empty-state");
 const textInput = el("text-input");
 const sendBtn = el("send-btn");
+const loadingOverlay = el("loading-overlay");
+let loadingCount = 0;
+
+function setLoading(loading) {
+  loadingCount = Math.max(0, loadingCount + (loading ? 1 : -1));
+  const active = loadingCount > 0;
+  loadingOverlay.hidden = !active;
+  loadingOverlay.setAttribute("aria-busy", String(active));
+}
+
+async function withLoading(task) {
+  setLoading(true);
+  try {
+    return await task();
+  } finally {
+    setLoading(false);
+  }
+}
+
 let sceneSnapshot = null;
 let lastState = null;
 const sceneNonce = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const sceneSequenceKey = "localViewerSceneSequence";
-const storedSceneSequence = Number.parseInt(sessionStorage.getItem(sceneSequenceKey) || "0", 10);
+const storedSceneSequence = Number.parseInt(safeStorageGet("session", sceneSequenceKey) || "0", 10);
 let sceneSequence = Number.isSafeInteger(storedSceneSequence) && storedSceneSequence >= 0
   ? storedSceneSequence
   : 0;
 
 function nextSceneId(data, suffix = "") {
   sceneSequence += 1;
-  sessionStorage.setItem(sceneSequenceKey, String(sceneSequence));
+  safeStorageSet("session", sceneSequenceKey, String(sceneSequence));
   return `web:${data.session_id || "web-session"}:${sceneNonce}:scene:${sceneSequence}${suffix}`;
 }
 
@@ -284,7 +380,11 @@ async function loadState() {
   }
 }
 
-async function sendCommand(text) {
+function sendCommand(text) {
+  return withLoading(() => sendCommandImpl(text));
+}
+
+async function sendCommandImpl(text) {
   // What the render showed before this command, so the reply can report the
   // change rather than only the new value.
   const before = state.current ? state.current.class_visibility : null;
@@ -339,7 +439,11 @@ textInput.addEventListener("keydown", (e) => {
   }
 });
 
-async function navigate(path) {
+function navigate(path) {
+  return withLoading(() => navigateImpl(path));
+}
+
+async function navigateImpl(path) {
   const previous = lastState;
   const data = await (await fetch(path, { method: "POST" })).json();
   await refresh(data);
@@ -361,18 +465,33 @@ el("reset-btn").addEventListener("click", () => sendCommand("reset"));
 function initToggleGroup(container) {
   const key = container.dataset.toggleGroup;
   const items = Array.from(container.querySelectorAll(".toggle-item"));
+  const selectItem = (selected) => {
+    items.forEach((other) => {
+      const active = other === selected;
+      other.dataset.state = active ? "on" : "off";
+      other.setAttribute("aria-checked", String(active));
+      other.tabIndex = active ? 0 : -1;
+    });
+    config[key] = selected.dataset.value;
+  };
   items.forEach((item) => {
     item.setAttribute("role", "radio");
     item.setAttribute("aria-checked", item.dataset.state === "on" ? "true" : "false");
-    item.addEventListener("click", () => {
-      if (item.dataset.state === "on") return;
-      items.forEach((other) => {
-        other.dataset.state = "off";
-        other.setAttribute("aria-checked", "false");
-      });
-      item.dataset.state = "on";
-      item.setAttribute("aria-checked", "true");
-      config[key] = item.dataset.value;
+    item.tabIndex = item.dataset.state === "on" ? 0 : -1;
+    item.addEventListener("click", () => selectItem(item));
+    item.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", " ", "Enter"].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === " " || event.key === "Enter") {
+        selectItem(item);
+        return;
+      }
+      const current = items.indexOf(item);
+      const next = event.key === "Home" ? 0
+        : event.key === "End" ? items.length - 1
+          : (current + ((event.key === "ArrowLeft" || event.key === "ArrowUp") ? -1 : 1) + items.length) % items.length;
+      items[next].focus();
+      selectItem(items[next]);
     });
   });
 }
@@ -388,9 +507,11 @@ const policyToggleBtn = el("policy-toggle-btn");
 searchToggleBtn.addEventListener("click", () => {
   config.search = !config.search;
   searchToggleBtn.dataset.active = String(config.search);
+  searchToggleBtn.setAttribute("aria-pressed", String(config.search));
   searchOptions.hidden = !config.search;
   if (config.search) {
     policyToggleBtn.dataset.active = "false";
+    policyToggleBtn.setAttribute("aria-pressed", "false");
     config.mode = "search";
   } else {
     config.mode = "exact";
@@ -400,9 +521,11 @@ searchToggleBtn.addEventListener("click", () => {
 policyToggleBtn.addEventListener("click", () => {
   const active = policyToggleBtn.dataset.active !== "true";
   policyToggleBtn.dataset.active = String(active);
+  policyToggleBtn.setAttribute("aria-pressed", String(active));
   if (active) {
     config.search = false;
     searchToggleBtn.dataset.active = "false";
+    searchToggleBtn.setAttribute("aria-pressed", "false");
     searchOptions.hidden = true;
     config.mode = "policy";
   } else {
@@ -475,9 +598,11 @@ async function startRecording() {
     form.append("audio", blob, "clip.webm");
     micBtn.disabled = true;
     try {
-      const r = await fetch("/api/transcribe", { method: "POST", body: form });
-      const data = await r.json();
-      if (data.text) sendCommand(data.text);
+      await withLoading(async () => {
+        const r = await fetch("/api/transcribe", { method: "POST", body: form });
+        const data = await r.json();
+        if (data.text) sendCommand(data.text);
+      });
     } finally {
       micBtn.disabled = false;
     }
@@ -543,7 +668,11 @@ function highlightSelectOption(index) {
   if (index >= 0) selectOptions[index].scrollIntoView({ block: "nearest" });
 }
 
-async function chooseDataset(name) {
+function chooseDataset(name) {
+  return withLoading(() => chooseDatasetImpl(name));
+}
+
+async function chooseDatasetImpl(name) {
   if (name === state.dataset) { closeSelect(); return; }
   const previous = state.dataset;
   const previousSceneId = sceneSnapshot?.scene_id || "none";
@@ -631,54 +760,72 @@ document.addEventListener("click", (e) => {
 // ---------- command reference modal ----------
 
 let commandsCache = null;
+let commandsReturnFocus = el("commands-help-btn");
+let commandsOpenPromise = null;
 
 async function openCommandsModal() {
   const modal = el("commands-modal");
-  if (!commandsCache) {
-    const res = await fetch("/api/commands");
-    const data = await res.json();
-    commandsCache = data.commands;
-    const list = el("commands-list");
-    list.innerHTML = "";
-    for (const entry of commandsCache) {
-      const section = document.createElement("div");
-      section.className = "cmd-category";
-      const title = document.createElement("h3");
-      title.textContent = entry.category;
-      const desc = document.createElement("p");
-      desc.textContent = entry.description;
-      const examples = document.createElement("div");
-      examples.className = "cmd-examples";
-      for (const example of entry.examples) {
-        const chip = document.createElement("code");
-        chip.className = "cmd-example-chip";
-        chip.textContent = example;
-        examples.appendChild(chip);
+  if (modal.open || commandsOpenPromise) return;
+  commandsReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : el("commands-help-btn");
+  commandsOpenPromise = (async () => {
+    if (!commandsCache) {
+      const res = await fetch("/api/commands");
+      const data = await res.json();
+      commandsCache = data.commands;
+      const list = el("commands-list");
+      list.innerHTML = "";
+      for (const entry of commandsCache) {
+        const section = document.createElement("div");
+        section.className = "cmd-category";
+        const title = document.createElement("h3");
+        title.textContent = entry.category;
+        const desc = document.createElement("p");
+        desc.textContent = entry.description;
+        const examples = document.createElement("div");
+        examples.className = "cmd-examples";
+        for (const example of entry.examples) {
+          const chip = document.createElement("code");
+          chip.className = "cmd-example-chip";
+          chip.textContent = example;
+          examples.appendChild(chip);
+        }
+        section.appendChild(title);
+        section.appendChild(desc);
+        section.appendChild(examples);
+        list.appendChild(section);
       }
-      section.appendChild(title);
-      section.appendChild(desc);
-      section.appendChild(examples);
-      list.appendChild(section);
     }
+    modal.showModal();
+    // Dialog starts at opacity/scale 0 in CSS; adding this class one frame
+    // later is what makes the transition to full opacity/scale actually run
+    // (toggling it in the same frame as showModal() would skip straight to
+    // the end state with no visible animation).
+    requestAnimationFrame(() => modal.classList.add("dialog-open"));
+  })();
+  try {
+    await commandsOpenPromise;
+  } finally {
+    commandsOpenPromise = null;
   }
-  modal.showModal();
-  // Dialog starts at opacity/scale 0 in CSS; adding this class one frame
-  // later is what makes the transition to full opacity/scale actually run
-  // (toggling it in the same frame as showModal() would skip straight to
-  // the end state with no visible animation).
-  requestAnimationFrame(() => modal.classList.add("dialog-open"));
 }
 
 function closeCommandsModal() {
   const modal = el("commands-modal");
-  modal.classList.remove("dialog-open");
-  modal.close();
+  if (modal.open) modal.close();
 }
 
+const modal = el("commands-modal");
 el("commands-help-btn").addEventListener("click", openCommandsModal);
 el("commands-modal-close").addEventListener("click", closeCommandsModal);
-el("commands-modal").addEventListener("click", (e) => {
-  if (e.target === el("commands-modal")) closeCommandsModal();
+modal.addEventListener("click", (e) => {
+  if (e.target === modal) closeCommandsModal();
+});
+modal.addEventListener("cancel", () => {
+  // Native Escape closes the dialog; close handles shared cleanup.
+});
+modal.addEventListener("close", () => {
+  modal.classList.remove("dialog-open");
+  commandsReturnFocus?.focus();
 });
 
 // ---------- tooltip ----------
@@ -807,7 +954,7 @@ const pct = (v) => `${Math.min(100, Math.max(0, (v || 0) * 100)).toFixed(1)}%`;
 
 function armSkeleton(name) {
   return `<div class="card compare-arm">
-    <span class="compare-arm-name">${ARM_LABEL[name]}</span>
+    <span class="compare-arm-name">${escapeHtml(ARM_LABEL[name])}</span>
     <div class="skeleton compare-arm-image"></div>
     <div class="skeleton" style="height:1.45rem;width:5rem"></div>
     <div class="skeleton" style="height:0.72rem;width:7rem"></div>
@@ -827,23 +974,23 @@ const CHANNEL = {
 
 function classBars(values, start, channel) {
   const spec = CHANNEL[channel];
-  return `<div class="compare-channel">${spec.label} per class</div>
+  return `<div class="compare-channel">${escapeHtml(spec.label)} per class</div>
   <table class="table">${CLASS_ORDER.map((c) => {
     const value = values && values[c] != null ? values[c] : null;
     const from = start && start[c] != null ? start[c] : 0;
     if (value === null) {
-      return `<tr><td class="table-label">${CLASS_LABEL[c]}</td>
+       return `<tr><td class="table-label">${escapeHtml(CLASS_LABEL[c])}</td>
         <td colspan="2" class="table-value">&mdash;</td></tr>`;
     }
     return `<tr>
-      <td class="table-label">${CLASS_LABEL[c]}</td>
+       <td class="table-label">${escapeHtml(CLASS_LABEL[c])}</td>
       <td style="width:100%">
         <div class="progress">
           <div class="progress-fill" style="width:${pct(spec.scale(value) / 100)};--progress-color:var(--class-${c})"></div>
           <div class="progress-tick" style="left:${pct(spec.scale(from) / 100)}"></div>
         </div>
       </td>
-      <td class="table-value">${spec.format(value)}</td>
+      <td class="table-value">${escapeHtml(spec.format(value))}</td>
     </tr>`;
   }).join("")}</table>`;
 }
@@ -851,8 +998,8 @@ function classBars(values, start, channel) {
 function armCard(name, arm, start, channel) {
   if (!arm || arm.unavailable) {
     return `<div class="card compare-arm">
-      <span class="compare-arm-name">${ARM_LABEL[name]}</span>
-      <p class="compare-unavailable">${arm ? arm.unavailable : "no result"}</p>
+      <span class="compare-arm-name">${escapeHtml(ARM_LABEL[name])}</span>
+      <p class="compare-unavailable">${escapeHtml(arm ? arm.unavailable : "no result")}</p>
     </div>`;
   }
   const sign = arm.attainment >= 0 ? "positive" : "negative";
@@ -861,23 +1008,27 @@ function armCard(name, arm, start, channel) {
   // An arm that returned its own input did not move. Without saying so, the
   // column reads as "this arm agrees with the start" -- the opposite claim.
   const noMove = arm.unchanged
-    ? `<div class="compare-nomove">did not move &mdash; ${evals} found no improving step</div>`
+    ? `<div class="compare-nomove">did not move &mdash; ${escapeHtml(evals)} found no improving step</div>`
     : "";
   return `<div class="card compare-arm">
-    <span class="compare-arm-name">${ARM_LABEL[name]}</span>
-    <img class="compare-arm-image" src="data:image/png;base64,${arm.image_b64}" alt="${ARM_LABEL[name]} result" />
+    <span class="compare-arm-name">${escapeHtml(ARM_LABEL[name])}</span>
+    <img class="compare-arm-image" src="data:image/png;base64,${escapeHtml(arm.image_b64)}" alt="${escapeHtml(ARM_LABEL[name])} result" />
     <div>
-      <div class="compare-attainment" data-sign="${sign}">${shown}</div>
+      <div class="compare-attainment" data-sign="${escapeHtml(sign)}">${escapeHtml(shown)}</div>
       <div class="compare-attainment-label">ATTAINMENT</div>
     </div>
-    <div class="compare-cost">${evals} · ${arm.elapsed_ms} ms</div>
+    <div class="compare-cost">${escapeHtml(evals)} · ${escapeHtml(arm.elapsed_ms)} ms</div>
     ${noMove}
     <hr class="separator" />
     ${classBars(channel === "bright" ? arm.class_brightness : arm.class_visibility, start, channel)}
   </div>`;
 }
 
-async function runCompare() {
+function runCompare() {
+  return withLoading(() => runCompareImpl());
+}
+
+async function runCompareImpl() {
   // `submitText` clears the composer, so after sending an instruction the box
   // is empty -- and "type it, send it, then compare it" is the natural flow.
   // Falling back to the step's own instruction is what makes the button work
@@ -896,7 +1047,7 @@ async function runCompare() {
     showToast(`Comparing "${text}" from the current step. Step back first to compare it from where it was answered.`);
   }
   showCompare(true);
-  compareGoal.innerHTML = `<strong>"${text}"</strong>`;
+  compareGoal.innerHTML = `<strong>"${escapeHtml(text)}"</strong>`;
   compareColumns.innerHTML = ARM_ORDER.map(armSkeleton).join("");
 
   let payload;
@@ -909,17 +1060,17 @@ async function runCompare() {
     payload = await res.json();
     if (!res.ok) throw new Error(payload.detail || "compare failed");
   } catch (err) {
-    compareColumns.innerHTML = `<p class="compare-unavailable">${err.message}</p>`;
+    compareColumns.innerHTML = `<p class="compare-unavailable">${escapeHtml(err.message)}</p>`;
     return;
   }
 
   if (!payload.applicable) {
     compareColumns.innerHTML =
-      `<p class="compare-unavailable">${payload.reason}<br />The comparison answers visibility instructions; camera and reset commands have nothing to score.</p>`;
+      `<p class="compare-unavailable">${escapeHtml(payload.reason)}<br />The comparison answers visibility instructions; camera and reset commands have nothing to score.</p>`;
     return;
   }
 
-  compareGoal.innerHTML = `<strong>"${payload.text}"</strong> &rarr; ${payload.goal_text}`;
+  compareGoal.innerHTML = `<strong>"${escapeHtml(payload.text)}"</strong> &rarr; ${escapeHtml(payload.goal_text)}`;
   // If the instruction names brightness at all, that is the channel it is
   // about -- otherwise visibility.
   const channel = payload.channels && payload.channels.bright.length ? "bright" : "vis";
@@ -942,26 +1093,35 @@ el("compare-close").addEventListener("click", () => { showCompare(false); });
 const SWEEP_ARMS = ["exact", "search_cheap", "policy"];
 
 function sweepRow(name, arm, best) {
-  if (!arm || arm.n === 0) {
-    return `<tr><td class="table-label">${ARM_LABEL[name]}</td>
-      <td colspan="3" class="table-value">&mdash;</td></tr>`;
+  if (!arm || arm.n === 0 || !Number.isFinite(arm.median)) {
+    if (name !== "policy") {
+      return `<tr><td class="table-label">${escapeHtml(ARM_LABEL[name])}</td>
+        <td colspan="3" class="table-value">&mdash;</td></tr>`;
+    }
+    const reason = arm?.unavailable || "policy arm has no checkpoint-backed samples";
+    return `<tr><td class="table-label">${escapeHtml(ARM_LABEL[name])}</td>
+      <td colspan="3" class="table-value"><strong>Policy unavailable</strong><br />${escapeHtml(reason)}</td></tr>`;
   }
   const median = arm.median;
   const width = Math.min(100, Math.max(0, (median / best) * 100));
   const sign = median >= 0 ? "positive" : "negative";
   return `<tr>
-    <td class="table-label">${ARM_LABEL[name]}</td>
+    <td class="table-label">${escapeHtml(ARM_LABEL[name])}</td>
     <td style="width:100%">
       <div class="progress">
         <div class="progress-fill" style="width:${width}%;--progress-color:var(--sweep-${name})"></div>
       </div>
     </td>
-    <td class="table-value" data-sign="${sign}">${median >= 0 ? "+" : "−"}${Math.abs(median).toFixed(3)}</td>
-    <td class="table-value">${Math.round(arm.share_positive * 100)}%</td>
+    <td class="table-value" data-sign="${escapeHtml(sign)}">${escapeHtml(`${median >= 0 ? "+" : "−"}${Math.abs(median).toFixed(3)}`)}</td>
+    <td class="table-value">${escapeHtml(`${Math.round(arm.share_positive * 100)}%`)}</td>
   </tr>`;
 }
 
-async function runSweep() {
+function runSweep() {
+  return withLoading(() => runSweepImpl());
+}
+
+async function runSweepImpl() {
   showCompare(true);
   compareGoal.innerHTML = `<strong>20 sampled instructions</strong> &mdash; what each method does across the grammar, not on one phrase`;
   compareColumns.innerHTML = `<div class="card compare-arm" style="grid-column:1/-1">
@@ -981,13 +1141,16 @@ async function runSweep() {
     payload = await res.json();
     if (!res.ok) throw new Error(payload.detail || "sweep failed");
   } catch (err) {
-    compareColumns.innerHTML = `<p class="compare-unavailable">${err.message}</p>`;
+    compareColumns.innerHTML = `<p class="compare-unavailable">${escapeHtml(err.message)}</p>`;
     return;
   }
 
-  const best = Math.max(...SWEEP_ARMS.map((n) => (payload.arms[n] ? payload.arms[n].median : 0)), 0.001);
+  const best = Math.max(...SWEEP_ARMS.map((n) => {
+    const median = payload.arms[n]?.median;
+    return Number.isFinite(median) ? median : 0;
+  }), 0.001);
   compareGoal.innerHTML =
-    `<strong>${payload.episodes} sampled instructions</strong> on ${payload.volume} &mdash; median attainment and how often each method improved on doing nothing`;
+    `<strong>${escapeHtml(payload.episodes)} sampled instructions</strong> on ${escapeHtml(payload.volume)} &mdash; median attainment and how often each method improved on doing nothing`;
   compareColumns.innerHTML = `<div class="card compare-arm" style="grid-column:1/-1">
     <table class="table sweep-table">
       <tr><td></td><td></td><td class="table-value">median</td><td class="table-value">improved</td></tr>

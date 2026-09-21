@@ -50,6 +50,31 @@
     "Liberation Mono", monospace;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  --primary: 240 5.9% 10%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --success: 142 71% 35%;
+  --success-foreground: 144 61% 92%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 240 5.9% 10%;
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -81,6 +106,7 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  overflow: hidden;
 }
 
 /* ---------- app bar ---------- */
@@ -118,7 +144,10 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
+
+#app-bar-right #dataset-row { align-self: center; }
 
 #session-indicator {
   display: flex;
@@ -139,7 +168,8 @@ select:focus-visible {
 
 #main {
   flex: 1;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 400px;
   min-height: 0;
 }
 
@@ -154,7 +184,7 @@ select:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 36px;
+  min-height: 40px;
   padding: 0 16px;
   border-radius: var(--radius);
   border: 1px solid transparent;
@@ -209,12 +239,12 @@ select:focus-visible {
 }
 .btn-success:hover:not(:disabled) { background: hsl(var(--success) / 0.12); }
 
-.btn-sm { height: 30px; padding: 0 12px; font-size: 12.5px; }
+.btn-sm { min-height: 40px; padding: 0 12px; font-size: 12.5px; }
 
-.btn-icon { width: 32px; height: 32px; padding: 0; border-radius: var(--radius); }
+.btn-icon { width: 40px; height: 40px; padding: 0; border-radius: var(--radius); }
 .btn-icon svg { width: 15px; height: 15px; }
 
-.btn-icon-round { width: 34px; height: 34px; padding: 0; border-radius: 999px; }
+.btn-icon-round { width: 40px; height: 40px; padding: 0; border-radius: 999px; }
 
 /* ---------- image panel ---------- */
 
@@ -228,6 +258,8 @@ select:focus-visible {
   padding: 18px;
   gap: 14px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 #viewport {
@@ -236,6 +268,8 @@ select:focus-visible {
   justify-content: center;
   width: 100%;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
   flex: 1;
 }
 
@@ -313,7 +347,7 @@ select:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 32px;
+   min-height: 40px;
   padding: 0 10px;
   font-size: 12.5px;
   color: hsl(var(--foreground));
@@ -415,7 +449,8 @@ select:focus-visible {
 #chat-panel {
   flex: 1;
   min-width: 360px;
-  max-width: 440px;
+  min-height: 0;
+  max-width: none;
   display: flex;
   flex-direction: column;
   background: hsl(var(--card));
@@ -424,12 +459,40 @@ select:focus-visible {
 
 #messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
+#loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: hsl(var(--background) / 0.58);
+  color: hsl(var(--foreground));
+  font: 12px var(--mono);
+  pointer-events: all;
+}
+
+#loading-overlay[hidden] { display: none; }
+
+.loading-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid hsl(var(--muted-foreground) / 0.35);
+  border-top-color: hsl(var(--primary));
+  border-radius: 50%;
+  animation: loading-spin 0.8s linear infinite;
+}
+
+@keyframes loading-spin { to { transform: rotate(360deg); } }
 
 #empty-state {
   margin: auto;
@@ -479,6 +542,7 @@ select:focus-visible {
 /* ---------- composer ---------- */
 
 #composer {
+  flex-shrink: 0;
   border-top: 1px solid hsl(var(--border));
   padding: 12px 16px 16px;
   display: flex;
@@ -510,7 +574,7 @@ select:focus-visible {
 .toggle {
   display: inline-flex;
   align-items: center;
-  height: 30px;
+  min-height: 40px;
   padding: 0 12px;
   font-size: 12px;
   font-weight: 500;
@@ -542,7 +606,7 @@ select:focus-visible {
 .toggle-item {
   display: inline-flex;
   align-items: center;
-  height: 30px;
+  min-height: 40px;
   padding: 0 12px;
   font-size: 12px;
   font-weight: 500;
@@ -564,7 +628,7 @@ select:focus-visible {
 
 #steps-input {
   width: 56px;
-  height: 30px;
+  min-height: 40px;
   padding: 0 8px;
   border-radius: var(--radius);
   border: 1px solid hsl(var(--input));
@@ -613,8 +677,8 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border-radius: 999px;
   border: none;
   background: transparent;
@@ -885,10 +949,37 @@ select:focus-visible {
   background: hsl(var(--muted-foreground) / 0.4);
 }
 
+/* ---------- About dialog ---------- */
+
+#about-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 32px));
+  padding: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) + 2px);
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+#about-modal::backdrop { background: rgba(0, 0, 0, 0.6); }
+.about-card { padding: 22px; }
+.about-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.about-header h2 { margin: 2px 0 0; font-size: 20px; line-height: 1.2; }
+.eyebrow { margin: 0; color: hsl(var(--muted-foreground)); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.about-body { margin: 22px 0; color: hsl(var(--muted-foreground)); }
+.about-body p { margin: 0 0 12px; }
+.about-body p:last-child { margin-bottom: 0; }
+.about-links { display: flex; flex-wrap: wrap; gap: 16px; padding-top: 16px; border-top: 1px solid hsl(var(--border)); }
+.about-links a { color: hsl(var(--foreground)); display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 40px; }
+.about-links a svg { width: 22px; height: 22px; }
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 860px) {
-  #main { flex-direction: column; }
+  #app-bar { height: auto; min-height: 44px; flex-wrap: wrap; row-gap: 8px; padding-block: 8px; }
+  #app-bar-right { width: 100%; justify-content: flex-end; gap: 8px; }
+  #main { display: flex; flex-direction: column; overflow: auto; }
   #chat-panel { max-width: none; border-left: none; border-top: 1px solid hsl(var(--border)); }
 }
 
@@ -1063,17 +1154,39 @@ select:focus-visible {
 
 /* Layout: replaces #single-view inside #viewport, so the chat panel and
    composer never move when it opens. */
-#compare-view { display: flex; flex-direction: column; gap: 0.7rem; height: 100%; overflow-y: auto; }
-#compare-header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+#compare-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+#compare-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-shrink: 0;
+}
 #compare-goal { color: hsl(var(--muted-foreground)); font-size: 0.85rem; }
 #compare-goal strong { color: hsl(var(--foreground)); font-weight: 600; }
-#compare-columns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; align-items: start; }
-@media (max-width: 1100px) { #compare-columns { grid-template-columns: repeat(2, 1fr); } }
+#compare-columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+  align-items: start;
+  min-width: 0;
+}
+@media (max-width: 1100px) { #compare-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px)  { #compare-columns { grid-template-columns: 1fr; } }
 
-.compare-arm { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.7rem; }
+.compare-arm { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.7rem; min-width: 0; }
 .compare-arm-name { font-size: 0.65rem; letter-spacing: 0.09em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
-.compare-arm-image { width: 100%; aspect-ratio: 1; object-fit: contain; background: #000; border-radius: calc(var(--radius) - 2px); display: block; }
+.compare-arm-image { width: 100%; max-width: 100%; aspect-ratio: 1; max-height: min(32vh, 360px); object-fit: contain; background: #000; border-radius: calc(var(--radius) - 2px); display: block; }
 
 /* Hero number: attainment is one headline per arm, so it is a number, not a
    chart. The sign is printed, so colour never carries the meaning alone. */

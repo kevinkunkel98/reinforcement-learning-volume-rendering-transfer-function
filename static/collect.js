@@ -9,13 +9,57 @@
 const RATER_KEY = "collectRaterId";
 const ROLE_KEY = "collectRaterRole";
 const EXPERIENCE_KEY = "collectRaterExperience";
+const THEME_KEY = "tf-rl-theme";
 const VALID_ROLES = ["radiologist", "clinician", "researcher", "other"];
+const storageFallback = new Map();
+
+const el = (id) => document.getElementById(id);
+
+function storageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (err) {
+    return storageFallback.get(key) ?? null;
+  }
+}
+
+function storageSet(key, value) {
+  storageFallback.set(key, value);
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    // In-memory fallback keeps this session usable when storage is blocked.
+  }
+}
+
+function applyTheme(theme) {
+  const resolved = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = resolved;
+  const button = el("theme-toggle");
+  button?.setAttribute("aria-pressed", String(resolved === "dark"));
+  button?.setAttribute("title", `Switch to ${resolved === "dark" ? "light" : "dark"} theme`);
+  const label = button?.querySelector("#theme-label");
+  if (label) label.textContent = `${resolved[0].toUpperCase()}${resolved.slice(1)} mode`;
+}
+
+function initTheme() {
+  let saved = null;
+  saved = storageGet(THEME_KEY);
+  applyTheme(saved === "light" ? "light" : "dark");
+  el("theme-toggle")?.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    storageSet(THEME_KEY, next);
+    applyTheme(next);
+  });
+}
+
+initTheme();
 
 function getRaterId() {
-  let id = localStorage.getItem(RATER_KEY);
+  let id = storageGet(RATER_KEY);
   if (!id) {
     id = (window.prompt("Rater ID:") || "anon").trim() || "anon";
-    localStorage.setItem(RATER_KEY, id);
+    storageSet(RATER_KEY, id);
   }
   return id;
 }
@@ -25,19 +69,19 @@ function getRaterId() {
 // of the four values the server accepts; experience is free text and may be
 // left blank.
 function getRaterRole() {
-  let role = localStorage.getItem(ROLE_KEY);
+  let role = storageGet(ROLE_KEY);
   while (!role || !VALID_ROLES.includes(role)) {
     role = (window.prompt(`Role (${VALID_ROLES.join("/")}):`) || "").trim().toLowerCase();
   }
-  localStorage.setItem(ROLE_KEY, role);
+  storageSet(ROLE_KEY, role);
   return role;
 }
 
 function getRaterExperience() {
-  let experience = localStorage.getItem(EXPERIENCE_KEY);
+  let experience = storageGet(EXPERIENCE_KEY);
   if (experience === null) {
     experience = (window.prompt("Experience (optional, e.g. \"8 years CT\"):") || "").trim();
-    localStorage.setItem(EXPERIENCE_KEY, experience);
+    storageSet(EXPERIENCE_KEY, experience);
   }
   return experience;
 }
@@ -48,13 +92,12 @@ const raterExperience = getRaterExperience();
 const countKey = `collectJudgedCount:${raterId}`;
 
 function loadJudgedCount() {
-  const stored = Number.parseInt(localStorage.getItem(countKey) || "0", 10);
+  const stored = Number.parseInt(storageGet(countKey) || "0", 10);
   return Number.isFinite(stored) && stored >= 0 ? stored : 0;
 }
 
 let judgedCount = loadJudgedCount();
 
-const el = (id) => document.getElementById(id);
 const instructionEl = el("collect-instruction");
 const volumeEl = el("collect-volume");
 const progressEl = el("collect-progress");
@@ -70,8 +113,8 @@ let currentItem = null;
 let decisionStart = null;
 let busy = false;
 
-raterEl.textContent = `rater: ${raterId}`;
-progressEl.textContent = `judged: ${judgedCount}`;
+raterEl.textContent = `Rater: ${raterId}`;
+progressEl.textContent = `Judged: ${judgedCount}`;
 
 function setBusy(value) {
   busy = value;
@@ -116,6 +159,7 @@ async function judge(choice) {
   setBusy(true);
   const decisionMs = decisionStart != null ? Math.round(performance.now() - decisionStart) : null;
   const pairId = currentItem.pair_id;
+  let judgeCommitted = false;
   try {
     const response = await fetch("/api/collect/judge", {
       method: "POST",
@@ -123,14 +167,30 @@ async function judge(choice) {
       body: JSON.stringify({ pair_id: pairId, choice, decision_ms: decisionMs }),
     });
     if (!response.ok) throw new Error(`judge failed: ${response.status}`);
-    const next = await response.json();
+    judgeCommitted = true;
     judgedCount += 1;
-    localStorage.setItem(countKey, String(judgedCount));
-    progressEl.textContent = `judged: ${judgedCount}`;
+    storageSet(countKey, String(judgedCount));
+    progressEl.textContent = `Judged: ${judgedCount}`;
+    const next = await response.json();
     await showItem(next);
   } catch (err) {
     console.error(err);
-    setBusy(false);
+    if (!judgeCommitted) {
+      setBusy(false);
+      return;
+    }
+    // The judgment is already committed. Never retry its pair; fetch a fresh
+    // pending item so a rendering/response failure cannot strand the rater.
+    currentItem = null;
+    decisionStart = null;
+    instructionEl.textContent = "Recovering next item…";
+    try {
+      await showItem(await fetchNext());
+    } catch (reconcileErr) {
+      console.error(reconcileErr);
+      instructionEl.textContent = "Failed to load next item. Reload to continue.";
+      setBusy(false);
+    }
   }
 }
 

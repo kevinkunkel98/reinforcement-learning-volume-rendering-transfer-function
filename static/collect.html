@@ -4,44 +4,103 @@
   <meta charset="utf-8" />
   <title>Preference Collection</title>
   <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --background: 0 0% 100%;
+      --foreground: 240 10% 3.9%;
+      --card: 0 0% 100%;
+      --card-foreground: 240 10% 3.9%;
+      --popover: 0 0% 100%;
+      --popover-foreground: 240 10% 3.9%;
+      --primary: 240 5.9% 10%;
+      --primary-foreground: 0 0% 98%;
+      --secondary: 240 4.8% 95.9%;
+      --secondary-foreground: 240 5.9% 10%;
+      --muted: 240 4.8% 95.9%;
+      --muted-foreground: 240 3.8% 46.1%;
+      --accent: 240 4.8% 95.9%;
+      --accent-foreground: 240 5.9% 10%;
+      --border: 240 5.9% 90%;
+      --input: 240 5.9% 90%;
+      --ring: 240 5.9% 10%;
+    }
+
+    #collect-title {
+      margin: 0 0 2px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: hsl(var(--foreground));
+    }
+
+    #collect-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .judge-btn {
+      min-width: 140px;
+      min-height: 48px;
+      padding: 0 20px;
+      font-size: 15px;
+    }
+
+    .shortcut {
+      opacity: 0.65;
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    @media (max-width: 520px) {
+      #collect-header-actions { width: 100%; }
+      #collect-header-actions .btn { flex: 1; }
+      .judge-btn { flex: 1 1 calc(50% - 10px); }
+    }
+  </style>
 </head>
 <body>
   <div id="collect-app">
     <header id="collect-header">
       <div id="collect-header-main">
-        <p id="collect-instruction">Loading…</p>
+        <p id="collect-title">Preference collection</p>
+        <p id="collect-instruction" aria-live="polite">Loading…</p>
         <div id="collect-meta">
           <span id="collect-volume">—</span>
-          <span id="collect-progress">judged: 0</span>
+          <span id="collect-progress" aria-live="polite">Judged: 0</span>
           <span id="collect-rater"></span>
         </div>
       </div>
-      <button id="show-start-toggle" class="btn btn-outline btn-sm" type="button">show start</button>
+      <div id="collect-header-actions">
+        <button id="theme-toggle" class="btn btn-outline btn-sm" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Switch to light theme"><span id="theme-label">Dark mode</span></button>
+        <button id="show-start-toggle" class="btn btn-outline btn-sm" type="button">Show start</button>
+      </div>
     </header>
 
     <main id="collect-main">
       <div id="pair-grids">
         <section class="candidate-panel" data-side="a">
-          <h2 class="candidate-label">A</h2>
-          <img id="candidate-a-image" class="candidate-grid" alt="candidate A: six standard views" />
+          <h2 class="candidate-label">Candidate A</h2>
+          <img id="candidate-a-image" class="candidate-grid" alt="Candidate A: six standard views" />
         </section>
         <section class="candidate-panel" data-side="b">
-          <h2 class="candidate-label">B</h2>
-          <img id="candidate-b-image" class="candidate-grid" alt="candidate B: six standard views" />
+          <h2 class="candidate-label">Candidate B</h2>
+          <img id="candidate-b-image" class="candidate-grid" alt="Candidate B: six standard views" />
         </section>
       </div>
 
       <section id="start-panel" hidden>
-        <h2 class="candidate-label">START</h2>
-        <img id="start-image" class="candidate-grid" alt="start state: six standard views" />
+        <h2 class="candidate-label">Start state</h2>
+        <img id="start-image" class="candidate-grid" alt="Start state: six standard views" />
       </section>
     </main>
 
     <footer id="collect-controls">
-      <button class="btn btn-default judge-btn" data-choice="a" type="button">A</button>
-      <button class="btn btn-default judge-btn" data-choice="b" type="button">B</button>
-      <button class="btn btn-secondary judge-btn" data-choice="equal" type="button">E · equal</button>
-      <button class="btn btn-ghost judge-btn" data-choice="skip" type="button">S · skip</button>
+      <button class="btn btn-default judge-btn" data-choice="a" type="button">Choose A <span class="shortcut">A</span></button>
+      <button class="btn btn-default judge-btn" data-choice="b" type="button">Choose B <span class="shortcut">B</span></button>
+      <button class="btn btn-secondary judge-btn" data-choice="equal" type="button">Equal <span class="shortcut">E</span></button>
+      <button class="btn btn-ghost judge-btn" data-choice="skip" type="button">Skip <span class="shortcut">S</span></button>
     </footer>
   </div>
   <script src="/static/collect.js"></script>

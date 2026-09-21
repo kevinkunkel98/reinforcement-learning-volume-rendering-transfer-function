@@ -120,9 +120,9 @@ def test_app_integrates_viewer_with_state_and_dataset_changes():
     assert "randomUUID" in app
     assert "setItem(\"localViewerSceneNonce\"" not in app
     assert "sceneSequence" in app
-    assert "getItem(sceneSequenceKey" in app
+    assert 'safeStorageGet("session", sceneSequenceKey)' in app
     assert "sceneSequenceKey" in app
-    assert "setItem(sceneSequenceKey" in app
+    assert 'safeStorageSet("session", sceneSequenceKey' in app
     assert "transitionIdentity" in app
     assert "sceneNonce" in app and "before.scene_id" in app
     assert "event_id: eventId" in app
@@ -154,6 +154,18 @@ def test_styles_cover_viewer_loading_error_and_fallback_states():
     assert "min-width: 0" in css
 
 
+def test_compare_layout_fits_inside_viewer_region_without_card_overflow():
+    css = read("style.css")
+    assert "#image-panel" in css and "overflow: hidden" in css
+    assert re.search(r"#viewport\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0[^}]*max-width:\s*100%", css, re.S)
+    assert re.search(r"#compare-view\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0[^}]*max-width:\s*100%", css, re.S)
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in css
+    assert re.search(r"\.compare-arm\s*\{[^}]*min-width:\s*0", css, re.S)
+    assert re.search(r"\.compare-arm-image\s*\{[^}]*aspect-ratio:\s*1[^}]*max-height:", css, re.S)
+    assert "@media (max-width: 1100px)" in css
+    assert "@media (max-width: 640px)" in css
+
+
 def test_telemetry_reads_out_the_four_goal_classes_not_retired_bands():
     html = read("index.html")
     for goal_class in ("skeleton", "lungs", "soft", "vessels"):
@@ -166,6 +178,42 @@ def test_app_reads_class_visibility_for_the_telemetry():
     app = read("app.js")
     assert "class_visibility" in app
     assert '"air", "fat"' not in app
+
+
+def test_app_explains_unavailable_policy_sweep_arm_without_nan_or_blank_values():
+    app = read("app.js")
+    assert "Policy unavailable" in app
+    assert "policy arm has no checkpoint-backed samples" in app
+    assert "Number.isFinite(arm.median)" in app
+
+
+def test_viewer_has_global_async_loading_state_and_chat_overflow_contract():
+    html = read("index.html")
+    app = read("app.js")
+    css = read("style.css")
+    assert 'id="loading-overlay"' in html
+    assert 'aria-live="polite"' in html
+    assert "withLoading" in app
+    for function_name in ("sendCommand", "navigate", "chooseDataset", "runCompare", "runSweep"):
+        assert f"withLoading(() => {function_name}Impl" in app
+    assert "await withLoading(async () =>" in app
+    assert re.search(r"#messages\s*\{[^}]*overflow-y:\s*auto", css, re.S)
+
+
+def test_viewer_contains_containment_contract_for_chat_history_and_panels():
+    css = read("style.css")
+    assert re.search(r"#app\s*\{[^}]*overflow:\s*hidden", css, re.S)
+    assert re.search(r"#main\s*\{[^}]*min-height:\s*0", css, re.S)
+    assert re.search(r"#image-panel\s*\{[^}]*min-height:\s*0[^}]*overflow:\s*hidden", css, re.S)
+    assert re.search(r"#chat-panel\s*\{[^}]*min-height:\s*0", css, re.S)
+    assert re.search(r"#messages\s*\{[^}]*min-height:\s*0", css, re.S)
+    assert re.search(r"#composer\s*\{[^}]*flex-shrink:\s*0", css, re.S)
+
+
+def test_mobile_main_keeps_intentional_stack_scrolling():
+    css = read("style.css")
+    mobile = css[css.index("@media (max-width: 860px)"):]
+    assert re.search(r"#main\s*\{[^}]*overflow:\s*(?:auto|scroll)", mobile, re.S)
 
 
 def test_viewer_parses_with_the_llm_but_applies_the_command_exactly():
@@ -187,3 +235,142 @@ def test_viewer_leaves_the_camera_alone_when_a_step_does_not_move_it():
     guard = viewer.index("if (sameCameraRequest(value)) return;")
     reseat = viewer.index("appliedCameraState = toRendererCamera(value);", guard)
     assert guard < reseat
+
+
+def test_app_persists_theme_and_updates_accessible_toggle_state():
+    app = read("app.js")
+    assert 'const THEME_KEY = "tf-rl-theme"' in app
+    assert "function applyTheme(theme)" in app
+    assert "document.documentElement.dataset.theme" in app
+    assert 'setAttribute("aria-pressed"' in app
+    assert 'setAttribute("title"' in app
+    assert 'safeStorageGet("local", THEME_KEY)' in app
+    assert 'safeStorageSet("local", THEME_KEY, next)' in app
+    assert "try" in app and "catch" in app
+
+
+def test_app_handles_about_dialog_without_touching_viewer_state():
+    app = read("app.js")
+    assert 'el("about-modal")' in app
+    assert 'el("about-btn")' in app
+    assert 'el("about-modal-close")' in app
+    assert "showModal()" in app
+    assert "close()" in app
+    assert "e.key === \"Escape\"" in app
+    assert "document.activeElement" in app
+    assert "focus()" in app
+
+
+def test_app_visible_copy_is_english_only():
+    app = read("app.js")
+    for word in ("LOKALE SITZUNG", "SKELETT", "LUNGE", "WEICHGEW.", "GEFÄSSE"):
+        assert word not in app
+
+
+def test_viewer_has_theme_about_controls_and_english_copy():
+    html = read("index.html")
+    for control_id in ("theme-toggle", "about-btn", "about-modal", "about-modal-close"):
+        assert f'id="{control_id}"' in html
+    assert 'aria-label="Toggle color theme"' in html
+    assert 'aria-label="About this project"' in html
+    assert 'aria-labelledby="about-modal-title"' in html
+    assert "Conversational Transfer Functions" in html
+    assert "semantic Gaussian peaks for lungs, soft tissue, vessels, and skeleton" in html
+    assert 'id="session-indicator"' not in html
+    for word in ("LOKALE SITZUNG", "SKELETT", "LUNGE", "WEICHGEW.", "GEFÄSSE"):
+        assert word not in html
+
+
+def test_app_source_keeps_theme_and_about_lifecycle_contracts():
+    app = read("app.js")
+    assert "initTheme();" in app
+    assert "initAboutDialog();" in app
+    assert "modal.addEventListener(\"click\"" in app
+    assert "modal.addEventListener(\"cancel\"" in app
+    assert "modal.addEventListener(\"close\"" in app
+    assert "modal.addEventListener(\"keydown\"" in app
+    assert 'safeStorageGet("local", THEME_KEY)' in app
+    assert 'safeStorageSet("local", THEME_KEY, next)' in app
+
+
+def test_command_dialog_cleans_up_native_close_and_restores_opener_focus():
+    app = read("app.js")
+    assert "let commandsReturnFocus = el(\"commands-help-btn\");" in app
+    assert "commandsReturnFocus = document.activeElement instanceof HTMLElement" in app
+    assert "modal.addEventListener(\"cancel\", (event) =>" in app
+    assert "modal.addEventListener(\"close\", () => {" in app
+    assert "modal.classList.remove(\"dialog-open\");" in app
+    assert "commandsReturnFocus?.focus();" in app
+
+
+def test_command_dialog_ignores_duplicate_open_requests_while_loading_or_open():
+    app = read("app.js")
+    assert "let commandsOpenPromise = null;" in app
+    assert "if (modal.open || commandsOpenPromise) return;" in app
+    assert "commandsOpenPromise = (async () => {" in app
+    assert "commandsOpenPromise = null;" in app
+
+
+def test_answer_mode_toggles_expose_and_sync_pressed_state():
+    html = read("index.html")
+    app = read("app.js")
+    assert 'id="search-toggle-btn"' in html
+    assert 'id="policy-toggle-btn"' in html
+    assert 'id="search-toggle-btn" class="toggle" data-active="false" aria-pressed="false"' in html
+    assert 'id="policy-toggle-btn" class="toggle" data-active="false" aria-pressed="false"' in html
+    assert 'searchToggleBtn.setAttribute("aria-pressed", String(config.search));' in app
+    assert 'policyToggleBtn.setAttribute("aria-pressed", "false");' in app
+    assert 'policyToggleBtn.setAttribute("aria-pressed", String(active));' in app
+    assert 'searchToggleBtn.setAttribute("aria-pressed", "false");' in app
+
+
+def test_theme_control_exposes_visible_current_mode_and_mobile_bar_wraps():
+    html = read("index.html")
+    app = read("app.js")
+    css = read("style.css")
+    assert 'id="theme-toggle"' in html
+    assert 'id="theme-label"' in html
+    assert 'button?.querySelector("#theme-label")' in app
+    assert "#app-bar-right {" in css
+    assert "flex-wrap: wrap;" in css
+    assert "@media (max-width: 860px)" in css
+
+
+def test_collector_has_english_blind_judging_controls_and_standalone_theme():
+    html = read("collect.html")
+    js = read("collect.js")
+    for label in ("Preference collection", "Candidate A", "Candidate B", "Start state", "Show start", "Choose A", "Choose B", "Equal", "Skip"):
+        assert label in html
+    assert 'id="about-btn"' not in html
+    assert 'id="theme-toggle"' in html
+    assert 'id="theme-label"' in html
+    assert 'aria-label="Toggle color theme"' in html
+    assert 'data-choice="a"' in html and 'data-choice="b"' in html
+    assert 'data-choice="equal"' in html and 'data-choice="skip"' in html
+    assert 'const THEME_KEY = "tf-rl-theme"' in js
+    assert "document.documentElement.dataset.theme" in js
+    assert 'setAttribute("aria-pressed"' in js
+    assert "storageGet(THEME_KEY)" in js
+    assert "storageSet(THEME_KEY, next)" in js
+    assert 'button?.querySelector("#theme-label")' in js
+    assert 'const KEY_CHOICES = { a: "a", b: "b", e: "equal", s: "skip" }' in js
+    assert '"/api/collect/judge"' in js
+
+
+def test_collector_uses_safe_storage_and_reconciles_after_committed_judgment():
+    js = read("collect.js")
+    html = read("collect.html")
+    assert "function storageGet(key)" in js
+    assert "function storageSet(key, value)" in js
+    assert "storageGet(RATER_KEY)" in js
+    assert "storageSet(RATER_KEY, id)" in js
+    assert "storageGet(ROLE_KEY)" in js
+    assert "storageSet(ROLE_KEY, role)" in js
+    assert "storageGet(EXPERIENCE_KEY)" in js
+    assert "storageSet(EXPERIENCE_KEY, experience)" in js
+    assert "storageGet(countKey)" in js
+    assert "storageSet(countKey, String(judgedCount))" in js
+    assert "judgeCommitted" in js
+    assert "currentItem = null" in js
+    assert "showItem(await fetchNext())" in js
+    assert 'aria-live="polite"' in html
