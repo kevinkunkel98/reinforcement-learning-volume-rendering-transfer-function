@@ -13,6 +13,12 @@ const state = { current: null, cursor: 0, total: 1, dataset: null };
 const config = { parser: "llm", search: false, mode: "exact" };
 
 const el = (id) => document.getElementById(id);
+
+// The four goal classes, in a fixed order, shared by the chat replies and the
+// comparison panel so a class keeps the same name and hue everywhere.
+const CLASS_ORDER = ["skeleton", "lungs", "soft", "vessels"];
+const CLASS_LABEL = { skeleton: "skeleton", lungs: "lungs", soft: "soft tissue", vessels: "vessels" };
+
 const messagesEl = el("messages");
 const emptyState = el("empty-state");
 const textInput = el("text-input");
@@ -203,6 +209,66 @@ function appendMessage(step) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// The system's turn in the conversation. It does not chat -- it reports what
+// the render now shows, which is the measurement the whole project is built
+// on. Without it the thread is a list of things the user said, and the effect
+// of each command is invisible.
+const METHOD_SAID = {
+  policy: "the policy answered",
+  search: "search answered",
+  exact: "applied directly",
+  camera: "moved the camera",
+};
+
+function appendReply(step, before) {
+  const div = document.createElement("div");
+  div.className = "msg-reply";
+
+  const method = document.createElement("div");
+  method.className = "reply-method";
+  method.textContent = METHOD_SAID[step.mode] || METHOD_SAID.exact;
+  div.appendChild(method);
+
+  // A fallback or a search that found nothing is the most useful thing the
+  // system can say, so it belongs in the thread, not only in a toast that
+  // disappears.
+  if (step.message) {
+    const note = document.createElement("div");
+    note.className = "reply-note";
+    note.textContent = step.message;
+    div.appendChild(note);
+  }
+
+  const now = step.class_visibility || {};
+  const moved = CLASS_ORDER.filter((c) => {
+    const a = before ? before[c] : null;
+    const b = now[c];
+    return a != null && b != null && Math.abs(b - a) >= 0.0001;
+  });
+
+  if (moved.length) {
+    const list = document.createElement("div");
+    list.className = "reply-deltas";
+    for (const c of moved) {
+      const row = document.createElement("div");
+      row.className = "reply-delta";
+      row.innerHTML = `<span class="reply-dot" style="background:var(--class-${c})"></span>
+        <span class="reply-class">${CLASS_LABEL[c]}</span>
+        <span class="reply-numbers">${(before[c] * 100).toFixed(2)} &rarr; ${(now[c] * 100).toFixed(2)}%</span>`;
+      div.appendChild(list);
+      list.appendChild(row);
+    }
+  } else if (!step.message) {
+    const none = document.createElement("div");
+    none.className = "reply-note";
+    none.textContent = "Nothing moved measurably.";
+    div.appendChild(none);
+  }
+
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 async function loadState() {
   const r = await fetch("/api/state");
   const data = await r.json();
@@ -219,6 +285,9 @@ async function loadState() {
 }
 
 async function sendCommand(text) {
+  // What the render showed before this command, so the reply can report the
+  // change rather than only the new value.
+  const before = state.current ? state.current.class_visibility : null;
   const body = {
     text,
     parser: config.parser,
@@ -240,10 +309,7 @@ async function sendCommand(text) {
   await refresh(data);
   await postSceneTransition(data);
   appendMessage(data.current);
-  // mode="policy" degrades to exact application (no checkpoint, or the
-  // command isn't a goal) and explains why in current.message -- surface it
-  // rather than silently answering with a different mode than requested.
-  if (data.current.message) showToast(data.current.message, "default");
+  appendReply(data.current, before);
 }
 
 function autoResize() {
@@ -702,8 +768,6 @@ loadState();
 // neighbourhood while spending no visibility evaluations -- is on one screen
 // instead of spread across four interactions the viewer has to hold in memory.
 
-const CLASS_ORDER = ["skeleton", "lungs", "soft", "vessels"];
-const CLASS_LABEL = { skeleton: "skeleton", lungs: "lungs", soft: "soft tissue", vessels: "vessels" };
 const ARM_ORDER = ["exact", "search_cheap", "search_thorough", "policy"];
 const ARM_LABEL = {
   exact: "exact",
