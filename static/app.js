@@ -732,9 +732,22 @@ function armSkeleton(name) {
   </div>`;
 }
 
-function classBars(visibility, start) {
-  return `<table class="table">${CLASS_ORDER.map((c) => {
-    const value = visibility && visibility[c] != null ? visibility[c] : null;
+// `goals.distance` scores two channels -- how much of the image a class
+// contributes (vis) and how bright it appears (bright) -- and an instruction
+// names one or the other. Plotting visibility for "brighten the skeleton"
+// shows four columns with near-identical bars and attainment from 0.00 to
+// 0.94, which reads as the panel contradicting itself. So plot the channel
+// the instruction is actually about, and say which one.
+const CHANNEL = {
+  vis: { label: "visible", scale: (v) => v * 100, unit: "%", format: (v) => `${(v * 100).toFixed(1)}%` },
+  bright: { label: "brightness", scale: (v) => v * 100, unit: "", format: (v) => v.toFixed(3) },
+};
+
+function classBars(values, start, channel) {
+  const spec = CHANNEL[channel];
+  return `<div class="compare-channel">${spec.label} per class</div>
+  <table class="table">${CLASS_ORDER.map((c) => {
+    const value = values && values[c] != null ? values[c] : null;
     const from = start && start[c] != null ? start[c] : 0;
     if (value === null) {
       return `<tr><td class="table-label">${CLASS_LABEL[c]}</td>
@@ -744,16 +757,16 @@ function classBars(visibility, start) {
       <td class="table-label">${CLASS_LABEL[c]}</td>
       <td style="width:100%">
         <div class="progress">
-          <div class="progress-fill" style="width:${pct(value)};--progress-color:var(--class-${c})"></div>
-          <div class="progress-tick" style="left:${pct(from)}"></div>
+          <div class="progress-fill" style="width:${pct(spec.scale(value) / 100)};--progress-color:var(--class-${c})"></div>
+          <div class="progress-tick" style="left:${pct(spec.scale(from) / 100)}"></div>
         </div>
       </td>
-      <td class="table-value">${(value * 100).toFixed(1)}%</td>
+      <td class="table-value">${spec.format(value)}</td>
     </tr>`;
   }).join("")}</table>`;
 }
 
-function armCard(name, arm, start) {
+function armCard(name, arm, start, channel) {
   if (!arm || arm.unavailable) {
     return `<div class="card compare-arm">
       <span class="compare-arm-name">${ARM_LABEL[name]}</span>
@@ -778,13 +791,28 @@ function armCard(name, arm, start) {
     <div class="compare-cost">${evals} · ${arm.elapsed_ms} ms</div>
     ${noMove}
     <hr class="separator" />
-    ${classBars(arm.class_visibility, start)}
+    ${classBars(channel === "bright" ? arm.class_brightness : arm.class_visibility, start, channel)}
   </div>`;
 }
 
 async function runCompare() {
-  const text = textInput.value.trim();
-  if (!text) return;
+  // `submitText` clears the composer, so after sending an instruction the box
+  // is empty -- and "type it, send it, then compare it" is the natural flow.
+  // Falling back to the step's own instruction is what makes the button work
+  // when a reader expects it to.
+  const typed = textInput.value.trim();
+  const applied = lastState && lastState.current ? lastState.current.cmd_text : null;
+  const text = typed || applied;
+  if (!text) {
+    showToast("Type an instruction, then press compare to answer it four ways.");
+    return;
+  }
+  if (!typed) {
+    // The comparison starts from where the session is now. If that instruction
+    // has already been applied, this compares from *after* it, which is not
+    // the same question -- say so rather than quietly answering a different one.
+    showToast(`Comparing "${text}" from the current step. Step back first to compare it from where it was answered.`);
+  }
   showCompare(true);
   compareGoal.innerHTML = `<strong>"${text}"</strong>`;
   compareColumns.innerHTML = ARM_ORDER.map(armSkeleton).join("");
@@ -810,8 +838,13 @@ async function runCompare() {
   }
 
   compareGoal.innerHTML = `<strong>"${payload.text}"</strong> &rarr; ${payload.goal_text}`;
-  const start = payload.start ? payload.start.class_visibility : null;
-  compareColumns.innerHTML = ARM_ORDER.map((name) => armCard(name, payload.arms[name], start)).join("");
+  // If the instruction names brightness at all, that is the channel it is
+  // about -- otherwise visibility.
+  const channel = payload.channels && payload.channels.bright.length ? "bright" : "vis";
+  const start = payload.start
+    ? (channel === "bright" ? payload.start.class_brightness : payload.start.class_visibility)
+    : null;
+  compareColumns.innerHTML = ARM_ORDER.map((name) => armCard(name, payload.arms[name], start, channel)).join("");
 }
 
 el("compare-btn").addEventListener("click", runCompare);

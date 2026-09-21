@@ -836,6 +836,44 @@ def test_compare_arms_does_not_leak_raw_exception_text_into_a_reason(ts_session,
     assert "visibility cache" in reason
 
 
+def test_compare_arms_reports_brightness_beside_visibility(ts_session):
+    """A brightness instruction moves the brightness channel, not the
+    visibility one. Plotting only visibility makes four columns whose bars are
+    near-identical while their attainment ranges from 0.00 to 0.94 -- the
+    panel then contradicts itself."""
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
+                                cheap=4, thorough=8)
+
+    for name, arm in arms.items():
+        assert set(arm["class_brightness"]) == set(goals.GOAL_CLASSES), name
+
+
+def test_goal_channels_names_which_channel_the_instruction_targets():
+    """The panel plots the channel the instruction is about."""
+    vis_only = np.zeros(4 * len(goals.GOAL_CLASSES))
+    vis_only[len(goals.GOAL_CLASSES) + goals.GOAL_CLASSES.index("skeleton")] = 1.0
+    assert server.goal_channels(vis_only) == {"vis": ["skeleton"], "bright": []}
+
+    bright_only = np.zeros(4 * len(goals.GOAL_CLASSES))
+    bright_only[3 * len(goals.GOAL_CLASSES) + goals.GOAL_CLASSES.index("lungs")] = 1.0
+    assert server.goal_channels(bright_only) == {"vis": [], "bright": ["lungs"]}
+
+
+def test_compare_route_says_which_channel_to_plot(ts_session, monkeypatch):
+    s = ts_session
+    s.policy_provider = lambda: policy_stub()
+    monkeypatch.setattr(server, "session", s)
+
+    result = asyncio.run(server.compare_route(
+        server.CompareRequest(text="brighten the skeleton", parser="rule", cheap=4, thorough=8)))
+
+    assert result["applicable"] is True
+    assert result["channels"]["bright"] == ["skeleton"]
+    assert set(result["start"]["class_brightness"]) == set(goals.GOAL_CLASSES)
+
+
 # --- the /api/compare route ---------------------------------------------------
 
 def test_compare_route_leaves_session_history_untouched(ts_session, monkeypatch):

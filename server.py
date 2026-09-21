@@ -142,6 +142,40 @@ def _class_visibility(params, model_for_volume=visibility.for_volume):
             for goal_class in goals.GOAL_CLASSES}
 
 
+def _class_brightness(params, model_for_volume=visibility.for_volume):
+    """Mean brightness of each goal class, the companion to
+    `_class_visibility`.
+
+    `goals.distance` scores two channels -- how much of the image a class
+    contributes (`vis`) and how bright it appears (`bright`, weighted KAPPA) --
+    and an instruction names one or the other. "Brighten the skeleton" barely
+    moves visibility, so a panel plotting visibility alone shows four columns
+    with near-identical bars and attainment from 0.00 to 0.94, and reads as
+    self-contradictory."""
+    try:
+        model = model_for_volume(_dataset_name)
+        bright = goals.aggregate(model.features(np.asarray(params, dtype=np.float64)))["bright"]
+        supported = set(goals.goal_classes_for_volume(_dataset_name))
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        print(f"[telemetry] no visibility model for {_dataset_name}: {exc}")
+        return {goal_class: None for goal_class in goals.GOAL_CLASSES}
+    return {goal_class: (float(bright[goal_class]) if goal_class in supported else None)
+            for goal_class in goals.GOAL_CLASSES}
+
+
+def goal_channels(goal) -> dict:
+    """Which channel each goal class is named on, from the 16-value goal
+    vector: targets and masks for `vis`, then targets and masks for `bright`.
+
+    The panel plots the channel the instruction is actually about."""
+    n = len(goals.GOAL_CLASSES)
+    vis_mask, bright_mask = goal[n:2 * n], goal[3 * n:4 * n]
+    return {
+        "vis": [c for i, c in enumerate(goals.GOAL_CLASSES) if vis_mask[i]],
+        "bright": [c for i, c in enumerate(goals.GOAL_CLASSES) if bright_mask[i]],
+    }
+
+
 _frame_bounds_cache = {"dataset": None, "bounds": None}
 
 
@@ -315,6 +349,7 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
             "params": params.tolist(),
             "image_b64": image_b64,
             "class_visibility": _class_visibility(params),
+            "class_brightness": _class_brightness(params),
             "attainment": float(goals.attainment(instruction["goal"], start_agg, final_agg)),
             # An arm that returned its own input is not an arm that *agrees*
             # with the start -- it is an arm that did not move, and rendered
@@ -338,8 +373,8 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
         # Same keys as a successful arm, so a consumer iterating the arms
         # never has to special-case a failed one before reading a field.
         return {"params": None, "unavailable": reason, "attainment": None,
-                "class_visibility": None, "image_b64": None, "evaluations": None,
-                "unchanged": None, "elapsed_ms": elapsed_ms}
+                "class_visibility": None, "class_brightness": None, "image_b64": None,
+                "evaluations": None, "unchanged": None, "elapsed_ms": elapsed_ms}
 
     def _arm(fn, evaluations):
         started = time.perf_counter()
@@ -698,7 +733,9 @@ async def compare_route(req: CompareRequest):
                          start_params, camera, cheap=req.cheap, thorough=req.thorough)
     return {"applicable": True, "text": req.text, "goal_text": instruction["text"],
             "budgets": {"cheap": req.cheap, "thorough": req.thorough}, "arms": arms,
-            "start": {"class_visibility": _class_visibility(start_params)},
+            "channels": goal_channels(instruction["goal"]),
+            "start": {"class_visibility": _class_visibility(start_params),
+                       "class_brightness": _class_brightness(start_params)},
             **parser_meta}
 
 

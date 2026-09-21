@@ -1088,3 +1088,8 @@ select:focus-visible {
    column reads as "this arm agrees with the start", which is the opposite
    claim. */
 .compare-nomove { font-size: 0.68rem; color: hsl(var(--amber, var(--muted-foreground))); }
+
+.compare-channel {
+  font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: hsl(var(--muted-foreground)); margin-bottom: 0.15rem;
+}
