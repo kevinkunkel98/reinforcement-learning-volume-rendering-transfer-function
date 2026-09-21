@@ -432,6 +432,42 @@ at $p < 0.001$. Note that B1, the rule-based executor this system would otherwis
 ship, scores *below doing nothing*: acting on the named tissue alone is worse
 than leaving the transfer function untouched.]
 
+=== Why the rule executor fails, concretely
+
+B1's median hides a bimodal split, and the mechanism is worth stating because it
+is the thesis's argument in miniature. Swept over 53 instruction-volume pairs in
+the viewer, the rule executor's median attainment is $+0.003$ -- it improves 28
+and *worsens* 25. But by instruction kind it ranges from $+0.147$ on show-only
+to $-2.192$ on compound.
+
+The show-only case is the instructive one. `commands.apply_command` answers
+"show only X" by setting X's peak to a hard-coded height of $0.7$ and every
+other peak to $0$, while the goal asks for X to become ten times more visible
+(`HIDE_STRENGTH` $= 1.0$ in $log_10$). Default peak heights are lungs $0.05$,
+soft tissue $0.15$, vessels $0.30$, skeleton $0.60$. So:
+
+#block(inset: (left: 1em))[
+  *"Show only the lungs"* moves the lung peak $0.05 arrow 0.7$ -- a 14#sym.times
+  jump against a goal asking for 10#sym.times. The rule succeeds, and beats even
+  the 200-evaluation search on four of five test subjects.
+
+  *"Show only the skeleton"* moves the bone peak $0.60 arrow 0.7$ -- a
+  1.17#sym.times nudge against the same 10#sym.times goal, while dimming
+  everything else. It lands *below doing nothing* on four of five subjects.
+]
+
+#finding[The rule is not bad at "show only". It is good at showing things that
+started dim, because a constant cannot know what the current state is. That is
+the whole case for grounding the decision in a measurement of the render: the
+quantity a rule would need to know -- how far this tissue is from where the
+instruction wants it, on *this* scan -- is exactly what the rule has no access
+to, and what both search and the policy consume.]
+
+#caveat[These sweep numbers come from single episodes at the default transfer
+function, not from the held-out protocol of @results, and are reported to
+explain a mechanism rather than to measure one. The held-out figure for B1
+remains $-0.022$ over 200 episodes.]
+
 #caveat[The comparison against cheap search splits by seed: seed 0 favours search
 ($p = 3.0 times 10^(-4)$), seeds 1 and 2 favour the policy ($p = 0.054$,
 $p = 0.029$). The defensible claim is that the policy *matches* cheap search at a
