@@ -73,6 +73,9 @@ def aggregate(features: dict) -> dict:
             bright[goal_class] = sum(features["vis"][m] * features["bright"][m] for m in measured) / total_vis
         else:
             bright[goal_class] = 0.0
+    # Not a goal class -- no instruction ever names it -- but distance() still
+    # needs it to tell "hidden" apart from "hidden behind unlabeled material".
+    vis["other"] = features["vis"].get("other", 0.0)
     return {"vis": vis, "bright": bright, "coverage": features["coverage"]}
 
 
@@ -106,6 +109,8 @@ def progress(start: dict, current: dict) -> tuple:
         c[goal_class] = (math.log10(current["vis"][goal_class] + EPSILON)
                           - math.log10(start["vis"][goal_class] + EPSILON))
         b[goal_class] = current["bright"][goal_class] - start["bright"][goal_class]
+    c["other"] = (math.log10(current["vis"].get("other", 0.0) + EPSILON)
+                  - math.log10(start["vis"].get("other", 0.0) + EPSILON))
     return c, b
 
 
@@ -132,6 +137,11 @@ def distance(goal: np.ndarray, start: dict, current: dict) -> float:
         total += m[i] * abs(c[goal_class] - d[i]) + KAPPA * n[i] * abs(b[goal_class] - e[i])
         total += LAMBDA_KEEP * (1.0 - m[i]) * max(0.0, abs(c[goal_class]) - KEEP_TOLERANCE)
         total += LAMBDA_KEEP * KAPPA * (1.0 - n[i]) * max(0.0, abs(b[goal_class]) - KEEP_TOLERANCE)
+    # "other" (unlabeled tissue) can never be named by an instruction, so it is
+    # always the unmentioned case -- without this, a transfer function can
+    # satisfy "show only X" by rendering an opaque wall of unclassified
+    # material instead of X, since none of the four goal classes charges for it.
+    total += LAMBDA_KEEP * max(0.0, abs(c["other"]) - KEEP_TOLERANCE)
     return float(total)
 
 

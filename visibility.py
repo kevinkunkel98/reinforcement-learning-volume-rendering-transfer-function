@@ -161,7 +161,16 @@ class VisibilityModel:
         return before * alpha, luminance, 1.0 - transparency.prod(dim=1)
 
     def features(self, params) -> dict:
-        """{"vis": {class: float}, "bright": {class: float}, "coverage": float}."""
+        """{"vis": {class: float, "other": float}, "bright": {class: float}, "coverage": float}.
+
+        "other" is voxels the label volume (or the intensity fallback)
+        assigned to none of the five classes -- fat, connective tissue,
+        partial-volume edges. A transfer function can still put opacity
+        there, so it is measured the same way the five classes are, instead
+        of silently vanishing: `goals.distance` charges for it under the same
+        keep-tolerance any unmentioned class gets, or a search/policy could
+        satisfy "show only X" by rendering an opaque wall of unclassified
+        material instead of X (see goals.py's OTHER keep term)."""
         weights, luminance, accumulated = self._weights(params)
         vis, bright = {}, {}
         for index, name in enumerate(CLASSES):
@@ -169,6 +178,8 @@ class VisibilityModel:
             total = float(masked.sum())
             vis[name] = total / self._rays
             bright[name] = float((masked * luminance).sum() / total) if total > 1e-6 else 0.0
+        other_masked = torch.where(self._labels == -1, weights, torch.zeros(()))
+        vis["other"] = float(other_masked.sum()) / self._rays
         coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
         return {"vis": vis, "bright": bright, "coverage": coverage}
 

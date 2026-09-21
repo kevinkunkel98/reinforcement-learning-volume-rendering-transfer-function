@@ -101,6 +101,23 @@ def test_coverage_counts_rays_that_accumulate_opacity():
     assert 0.0 <= thin < thick <= 1.0
 
 
+def test_features_reports_unlabeled_tissue_as_other():
+    """A transfer function can render tissue that belongs to none of the five
+    named classes (fat, connective tissue, partial-volume edges): HU -200
+    falls in the gap the intensity fallback leaves unclassified, between
+    lungs (<=-500) and organs (>=-30). That contribution has to be visible
+    somewhere in features(), or a caller scoring only the five named classes
+    cannot tell "everything hidden" from "an opaque wall of unclassified
+    material" -- exactly what goals.distance's "other" keep term needs."""
+    volume = _slab_volume(-1000.0, -200.0)
+    model = _model(volume)
+    params = _single_peak_params(center_hu=-200.0, height=0.9, width_hu=80.0, peak=0)
+    features = model.features(params)
+    assert features["coverage"] > 0.5
+    assert sum(v for name, v in features["vis"].items() if name != "other") < 0.01
+    assert features["vis"]["other"] > 0.3
+
+
 def test_views_see_different_things():
     """Bone behind soft tissue is hidden from the front and open from behind."""
     n = 24

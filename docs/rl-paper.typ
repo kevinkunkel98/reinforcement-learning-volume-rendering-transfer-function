@@ -302,6 +302,42 @@ mapping the thesis asks about, and one where a 10-evaluation search already does
 well. Emitting the whole transfer function at once removes the search from the
 policy's job and leaves the mapping.]
 
+=== Four generations of the one-shot policy <lineage>
+
+The one-shot formulation itself went through four checkpoint generations, each
+retrained from scratch rather than fine-tuned, so a later generation's numbers
+never carry an earlier bug's habits forward.
+
+#figure(
+  table(
+    columns: 3, align: (left, left, left), stroke: rule,
+    thead[Version][Checkpoints][What changed],
+    [v1], [`oneshot_seed{0,1}`],
+      [First one-shot checkpoint, replacing the ten-step formulation above.
+       Exploratory: no held-out evaluation was ever run against it, and it was
+       superseded within a day by v2.],
+    [v2], [`oneshot_v2_seed{0,1,2}`],
+      [Added the reachable-ceiling channel (`solo_max`, @measure) to the
+       observation. Evaluated, but on two undetected bugs, below.],
+    [v3], [`oneshot_v3_seed{0,1,2}`],
+      [The ceiling probed at the wrong peak centre, and a colour action that
+       collapsed $r=g=b$ (@retrain), both fixed. This is the checkpoint behind
+       every number in @results unless stated otherwise.],
+    [v4], [`oneshot_v4_seed{0,1,2}`],
+      [`goals.distance` charges for a transfer function that hides behind
+       unclassified ("other") tissue instead of the named goal class — a gap
+       v1–v3 all shared (@v4-retrain).],
+  ),
+  caption: [Checkpoint lineage. Directory names under `out/rl_v2/` match the
+  version column exactly, so a result file's own path states which generation
+  produced it.],
+)
+
+#caveat[v1 is documented here for completeness, not as a measured baseline: it
+predates the reachable-ceiling channel entirely (a 53-value observation, not
+57), and no result file for it exists. Its numbers cannot be recovered without
+retraining it, which this paper does not do.]
+
 = Experimental setup
 
 == Data
@@ -544,6 +580,66 @@ $+0.086$); $n = 3$ training runs per arm; and the $p$-value is a paired test ove
 across seeds. An earlier ablation that would have isolated the channel directly
 ("policy, no ceiling input") was never validly run — the stored result file is
 byte-identical to its own control — and is withdrawn rather than repaired.]
+
+== Fixing a reward-hacking blind spot (v3 to v4) <v4-retrain>
+
+`visibility.py` scores a transfer function per anatomical class (@measure), but
+every voxel the label volume assigns to none of the five classes — fat,
+connective tissue, partial-volume edges — was simply invisible to the
+objective: not measured, not penalised, not present anywhere in `goals.distance`.
+
+#finding[A transfer function can satisfy "show only X" by rendering an opaque
+wall of unclassified tissue instead of X. Driving the viewer's "show only
+bones" on `ts_s0477` with `hill_climb` (200 evaluations) reached *full frame
+coverage* while every one of the five labelled classes read below $0.001$ of
+the image — none of skeleton, lungs, organs, muscle or vessels was actually
+shown; 99 % of the frame was material the objective could not see. The search
+found this because it optimises `goals.distance` directly; nothing stopped v1
+through v3 from learning the same shortcut, since they were rewarded by the
+identical function.]
+
+The fix adds an "other" bucket to `visibility.py`'s per-class output (the
+voxels the label volume assigns to none of the five classes) and charges for
+it in `goals.distance` under the same keep-tolerance any unmentioned class
+already gets — it can never be *named* by an instruction, so it is always the
+unmentioned case. Verified in isolation before retraining: a transfer function
+that hides a class behind a spike in unclassified material now scores strictly
+worse than hiding it cleanly (`tests/test_goals.py`,
+`test_distance_penalises_hiding_behind_unlabeled_material`).
+
+#figure(
+  table(
+    columns: 4, align: (left, center, center, center), stroke: rule,
+    thead[Method][v3][v4][Improved (v3 #sym.arrow v4)],
+    [B4 hill-climb (thorough)], [+0.730], [+0.692], [100 % #sym.arrow 100 %],
+    [*policy + 3 refinements*], [+0.316], [*+0.371*], [76 % #sym.arrow 80 %],
+    [*policy alone*], [+0.275], [*+0.331*], [73 % #sym.arrow 78 %],
+    [B3 hill-climb (cheap)], [+0.263], [+0.258], [93 % #sym.arrow 93 %],
+    [B1 rule executor], [#sym.minus 0.022], [#sym.minus 0.022], [37 % #sym.arrow 37 %],
+    [B5 occlusion heuristic], [#sym.minus 0.191], [#sym.minus 0.198], [30 % #sym.arrow 30 %],
+  ),
+  caption: [Median of seed medians, same 200-episode held-out protocol as
+  @results. B4's own score *drops* — some of its old advantage was the same
+  exploit, now correctly discounted rather than rewarded.],
+)
+
+#finding[The policy improved on the corrected objective without being trained
+differently — same architecture, same 150k timesteps, three fresh seeds. That
+the deterministic baselines B0–B2 and B5 barely move while B4 (the arm that
+directly optimises `goals.distance`) drops the most is the expected signature
+of a reward-hacking fix: it should hurt whatever was exploiting the gap hardest
+and leave everything else roughly where it was.]
+
+#caveat[The fix does not resolve the failure mode it was written to explain.
+Re-running "show only bones" on `ts_s0477` with the strongest new seed still
+reaches only $0.0018$ skeleton visibility against $0.604$ in the "other"
+bucket — attainment rose from $+0.246$ to $+0.289$, but the gain is from
+slightly cleaner suppression of lungs and soft tissue, not from actually
+raising the named class. `show_only`'s own per-kind mean held near $+0.22$
+across all three v4 seeds, barely above v3's $+0.20$. One retrain removed the
+wrong incentive; it did not teach the policy the right behaviour. Plausible
+next steps — more training steps, a larger `LAMBDA_KEEP`, oversampling
+`show_only` episodes — are untested hypotheses, not claims.]
 
 == Convergence
 

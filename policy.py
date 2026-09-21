@@ -13,15 +13,20 @@ Two callers, one constant. Anything that needs the policy imports it here.
 """
 import os
 
-# v3: trained on the corrected observation. Held-out attainment +0.275 against
-# v2's +0.247, as the median of the three seeds' own medians -- the statistic
-# the README and pipeline tables report.
+# v4: trained after goals.distance gained an "other" keep term (visibility.py's
+# unlabeled-tissue bucket) -- v3 and earlier let a transfer function satisfy
+# "show only X" by rendering an opaque wall of unclassified tissue instead of
+# X, since none of the four goal classes charged for it. Per-seed held-out
+# medians: seed0 +0.306, seed1 +0.331, seed2 +0.357 (out/rl_v2/eval_v4_seed*.json)
+# -- seed2 shipped here as the strongest, where v3 shipped its weakest (seed0)
+# by oversight (see docs/STATUS.md's "Known issues").
 #
-# The paired v2/v3 test uses a different statistic and the two must not be
-# crossed: on the median of the seed-averaged per-episode attainment it is v3
-# +0.286 against v2 +0.201, Wilcoxon p = 0.0064. Same checkpoints, same 200
-# episodes; +0.028 and +0.086 are the same result aggregated two ways.
-POLICY_PATH = "out/rl_v2/oneshot_v3_seed0/best.zip"
+# v3's own numbers (pre-fix, kept for the historical comparison in
+# docs/STATUS.md and docs/rl-paper.typ): held-out attainment +0.275 against
+# v2's +0.247, as the median of the three seeds' own medians. On the paired
+# v2/v3 test (a different statistic -- do not cross the two): v3 +0.286
+# against v2 +0.201, Wilcoxon p = 0.0064.
+POLICY_PATH = "out/rl_v2/oneshot_v4_seed2/best.zip"
 
 _state = {"loaded": False, "policy": None}
 

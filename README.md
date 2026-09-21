@@ -42,8 +42,8 @@ function:
 
 | instruction | exact | search · 10 | search · 200 | **policy** |
 |---|---|---|---|---|
-| more bone | −0.001 | +0.348 | +0.582 | **+0.627** |
-| brighten the skeleton | +0.025 | +0.000 | +0.941 | **+0.819** |
+| more bone | −0.001 | +0.348 | +0.582 | **+0.541** |
+| brighten the skeleton | +0.025 | +0.000 | +0.941 | **+0.775** |
 
 Read the cost column, not the clock: exact and the policy spend **zero**
 visibility evaluations, cheap search spends ten, thorough search two hundred. On
@@ -61,9 +61,9 @@ each method does across all of them.
 
 | sweep seed | exact | search · 10 | **policy** |
 |---|---|---|---|
-| 0 | −0.209 (37 %) | +0.342 (100 %) | **+0.425 (85 %)** |
-| 1 | −0.263 (22 %) | +0.387 (100 %) | **+0.405 (95 %)** |
-| 2 | +0.041 (60 %) | +0.384 (100 %) | **+0.340 (85 %)** |
+| 0 | −0.209 (37 %) | +0.342 (100 %) | **+0.473 (90 %)** |
+| 1 | −0.263 (22 %) | +0.387 (100 %) | **+0.443 (95 %)** |
+| 2 | +0.041 (60 %) | +0.384 (100 %) | **+0.352 (90 %)** |
 
 Five seconds, deterministic in its seed. The search arms call
 `rl.baselines.hill_climb` at the budgets the held-out table reports, and
@@ -138,25 +138,25 @@ training seeds:
 
 | Method | Evaluations used | Median attainment | Improved |
 |---|---|---|---|
-| hill-climb (thorough) | 200 | +0.730 | 100 % |
-| **policy + 3 refinements** | **4** | **+0.316** | 76 % |
-| **policy alone** | **0** | **+0.275** | 73 % |
-| hill-climb (cheap) | 10 | +0.263 | 93 % |
+| hill-climb (thorough) | 200 | +0.692 | 100 % |
+| **policy + 3 refinements** | **4** | **+0.371** | 80 % |
+| **policy alone** | **0** | **+0.331** | 78 % |
+| hill-climb (cheap) | 10 | +0.258 | 93 % |
 | do nothing | 0 | 0.000 | — |
 | today's rule-based executor | 0 | −0.022 | 37 % |
 | random | 0 | −0.040 | 39 % |
-| occlusion heuristic | 0 | −0.191 | 30 % |
+| occlusion heuristic | 0 | −0.198 | 30 % |
 
 Attainment is 1 when the instruction is satisfied, 0 when nothing changed,
 negative when the result got worse. The policy beats every non-search baseline at
 p < 0.001, and with no evaluations at all it matches a hill-climber allowed ten of
-them. It is not yet as *reliable* as search (73 % vs 93 % of instructions
+them. It is not yet as *reliable* as search (78 % vs 93 % of instructions
 improved) — that gap is the honest headline. Per seed the paired comparison
-against cheap search splits: seed 0 favours search (p = 3.0e-04), seeds 1 and 2
-favour the policy (p = 0.054, p = 0.029), so "matches" is the defensible claim
-and "beats" is not.
+against cheap search: p = 0.607, 0.892, 0.610 — none reach significance, so
+"matches" now holds uniformly across all three seeds, not just two of three as
+before the reward fix below.
 
-This table was wrong twice, and both corrections are worth recording.
+This table was wrong three times, and every correction is worth recording.
 
 The first: an early version reported +0.194 for the policy alone, inflated by a
 colour decode that collapsed every peak to grey and by a reachable-ceiling probe
@@ -182,6 +182,25 @@ exactly the ones that read the reachable-ceiling channel — so that channel ear
 its place after all, contrary to what
 `docs/experiments/2026-09-16-retrain-after-measurement-fixes.md` concluded from
 the stale numbers.
+
+The third: `visibility.py` measures five anatomical classes, but every voxel
+labelled as none of them — fat, connective tissue, partial-volume edges — was
+invisible to the objective entirely. A transfer function could satisfy "show
+only bones" by rendering an opaque wall of that unclassified material instead
+of bone, and nothing charged for it: driving the viewer's search on "show only
+bones" reached full frame coverage while every one of the five labelled
+classes read below 0.001 of the image. Fixed by adding an "other" bucket to
+`visibility.py` and charging for it in `goals.distance` under the same
+keep-tolerance any unmentioned class gets, verified with new unit tests before
+retraining. Three fresh seeds, same architecture, same 150k timesteps: policy
+alone rose +0.275 → +0.331, policy+refinement +0.316 → +0.371, and thorough
+search's own number *dropped* +0.730 → +0.692 (it was exploiting the same gap
+via `goals.distance`, now correctly discounted). What the fix did *not* do:
+teach the policy to actually solve `show_only` — re-measured with the new
+checkpoint, "show only bones" on `ts_s0477` still renders 60% unclassified
+material and under 0.2% skeleton, just slightly better-suppressed elsewhere.
+Full write-up, including that caveat, in `docs/rl-paper.typ` (`@v4-retrain`)
+and `docs/STATUS.md`.
 
 ```bash
 python -m rl.oneshot_train --timesteps 150000 --seed 0 --out out/rl_v2/seed0

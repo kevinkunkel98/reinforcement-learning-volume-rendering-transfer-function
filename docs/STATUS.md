@@ -1,60 +1,114 @@
-# Status — 2026-09-20
+# Status — 2026-09-21
 
-MVP due in 2 days. The results have not moved since the 18th and do not need
-to. What changed this weekend is that the prototype became something you can
-*operate* rather than describe: one instruction, answered four ways at once,
-with the cost of each answer on screen.
+Found and fixed a reward-hacking blind spot the same day as the presentation
+prep: `goals.distance` never charged a transfer function for rendering
+unclassified ("other") tissue, so a search or a policy could satisfy "show
+only X" by lighting up material that belongs to none of the five measured
+classes instead of X. Fixed, retrained three fresh seeds (`oneshot_v4_seed
+{0,1,2}`), re-ran the full held-out protocol. The fix helped the aggregate
+numbers; it did not fully solve the failure mode that exposed it. Both halves
+of that sentence are below, not just the first one.
 
 ## Where things stand
 
 | | state |
 |---|---|
-| Measurement (`visibility.py`) | validated against real renders, four of five classes |
-| Policy | 3 seeds on the corrected pipeline (`oneshot_v3_seed{0,1,2}`) |
-| Held-out evaluation | 200 episodes, 3 seeds, baselines B0–B5, provenance recorded |
-| Reproducibility | result files carry per-episode rows; `tools.compare_runs` recomputes the v2/v3 comparison from them |
+| Measurement (`visibility.py`) | validated against real renders, four of five classes; now also reports an "other" (unclassified-tissue) bucket per render |
+| Policy | 3 seeds on the reward-corrected pipeline (`oneshot_v4_seed{0,1,2}`); viewer ships seed 2, the strongest |
+| Held-out evaluation | 200 episodes, 3 seeds, baselines B0–B5, provenance recorded, re-run under the corrected objective |
+| Reproducibility | result files carry per-episode rows; `tools.compare_runs` recomputes seed-to-seed comparisons from them |
 | Viewer | four-mode comparison panel and a 20-instruction sweep |
 | Language → goal → policy | end to end, LLM parser default |
-| Figures | frontier, reliability, per-kind curves, qualitative, SAC diagnostics |
+| Figures | frontier, reliability, per-kind curves, qualitative, SAC diagnostics — **not yet re-rendered for v4**, still reflect v3 |
 | **Clean preference judgments** | **0** — the 54 collected are quarantined as a pilot |
-| Tests | 633 passing |
+| Tests | 669 passing |
 
-## Results (re-measured 2026-09-17, re-derived 2026-09-19)
+## What changed today: the "other" keep term
 
-200 instructions, six unseen patients. Attainment is the median of the three
-seeds' medians; "improved" is their mean. Baseline rows do not vary by seed —
-the episode seed is fixed at 0, so every arm is scored on identical episodes
-and only the policy differs between the three files.
+`visibility.py` measures five anatomical classes, but every voxel the label
+volume assigns to none of them — fat, connective tissue, partial-volume edges
+— was invisible to the objective: not measured, not penalised, not present
+anywhere in `goals.distance`. Driving the viewer's "show only bones" on
+`ts_s0477` with `hill_climb` (200 evaluations) reached **full frame
+coverage** while every one of the five labelled classes read below 0.001 of
+the image — 99% of the rendered frame was material the objective could not
+see, and the search still scored it as a strong answer.
 
-| Method | Evaluations | Median attainment | Improved |
-|---|---|---|---|
-| hill-climb (thorough) | 200 | +0.730 | 100 % |
-| **policy + 3 refinements** | **4** | **+0.316** | 76 % |
-| **policy alone** | **0** | **+0.275** | 73 % |
-| hill-climb (cheap) | 10 | +0.263 | 93 % |
-| do nothing | 0 | 0.000 | — |
-| rule-based executor | 0 | −0.022 | 37 % |
-| random | 0 | −0.040 | 39 % |
-| occlusion heuristic | 0 | −0.191 | 30 % |
+Fix: `visibility.py`'s `features()` now reports an `"other"` bucket for
+those unclassified voxels, and `goals.distance` charges for it under the same
+keep-tolerance any unmentioned class already gets (it can never be *named* by
+an instruction, so it is always the unmentioned case). Verified in isolation
+before retraining — 5 new tests, full suite green at 669/669 — then three
+fresh seeds retrained from scratch under the corrected reward (same
+architecture, same 150k timesteps).
 
-**The claim:** the policy answers with no evaluations at the level of a
-hill-climber allowed ten, and beats every non-search baseline at p < 0.001.
-Search remains more reliable (93 % vs 73 %). Per seed the paired test against
-cheap search splits — seed 0 favours search (p = 3.0e-04), seeds 1 and 2 favour
-the policy (p = 0.054, p = 0.029) — so "matches" is defensible and "beats" is
-not.
+## Results — v4, the corrected objective (measured 2026-09-21)
 
-Per instruction kind (median, seed 1): absolute +0.50, brightness +0.48,
-relative +0.30, show-only +0.20, **compound +0.09**. Compound is 25 % of the
-sampled mix (43 of the 200 test episodes) and the policy essentially fails it.
+200 instructions, six unseen patients, three fresh seeds. Same protocol as
+before: attainment is the median of the three seeds' medians; "improved" is
+their mean.
 
-On 2026-09-19 all six result files were re-run and reproduced their stored
-summaries exactly, to six decimal places, now carrying per-episode rows.
-`tools.compare_runs` recomputes the v2-against-v3 comparison from those files:
-+0.2008 against +0.2863 seed-averaged, p = 0.0064, v3 ahead on 59 % of
-episodes, the gain concentrated in absolute instructions (+0.1223).
+| Method | Evaluations | v3 (old) | **v4 (now)** | Improved |
+|---|---|---|---|---|
+| hill-climb (thorough) | 200 | +0.730 | +0.692 | 100 % |
+| **policy + 3 refinements** | **4** | +0.316 | **+0.371** | 80 % |
+| **policy alone** | **0** | +0.275 | **+0.331** | 78 % |
+| hill-climb (cheap) | 10 | +0.263 | +0.258 | 93 % |
+| do nothing | 0 | 0.000 | 0.000 | — |
+| rule-based executor | 0 | −0.022 | −0.022 | 37 % |
+| random | 0 | −0.040 | −0.040 | 39 % |
+| occlusion heuristic | 0 | −0.191 | −0.198 | 30 % |
 
-## The viewer, as of this weekend
+**The policy improved (+0.275→+0.331 alone, +0.316→+0.371 with refinement)
+without any change to architecture or training budget** — the only change
+was what the reward charges for. Thorough search's own number *dropped*
+(+0.730→+0.692): part of its old advantage was the same exploit, now
+correctly discounted rather than rewarded. That B4 drops the most while the
+deterministic baselines (B0–B2, B5) barely move at all is the expected
+signature of a reward-hacking fix, not noise.
+
+Per instruction kind (median of the three seeds' medians): absolute +0.511,
+brightness +0.561, relative +0.354, show-only +0.166, compound +0.117. Three
+of five kinds clearly improved on the old single-seed numbers (absolute
++0.50, brightness +0.48, relative +0.30); **compound moved from +0.09 to
++0.117 — still weak, but not nothing.**
+
+### The honest part: `show_only` itself is not fixed
+
+Re-ran "show only bones" on `ts_s0477` with the strongest new seed (2),
+independently of the viewer, straight from the checkpoint:
+
+```
+final vis: skeleton=0.0018, lungs=0.00006, soft=0.00093, other=0.604
+attainment: 0.289  (was 0.246 with the old checkpoint)
+```
+
+Skeleton is still tiny; "other" still dominates 60% of the image. The
+attainment gain is from slightly cleaner suppression of lungs/soft tissue,
+not from the policy learning to actually raise the named class. `show_only`'s
+own median-of-medians (+0.166) sits at or slightly below the old single-seed
+figure (+0.20) — the mean, less sensitive to this specific failure, moved
+from +0.20 to ~+0.22-0.23 across the three new seeds.
+
+**Conclusion: the reward fix was correct and necessary, and it measurably
+helped the aggregate numbers, but one retrain did not teach the policy to
+solve `show_only` — that remains open.** Untested hypotheses for next steps:
+train longer, raise `LAMBDA_KEEP`, oversample `show_only` episodes during
+training. None of these have been tried yet.
+
+## v1–v4, for the record
+
+| Version | Checkpoints | What changed |
+|---|---|---|
+| v1 | `oneshot_seed{0,1}` | First one-shot checkpoint, replacing an earlier ten-step formulation that never learned. Exploratory — no held-out eval was ever run; superseded within a day. |
+| v2 | `oneshot_v2_seed{0,1,2}` | Added the reachable-ceiling (`solo_max`) channel to the observation. Evaluated, but on two undetected bugs. |
+| v3 | `oneshot_v3_seed{0,1,2}` | Both bugs fixed: the ceiling was probed at the wrong peak centre, and a colour action collapsed r=g=b. This was the headline checkpoint until today. |
+| v4 | `oneshot_v4_seed{0,1,2}` | `goals.distance` now charges for hiding behind unclassified ("other") tissue — a gap v1–v3 all shared. **Current.** |
+
+Full v2→v3 and v3→v4 write-ups with per-kind tables and significance tests
+are in `docs/rl-paper.typ` (`@retrain`, `@v4-retrain`).
+
+## The viewer, as of today
 
 **compare** answers one instruction four ways from the same start state —
 applied directly, hill-climbed at 10 evaluations (B3) and 200 (B4), and by the
@@ -72,19 +126,24 @@ comparison is a single draw; the claim above is a median, and the reliability
 gap means roughly one instruction in four has the policy not improving.
 
 Measured on `ts_s0477`, a held-out test subject, reset to the default transfer
-function before every measurement:
+function before every measurement, **with the v4 seed-2 checkpoint**:
 
 | instruction | exact | search·10 | search·200 | policy |
 |---|---|---|---|---|
-| more bone | −0.001 | +0.348 | +0.582 | **+0.627** |
-| brighten the skeleton | +0.025 | +0.000 | +0.941 | **+0.819** |
-| show only the lungs | **+0.680** | +0.430 | +0.442 | +0.254 |
+| more bone | −0.001 | +0.348 | +0.582 | **+0.541** |
+| brighten the skeleton | +0.025 | +0.000 | +0.941 | **+0.775** |
 
 | sweep seed | exact | search·10 | policy |
 |---|---|---|---|
-| 0 | −0.209 (37 %) | +0.342 (100 %) | **+0.425 (85 %)** |
-| 1 | −0.263 (22 %) | +0.387 (100 %) | **+0.405 (95 %)** |
-| 2 | +0.041 (60 %) | +0.384 (100 %) | **+0.340 (85 %)** |
+| 0 | −0.209 (37 %) | +0.342 (100 %) | **+0.473 (90 %)** |
+| 1 | −0.263 (22 %) | +0.387 (100 %) | **+0.443 (95 %)** |
+| 2 | +0.041 (60 %) | +0.384 (100 %) | **+0.352 (90 %)** |
+
+The two single-episode examples read slightly lower than the old checkpoint's
+(+0.627/+0.819 → +0.541/+0.775) — expected variance on n=1, not a regression;
+the sweep numbers (which average over 20 instructions) are up on every seed
+(old +0.425/+0.405/+0.340 → new +0.473/+0.443/+0.352), consistent with the
+held-out table above.
 
 Exact and policy spend 0 evaluations and answer in 0 ms; search·10 takes
 ~140 ms, search·200 ~2.7 s.
@@ -94,15 +153,22 @@ Exact and policy spend 0 evaluations and answer in 0 ms; search·10 takes
 - **Press Reset before measuring anything.** Both panels start from wherever
   the session is, so comparing an instruction you have already applied measures
   from its own result — a different question, with worse-looking numbers.
-- **Drive brightness instructions.** The policy beats cheap search on 8 of 9 of
-  them, and cheap search often scores exactly +0.000 there, because ten
-  evaluations is less than half of one 24-evaluation coordinate sweep.
+- **Drive absolute and brightness instructions for a "policy works" demo** —
+  both are strong and improved further under v4. Avoid leading with `show only`
+  — it's the one category the reward fix didn't resolve (see above).
+- **Vessels only work on `ts_s1379`.** Every named demo dataset (`ct_chest`,
+  `ct_skull`, `ct_cardio`, `ct_abdomen`, `mri_head`, `stag_beetle`) has no
+  TotalSegmentator labels at all, so `goal_classes_for_volume` never offers
+  vessels as a goal there regardless of what the scan actually shows — this
+  includes `ct_cardio`, whose name suggests otherwise. `datasets.py`'s
+  `OUT_OF_SOURCE_CT` names exactly these four as a generalization split that
+  has never actually been evaluated.
 - **Avoid "a bit less soft tissue"** (policy −2.8 on two subjects) and compound
   instructions (median −0.25 in the sweep).
 - **Four of six test subjects have no lungs.** Lung instructions are correctly
   refused there; that is not a bug.
 
-## Defects found and fixed this weekend
+## Defects found and fixed this weekend (2026-09-20)
 
 - The viewer's **search mode was not the search the thesis measures** — a
   bespoke coordinate stepper over `evaluate.objective` rather than
@@ -120,25 +186,26 @@ Exact and policy spend 0 evaluations and answer in 0 ms; search·10 takes
 
 ## Cheapest improvements, in order
 
-1. **Fix compound instructions** — a quarter of the mix at +0.09, the clearest
-   capability gap and the one a user notices first.
-2. **Train longer.** Worth trying, but not the evidence-backed first move: the
-   per-kind curves plateau rather than run out of steps. ~3 h per seed.
+1. **Actually solve `show_only`.** The reward no longer rewards the wrong
+   thing, but the policy hasn't learned the right thing either — try more
+   training steps, a larger `LAMBDA_KEEP`, or oversampling `show_only`
+   episodes, and check per-episode renders, not just the attainment number.
+2. **Fix compound instructions** — still the second-clearest capability gap
+   (+0.117), the one a user notices first after show-only.
 3. **Distil search into the policy** — supervised pretraining on hill-climb
    solutions before RL. The standard way to close an amortisation gap.
 4. **Make `visibility.py` differentiable.** The index cube is constant with
    respect to the transfer function; only `transfer_tables` needs porting to
    torch. Gives an analytic ceiling, a teacher for distillation, and an honest
    new baseline.
+5. **Re-render the figures for v4** — frontier, reliability, per-kind curves,
+   qualitative and SAC diagnostics all still reflect v3.
 
 ## Known issues
 
 - **The "policy, no ceiling input" ablation** was never validly run: the stored
   result file is byte-identical to its own control, and no ablation switch has
   ever existed in the code. Withdrawn rather than repaired.
-- **The viewer ships the seed-0 checkpoint**, the weakest of the three on
-  held-out data (+0.231 against +0.307 and +0.275). Fixed before the held-out
-  numbers were known, and not revisited.
 - **`evaluations` in the comparison panel is the budget granted**, not what
   search spent — `hill_climb` can stop early, so B4 reports 200 where it spends
   about 193.
@@ -148,3 +215,18 @@ Exact and policy spend 0 evaluations and answer in 0 ms; search·10 takes
 - **Anchor-pool and image caches** under `out/cache/` are serialisation
   contracts across raters. Do not change their key formats without invalidating
   them deliberately.
+- **`hill_climb`'s coordinate descent still finds the same "suppress
+  everything, light up unclassified tissue" local optimum on `show_only`
+  from the default start and from randomized starts**, even under the
+  corrected objective — the fix removes the wrong incentive but doesn't
+  guarantee a greedy per-episode local search finds the right one. Not
+  addressed: would require its own scoped change to `rl.baselines.hill_climb`
+  and re-validation of the B3/B4 budget numbers, which this session
+  deliberately left alone.
+- **Out-of-source generalization (`ct_chest`, `ct_skull`, `ct_cardio`,
+  `ct_abdomen`) has never been formally evaluated**, despite
+  `datasets.OUT_OF_SOURCE_CT` and `rl.vis_eval --split out_of_source` existing
+  for exactly that. These volumes have no TotalSegmentator labels, so
+  `visibility.py` scores them on the coarser intensity fallback, and the
+  policy never trained on them. A live spot-check found the policy
+  performing at or below "do nothing" on `ct_skull`.

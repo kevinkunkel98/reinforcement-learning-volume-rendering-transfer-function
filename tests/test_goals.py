@@ -10,19 +10,23 @@ from transfer import peak_internal
 
 
 def _features(skeleton=(0.0, 0.0), lungs=(0.0, 0.0), organs=(0.0, 0.0),
-              muscle=(0.0, 0.0), vessels=(0.0, 0.0), coverage=0.5):
-    """A raw visibility.features()-shaped dict: each arg is (vis, bright)."""
+              muscle=(0.0, 0.0), vessels=(0.0, 0.0), other=0.0, coverage=0.5):
+    """A raw visibility.features()-shaped dict: each arg is (vis, bright).
+    `other` is the unlabeled-tissue vis (visibility.py's "other" bucket) --
+    no brightness, since nothing ever targets its colour."""
     values = {"skeleton": skeleton, "lungs": lungs, "organs": organs,
               "muscle": muscle, "vessels": vessels}
-    return {"vis": {c: v[0] for c, v in values.items()},
+    vis = {c: v[0] for c, v in values.items()}
+    vis["other"] = other
+    return {"vis": vis,
             "bright": {c: v[1] for c, v in values.items()},
             "coverage": coverage}
 
 
-def _aggregated(skeleton=0.0, lungs=0.0, soft=0.0, vessels=0.0,
+def _aggregated(skeleton=0.0, lungs=0.0, soft=0.0, vessels=0.0, other=0.0,
                  skeleton_b=0.0, lungs_b=0.0, soft_b=0.0, vessels_b=0.0, coverage=0.5):
     """An aggregate()-shaped dict directly, for tests that don't need aggregate() itself."""
-    return {"vis": {"skeleton": skeleton, "lungs": lungs, "soft": soft, "vessels": vessels},
+    return {"vis": {"skeleton": skeleton, "lungs": lungs, "soft": soft, "vessels": vessels, "other": other},
             "bright": {"skeleton": skeleton_b, "lungs": lungs_b, "soft": soft_b, "vessels": vessels_b},
             "coverage": coverage}
 
@@ -49,6 +53,15 @@ def test_aggregate_soft_brightness_is_zero_when_invisible():
     aggregated = goals.aggregate(features)
     assert aggregated["vis"]["soft"] == pytest.approx(0.0)
     assert aggregated["bright"]["soft"] == 0.0
+
+
+def test_aggregate_passes_through_other():
+    """`other` (unlabeled tissue) isn't a goal class, but a transfer function
+    can still render it, and `distance` needs it to detect a search that
+    hides behind unclassified material instead of answering the instruction."""
+    features = _features(skeleton=(0.3, 0.9), other=0.2)
+    aggregated = goals.aggregate(features)
+    assert aggregated["vis"]["other"] == pytest.approx(0.2)
 
 
 def test_goal_vector_layout():
@@ -113,6 +126,57 @@ def test_distance_tolerates_small_keep_drift():
 
     assert d_at_tolerance == pytest.approx(d_no_drift)
     assert d_beyond - d_no_drift == pytest.approx(goals.LAMBDA_KEEP * goals.KEEP_TOLERANCE)
+
+
+def test_distance_penalises_other_drifting_beyond_tolerance():
+    """`other` (unlabeled tissue) is never nameable by an instruction, so it
+    is always an unmentioned class -- drift beyond KEEP_TOLERANCE there costs
+    the same LAMBDA_KEEP penalty any other unmentioned class's drift does."""
+    start = _aggregated(skeleton=0.01, other=0.05)
+    goal = goals.goal_vector({"skeleton": {"vis": 0.3}})
+    new_vis = 10 ** (0.3 + math.log10(0.01 + goals.EPSILON)) - goals.EPSILON
+    without_drift = _aggregated(skeleton=new_vis, other=0.05)
+    with_drift = _aggregated(skeleton=new_vis, other=0.08)
+    c_other = math.log10(0.08 + goals.EPSILON) - math.log10(0.05 + goals.EPSILON)
+    extra = goals.LAMBDA_KEEP * max(0.0, abs(c_other) - goals.KEEP_TOLERANCE)
+    d0 = goals.distance(goal, start, without_drift)
+    d1 = goals.distance(goal, start, with_drift)
+    assert d1 - d0 == pytest.approx(extra)
+
+
+def test_distance_tolerates_small_other_drift():
+    start = _aggregated(skeleton=0.01, other=0.05)
+    goal = goals.goal_vector({"skeleton": {"vis": 0.3}})
+    new_skeleton = 10 ** (0.3 + math.log10(0.01 + goals.EPSILON)) - goals.EPSILON
+
+    def _other_at(c_target):
+        return 10 ** (c_target + math.log10(0.05 + goals.EPSILON)) - goals.EPSILON
+
+    no_drift = _aggregated(skeleton=new_skeleton, other=0.05)
+    at_tolerance = _aggregated(skeleton=new_skeleton, other=_other_at(goals.KEEP_TOLERANCE))
+    beyond_tolerance = _aggregated(skeleton=new_skeleton, other=_other_at(2 * goals.KEEP_TOLERANCE))
+
+    d_no_drift = goals.distance(goal, start, no_drift)
+    d_at_tolerance = goals.distance(goal, start, at_tolerance)
+    d_beyond = goals.distance(goal, start, beyond_tolerance)
+
+    assert d_at_tolerance == pytest.approx(d_no_drift)
+    assert d_beyond - d_no_drift == pytest.approx(goals.LAMBDA_KEEP * goals.KEEP_TOLERANCE)
+
+
+def test_distance_penalises_hiding_behind_unlabeled_material():
+    """The bug this whole fix exists for: a transfer function that suppresses
+    every named class but renders an opaque wall of unclassified tissue
+    instead must not score as well as suppressing them cleanly -- otherwise
+    a search (or a policy trained on this reward) can satisfy "show only X"
+    by rendering unlabeled material instead of X."""
+    start = _aggregated(skeleton=0.01, other=0.01)
+    goal = goals.goal_vector({"skeleton": {"vis": -goals.HIDE_STRENGTH}})
+    hidden_cleanly = _aggregated(skeleton=0.0001, other=0.01)
+    hidden_behind_other = _aggregated(skeleton=0.0001, other=0.9)
+    d_clean = goals.distance(goal, start, hidden_cleanly)
+    d_gamed = goals.distance(goal, start, hidden_behind_other)
+    assert d_gamed > d_clean
 
 
 def test_attainment_is_one_when_reached_and_negative_when_worse():

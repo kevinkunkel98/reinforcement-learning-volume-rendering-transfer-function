@@ -1179,8 +1179,10 @@ def test_rule_parser_reports_itself_without_a_fallback_reason():
 def test_policy_path_points_at_a_checkpoint_trained_on_the_corrected_observation():
     # v2 was trained with the lung ceiling probed at the retired band layout's
     # fat peak and with the colour action collapsing r=g=b (fixed in 62b5720 /
-    # cc167af). The viewer must not demo that checkpoint when a v3 one exists.
-    assert "oneshot_v3" in server.POLICY_PATH
+    # cc167af). The viewer must not demo that checkpoint when a v3-or-later
+    # one exists. v4 (current) adds goals.distance's "other" keep term on top
+    # of v3's observation fix -- it doesn't regress this property.
+    assert "oneshot_v3" in server.POLICY_PATH or "oneshot_v4" in server.POLICY_PATH
 
 
 def test_framing_is_measured_once_per_dataset_not_per_command():
@@ -1203,4 +1205,4 @@ def test_collector_and_viewer_load_the_same_checkpoint():
 
     assert server.POLICY_PATH == policy.POLICY_PATH
     assert collect.POLICY_PATH == policy.POLICY_PATH
-    assert "oneshot_v3" in policy.POLICY_PATH
+    assert "oneshot_v3" in policy.POLICY_PATH or "oneshot_v4" in policy.POLICY_PATH
