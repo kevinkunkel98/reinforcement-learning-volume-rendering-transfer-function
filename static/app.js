@@ -780,9 +780,27 @@ const compareView = el("compare-view");
 const compareColumns = el("compare-columns");
 const compareGoal = el("compare-goal");
 
-function showCompare(on) {
+async function showCompare(on) {
   el("single-view").hidden = on;
   compareView.hidden = !on;
+  if (on) return;
+
+  // The viewport is a WebGL canvas. Hiding it with `hidden` is display:none,
+  // so it measures 0x0 while the panel is open and comes back blank: vtk
+  // sized itself to nothing and has no reason to redraw. Nudge the layout,
+  // then re-issue the current step so both the canvas and the fallback image
+  // are painted from real state rather than whatever survived being hidden.
+  window.dispatchEvent(new Event("resize"));
+  try {
+    // Fresh state, not `lastState`: back/forward move the cursor without
+    // updating it, so restoring from the cached copy could quietly rewind the
+    // view to a different step than the one the counter shows.
+    const r = await fetch("/api/state");
+    if (r.ok) await refresh(await r.json());
+  } catch (err) {
+    showToast("Could not redraw the view. Step back and forward to restore it.", "destructive");
+  }
+  if (window.volumeViewer && window.volumeViewer.render) window.volumeViewer.render();
 }
 
 const pct = (v) => `${Math.min(100, Math.max(0, (v || 0) * 100)).toFixed(1)}%`;
@@ -912,7 +930,7 @@ async function runCompare() {
 }
 
 el("compare-btn").addEventListener("click", runCompare);
-el("compare-close").addEventListener("click", () => showCompare(false));
+el("compare-close").addEventListener("click", () => { showCompare(false); });
 
 // --- the sweep: the distribution, not one draw --------------------------------
 // One comparison is a single episode. The claim the thesis makes is a median
