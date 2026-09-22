@@ -181,8 +181,8 @@ def plot_kind_curves(run_dirs: list, output_dir: str = OUTPUT_DIR) -> str:
     ax.set_xlabel("training steps")
     ax.set_ylabel("attainment on the evaluation episodes")
     ax.xaxis.set_major_formatter(lambda v, _pos: f"{v/1000:.0f}k")
-    ax.set_title("What the policy learns, and when")
-    ax.text(0.5, 1.015, "median of 3 seeds, range shaded", transform=ax.transAxes,
+    ax.set_title("What the policy learns, and when", pad=22)
+    ax.text(0.5, 1.06, "median of 3 seeds, range shaded", transform=ax.transAxes,
             ha="center", va="bottom", fontsize=8.5, color="#555555")
     ax.legend(frameon=False, fontsize=9, ncol=2)
     fig.tight_layout()
