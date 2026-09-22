@@ -67,7 +67,7 @@ def test_aggregate_passes_through_other():
 def test_goal_vector_layout():
     vector = goals.goal_vector({"skeleton": {"vis": 0.3}})
     assert vector.shape == (16,)
-    d, m, e, n = vector[0:4], vector[4:8], vector[8:12], vector[12:16]
+    d, m, _, _ = vector[0:4], vector[4:8], vector[8:12], vector[12:16]
     skeleton = goals.GOAL_CLASSES.index("skeleton")
     assert d[skeleton] == pytest.approx(0.3)
     assert m[skeleton] == 1.0

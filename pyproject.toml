@@ -1,0 +1,61 @@
+[tool.ruff]
+line-length = 100
+extend-exclude = ["data", "out", "plots/output", "plots/output_v4"]
+
+[tool.ruff.lint]
+# Ruff's own documented default (pyflakes + the non-stylistic pycodestyle
+# error classes) -- picked explicitly because some editor/LSP setups (Mason's
+# bundled ruff, in particular) enable a much larger preview rule set by
+# default, which flags hundreds of purely stylistic choices (line length,
+# import order, tuple-unpacking style) this codebase doesn't follow as bugs.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files intentionally import a helper just above the section that uses
+# it (each added incrementally, task by task) rather than grouping every
+# import at the top of a large file.
+"tests/*.py" = ["E402"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.14"
+exclude = ["data", "out", ".venv", "plots/output", "plots/output_v4"]
+# faster-whisper is required (requirements.txt); mlx_whisper is an optional,
+# Apple-Silicon-only accelerator asr.py tries first and falls back from on
+# ImportError (see asr.py) -- it is deliberately not a dependency, so Pyright
+# can never resolve it and that specific import is ignored per-line instead.
+reportMissingImports = true
+# This codebase predates PEP 604 and writes `x: str = None` throughout rather
+# than `x: str | None = None` -- a real but purely cosmetic typing-strictness
+# gap, not a bug (every such default is handled with `x = x or DEFAULT`
+# immediately inside the function). Disabling this one check removes the
+# overwhelming majority of noise without masking anything real.
+strictParameterNoneValue = false
+# Consistent across visibility.py, server.py, rl/vis_env.py, rl/vis_eval.py,
+# and more: this codebase narrows an Optional with `x = x or DEFAULT` or an
+# explicit `if x is None` check rather than a type annotation, everywhere.
+# Pyright's stricter Optional-flow checks don't see that pattern and treat
+# every one of these as a potential None-access, which is not a real risk
+# here -- verified against a representative sample before disabling.
+reportArgumentType = "none"
+reportOptionalMemberAccess = "none"
+reportOptionalOperand = "none"
+reportAssignmentType = "none"
+
+# tests/ builds duck-typed stub models/policies (a stub object need only have
+# the few attributes the code under test actually calls) and calls real
+# library functions whose bundled type stubs are known-incomplete for the
+# attributes these tests exercise (gymnasium's Box-specific .low/.high behind
+# the generic Space return type, nibabel's .dataobj, functools.lru_cache's
+# .cache_clear/.cache_info). The tests are correct at runtime; the stubs are
+# incomplete, not the code under test.
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+extraPaths = ["."]
+reportOptionalSubscript = "none"
+reportFunctionMemberAccess = "none"
+reportAttributeAccessIssue = "none"
+
+[[tool.pyright.executionEnvironments]]
+root = "."

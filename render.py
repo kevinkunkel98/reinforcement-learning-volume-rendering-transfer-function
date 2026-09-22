@@ -1,7 +1,7 @@
 """Offscreen VTK volume rendering, pixel grab, image features."""
 import numpy as np
 import vtk
-from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
+from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy  # pyright: ignore[reportMissingImports]
 from transfer import N_PEAKS, peak_internal, vector_to_vtk
 
 WIDTH, HEIGHT = 1024, 800

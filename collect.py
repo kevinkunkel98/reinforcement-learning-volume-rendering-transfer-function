@@ -165,9 +165,6 @@ class Collector:
                 return i
         return None
 
-    def _should_use_anchor(self, rater_id: str) -> bool:
-        return self._next_anchor_index(rater_id) is not None and self.rng.random() < ANCHOR_RATE
-
     def _serve(self, rater_id: str) -> tuple:
         """Generate (or repeat, or draw from the anchor pool) one item for
         `rater_id`, register it as pending judgment, and return `(pair_id,
@@ -179,8 +176,8 @@ class Collector:
             eligible = history[:len(history) - REPEAT_MIN_GAP + 1]
             repeat_of = str(self.rng.choice(eligible))
             item = _swap_sides(self._items[repeat_of])
-        elif self._should_use_anchor(rater_id):
-            anchor_id = self._next_anchor_index(rater_id)
+        elif (candidate := self._next_anchor_index(rater_id)) is not None and self.rng.random() < ANCHOR_RATE:
+            anchor_id = candidate
             self._rater_anchor_seen[rater_id].add(anchor_id)
             item = _to_displayed(self._get_anchor_pool()[anchor_id])
             if self.rng.random() < 0.5:

@@ -89,7 +89,8 @@ def plot_qualitative(policy_path: str = DEFAULT_POLICY, episodes: int = 60,
         for col, params in enumerate((start, final_params)):
             ax = axes[row][col]
             ax.imshow(_render_front(volume, spacing, params, frame_bounds))
-            ax.set_xticks([]); ax.set_yticks([])
+            ax.set_xticks([])
+            ax.set_yticks([])
             for spine in ax.spines.values():
                 spine.set_visible(False)
             if row == 0:

@@ -124,19 +124,23 @@ class VisibilityTFEnv(gym.Env):
         b_vals = [b[goal_class] for goal_class in goals.GOAL_CLASSES]
         step_fraction = self._step_count / MAX_STEPS
 
-        values = (controllable + list(self._instruction["goal"]) + log_vis + bright
+        # `self._instruction`/`self._start_agg`/etc. are set to None in
+        # __init__ and only ever read after reset() has filled them in -- the
+        # standard Gymnasium convention (reset() before step()), not a real
+        # possibility of None reaching these lines.
+        values = (controllable + list(self._instruction["goal"]) + log_vis + bright  # pyright: ignore[reportOptionalSubscript]
                   + c_vals + b_vals + [agg["coverage"]] + list(self._model.histogram) + [step_fraction])
         return np.asarray(values, dtype=np.float32)
 
     def _attainment(self, agg: dict) -> float:
         if self._start_distance <= _ATTAINMENT_FLOOR:
             return 0.0
-        return goals.attainment(self._instruction["goal"], self._start_agg, agg)
+        return goals.attainment(self._instruction["goal"], self._start_agg, agg)  # pyright: ignore[reportOptionalSubscript]
 
     def _info(self, distance: float, agg: dict, useless: bool) -> dict:
         return {"attainment": self._attainment(agg), "distance": distance,
-                "kind": self._instruction["kind"], "volume": self._volume,
-                "text": self._instruction["text"], "useless": useless}
+                "kind": self._instruction["kind"], "volume": self._volume,  # pyright: ignore[reportOptionalSubscript]
+                "text": self._instruction["text"], "useless": useless}  # pyright: ignore[reportOptionalSubscript]
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -174,7 +178,7 @@ class VisibilityTFEnv(gym.Env):
 
         raw_features = self._model.features(params)
         agg = goals.aggregate(raw_features)
-        distance = goals.distance(self._instruction["goal"], self._start_agg, agg)
+        distance = goals.distance(self._instruction["goal"], self._start_agg, agg)  # pyright: ignore[reportOptionalSubscript]
         useless = goals.is_useless(raw_features)
         denom = max(self._start_distance, DISTANCE_FLOOR)
         normalized_drop = np.clip((self._prev_distance - distance) / denom, -REWARD_CLIP, REWARD_CLIP)

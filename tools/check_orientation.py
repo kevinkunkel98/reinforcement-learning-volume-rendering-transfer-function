@@ -28,7 +28,10 @@ def projection_panels(volume: np.ndarray):
     """(coronal, sagittal, axial) uint8 images; row 0 is the top of the image."""
     lo, hi = WINDOW_HU
     v = np.clip((volume - lo) / (hi - lo), 0.0, 1.0)
-    to_u8 = lambda plane: (plane * 255).round().astype(np.uint8)
+
+    def to_u8(plane):
+        return (plane * 255).round().astype(np.uint8)
+
     coronal = v.max(axis=1).T[::-1]      # rows: superior -> inferior, cols: R axis
     sagittal = v.max(axis=0).T[::-1]     # rows: superior -> inferior, cols: A axis
     axial = v.max(axis=2).T[::-1]        # rows: anterior -> posterior, cols: R axis

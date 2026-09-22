@@ -44,7 +44,7 @@ import zipfile
 import nibabel as nib
 import numpy as np
 import vtk
-from vtk.util.numpy_support import vtk_to_numpy
+from vtk.util.numpy_support import vtk_to_numpy  # pyright: ignore[reportMissingImports]
 
 from phantom import build_phantom
 import totalseg
@@ -328,8 +328,8 @@ def load_dataset(name: str = "synthetic", canonical: bool = False):
     return _load_dataset_cached(name, bool(canonical))
 
 
-load_dataset.cache_clear = _load_dataset_cached.cache_clear
-load_dataset.cache_info = _load_dataset_cached.cache_info
+load_dataset.cache_clear = _load_dataset_cached.cache_clear  # pyright: ignore[reportFunctionMemberAccess]
+load_dataset.cache_info = _load_dataset_cached.cache_info  # pyright: ignore[reportFunctionMemberAccess]
 
 
 def list_datasets() -> list:

@@ -48,7 +48,7 @@ def _compose_grid(frames: list, size: int, columns: int) -> Image.Image:
     rows = -(-len(frames) // columns)  # ceil division
     grid = Image.new("RGB", (size * columns, size * rows), (0, 0, 0))
     for index, frame in enumerate(frames):
-        thumb = Image.fromarray(np.asarray(frame, dtype=np.uint8)).resize((size, size), Image.BILINEAR)
+        thumb = Image.fromarray(np.asarray(frame, dtype=np.uint8)).resize((size, size), Image.Resampling.BILINEAR)
         row, col = divmod(index, columns)
         grid.paste(thumb, (col * size, row * size))
     return grid

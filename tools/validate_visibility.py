@@ -32,7 +32,7 @@ import os
 
 import numpy as np
 import vtk
-from vtk.util.numpy_support import numpy_to_vtk
+from vtk.util.numpy_support import numpy_to_vtk  # pyright: ignore[reportMissingImports]
 
 import datasets
 import render
@@ -131,7 +131,9 @@ def _render_with_label_mask(volume, spacing, params, cameras, labels, black_labe
     """Mean luminance over the views; black_label renders that class's colour as
     black while leaving every opacity untouched, so occlusion is unchanged."""
     prop, renderer, window = render._get_pipeline(volume, spacing)
-    mapper = renderer.GetVolumes().GetLastProp().GetMapper()
+    # vtk's stubs type GetLastProp()'s return as the generic vtkProp base
+    # class; at runtime it's the vtkVolume this pipeline actually added.
+    mapper = renderer.GetVolumes().GetLastProp().GetMapper()  # pyright: ignore[reportAttributeAccessIssue]
     label_image = vtk.vtkImageData()
     label_image.SetDimensions(*labels.shape)
     label_image.SetSpacing(*spacing)

@@ -22,7 +22,6 @@ import numpy as np
 
 import totalseg
 import transfer
-from transfer import PARAMS_PER_PEAK, TOTAL_PARAMS, CENTER_RANGE, WIDTH_RANGE, _from_range, _from_unit
 
 GOAL_CLASSES = ("skeleton", "lungs", "soft", "vessels")
 MEASURED_FOR_GOAL = {"skeleton": ("skeleton",), "lungs": ("lungs",),

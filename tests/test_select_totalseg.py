@@ -106,7 +106,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
-from tools.select_totalseg import build_manifest
+from tools.select_totalseg import build_manifest, _subject_label_volume
 
 META_HEADER = "image_id;age;gender;institute;study_type;split;manufacturer;scanner_model;kvp;pathology;pathology_location"
 
@@ -180,3 +180,18 @@ def test_build_manifest_selects_extracts_and_describes(tmp_path):
     assert "numpy_version" in manifest["selection"]
     assert list(out_dir.rglob("*.tmp")) == []
     json.dumps(manifest)                        # serializable
+
+
+def test_subject_label_volume_raises_clearly_when_nothing_matches(tmp_path):
+    """Every mask filtered out (an unrecognized structure name, or none at
+    all) used to leave `image` unbound, crashing on `image.affine` with a
+    confusing NameError instead of saying what actually went wrong."""
+    shape = (32, 32, 32)
+    zip_path = tmp_path / "no_match.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("s0001/segmentations/unrecognized_structure.nii.gz",
+                    _mask_gz(shape, 1.5, (0, 0, 0)))
+
+    with zipfile.ZipFile(zip_path) as zf:
+        with pytest.raises(ValueError, match="no recognized structure"):
+            _subject_label_volume(zf, "s0001", shape)

@@ -5,7 +5,6 @@ Python-side microphone capture this module used to carry went with the
 CLI that called it, and with it the `sounddevice` dependency the web
 server was importing at start-up purely to support dead code.
 """
-import os
 
 _MODEL_CACHE = {}
 SAMPLE_RATE = 16000
@@ -16,7 +15,7 @@ def _load_model(model_size: str = "small"):
     if model_size in _MODEL_CACHE:
         return _MODEL_CACHE[model_size]
     try:
-        import mlx_whisper  # noqa: F401
+        import mlx_whisper  # noqa: F401  # pyright: ignore[reportMissingImports]
         _MODEL_CACHE[model_size] = ("mlx", model_size)
         print(f"[asr] using mlx-whisper ({model_size})")
     except ImportError:
@@ -30,7 +29,7 @@ def _load_model(model_size: str = "small"):
 def _transcribe_path(path: str, lang: str, model_size: str) -> str:
     kind, model = _load_model(model_size)
     if kind == "mlx":
-        import mlx_whisper
+        import mlx_whisper  # pyright: ignore[reportMissingImports]
         result = mlx_whisper.transcribe(path, language=lang)
         return result["text"].strip()
     segments, _ = model.transcribe(path, language=lang)

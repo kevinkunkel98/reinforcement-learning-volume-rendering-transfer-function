@@ -10,7 +10,7 @@ import numpy as np
 
 from transfer import (
     CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, SHOW_ONLY_MAX_WIDTH_HU, TISSUE_BANDS,
-    TISSUE_HU, WIDTH_RANGE, _from_range, _from_unit, _unit, default_params, peak_internal,
+    TISSUE_HU, WIDTH_RANGE, _from_range, _from_unit, default_params, peak_internal,
 )
 
 # --- goal-class vocabulary: the four RL v2 goal classes ---------------------

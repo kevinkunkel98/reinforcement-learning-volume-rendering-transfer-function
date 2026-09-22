@@ -178,20 +178,24 @@ class OneShotEnv(gym.Env):
     def _controllable_values(self, params: np.ndarray) -> list:
         return [float(np.mean([params[i] for i in group])) for group in CONTROLLABLE]
 
+    # `self._instruction`/`self._start_agg`/etc. are set to None in __init__
+    # and only ever read here, after reset() has always already filled them
+    # in -- the standard Gymnasium convention (reset() before step()), not a
+    # real possibility of None reaching these lines.
     def _build_observation(self) -> np.ndarray:
         solo_max_log = self._solo_max_log(self._volume, self._model)
         controllable = self._controllable_values(self._start_params)
-        return build_observation(self._instruction["goal"], self._model.histogram, self._start_agg,
+        return build_observation(self._instruction["goal"], self._model.histogram, self._start_agg,  # pyright: ignore[reportOptionalSubscript]
                                   solo_max_log, controllable)
 
     def _attainment(self, agg: dict) -> float:
         if self._start_distance <= _ATTAINMENT_FLOOR:
             return 0.0
-        return goals.attainment(self._instruction["goal"], self._start_agg, agg)
+        return goals.attainment(self._instruction["goal"], self._start_agg, agg)  # pyright: ignore[reportOptionalSubscript]
 
     def _info(self, attainment: float, useless: bool) -> dict:
-        return {"attainment": attainment, "kind": self._instruction["kind"],
-                "volume": self._volume, "text": self._instruction["text"], "useless": useless,
+        return {"attainment": attainment, "kind": self._instruction["kind"],  # pyright: ignore[reportOptionalSubscript]
+                "volume": self._volume, "text": self._instruction["text"], "useless": useless,  # pyright: ignore[reportOptionalSubscript]
                 "goal_source": "hindsight" if self._hindsight_action is not None else "instruction"}
 
     def hindsight_action(self):
@@ -224,7 +228,10 @@ class OneShotEnv(gym.Env):
         # hindsight goal that mentioned every class would shift the observation
         # distribution the policy sees away from the one it is evaluated on.
         count = int(rng.integers(1, self.HINDSIGHT_MAX_MENTIONS + 1))
-        targets = {c: {"vis": deltas[c]} for c in ranked[:count]}
+        # HINDSIGHT_MAX_TRIES (20) is a fixed positive constant, so the loop
+        # above always runs at least once and these are always bound; Pyright
+        # can't fold that constant across the `range()` call to see it.
+        targets = {c: {"vis": deltas[c]} for c in ranked[:count]}  # pyright: ignore[reportPossiblyUnboundVariable]
 
         instruction = {
             "kind": "hindsight",
@@ -232,7 +239,7 @@ class OneShotEnv(gym.Env):
             "targets": targets,
             "goal": goals.goal_vector(targets),
         }
-        return instruction, action
+        return instruction, action  # pyright: ignore[reportPossiblyUnboundVariable]
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
