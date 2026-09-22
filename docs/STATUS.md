@@ -9,6 +9,20 @@ classes instead of X. Fixed, retrained three fresh seeds (`oneshot_v4_seed
 numbers; it did not fully solve the failure mode that exposed it. Both halves
 of that sentence are below, not just the first one.
 
+Also found, live, why "show only X" via the rule executor looks inconsistent:
+a wide peak (skeleton's is 280 HU) keeps real opacity in a neighbour's HU
+range, so raising it alone re-lights tissue whose own peak was correctly
+zeroed. "Show only" now also caps the shown peak's width to 150 HU
+(`transfer.SHOW_ONLY_MAX_WIDTH_HU`), verified before and after with new unit
+tests. On the case that exposed it (`ts_s0454`, "show only bones", cold
+reset): skeleton visibility barely moved (11.1%→9.8%), soft-tissue haze
+dropped 124x (3.98%→0.03%), and that episode's attainment went from a clear
+regression (−0.448) to a clear win (+0.148). The *aggregate* B1 median across
+the full 200-episode held-out mix barely moved (−0.022→−0.0225) — this fixes
+a real visual artifact on individual episodes, not the rule executor's
+overall score, which still varies by which class is asked for and how bright
+it already was.
+
 ## Where things stand
 
 | | state |
@@ -186,10 +200,14 @@ Exact and policy spend 0 evaluations and answer in 0 ms; search·10 takes
 
 ## Cheapest improvements, in order
 
-1. **Actually solve `show_only`.** The reward no longer rewards the wrong
-   thing, but the policy hasn't learned the right thing either — try more
-   training steps, a larger `LAMBDA_KEEP`, or oversampling `show_only`
+1. **Actually solve `show_only` for the policy.** The reward no longer rewards
+   the wrong thing, but the policy hasn't learned the right thing either — try
+   more training steps, a larger `LAMBDA_KEEP`, or oversampling `show_only`
    episodes, and check per-episode renders, not just the attainment number.
+   (The rule executor's version of this — a wide peak re-lighting other
+   tissue — is fixed; see above. The policy's action space includes width
+   too, but nothing currently pushes it to narrow a peak the way the rule
+   now does explicitly.)
 2. **Fix compound instructions** — still the second-clearest capability gap
    (+0.117), the one a user notices first after show-only.
 3. **Distil search into the policy** — supervised pretraining on hill-climb

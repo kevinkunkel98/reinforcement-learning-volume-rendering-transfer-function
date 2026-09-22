@@ -9,8 +9,8 @@ from urllib.request import Request, urlopen
 import numpy as np
 
 from transfer import (
-    CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, TISSUE_BANDS, TISSUE_HU,
-    WIDTH_RANGE, _from_range, _from_unit, _unit, default_params, peak_internal,
+    CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, SHOW_ONLY_MAX_WIDTH_HU, TISSUE_BANDS,
+    TISSUE_HU, WIDTH_RANGE, _from_range, _from_unit, _unit, default_params, peak_internal,
 )
 
 # --- goal-class vocabulary: the four RL v2 goal classes ---------------------
@@ -109,8 +109,9 @@ COMMAND_REFERENCE = [
     {
         "category": "Opacity (relative)",
         "examples": ["increase opacity for skeleton strongly", "decrease opacity for lungs slightly",
-                     "more bone", "a bit less soft tissue"],
-        "description": "Nudge a class's visibility up or down by a relative amount.",
+                     "more bone", "a bit less soft tissue", "hide the lungs", "remove the skeleton"],
+        "description": "Nudge a class's visibility up or down by a relative amount. "
+                        "\"hide\"/\"remove\" are a decrease at strength \"strongly\".",
     },
     {
         "category": "Opacity (absolute)",
@@ -159,10 +160,17 @@ STRENGTH_WORDS = {"slightly": 0.15, "moderately": 0.35, "strongly": 0.6}
 NEAR_THRESHOLD_HU = 300.0
 
 DIRECT_VERBS = {
-    "sharpen": ("width", "decrease"),
-    "soften": ("width", "increase"),
-    "brighten": ("brightness", "increase"),
-    "darken": ("brightness", "decrease"),
+    "sharpen": ("width", "decrease", "moderately"),
+    "soften": ("width", "increase", "moderately"),
+    "brighten": ("brightness", "increase", "moderately"),
+    "darken": ("brightness", "decrease", "moderately"),
+    # There is no "hide" direction (see _SYSTEM_PROMPT): hiding a class
+    # completely is "decrease" with strength "strongly". The LLM parser
+    # already knows this from the prompt; the rule parser had no vocabulary
+    # for "hide"/"remove" at all, so it raised on a very natural phrasing
+    # instead of falling back to it.
+    "hide": ("opacity", "decrease", "strongly"),
+    "remove": ("opacity", "decrease", "strongly"),
 }
 
 ATTRIBUTE_WORD_ALIASES = {"sharpness": "width"}
@@ -183,11 +191,10 @@ def parse_command_rule(text: str) -> dict:
             return {"target": classes[0] if len(classes) == 1 else classes,
                      "attribute": "opacity", "direction": "show_only", "strength": None}
 
-    m = re.search(r"\b(sharpen|soften|brighten|darken)\b\s+([\w ]+)", t)
+    m = re.search(r"\b(sharpen|soften|brighten|darken|hide|remove)\b\s+([\w ]+)", t)
     if m:
         verb, target_text = m.group(1), m.group(2)
-        attribute, direction = DIRECT_VERBS[verb]
-        strength = "moderately"
+        attribute, direction, strength = DIRECT_VERBS[verb]
         for word in STRENGTH_WORDS:
             if word in target_text:
                 strength = word
@@ -369,6 +376,13 @@ def apply_command(cmd: dict, params: np.ndarray) -> np.ndarray:
         for tissue in targets:
             params, idx = _find_or_create_peak(params, tissue)
             target_idxs.add(idx)
+        for idx in target_idxs:
+            # A wide peak still has real opacity reaching into a neighbour's
+            # HU range, so boosting it alone lights up other tissue too --
+            # cap (never widen) so an already-narrow peak is untouched.
+            base = idx * PARAMS_PER_PEAK
+            current_width = peak_internal(params, idx)["width"]
+            params[base + 1] = _from_range(min(current_width, SHOW_ONLY_MAX_WIDTH_HU), *WIDTH_RANGE)
         for i in range(N_PEAKS):
             b = i * PARAMS_PER_PEAK
             params[b + 2] = _from_unit(0.7 if i in target_idxs else 0.0)

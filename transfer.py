@@ -58,6 +58,18 @@ def peak_internal(params: np.ndarray, i: int) -> dict:
 ANATOMICAL_PEAK_INDEX = {"lungs": 0, "soft": 1, "vessels": 2, "skeleton": 3}
 ANATOMICAL_CENTRES_HU = {"lungs": -800.0, "soft": 40.0, "vessels": 300.0, "skeleton": 900.0}
 ANATOMICAL_WIDTHS_HU = {"lungs": 60.0, "soft": 80.0, "vessels": 80.0, "skeleton": 280.0}
+
+# "Show only X" sets X's height high and everything else's height to zero, but
+# a wide peak (skeleton's default is 280 HU) still has real opacity reaching
+# into a neighbour's HU range -- boosting it lights up organ/muscle voxels and
+# unlabeled ("other") tissue too, even though their own peaks are zeroed. On
+# ts_s0454, capping skeleton's width to 150 HU cut soft-tissue haze 124x
+# (3.98% -> 0.03%) and unlabeled bleed 28x (22.3% -> 0.8%) while costing only
+# 12% of skeleton's own visibility (11.1% -> 9.8%) -- narrower than 150
+# started cutting into skeleton itself for diminishing haze reduction. Applied
+# as a cap (`min(current, 150)`), never a widening, so classes already
+# narrower than this (lungs 60, soft/vessels 80) are untouched.
+SHOW_ONLY_MAX_WIDTH_HU = 150.0
 ANATOMICAL_HEIGHTS = {"lungs": 0.05, "soft": 0.15, "vessels": 0.3, "skeleton": 0.6}
 ANATOMICAL_COLOURS = {"lungs": (0.55, 0.70, 0.95), "soft": (0.85, 0.35, 0.35),
                       "vessels": (0.90, 0.45, 0.40), "skeleton": (0.95, 0.95, 0.90)}

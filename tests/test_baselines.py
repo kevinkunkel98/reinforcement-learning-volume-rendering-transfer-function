@@ -53,6 +53,10 @@ def _peak_rgb(params, goal_class):
     return transfer.peak_internal(params, goals.PEAK_INDEX[goal_class])["rgb"]
 
 
+def _peak_width(params, goal_class):
+    return transfer.peak_internal(params, goals.PEAK_INDEX[goal_class])["width"]
+
+
 def _relative_instruction(goal_class: str, vis_delta: float) -> dict:
     targets = {goal_class: {"vis": vis_delta}}
     return {"kind": "relative", "text": "test", "targets": targets, "goal": goals.goal_vector(targets)}
@@ -118,6 +122,30 @@ def test_current_executor_show_only_zeroes_the_others():
     assert _peak_height(result, "skeleton") == pytest.approx(0.7)
     for other in ("lungs", "soft", "vessels"):
         assert _peak_height(result, other) == pytest.approx(0.0)
+
+
+def test_current_executor_show_only_narrows_a_wide_shown_peak():
+    """Skeleton's default width (280 HU) still has real opacity reaching into
+    neighbouring tissue's HU range, lighting up organ/muscle and unlabeled
+    voxels even when their own peaks are zeroed. "Show only" must cap the
+    shown peak's width too (transfer.SHOW_ONLY_MAX_WIDTH_HU)."""
+    model = _StubModel()
+    start = _start_params()
+    instruction = _show_only_instruction(["skeleton"])
+
+    result = baselines.current_executor(model, start, instruction)
+
+    assert _peak_width(result, "skeleton") == pytest.approx(transfer.SHOW_ONLY_MAX_WIDTH_HU)
+
+
+def test_current_executor_show_only_does_not_widen_an_already_narrow_peak():
+    model = _StubModel()
+    start = _start_params()
+    instruction = _show_only_instruction(["lungs"])
+
+    result = baselines.current_executor(model, start, instruction)
+
+    assert _peak_width(result, "lungs") == pytest.approx(transfer.ANATOMICAL_WIDTHS_HU["lungs"])
 
 
 def test_current_executor_absolute_sets_the_level():

@@ -515,6 +515,33 @@ mean ($+0.318$) is also the better figure. The policy matches cheap search *in
 the middle of the distribution* while being cheaper. Its worst episodes are
 worse.]
 
+==== A wide peak undermines its own "show only"
+
+`commands.apply_command` sets the shown peak's *height* but never touches its
+*width* — skeleton's default width is 280 HU, wide enough that raising its
+opacity still lights up voxels in a neighbour's HU range, even though that
+neighbour's own peak is correctly zeroed. Live-checked on `ts_s0454`, "show
+only bones", cold reset: soft-tissue visibility rose 1.07 % #sym.arrow.r
+3.98 % — the opposite of what "show only" asked for — purely as a side effect
+of the wide bone peak, not a failure to suppress soft tissue's own peak. This
+is the same interference the original design doc named on day one ("more
+bone, less spongy requires narrowing the bone peak") resurfacing inside the
+rule executor that superseded that first prototype.
+
+Fix: "show only" now also caps the shown peak's width to 150 HU
+(`transfer.SHOW_ONLY_MAX_WIDTH_HU`), verified with new unit tests before the
+change. On the same case: skeleton visibility barely moved (11.1 %
+#sym.arrow.r 9.8 %), soft-tissue haze fell 124#sym.times (3.98 %
+#sym.arrow.r 0.03 %), and that episode's attainment went from $-0.448$ to
+$+0.148$.
+
+#caveat[This fixes a real, visually confirmed artifact on individual episodes,
+not B1's aggregate score: the 200-episode held-out median moved from $-0.022$
+to $-0.0225$, statistically indistinguishable. Which classes and starting
+brightnesses the random episode mix happens to sample matters more to the
+aggregate number than this fix does. It is reported here for the mechanism,
+not as a headline improvement.]
+
 == Where the policy succeeds and fails
 
 #figure(

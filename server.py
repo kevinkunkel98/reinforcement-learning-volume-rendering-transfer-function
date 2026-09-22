@@ -41,7 +41,7 @@ from render import features, grab, render
 from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
 from rl.oneshot_env import build_observation
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
-from transfer import TISSUE_BANDS, default_params, opacity_mass
+from transfer import TISSUE_BANDS, _opacity_and_color_at, default_params, opacity_mass
 import visibility
 
 LOG_PATH = "out/log.jsonl"
@@ -121,6 +121,34 @@ def set_dataset(name: str):
 
 def _masses(params):
     return {t: opacity_mass(params, lo, hi) for t, (lo, hi) in TISSUE_BANDS.items()}
+
+
+# The histogram/transfer-function visual guide the original project brief
+# asked for and the viewer never had: the curve is a pure function of `params`
+# (no volume needed, so it works even for a dataset with no visibility model),
+# sampled at the same resolution visibility.py's own LUT uses internally so
+# the picture matches what the render actually composites.
+CURVE_SAMPLES = visibility.LUT_SIZE
+
+
+def _transfer_curve(params):
+    hu = visibility.lut_values()
+    opacity, rgb = _opacity_and_color_at(np.asarray(params, dtype=np.float64), hu)
+    return {"hu": hu.tolist(), "opacity": opacity.tolist(), "rgb": rgb.tolist()}
+
+
+def _histogram(model_for_volume=visibility.for_volume):
+    """The loaded volume's own intensity histogram -- the same one
+    `rl.oneshot_env`'s observation already carries, so what this plots is
+    exactly what the policy sees, not a separate visualization-only
+    computation. `None` only if the volume itself cannot be loaded/scored,
+    matching `_class_visibility`'s failure handling."""
+    try:
+        model = model_for_volume(_dataset_name)
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        print(f"[telemetry] no histogram for {_dataset_name}: {exc}")
+        return None
+    return {"counts": model.histogram.tolist(), "range": list(visibility.CENTER_RANGE)}
 
 
 def _class_visibility(params, model_for_volume=visibility.for_volume):
@@ -238,6 +266,8 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
         "image_path": image_path,
         "masses": _masses(params),
         "class_visibility": _class_visibility(params),
+        "curve": _transfer_curve(params),
+        "histogram": _histogram(),
         "features": features(img),
         "search": search,
         "mode": mode,
@@ -760,7 +790,13 @@ async def dataset_switch(req: DatasetRequest):
 
 class CommandRequest(BaseModel):
     text: str
-    parser: str = "rule"
+    # LLM is the default: it handles phrasings the rule grammar can't (which
+    # matters most for voice, where phrasing varies most), and falls back to
+    # the rule parser automatically when Ollama is down (parse_command_with_meta).
+    # static/app.js already defaults its own `config.parser` to "llm" for the
+    # same reason; this is the same default for any caller that hits the API
+    # directly instead of through the viewer.
+    parser: str = "llm"
     model: str = "qwen2.5:7b"
     search: bool = False
     steps: int = 10
@@ -777,7 +813,7 @@ async def command(req: CommandRequest):
 
 class CompareRequest(BaseModel):
     text: str
-    parser: str = "rule"
+    parser: str = "llm"  # see CommandRequest.parser
     model: str = "qwen2.5:7b"
     # Bounded because these handlers run on the event loop: a hill-climb of
     # 100000 evaluations would freeze every other route, the UI and the state

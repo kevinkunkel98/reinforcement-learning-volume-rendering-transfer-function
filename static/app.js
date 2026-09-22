@@ -95,6 +95,17 @@ initAboutDialog();
 // comparison panel so a class keeps the same name and hue everywhere.
 const CLASS_ORDER = ["skeleton", "lungs", "soft", "vessels"];
 const CLASS_LABEL = { skeleton: "skeleton", lungs: "lungs", soft: "soft tissue", vessels: "vessels" };
+// Must match transfer.ANATOMICAL_CENTRES_HU -- fixed, never sent by the
+// server, so it's duplicated here the same way CLASS_LABEL already is.
+const CLASS_CENTER_HU = { lungs: -800, soft: 40, vessels: 300, skeleton: 900 };
+// Must match transfer.ANATOMICAL_COLOURS -- the actual peak colour the render
+// composites, not --class-* (the telemetry tiles' own accent hues, picked for
+// UI contrast and unrelated to a tissue's real transfer-function colour). A
+// tick drawn in a --class-* colour would contradict the colour ramp under it.
+const CLASS_ANATOMICAL_RGB = {
+  lungs: [0.55, 0.70, 0.95], soft: [0.85, 0.35, 0.35],
+  vessels: [0.90, 0.45, 0.40], skeleton: [0.95, 0.95, 0.90],
+};
 
 const messagesEl = el("messages");
 const emptyState = el("empty-state");
@@ -245,6 +256,7 @@ async function refresh(data) {
   }
 
   updateTelemetry(state.current.class_visibility);
+  drawTfCurve(state.current.histogram, state.current.curve);
   return data;
 }
 
@@ -259,6 +271,99 @@ function updateTelemetry(classVisibility) {
     const node = el(`telem-${goalClass}`);
     if (!node) continue;
     node.textContent = (v === undefined || v === null) ? "—" : `${(v * 100).toFixed(1)}%`;
+  }
+}
+
+// The histogram/transfer-function visual guide: the volume's own intensity
+// histogram (sqrt-scaled -- raw CT histograms are dominated by one huge
+// air/background bin that would otherwise make every tissue peak invisible),
+// the opacity curve traced over it, and a colour ramp along the bottom built
+// from the exact same samples the render composites. Both `histogram` and
+// `curve` come from the current step (server.py's _render_step), computed by
+// the same code the renderer and the policy's observation use -- this draws
+// what the system actually sees, not a separate approximation of it.
+const tfCurveCanvas = el("tf-curve-canvas");
+const tfCurveCtx = tfCurveCanvas ? tfCurveCanvas.getContext("2d") : null;
+
+function drawTfCurve(histogram, curve) {
+  if (!tfCurveCtx || !curve) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = tfCurveCanvas.clientWidth || 700;
+  const cssHeight = tfCurveCanvas.clientHeight || 110;
+  tfCurveCanvas.width = Math.round(cssWidth * dpr);
+  tfCurveCanvas.height = Math.round(cssHeight * dpr);
+  const ctx = tfCurveCtx;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const rampHeight = 10;
+  const plotHeight = cssHeight - rampHeight - 2;
+  const [lo, hi] = histogram ? histogram.range : [curve.hu[0], curve.hu[curve.hu.length - 1]];
+  const huToX = (hu) => ((hu - lo) / (hi - lo)) * cssWidth;
+
+  // Histogram: filled area, sqrt-scaled so tissue peaks aren't flattened to
+  // nothing beside the background bin.
+  if (histogram && histogram.counts.length) {
+    const counts = histogram.counts;
+    const maxCount = Math.max(...counts, 1e-9);
+    const binWidth = cssWidth / counts.length;
+    ctx.fillStyle = "hsla(0, 0%, 60%, 0.25)";
+    ctx.beginPath();
+    ctx.moveTo(0, plotHeight);
+    counts.forEach((count, i) => {
+      const h = Math.sqrt(Math.max(count, 0) / maxCount) * plotHeight;
+      const x = i * binWidth;
+      ctx.lineTo(x, plotHeight - h);
+      ctx.lineTo(x + binWidth, plotHeight - h);
+    });
+    ctx.lineTo(cssWidth, plotHeight);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Opacity curve, traced from the same samples the colour ramp below uses.
+  const primary = getComputedStyle(document.documentElement).getPropertyValue("--primary");
+  ctx.strokeStyle = `hsl(${primary})`;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  curve.hu.forEach((hu, i) => {
+    const x = huToX(hu);
+    const y = plotHeight - curve.opacity[i] * plotHeight;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Colour ramp: the exact blended colour at each sampled HU, so a haze or a
+  // desaturated peak (see docs/STATUS.md's width-narrowing fix) is visible
+  // directly, not just inferable from the opacity line.
+  const rampY = plotHeight + 2;
+  const step = cssWidth / curve.rgb.length;
+  curve.rgb.forEach((rgb, i) => {
+    const [r, g, b] = rgb;
+    ctx.fillStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+    ctx.fillRect(i * step, rampY, step + 1, rampHeight);
+  });
+
+  // Tick marks at the four anatomical peak centres, in that peak's actual
+  // transfer-function colour (transfer.ANATOMICAL_COLOURS) -- not the
+  // telemetry tiles' --class-* accent hues, which are UI-only and would
+  // contradict the colour ramp directly underneath. A dark outline keeps the
+  // near-white skeleton tick visible against the cream ramp there.
+  for (const goalClass of CLASS_ORDER) {
+    const x = huToX(CLASS_CENTER_HU[goalClass]);
+    if (x < 0 || x > cssWidth) continue;
+    const [r, g, b] = CLASS_ANATOMICAL_RGB[goalClass];
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, plotHeight);
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.strokeStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 }
 

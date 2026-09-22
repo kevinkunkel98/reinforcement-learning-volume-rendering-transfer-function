@@ -113,6 +113,14 @@ def current_executor(model, start_params, instruction) -> np.ndarray:
         for goal_class, idx in goals.PEAK_INDEX.items():
             base = idx * PARAMS_PER_PEAK
             params[base + 2] = transfer._from_unit(0.7 if goal_class in shown else 0.0)
+            if goal_class in shown:
+                # A wide peak still has real opacity reaching into a
+                # neighbour's HU range, so boosting it alone lights up other
+                # tissue too -- cap (never widen) so an already-narrow peak
+                # is untouched.
+                current_width = transfer.peak_internal(params, idx)["width"]
+                params[base + 1] = transfer._from_range(
+                    min(current_width, transfer.SHOW_ONLY_MAX_WIDTH_HU), *transfer.WIDTH_RANGE)
         return params
 
     if kind == "absolute":

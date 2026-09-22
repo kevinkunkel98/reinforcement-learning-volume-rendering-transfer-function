@@ -4,12 +4,14 @@
 
 ## Opacity (relative)
 
-Nudge a class's visibility up or down by a relative amount.
+Nudge a class's visibility up or down by a relative amount. "hide"/"remove" are a decrease at strength "strongly".
 
 - `increase opacity for skeleton strongly`
 - `decrease opacity for lungs slightly`
 - `more bone`
 - `a bit less soft tissue`
+- `hide the lungs`
+- `remove the skeleton`
 
 ## Opacity (absolute)
 

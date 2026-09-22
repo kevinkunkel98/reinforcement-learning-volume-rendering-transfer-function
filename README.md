@@ -202,6 +202,16 @@ material and under 0.2% skeleton, just slightly better-suppressed elsewhere.
 Full write-up, including that caveat, in `docs/rl-paper.typ` (`@v4-retrain`)
 and `docs/STATUS.md`.
 
+One more, smaller fix the same session: the rule-based "show only" only ever
+sets a peak's *height*, never its *width* — skeleton's default width (280 HU)
+is wide enough that boosting it still lights up neighbouring tissue whose own
+peak is correctly zeroed. "Show only" now also caps the shown peak's width to
+150 HU. On the case that exposed it, soft-tissue haze fell 124× (3.98%→0.03%)
+for a 12% cost to skeleton's own visibility, turning a clear regression
+(−0.448) into a clear win (+0.148) — but it barely moved B1's *aggregate*
+200-episode score (−0.022→−0.0225), since which class gets asked for and how
+bright it started matters more to that number than this fix does.
+
 ```bash
 python -m rl.oneshot_train --timesteps 150000 --seed 0 --out out/rl_v2/seed0
 python -m rl.vis_eval --policy out/rl_v2/seed0/best.zip --split test --episodes 200 --refine 3

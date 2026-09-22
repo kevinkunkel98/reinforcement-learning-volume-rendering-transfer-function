@@ -19,6 +19,7 @@ from fastapi.responses import Response
 
 import goals
 import server
+import visibility
 from rl.baselines import CONTROLLABLE
 from server import Session
 
@@ -270,6 +271,29 @@ def test_initial_state_has_one_step_at_cursor_zero():
     assert state["total"] == 1
     assert state["current"]["cmd_text"] is None
     assert len(state["current"]["params"]) == 24
+
+
+def test_render_step_includes_a_transfer_curve():
+    """The histogram/curve visual guide (README, "the hard part") needs the
+    opacity+colour curve sampled over the HU range on every step, computed
+    fresh from that step's own params -- not the volume, so it works even for
+    datasets with no visibility model."""
+    s = _fresh_session()
+    curve = s.state()["current"]["curve"]
+    assert len(curve["hu"]) == server.CURVE_SAMPLES
+    assert len(curve["opacity"]) == server.CURVE_SAMPLES
+    assert len(curve["rgb"]) == server.CURVE_SAMPLES
+    assert all(0.0 <= o <= 1.0 for o in curve["opacity"])
+    assert all(len(rgb) == 3 for rgb in curve["rgb"])
+    assert all(0.0 <= c <= 1.0 for rgb in curve["rgb"] for c in rgb)
+
+
+def test_render_step_includes_the_volume_histogram():
+    s = _fresh_session()
+    histogram = s.state()["current"]["histogram"]
+    assert len(histogram["counts"]) == visibility.HISTOGRAM_BINS
+    assert histogram["range"] == list(visibility.CENTER_RANGE)
+    assert abs(sum(histogram["counts"]) - 1.0) < 1e-6
 
 
 def test_state_and_steps_have_no_judgment_fields():

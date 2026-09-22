@@ -101,6 +101,26 @@ def test_apply_command_show_only_suppresses_others():
     assert all(h < 0.05 for i, h in enumerate(heights) if i != 3)
 
 
+def test_apply_command_show_only_narrows_a_wide_shown_peak():
+    """Skeleton's default width (280 HU) still has real opacity reaching into
+    neighbouring tissue's HU range -- boosting its height alone lights up
+    organ/muscle voxels too. "Show only" must also cap the shown peak's width
+    (see transfer.SHOW_ONLY_MAX_WIDTH_HU)."""
+    params = default_params()
+    cmd = {"target": "bone", "attribute": "opacity",
+           "direction": "show_only", "strength": None}
+    after = apply_command(cmd, params)
+    assert peak_internal(after, 3)["width"] == pytest.approx(150.0)
+
+
+def test_apply_command_show_only_does_not_widen_an_already_narrow_peak():
+    params = default_params()
+    cmd = {"target": "lungs", "attribute": "opacity",
+           "direction": "show_only", "strength": None}
+    after = apply_command(cmd, params)
+    assert peak_internal(after, 0)["width"] == pytest.approx(60.0)
+
+
 def _fake_response(payload: dict):
     resp = MagicMock()
     resp.read.return_value = json.dumps({"response": json.dumps(payload)}).encode()
@@ -436,6 +456,31 @@ def test_parse_darken_verb():
     assert cmd["target"] == "lungs"
     assert cmd["attribute"] == "brightness"
     assert cmd["direction"] == "decrease"
+
+
+def test_parse_hide_verb_defaults_to_strongly():
+    """"Hide"/"remove" have no dedicated direction (the LLM prompt already
+    says so: "decrease" with strength "strongly"), but the rule parser had no
+    vocabulary for them at all -- "hide the lungs" raised, it didn't parse as
+    a strong decrease."""
+    cmd = parse_command_rule("hide the lungs")
+    assert cmd["target"] == "lungs"
+    assert cmd["attribute"] == "opacity"
+    assert cmd["direction"] == "decrease"
+    assert cmd["strength"] == "strongly"
+
+
+def test_parse_remove_verb_defaults_to_strongly():
+    cmd = parse_command_rule("remove the skeleton")
+    assert cmd["target"] == "skeleton"
+    assert cmd["attribute"] == "opacity"
+    assert cmd["direction"] == "decrease"
+    assert cmd["strength"] == "strongly"
+
+
+def test_parse_hide_verb_respects_an_explicit_strength():
+    cmd = parse_command_rule("hide the lungs slightly")
+    assert cmd["strength"] == "slightly"
 
 
 def test_parse_shift_center_up_with_apostrophe():
