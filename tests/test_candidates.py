@@ -383,6 +383,7 @@ def test_anchor_items_rejects_malformed_item(monkeypatch, tmp_path):
     lambda item: item["a"]["params"].__setitem__(0, float("inf")),
     lambda item: item["features"]["start"]["vis"].__setitem__("skeleton", float("nan")),
     lambda item: item["instruction"].__setitem__("kind", "unknown"),
+    lambda item: item["instruction"].__setitem__("kind", []),
     lambda item: item["instruction"].__setitem__("text", 7),
     lambda item: item["instruction"]["goal"].__setitem__(0, float("inf")),
     lambda item: item["instruction"]["targets"].__setitem__("skeleton", 0.1),

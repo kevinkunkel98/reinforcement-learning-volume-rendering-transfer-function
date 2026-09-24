@@ -237,6 +237,7 @@ def _cache_item_is_valid(item: dict, volumes: tuple) -> bool:
         return False
     instruction = item["instruction"]
     if (not isinstance(instruction, dict) or set(instruction) != {"kind", "text", "targets", "goal"}
+            or not isinstance(instruction["kind"], str)
             or instruction["kind"] not in INSTRUCTION_KINDS
             or not isinstance(instruction["text"], (str, type(None)))
             or not isinstance(instruction["targets"], dict)):
