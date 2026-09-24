@@ -346,7 +346,7 @@ def test_parse_command_llm_compound_with_relative_subcommands():
 def test_parse_command_llm_rejects_retired_target_via_rule_parser_fallback():
     payload = {"target": "spongy", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
     with patch("commands.urlopen", return_value=_fake_response(payload)):
-        with pytest.raises(ValueError, match="skeleton, lungs, soft, vessels"):
+        with pytest.raises(ValueError, match="skeleton, lungs, heart, vessels"):
             parse_command_llm("decrease opacity for spongy bone")
 
 
@@ -634,6 +634,27 @@ def test_parse_much_less_is_strong_decrease():
     assert cmd["strength"] == "strongly"
 
 
+@pytest.mark.parametrize(
+    ("text", "target", "direction"),
+    [
+        ("show more liver", "liver", "increase"),
+        ("hide the kidneys", "kidneys", "decrease"),
+        ("brighten the spleen", "spleen", "increase"),
+        ("show heart", "heart", "show_only"),
+        ("reduce aorta", "vessels", "decrease"),
+    ],
+)
+def test_parse_eight_class_anatomy_vocabulary(text, target, direction):
+    cmd = parse_command_rule(text)
+    assert cmd["target"] == target
+    assert cmd["direction"] == direction
+
+
+def test_llm_prompt_describes_promoted_anatomy_classes():
+    for term in ("heart", "cardiac", "liver", "kidneys", "renal", "spleen", "aorta", "vena cava"):
+        assert term in commands._SYSTEM_PROMPT
+
+
 def test_parse_compound_relative_clauses():
     cmd = parse_command_rule("more bone, a bit less soft tissue")
     assert "compound" in cmd
@@ -655,17 +676,17 @@ def test_parse_show_me_the_class():
 
 
 def test_parse_rejects_fat():
-    with pytest.raises(ValueError, match="skeleton, lungs, soft, vessels"):
+    with pytest.raises(ValueError, match="skeleton, lungs, heart, vessels"):
         parse_command_rule("decrease opacity for fat")
 
 
 def test_parse_rejects_air():
-    with pytest.raises(ValueError, match="skeleton, lungs, soft, vessels"):
+    with pytest.raises(ValueError, match="skeleton, lungs, heart, vessels"):
         parse_command_rule("decrease opacity for air")
 
 
 def test_parse_rejects_spongy():
-    with pytest.raises(ValueError, match="skeleton, lungs, soft, vessels"):
+    with pytest.raises(ValueError, match="skeleton, lungs, heart, vessels"):
         parse_command_rule("decrease opacity for spongy bone")
 
 

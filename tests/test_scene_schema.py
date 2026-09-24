@@ -342,6 +342,16 @@ def test_the_four_goal_classes_are_accepted_as_scene_targets():
         assert goal_class in _TISSUES, f"{goal_class} is a goal class the parser emits"
 
 
+@pytest.mark.parametrize("target", ["heart", "vessels", "liver", "kidneys", "spleen"])
+def test_normalize_scene_accepts_registry_anatomy_targets(target):
+    scene = normalize_scene(valid_scene(
+        goal={"target": target, "direction": "increase"},
+        command={"attribute": "opacity", "target": target, "direction": "increase"},
+    ))
+    assert scene["goal"]["target"] == target
+    assert scene["command"]["target"] == target
+
+
 def test_retired_band_names_are_no_longer_canonical_targets():
     from scene_schema import _TISSUES
 

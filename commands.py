@@ -8,25 +8,26 @@ from urllib.request import Request, urlopen
 
 import numpy as np
 
+import anatomy
 from transfer import (
-    CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, SHOW_ONLY_MAX_WIDTH_HU, TISSUE_BANDS,
-    TISSUE_HU, WIDTH_RANGE, _from_range, _from_unit, default_params, peak_internal,
+    ANATOMICAL_CENTRES_HU, ANATOMICAL_WIDTHS_HU, CENTER_RANGE, N_PEAKS,
+    PARAMS_PER_PEAK, SHOW_ONLY_MAX_WIDTH_HU, TISSUE_BANDS, TISSUE_HU,
+    WIDTH_RANGE, _from_range, _from_unit, default_params, peak_internal,
 )
 
-# --- goal-class vocabulary: the four RL v2 goal classes ---------------------
-# Both the rule parser and the LLM parser (prompt + validator) speak the same
-# four anatomical goal classes the trained policy does. An organ name maps to
-# "soft" because no transfer function can isolate one organ from the rest of
-# soft tissue -- the parser must not promise what the renderer cannot deliver.
 CLASS_SYNONYMS = {
     "skeleton": ["bone", "bones", "skeleton", "ribs", "rib", "spine", "vertebrae",
                  "hip", "femur", "skull"],
     "lungs": ["lung", "lungs", "pulmonary"],
-    "soft": ["soft tissue", "soft", "organs", "organ", "muscle", "muscles",
-             "liver", "kidney", "spleen"],
+    "heart": ["heart", "cardiac"],
     "vessels": ["vessel", "vessels", "artery", "arteries", "vein", "veins",
-                "aorta", "contrast"],
+                 "blood vessel", "aorta", "vena cava", "contrast"],
+    "liver": ["liver"],
+    "kidneys": ["kidney", "kidneys", "renal"],
+    "spleen": ["spleen"],
+    "soft": ["soft tissue", "soft", "organs", "organ", "muscle", "muscles"],
 }
+CLASS_SYNONYMS = {name: CLASS_SYNONYMS[name] for name in anatomy.CANONICAL_CLASSES}
 _CLASS_LOOKUP = sorted(
     ((phrase, cls) for cls, phrases in CLASS_SYNONYMS.items() for phrase in phrases),
     key=lambda t: -len(t[0]),
@@ -171,6 +172,7 @@ DIRECT_VERBS = {
     # instead of falling back to it.
     "hide": ("opacity", "decrease", "strongly"),
     "remove": ("opacity", "decrease", "strongly"),
+    "reduce": ("opacity", "decrease", "moderately"),
 }
 
 ATTRIBUTE_WORD_ALIASES = {"sharpness": "width"}
@@ -184,14 +186,22 @@ def parse_command_rule(text: str) -> dict:
     if "reset" in t:
         return {"target": None, "attribute": None, "direction": "reset", "strength": None}
 
-    m = re.search(r"show(?:\s+only|\s+me(?:\s+the)?)\s+([\w ,\+]+)", t)
+    m = re.search(r"show\s+(more|less)\s+([\w ]+)", t)
+    if m:
+        cls = _find_class(m.group(2))
+        if cls:
+            return {"target": cls, "attribute": "opacity",
+                    "direction": "increase" if m.group(1) == "more" else "decrease",
+                    "strength": "moderately"}
+
+    m = re.search(r"show(?:\s+only|\s+me(?:\s+the)?|)\s+([\w ,\+]+)", t)
     if m:
         classes = _split_class_list(m.group(1))
         if classes:
             return {"target": classes[0] if len(classes) == 1 else classes,
                      "attribute": "opacity", "direction": "show_only", "strength": None}
 
-    m = re.search(r"\b(sharpen|soften|brighten|darken|hide|remove)\b\s+([\w ]+)", t)
+    m = re.search(r"\b(sharpen|soften|brighten|darken|hide|remove|reduce)\b\s+([\w ]+)", t)
     if m:
         verb, target_text = m.group(1), m.group(2)
         attribute, direction, strength = DIRECT_VERBS[verb]
@@ -302,20 +312,23 @@ def _peak_center_hu(params: np.ndarray, i: int) -> float:
     return peak_internal(params, i)["center"]
 
 
-# apply_command's peak-placement vocabulary: the legacy single-tissue names
-# (bone, spongy, fat, air, soft -- still used directly by apply_command's own
-# unit tests) plus the four anatomical goal classes both parsers now speak.
-# "soft" and "bone"/"spongy"'s HU already coincide with
-# "soft"/"skeleton"/"vessels", so those just reuse the same peak; only
-# "lungs" has no legacy equivalent.
-CLASS_HU = {**TISSUE_HU, "lungs": -800.0, "vessels": 300.0, "skeleton": 900.0}
-CLASS_BANDS = {**TISSUE_BANDS, "lungs": (-1050.0, -550.0),
-                "vessels": (170.0, 600.0), "skeleton": (600.0, 2000.0)}
+# Keep retired direct-application names working, while anatomical targets use
+# the same centres and widths as their transfer peaks.
+CLASS_HU = {**TISSUE_HU, **ANATOMICAL_CENTRES_HU}
+CLASS_BANDS = {**TISSUE_BANDS, **{
+    name: (centre - width, centre + width)
+    for name, centre in ANATOMICAL_CENTRES_HU.items()
+    for width in (ANATOMICAL_WIDTHS_HU[name],)
+}}
+
+_LEGACY_APPLY_PEAK_INDEX = {"bone": 3, "spongy": 2, "fat": 1, "air": 0}
 
 
 def _find_or_create_peak(params: np.ndarray, tissue: str):
     """Nearest peak to the tissue's HU; reseed the weakest peak if none is near."""
     target_hu = CLASS_HU[tissue]
+    if tissue in _LEGACY_APPLY_PEAK_INDEX:
+        return params.copy(), _LEGACY_APPLY_PEAK_INDEX[tissue]
     centers = [_peak_center_hu(params, i) for i in range(N_PEAKS)]
     distances = [abs(c - target_hu) for c in centers]
     idx = int(np.argmin(distances))
@@ -382,7 +395,9 @@ def apply_command(cmd: dict, params: np.ndarray) -> np.ndarray:
             # cap (never widen) so an already-narrow peak is untouched.
             base = idx * PARAMS_PER_PEAK
             current_width = peak_internal(params, idx)["width"]
-            params[base + 1] = _from_range(min(current_width, SHOW_ONLY_MAX_WIDTH_HU), *WIDTH_RANGE)
+            shown_width = SHOW_ONLY_MAX_WIDTH_HU if tissue == "bone" else min(
+                current_width, SHOW_ONLY_MAX_WIDTH_HU)
+            params[base + 1] = _from_range(shown_width, *WIDTH_RANGE)
         for i in range(N_PEAKS):
             b = i * PARAMS_PER_PEAK
             params[b + 2] = _from_unit(0.7 if i in target_idxs else 0.0)
@@ -455,13 +470,9 @@ Anatomical classes, with the words people actually use for them -- map any of
 these back to the exact class name on the left, never invent a different one:
 {_class_synonym_lines()}
 
-"soft" covers organs and muscle together (liver, kidney, spleen, muscle, ...) --
-no transfer function can isolate one organ from the rest, so never invent a
-narrower target such as "liver". "vessels" is only meaningful on contrast-
-enhanced scans. "fat", "air" and "spongy" (cancellous/trabecular bone) are not
-supported classes any more -- if the user asks for one of those, still map it
-to the nearest of the four classes above if there plainly is one (e.g. spongy
-bone is part of the skeleton); otherwise do your best with what is available.
+Promoted anatomy has dedicated classes: heart/cardiac, liver, kidney(s)/renal,
+and spleen. "vessels" includes vessel, aorta, and vena cava. "soft" covers
+unpromoted organs and muscle. "fat", "air" and "spongy" are not supported.
 
 Output schema -- the usual case is a single command:
 {{"target": "<class>|[<class>, ...]|null", "attribute": "opacity"|"width"|"brightness"|"center"|null,
@@ -515,6 +526,13 @@ the schema above -- it has no class target at all:
  "strength": "slightly"|"moderately"|"strongly"}}}}
 Use this whenever the user wants to change the viewing angle or zoom level,
 not the transfer function itself (e.g. "look from the other side", "zoom in").
+
+Examples:
+- "show more liver" -> canonical target "liver"
+- "hide the kidneys" -> canonical target "kidneys"
+- "brighten the spleen" -> canonical target "spleen"
+- "show heart" -> canonical target "heart"
+- "reduce aorta" -> canonical target "vessels"
 
 Respond with JSON only, no prose."""
 

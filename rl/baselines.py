@@ -20,16 +20,17 @@ import math
 
 import numpy as np
 
+import anatomy
 import commands
 import goals
 import transfer
 
-N_PEAKS = transfer.N_PEAKS
+N_PEAKS = len(anatomy.CANONICAL_PEAK_ORDER)
 PARAMS_PER_PEAK = transfer.PARAMS_PER_PEAK
 
 
 def _controllable_dims() -> tuple:
-    """12 controllable value-groups: (width,), (height,), (r, g, b) per peak."""
+    """Width, height, and brightness groups for every canonical peak."""
     dims = []
     for peak in range(N_PEAKS):
         base = peak * PARAMS_PER_PEAK
@@ -58,8 +59,17 @@ def apply_controllable(start_params: np.ndarray, action) -> np.ndarray:
     params = np.asarray(start_params, dtype=np.float64).copy()
     for group, value in zip(CONTROLLABLE, action):
         offset = float(np.mean([params[i] for i in group]))
-        for index in group:
-            params[index] = float(value) + (params[index] - offset)
+        offsets = np.asarray([params[i] - offset for i in group], dtype=np.float64)
+        # Keep RGB hue offsets while projecting them into the parameter bounds.
+        for _ in range(len(group)):
+            clipped = np.clip(value + offsets, -1.0, 1.0)
+            residual = float(value - np.mean(clipped))
+            free = (clipped > -1.0) & (clipped < 1.0)
+            if not np.any(free) or abs(residual) < 1e-12:
+                break
+            offsets[free] += residual * len(offsets) / np.count_nonzero(free)
+        for index, channel in zip(group, np.clip(value + offsets, -1.0, 1.0)):
+            params[index] = float(channel)
     return np.clip(params, -1.0, 1.0)
 
 
@@ -110,7 +120,7 @@ def current_executor(model, start_params, instruction) -> np.ndarray:
 
     if kind == "show_only":
         shown = {c for c, entry in targets.items() if entry.get("vis", 0.0) > 0.0}
-        for goal_class, idx in goals.PEAK_INDEX.items():
+        for goal_class, idx in transfer.ANATOMICAL_PEAK_INDEX.items():
             base = idx * PARAMS_PER_PEAK
             params[base + 2] = transfer._from_unit(0.7 if goal_class in shown else 0.0)
             if goal_class in shown:
@@ -127,7 +137,7 @@ def current_executor(model, start_params, instruction) -> np.ndarray:
         start_vis = _start_vis(model, start_params)
         for goal_class, delta in _mentioned(instruction, "vis").items():
             level = _infer_level(model, goal_class, delta, start_vis[goal_class])
-            base = goals.PEAK_INDEX[goal_class] * PARAMS_PER_PEAK
+            base = transfer.ANATOMICAL_PEAK_INDEX[goal_class] * PARAMS_PER_PEAK
             params[base + 2] = transfer._from_unit(commands.LEVEL_WORDS[level])
         return params
 
@@ -136,7 +146,7 @@ def current_executor(model, start_params, instruction) -> np.ndarray:
             strength = _nearest_key(delta, goals.BRIGHTNESS_STRENGTH)
             step = commands.STRENGTH_WORDS[strength]
             direction = _direction(delta)
-            base = goals.PEAK_INDEX[goal_class] * PARAMS_PER_PEAK
+            base = transfer.ANATOMICAL_PEAK_INDEX[goal_class] * PARAMS_PER_PEAK
             for offset in (3, 4, 5):
                 new_ext = commands._asymptotic_step(float(params[base + offset]), direction, step)
                 params[base + offset] = float(np.clip(new_ext, -1.0, 1.0))
@@ -147,7 +157,7 @@ def current_executor(model, start_params, instruction) -> np.ndarray:
         strength = _nearest_key(delta, goals.VISIBILITY_STRENGTH)
         step = commands.STRENGTH_WORDS[strength]
         direction = _direction(delta)
-        base = goals.PEAK_INDEX[goal_class] * PARAMS_PER_PEAK
+        base = transfer.ANATOMICAL_PEAK_INDEX[goal_class] * PARAMS_PER_PEAK
         new_ext = commands._asymptotic_step(float(params[base + 2]), direction, step)
         params[base + 2] = float(np.clip(new_ext, -1.0, 1.0))
     return params
@@ -164,7 +174,7 @@ def occlusion_rule(model, start_params, instruction) -> np.ndarray:
     params = current_executor(model, start_params, instruction)
     shown = _increasing_or_shown_classes(instruction)
     if shown:
-        for goal_class, idx in goals.PEAK_INDEX.items():
+        for goal_class, idx in transfer.ANATOMICAL_PEAK_INDEX.items():
             if goal_class not in shown:
                 base = idx * PARAMS_PER_PEAK
                 params[base + 2] = transfer._from_unit(0.02)

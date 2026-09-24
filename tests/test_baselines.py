@@ -210,7 +210,7 @@ def test_random_policy_is_seeded_and_stays_in_bounds():
 
     assert np.array_equal(a, b)
     assert not np.array_equal(a, c)
-    assert a.shape == (24,)
+    assert a.shape == (transfer.N_PEAKS * transfer.PARAMS_PER_PEAK,)
     assert np.all(a >= -1.0) and np.all(a <= 1.0)
 
 
@@ -248,9 +248,20 @@ def test_every_baseline_returns_valid_params():
 
     for name, fn in baselines.BASELINES.items():
         result = fn(model, start, instruction)
-        assert result.shape == (24,), name
+        assert result.shape == (transfer.N_PEAKS * transfer.PARAMS_PER_PEAK,), name
         assert np.all(np.isfinite(result)), name
         assert np.all(result >= -1.0) and np.all(result <= 1.0), name
+
+
+@pytest.mark.parametrize("goal_class", ["heart", "vessels", "liver", "kidneys", "spleen"])
+def test_current_executor_controls_each_registry_class(goal_class):
+    model = _StubModel()
+    start = _start_params()
+    instruction = _relative_instruction(goal_class, goals.VISIBILITY_STRENGTH["moderately"])
+
+    result = baselines.current_executor(model, start, instruction)
+
+    assert _peak_height(result, goal_class) > _peak_height(start, goal_class)
 
 
 def test_apply_controllable_sets_each_group_to_the_action_value():

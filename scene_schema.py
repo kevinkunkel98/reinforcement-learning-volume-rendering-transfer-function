@@ -6,6 +6,8 @@ import math
 from numbers import Real
 from typing import Any, Mapping
 
+import anatomy
+
 
 _REQUIRED_SCENE_FIELDS = (
     "scene_id",
@@ -34,13 +36,7 @@ _OPTIONAL_SCENE_FIELDS = {
     "carried_forward",
     *_OPTIONAL_TRANSITION_FIELDS,
 }
-# The four goal classes the parser emits. This was the retired HU-band set
-# (air/fat/soft/spongy/bone) until 2026-09-18, which meant a scene transition
-# naming skeleton, lungs or vessels was rejected as non-canonical and the
-# request 400'd -- three of the four classes in use. Kept as a literal rather
-# than importing goals.GOAL_CLASSES: this module validates a wire format, and
-# a stored scene must not change meaning because an enum moved.
-_TISSUES = {"skeleton", "lungs", "soft", "vessels"}
+_TISSUES = set(anatomy.CANONICAL_CLASSES)
 _DIRECTIONS = {"increase", "decrease"}
 _VERDICTS = {"accepted", "better", "worse", "tie", "A", "B"}
 
