@@ -70,3 +70,18 @@ def test_per_class_report_keeps_reachability_counts_and_attainment():
     assert report["heart"]["median"] == pytest.approx(-0.2)
     assert report["heart"]["unsupported"] == 0
     assert report["heart"]["unreachable"] == 1
+
+
+def test_per_class_report_counts_all_statuses_even_without_scores():
+    rows = [
+        {"class": "liver", "status": "unsupported", "attainment": None},
+        {"class": "liver", "status": "unreachable", "attainment": None},
+    ]
+
+    report = summarise_per_class(rows)
+
+    assert report["liver"]["supported"] == 1
+    assert report["liver"]["reachable"] == 0
+    assert report["liver"]["unsupported"] == 1
+    assert report["liver"]["unreachable"] == 1
+    assert report["liver"]["n"] == 0

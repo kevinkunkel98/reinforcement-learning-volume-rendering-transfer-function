@@ -28,7 +28,8 @@ import sys
 # The modules that actually turn a rendered state into a number. A change in
 # any of them invalidates comparisons across result files, which is exactly
 # what the incident's numbers hid.
-DEFAULT_SCORING_MODULES = ("goals", "visibility", "rl.vis_eval", "rl.oneshot_env")
+DEFAULT_SCORING_MODULES = ("goals", "visibility", "rl.vis_eval", "rl.oneshot_env",
+                            "tools.per_class_eval")
 
 FINGERPRINT_CHARS = 12
 _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))

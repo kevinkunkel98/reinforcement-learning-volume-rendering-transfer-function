@@ -607,6 +607,34 @@ def test_compare_result_metadata_reports_one_shot_contract():
     assert comparison["metadata"]["anatomy_layout"] == "anatomy-v2"
 
 
+def test_per_class_summary_counts_every_class_and_scores_requested_reachable_only(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        formulation="one_shot")
+    results = {"policy": [{"attainment": 0.4, "kind": episodes[0]["instruction"]["kind"]}]}
+
+    report = vis_eval.per_class_summary(results, episodes, model_for_volume=_model_for_volume)
+
+    assert set(report["policy"]) == set(goals.GOAL_CLASSES)
+    assert sum(entry["n"] for entry in report["policy"].values()) == 1
+    assert sum(entry["unsupported"] + entry["unreachable"] + entry["reachable"]
+               for entry in report["policy"].values()) == len(goals.GOAL_CLASSES)
+
+
+def test_compare_accepts_and_returns_per_class_summary(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        formulation="one_shot")
+    results = {"policy": [{"attainment": 0.4, "kind": episodes[0]["instruction"]["kind"]}]}
+
+    comparison = vis_eval.compare(results, episodes=episodes, model_for_volume=_model_for_volume)
+
+    assert "per_class" in comparison
+    assert set(comparison["per_class"]["policy"]) == set(goals.GOAL_CLASSES)
+
+
 # --- provenance ------------------------------------------------------------------
 
 def _stub_run(monkeypatch):

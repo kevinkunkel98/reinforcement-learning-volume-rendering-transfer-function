@@ -26,6 +26,7 @@ the commit and the scoring code that produced it, and both the run and
 warn loudly when those numbers no longer match the code in this checkout.
 """
 import argparse
+import collections
 import json
 import math
 import os
@@ -401,7 +402,57 @@ def episodes_detail(results: dict, episodes: list) -> dict:
     return detail
 
 
-def compare(results: dict, policy_name: str = "policy") -> dict:
+def per_class_summary(results: dict, episodes: list, model_for_volume=None) -> dict:
+    """Report class support/reachability for every episode and scored classes.
+
+    Every canonical class gets one status count per episode. Attainment is
+    attributed only to classes explicitly mentioned by the episode instruction;
+    unmentioned reachable classes remain visible in coverage counts but do not
+    dilute class performance metrics.
+    """
+    get_model = model_for_volume or visibility.for_volume
+    models = {}
+    report = {}
+    for method, rows in results.items():
+        grouped = collections.defaultdict(list)
+        counts = collections.defaultdict(collections.Counter)
+        for row, episode in zip(rows, episodes):
+            volume = episode["volume"]
+            if volume not in models:
+                try:
+                    models[volume] = get_model(volume)
+                except (KeyError, OSError, ValueError):
+                    models[volume] = None
+            model = models[volume]
+            if model is None or "instruction" not in episode:
+                supported = set()
+                reachable = set()
+                mentioned = set()
+            else:
+                supported = set(goals.goal_classes_for_volume(volume))
+                reachable = set(goals.reachable_goal_classes(volume, model))
+                mentioned = set(episode["instruction"]["targets"])
+            for goal_class in goals.GOAL_CLASSES:
+                status = ("reachable" if goal_class in reachable else
+                          "unreachable" if goal_class in supported else "unsupported")
+                counts[goal_class][status] += 1
+                if goal_class in mentioned and status == "reachable" and row["attainment"] is not None:
+                    grouped[goal_class].append(float(row["attainment"]))
+        report[method] = {}
+        for goal_class in goals.GOAL_CLASSES:
+            values = grouped[goal_class]
+            report[method][goal_class] = {
+                **goals.summarise_attainment(values),
+                "supported": counts[goal_class]["reachable"] + counts[goal_class]["unreachable"],
+                "reachable": counts[goal_class]["reachable"],
+                "unsupported": counts[goal_class]["unsupported"],
+                "unreachable": counts[goal_class]["unreachable"],
+            }
+    return report
+
+
+def compare(results: dict, policy_name: str = "policy", episodes=None,
+            model_for_volume=None) -> dict:
     """Robust attainment stats per method (overall and per instruction kind),
     plus a paired Wilcoxon signed-rank test of `results[policy_name]` against
     every other method in `results`. Episodes where either side's
@@ -423,7 +474,11 @@ def compare(results: dict, policy_name: str = "policy") -> dict:
         else:
             comparisons[name] = {"statistic": None, "p_value": None, "n": 0}
 
-    return {"summary": summary, "comparisons": comparisons, "metadata": observation_metadata()}
+    comparison = {"summary": summary, "comparisons": comparisons,
+                  "metadata": observation_metadata()}
+    if episodes is not None:
+        comparison["per_class"] = per_class_summary(results, episodes, model_for_volume)
+    return comparison
 
 
 # --- CLI -----------------------------------------------------------------------
@@ -536,7 +591,7 @@ def main(argv=None):
               "provenance": provenance.IMPORT_TIME_PROVENANCE,
               "metadata": observation_metadata(),
               "episodes_detail": episodes_detail(results, episodes),
-              **compare(results)}
+               **compare(results, episodes=episodes)}
     _print_table(result)
 
     out = args.out or DEFAULT_OUT_TEMPLATE.format(split=args.split)

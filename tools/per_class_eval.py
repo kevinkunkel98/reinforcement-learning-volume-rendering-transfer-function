@@ -93,16 +93,27 @@ def main():
         overall = []
         for episode in episodes:
             model = models[episode["volume"]]
+            supported_classes = set(goals.goal_classes_for_volume(episode["volume"]))
+            reachable_classes = set(goals.reachable_goal_classes(episode["volume"], model))
+            attainment = _score(policy, episode, model)
             for goal_class in episode["instruction"]["targets"]:
-                supported = goal_class in goals.goal_classes_for_volume(episode["volume"])
-                reachable = supported and goal_class in goals.reachable_goal_classes(episode["volume"], model)
-                attainment = _score(policy, episode, model) if reachable else None
+                supported = goal_class in supported_classes
+                reachable = goal_class in reachable_classes
                 per_class_rows.append({
                     "class": str(goal_class),
                     "status": "reachable" if reachable else "unreachable" if supported else "unsupported",
                     "attainment": attainment,
                 })
-            attainment = _score(policy, episode, model)
+            mentioned = set(episode["instruction"]["targets"])
+            for goal_class in goals.GOAL_CLASSES:
+                if goal_class in mentioned:
+                    continue
+                per_class_rows.append({
+                    "class": goal_class,
+                    "status": "reachable" if goal_class in reachable_classes else
+                              "unreachable" if goal_class in supported_classes else "unsupported",
+                    "attainment": None,
+                })
             overall.append(attainment)
         results[path] = {
             "overall_median": statistics.median(overall),

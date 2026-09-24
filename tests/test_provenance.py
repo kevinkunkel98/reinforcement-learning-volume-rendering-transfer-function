@@ -65,7 +65,8 @@ def test_fingerprint_covers_every_module_not_just_the_first(tmp_path):
 
 def test_default_modules_are_the_ones_that_compute_a_score():
     assert set(provenance.DEFAULT_SCORING_MODULES) == {
-        "goals", "visibility", "rl.vis_eval", "rl.oneshot_env"}
+        "goals", "visibility", "rl.vis_eval", "rl.oneshot_env",
+        "tools.per_class_eval"}
     assert provenance.provenance()["scoring_modules"] == list(
         provenance.DEFAULT_SCORING_MODULES)
 
