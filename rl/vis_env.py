@@ -2,7 +2,7 @@
 instruction.
 
 Each episode picks a volume and an instruction (`goals.sample_instruction`);
-the agent edits the transfer function's 12 controllable values (height,
+the agent edits the transfer function's controllable values (height,
 width, brightness per peak -- centres and hue stay fixed) over `MAX_STEPS`
 steps. The reward is the drop in `goals.distance` to the instruction's goal,
 normalized by that episode's starting distance (`D_start`, floored at
@@ -28,10 +28,12 @@ from gymnasium import spaces
 import goals
 import visibility
 from rl.baselines import CONTROLLABLE
-from transfer import N_PEAKS, PARAMS_PER_PEAK
+from transfer import PARAMS_PER_PEAK, TOTAL_PARAMS
 
-OBSERVATION_SIZE = 62      # 12 params + 16 goal + 4 log vis + 4 bright + 4 c + 4 b + 1 coverage + 16 histogram + 1 progress
-ACTION_SIZE = 12
+N_GOAL_CLASSES = len(goals.GOAL_CLASSES)
+OBSERVATION_SIZE = (len(CONTROLLABLE) + 8 * N_GOAL_CLASSES
+                    + 1 + 16 + 1)
+ACTION_SIZE = len(CONTROLLABLE)
 MAX_STEPS = 10
 STEP_SCALE = 0.1           # per action unit, in normalized parameter units
 USELESS_PENALTY = 1.0
@@ -111,7 +113,7 @@ class VisibilityTFEnv(gym.Env):
 
     def _build_observation(self, params: np.ndarray, agg: dict) -> np.ndarray:
         controllable = []
-        for peak in range(N_PEAKS):
+        for peak in range(TOTAL_PARAMS // PARAMS_PER_PEAK):
             base = peak * PARAMS_PER_PEAK
             controllable.append(float(params[base + 1]))                       # width
             controllable.append(float(params[base + 2]))                       # height

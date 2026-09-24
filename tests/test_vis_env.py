@@ -4,6 +4,7 @@ import pytest
 
 import goals
 import transfer
+from anatomy import CANONICAL_CLASSES
 from rl import vis_env
 from rl.vis_env import ACTION_SIZE, DISTANCE_FLOOR, MAX_STEPS, OBSERVATION_SIZE, REWARD_CLIP, VisibilityTFEnv
 
@@ -13,7 +14,7 @@ class _StubModel:
     directly to that class's visibility/brightness -- fast and deterministic,
     but still responsive to every controllable value."""
 
-    MEASURED = {"skeleton": "skeleton", "lungs": "lungs", "soft": "organs", "vessels": "vessels"}
+    MEASURED = {name: name for name in CANONICAL_CLASSES}
 
     def __init__(self):
         self.histogram = np.full(16, 1.0 / 16.0, dtype=np.float32)
@@ -25,8 +26,6 @@ class _StubModel:
             peak = transfer.peak_internal(params, idx)
             vis[measured] = max(float(peak["height"]), 0.0)
             bright[measured] = float(sum(peak["rgb"]) / 3.0)
-        vis["muscle"] = 0.0
-        bright["muscle"] = 0.0
         coverage = min(1.0, sum(vis.values()))
         return {"vis": vis, "bright": bright, "coverage": coverage}
 
@@ -35,8 +34,8 @@ class _StubModel:
 
 
 CLASSES_PRESENT = {
-    "fake_a": ["skeleton", "lungs", "organs", "muscle", "vessels"],
-    "fake_b": ["skeleton", "lungs", "organs"],
+    "fake_a": list(CANONICAL_CLASSES),
+    "fake_b": ["skeleton", "lungs", "soft"],
 }
 CONTRAST = {"fake_a": True, "fake_b": False}
 
@@ -57,6 +56,8 @@ def test_observation_and_action_space_shapes(monkeypatch):
     env = _make_env(monkeypatch)
     assert env.observation_space.shape == (OBSERVATION_SIZE,)
     assert env.action_space.shape == (ACTION_SIZE,)
+    assert OBSERVATION_SIZE == 106
+    assert ACTION_SIZE == transfer.TOTAL_PARAMS // transfer.PARAMS_PER_PEAK * 3
     assert np.all(env.action_space.low == -1.0)
     assert np.all(env.action_space.high == 1.0)
 
@@ -187,7 +188,7 @@ def test_useless_penalty_applied_for_an_all_transparent_state(monkeypatch):
     env.reset(seed=2)
     # Force an all-transparent transfer function directly: every controllable
     # value at its floor means every peak's real height is 0.
-    env._params = np.full(24, -1.0, dtype=np.float64)
+    env._params = np.full(transfer.TOTAL_PARAMS, -1.0, dtype=np.float64)
 
     obs, reward, terminated, truncated, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
 
@@ -197,7 +198,7 @@ def test_useless_penalty_applied_for_an_all_transparent_state(monkeypatch):
 def test_useless_penalty_lowers_reward_relative_to_no_penalty(monkeypatch):
     env = _make_env(monkeypatch, volume_ids=("fake_a",))
     env.reset(seed=2)
-    env._params = np.full(24, -1.0, dtype=np.float64)
+    env._params = np.full(transfer.TOTAL_PARAMS, -1.0, dtype=np.float64)
     prev_distance = env._prev_distance
     start_distance = env._start_distance
 

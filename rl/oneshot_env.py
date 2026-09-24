@@ -3,7 +3,7 @@ visibility instruction.
 
 Each episode picks a volume and an instruction (`goals.sample_instruction`);
 unlike `vis_env.VisibilityTFEnv`'s ten-step edits, here the single action *is*
-the new value of each of the 12 controllable parameter groups
+the new value of each controllable parameter group
 (`rl.baselines.CONTROLLABLE`: height, width and colour per peak -- centres
 stay fixed), not a delta, and the episode ends immediately. The reward is the
 attainment of the resulting transfer function (`goals.attainment`), clipped
@@ -24,9 +24,9 @@ import goals
 import visibility
 from rl.baselines import CONTROLLABLE, apply_controllable
 
-OBSERVATION_SIZE = 57   # 16 goal + 16 histogram + 4 log10 visibility + 4 brightness + 4 log10 solo_max ceiling
-                         # + 12 start parameters + 1 coverage
-ACTION_SIZE = 12        # the new value of each controllable parameter group, in [-1, 1]
+N_GOAL_CLASSES = len(goals.GOAL_CLASSES)
+OBSERVATION_SIZE = 4 * N_GOAL_CLASSES + 16 + 3 * N_GOAL_CLASSES + len(CONTROLLABLE) + 1
+ACTION_SIZE = len(CONTROLLABLE)
 USELESS_PENALTY = 1.0
 REWARD_CLIP = 1.0
 
@@ -67,9 +67,9 @@ _ATTAINMENT_FLOOR = 1e-9
 
 
 def build_observation(goal, histogram, start_agg: dict, solo_max_log, controllable) -> np.ndarray:
-    """The `OBSERVATION_SIZE`-value one-shot observation: goal (16) +
-    histogram (16) + log10 visibility (4) + brightness (4) + log10 solo_max
-    ceiling (4) + controllable start parameters (12) + coverage (1), all at
+    """One-shot observation: goal (4n) + histogram (16) + log10 visibility (n)
+    + brightness (n) + log10 solo_max ceiling (n) + controllable start
+    parameters + coverage (1), all at
     the start state. The single implementation of this layout -- used by
     `OneShotEnv._build_observation` during training/rollout and by
     `rl.candidates` to query a policy standalone for preference collection,
@@ -87,11 +87,8 @@ class OneShotEnv(gym.Env):
     how much closer it gets to a sampled visibility/brightness instruction on
     a randomly chosen volume from `volume_ids`.
 
-    Observation layout (`OBSERVATION_SIZE` = 57): goal (16, `goal_vector`) +
-    histogram (16, `model.histogram`) + log10 visibility (4, one per
-    `goals.GOAL_CLASSES`, at the start state) + brightness (4, ditto) +
-    log10 solo_max ceiling (4, ditto -- see `_solo_max_log` below) +
-    controllable start parameters (12) + coverage (1, at the start state).
+    Observation layout derives from `len(goals.GOAL_CLASSES)` and
+    `len(CONTROLLABLE)`.
     """
 
     metadata = {"render_modes": []}
@@ -224,7 +221,7 @@ class OneShotEnv(gym.Env):
             ranked = sorted(goals.GOAL_CLASSES, key=lambda c: -abs(deltas[c]))
             if abs(deltas[ranked[0]]) >= self.HINDSIGHT_MIN_DELTA:
                 break
-        # A real instruction names one or two classes, never all four; a
+        # A real instruction names one or two classes, never all classes; a
         # hindsight goal that mentioned every class would shift the observation
         # distribution the policy sees away from the one it is evaluated on.
         count = int(rng.integers(1, self.HINDSIGHT_MAX_MENTIONS + 1))

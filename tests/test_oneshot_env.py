@@ -5,6 +5,7 @@ import pytest
 
 import goals
 import transfer
+from anatomy import CANONICAL_CLASSES
 from rl.baselines import CONTROLLABLE, apply_controllable
 from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, USELESS_PENALTY, OneShotEnv
 
@@ -14,10 +15,10 @@ class _StubModel:
     directly to that class's visibility/brightness -- fast and deterministic,
     but still responsive to every controllable value."""
 
-    MEASURED = {"skeleton": "skeleton", "lungs": "lungs", "soft": "organs", "vessels": "vessels"}
+    MEASURED = {name: name for name in CANONICAL_CLASSES}
     # Distinct per underlying (non-goal) class, so a test can tell the
     # appended observation values apart instead of all matching one constant.
-    SOLO_MAX = {"skeleton": 0.6, "lungs": 0.3, "organs": 0.4, "muscle": 0.1, "vessels": 0.05}
+    SOLO_MAX = {name: 0.1 + i * 0.05 for i, name in enumerate(CANONICAL_CLASSES)}
 
     def __init__(self):
         self.histogram = np.full(16, 1.0 / 16.0, dtype=np.float32)
@@ -30,8 +31,6 @@ class _StubModel:
             peak = transfer.peak_internal(params, idx)
             vis[measured] = max(float(peak["height"]), 0.0)
             bright[measured] = float(sum(peak["rgb"]) / 3.0)
-        vis["muscle"] = 0.0
-        bright["muscle"] = 0.0
         coverage = min(1.0, sum(vis.values()))
         return {"vis": vis, "bright": bright, "coverage": coverage}
 
@@ -41,8 +40,8 @@ class _StubModel:
 
 
 CLASSES_PRESENT = {
-    "fake_a": ["skeleton", "lungs", "organs", "muscle", "vessels"],
-    "fake_b": ["skeleton", "lungs", "organs"],
+    "fake_a": list(CANONICAL_CLASSES),
+    "fake_b": ["skeleton", "lungs", "soft"],
 }
 CONTRAST = {"fake_a": True, "fake_b": False}
 
@@ -63,6 +62,8 @@ def test_observation_and_action_space_shapes(monkeypatch):
     env = _make_env(monkeypatch)
     assert env.observation_space.shape == (OBSERVATION_SIZE,)
     assert env.action_space.shape == (ACTION_SIZE,)
+    assert OBSERVATION_SIZE == 97
+    assert ACTION_SIZE == len(CONTROLLABLE) == 24
     assert np.all(env.action_space.low == -1.0)
     assert np.all(env.action_space.high == 1.0)
 
@@ -75,10 +76,11 @@ def test_observation_appends_log_solo_max_per_goal_class(monkeypatch):
     expected = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
                 for c in goals.GOAL_CLASSES]
 
-    # Layout: goal(16) + histogram(16) + log_vis(4) + bright(4) + solo_max(4)
-    # + controllable(12) + coverage(1) == 57, appended right after brightness.
-    start = 16 + 16 + 4 + 4
-    appended = obs[start:start + 4]
+    n = len(goals.GOAL_CLASSES)
+    # Layout: goal(4n) + histogram(16) + log_vis(n) + bright(n) + solo_max(n)
+    # + controllable(24) + coverage(1) == 97.
+    start = 4 * n + 16 + n + n
+    appended = obs[start:start + n]
     assert appended == pytest.approx(expected, abs=1e-5)
 
 
@@ -140,13 +142,15 @@ def test_nonzero_action_sets_each_group_mean_and_keeps_the_peak_coloured(monkeyp
     env.reset(seed=0)
     # Clear of ±1 so no colour channel saturates -- clipping one would shift
     # its group's mean off the action value (`test_large_actions_are_clipped`).
-    action = np.linspace(-0.4, 0.4, ACTION_SIZE, dtype=np.float32)
+    action = np.linspace(-0.1, 0.1, ACTION_SIZE, dtype=np.float32)
 
     env.step(action)
+    expected_params = apply_controllable(env._start_params, action)
 
     for value, group in zip(action, CONTROLLABLE):
         got = [env._params[i] for i in group]
-        assert float(np.mean(got)) == pytest.approx(float(value), abs=1e-6)
+        expected = [expected_params[i] for i in group]
+        assert got == pytest.approx(expected, abs=1e-6)
         start = [env._start_params[i] for i in group]
         if max(start) - min(start) > 1e-9:
             assert max(got) - min(got) > 1e-9, "peak went grey"
@@ -311,5 +315,6 @@ def test_hindsight_goal_mentions_at_least_one_class():
     env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
     env.reset(seed=1)
     goal = env._instruction["goal"]
-    mentioned = goal[4:8]  # the m[4] block of goals.goal_vector
+    n = len(goals.GOAL_CLASSES)
+    mentioned = goal[n:2 * n]
     assert mentioned.sum() >= 1.0

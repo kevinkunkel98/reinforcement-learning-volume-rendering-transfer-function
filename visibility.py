@@ -8,12 +8,14 @@ transfer function. The result is, per class, how much of the final image that
 class contributes (`vis`) and how bright it appears (`bright`), plus how much
 of the frame is covered at all (`coverage`).
 
-Classes come from the TotalSegmentator label volume (`totalseg.load_labels`)
-when one exists for the volume; `label_source` reports "anatomy" in that
-case. The four Slicer CTs and the synthetic phantom carry no such labels, so
-their samples fall back to coarse Hounsfield bands mapped onto the same class
-names (`label_source` is then "intensity"), which only separate skeleton,
-lungs and organs -- muscle and vessels are never populated by the fallback.
+Classes come from the shared eight-class anatomy registry and TotalSegmentator
+label volume (`totalseg.load_labels`) when one exists; `label_source` reports
+"anatomy" in that case. Volumes without labels use coarse Hounsfield bands
+(`label_source` is "intensity"): only skeleton, lungs and generic soft tissue
+are measurable from intensity alone. Promoted organs (heart, liver, kidneys,
+spleen) and vessels stay empty in that fallback because intensity cannot
+identify them reliably. Unassigned samples use class id 0 and are reported as
+`other`.
 
 It is an estimate, not a renderer: no shading, no perspective, a coarse grid.
 tools/validate_visibility.py measures how well it tracks real VTK renders.
@@ -29,7 +31,7 @@ from anatomy import CLASS_LAYOUT_VERSION, MEASURED_CLASSES
 from transfer import CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, anatomical_params, _opacity_and_color_at
 from views import N_VIEWS, view_directions
 
-CLASSES = MEASURED_CLASSES[:-1]
+CLASSES = MEASURED_CLASSES[:-1]  # eight canonical classes; id 0 is "other"
 GRID_N = 80                     # samples per cube axis; 15 ms/features() on CPU
 LUT_SIZE = 256                  # quantization levels over CENTER_RANGE
 HISTOGRAM_BINS = 16
@@ -53,10 +55,11 @@ def lut_values() -> np.ndarray:
 
 
 def _intensity_class_ids(hu: np.ndarray) -> np.ndarray:
-    """Class ids from Hounsfield bands, for volumes with no anatomical label
-    volume. Only skeleton/lungs/organs are separable by intensity alone --
-    only skeleton, lungs and soft are populated; all promoted organs and
-    vessels stay empty because intensity alone cannot identify them."""
+    """Map unlabeled samples to skeleton, lungs or generic soft tissue.
+
+    Promoted organs and vessels remain unassigned: intensity alone cannot
+    identify those anatomical classes reliably.
+    """
     ids = np.zeros(hu.shape, dtype=np.uint8)
     ids[hu <= -500.0] = CLASSES.index("lungs") + 1
     ids[(hu >= -30.0) & (hu < 300.0)] = CLASSES.index("soft") + 1
