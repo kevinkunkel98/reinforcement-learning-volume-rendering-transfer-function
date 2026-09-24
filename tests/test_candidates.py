@@ -2,6 +2,7 @@ import json
 import os
 
 import numpy as np
+import pytest
 
 import goals
 import transfer
@@ -375,3 +376,27 @@ def test_anchor_items_rejects_malformed_item(monkeypatch, tmp_path):
                                 model_for_volume=lambda name: model, cache_path=cache_path)
 
     assert set(regenerated[0]) >= {"volume", "start_params", "instruction", "a", "b"}
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda item: item["start_params"].__setitem__(0, float("nan")),
+    lambda item: item["a"]["params"].__setitem__(0, float("inf")),
+    lambda item: item["features"]["start"]["vis"].__setitem__("skeleton", float("nan")),
+    lambda item: item["instruction"].__setitem__("kind", "unknown"),
+    lambda item: item["instruction"].__setitem__("text", 7),
+    lambda item: item["instruction"]["goal"].__setitem__(0, float("inf")),
+    lambda item: item["instruction"]["targets"].__setitem__("skeleton", 0.1),
+])
+def test_anchor_items_rejects_nonfinite_or_invalid_cached_payload(monkeypatch, tmp_path, mutate):
+    model = _make_model(monkeypatch)
+    valid_path = str(tmp_path / "valid.json")
+    cache_path = str(tmp_path / "anchor_items.json")
+    [item] = anchor_items(count=1, seed=0, volumes=["fake_a"], model_for_volume=lambda name: model,
+                          cache_path=valid_path)
+    mutate(item)
+    _write_cache(cache_path, [candidates._item_to_json(item)])
+
+    regenerated = anchor_items(count=1, seed=0, volumes=["fake_a"],
+                                model_for_volume=lambda name: model, cache_path=cache_path)
+
+    assert np.isfinite(regenerated[0]["start_params"]).all()

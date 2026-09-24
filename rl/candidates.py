@@ -28,6 +28,7 @@ NON_POLICY_SOURCES = tuple(source for source in dict.fromkeys(SOURCES) if source
 
 ANCHOR_CACHE_PATH = "out/cache/anchor_items.json"
 ANCHOR_CACHE_SCHEMA_VERSION = 2
+INSTRUCTION_KINDS = {kind for kind, _ in goals.INSTRUCTION_MIX}
 
 MIN_VISIBILITY_DIFFERENCE = 0.1     # log10 units, per class
 MIN_BRIGHTNESS_DIFFERENCE = 0.05
@@ -194,6 +195,37 @@ def _item_from_json(data: dict) -> dict:
     }
 
 
+def _finite_vector(value, length: int) -> bool:
+    if not isinstance(value, list) or len(value) != length:
+        return False
+    try:
+        return bool(np.isfinite(np.asarray(value, dtype=np.float64)).all())
+    except (TypeError, ValueError):
+        return False
+
+
+def _valid_features(features: dict) -> bool:
+    if not isinstance(features, dict) or set(features) != {"start", "a", "b"}:
+        return False
+    for aggregate in features.values():
+        if not isinstance(aggregate, dict) or set(aggregate) != {"vis", "bright", "coverage"}:
+            return False
+        if not isinstance(aggregate["vis"], dict) or not isinstance(aggregate["bright"], dict):
+            return False
+        measured_classes = set(goals.GOAL_CLASSES) | {"other"}
+        if set(aggregate["vis"]) != measured_classes:
+            return False
+        if set(aggregate["bright"]) != set(goals.GOAL_CLASSES):
+            return False
+        if not all(isinstance(value, (int, float)) and np.isfinite(value)
+                   for values in (aggregate["vis"], aggregate["bright"])
+                   for value in values.values()):
+            return False
+        if not isinstance(aggregate["coverage"], (int, float)) or not np.isfinite(aggregate["coverage"]):
+            return False
+    return True
+
+
 def _cache_item_is_valid(item: dict, volumes: tuple) -> bool:
     if not isinstance(item, dict) or set(item) != {
         "volume", "start_params", "instruction", "a", "b", "objective_choice",
@@ -201,17 +233,29 @@ def _cache_item_is_valid(item: dict, volumes: tuple) -> bool:
         return False
     if item["volume"] not in volumes or item["metadata"] != observation_metadata():
         return False
-    if not isinstance(item["start_params"], list) or len(item["start_params"]) != transfer.TOTAL_PARAMS:
+    if not _finite_vector(item["start_params"], transfer.TOTAL_PARAMS):
         return False
     instruction = item["instruction"]
-    if not isinstance(instruction, dict) or not {"kind", "text", "targets", "goal"} <= set(instruction):
+    if (not isinstance(instruction, dict) or set(instruction) != {"kind", "text", "targets", "goal"}
+            or instruction["kind"] not in INSTRUCTION_KINDS
+            or not isinstance(instruction["text"], (str, type(None)))
+            or not isinstance(instruction["targets"], dict)):
         return False
-    if not isinstance(instruction["goal"], list) or len(instruction["goal"]) != 4 * len(goals.GOAL_CLASSES):
+    if not _finite_vector(instruction["goal"], 4 * len(goals.GOAL_CLASSES)):
+        return False
+    for goal_class, target in instruction["targets"].items():
+        if goal_class not in goals.GOAL_CLASSES or not isinstance(target, dict):
+            return False
+        if set(target) - {"vis", "bright"} or not set(target):
+            return False
+        if not all(isinstance(value, (int, float)) and np.isfinite(value) for value in target.values()):
+            return False
+    if not _valid_features(item["features"]):
         return False
     for candidate in (item["a"], item["b"]):
         if not isinstance(candidate, dict) or set(candidate) != {"params", "source"}:
             return False
-        if not isinstance(candidate["params"], list) or len(candidate["params"]) != transfer.TOTAL_PARAMS:
+        if not _finite_vector(candidate["params"], transfer.TOTAL_PARAMS):
             return False
         if candidate["source"] not in SOURCES:
             return False
