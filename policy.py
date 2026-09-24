@@ -31,7 +31,7 @@ from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, observ
 # against v2 +0.201, Wilcoxon p = 0.0064.
 POLICY_PATH = "out/rl_v3/oneshot_seed0/best.zip"
 
-_state = {"loaded": False, "policy": None}
+_state = {"policies": {}}
 
 
 def _load_sac(path):
@@ -62,17 +62,17 @@ def load_policy(path: str = None):
     exact command application and to the non-policy candidate sources
     respectively.
     """
-    path = path or POLICY_PATH
-    if not _state["loaded"]:
-        _state["loaded"] = True
+    path = os.path.realpath(os.path.abspath(path or POLICY_PATH))
+    if path not in _state["policies"]:
+        loaded = None
         if os.path.exists(path):
-            _state["policy"] = _load_sac(path)
-            _validate_checkpoint(_state["policy"], path)
-    return _state["policy"]
+            loaded = _load_sac(path)
+            _validate_checkpoint(loaded, path)
+        _state["policies"][path] = loaded
+    return _state["policies"][path]
 
 
 def reset_cache():
     """Forget the cached checkpoint. For tests that change `POLICY_PATH` or the
     working directory -- the path is relative, so cwd decides what it finds."""
-    _state["loaded"] = False
-    _state["policy"] = None
+    _state["policies"].clear()

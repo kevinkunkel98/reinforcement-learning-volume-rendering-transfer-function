@@ -19,6 +19,7 @@ import os
 import numpy as np
 
 import goals
+import transfer
 from rl.baselines import BASELINES, CONTROLLABLE, apply_controllable
 from rl.oneshot_env import build_observation, observation_metadata
 
@@ -26,6 +27,7 @@ SOURCES = ("policy", "policy", "B1_current_executor", "B3_hill_climb_10", "B5_oc
 NON_POLICY_SOURCES = tuple(source for source in dict.fromkeys(SOURCES) if source != "policy")
 
 ANCHOR_CACHE_PATH = "out/cache/anchor_items.json"
+ANCHOR_CACHE_SCHEMA_VERSION = 2
 
 MIN_VISIBILITY_DIFFERENCE = 0.1     # log10 units, per class
 MIN_BRIGHTNESS_DIFFERENCE = 0.05
@@ -192,21 +194,55 @@ def _item_from_json(data: dict) -> dict:
     }
 
 
-def _load_anchor_cache(cache_path: str, count: int, seed: int):
+def _cache_item_is_valid(item: dict, volumes: tuple) -> bool:
+    if not isinstance(item, dict) or set(item) != {
+        "volume", "start_params", "instruction", "a", "b", "objective_choice",
+        "near_duplicate", "features", "metadata"}:
+        return False
+    if item["volume"] not in volumes or item["metadata"] != observation_metadata():
+        return False
+    if not isinstance(item["start_params"], list) or len(item["start_params"]) != transfer.TOTAL_PARAMS:
+        return False
+    instruction = item["instruction"]
+    if not isinstance(instruction, dict) or not {"kind", "text", "targets", "goal"} <= set(instruction):
+        return False
+    if not isinstance(instruction["goal"], list) or len(instruction["goal"]) != 4 * len(goals.GOAL_CLASSES):
+        return False
+    for candidate in (item["a"], item["b"]):
+        if not isinstance(candidate, dict) or set(candidate) != {"params", "source"}:
+            return False
+        if not isinstance(candidate["params"], list) or len(candidate["params"]) != transfer.TOTAL_PARAMS:
+            return False
+        if candidate["source"] not in SOURCES:
+            return False
+    return item["objective_choice"] in ("a", "b") and isinstance(item["near_duplicate"], bool)
+
+
+def _load_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple):
     if not os.path.exists(cache_path):
         return None
-    with open(cache_path) as f:
-        data = json.load(f)
+    try:
+        with open(cache_path) as f:
+            data = json.load(f)
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(data, dict) or data.get("schema_version") != ANCHOR_CACHE_SCHEMA_VERSION:
+        return None
     if data.get("seed") != seed or data.get("count") != count:
         return None
-    if any(entry.get("metadata") != observation_metadata() for entry in data.get("items", [])):
+    if data.get("volumes") != list(volumes) or not isinstance(data.get("items"), list):
+        return None
+    if len(data["items"]) != count:
+        return None
+    if any(not _cache_item_is_valid(entry, volumes) for entry in data["items"]):
         return None
     return [_item_from_json(entry) for entry in data["items"]]
 
 
-def _save_anchor_cache(cache_path: str, count: int, seed: int, items: list) -> None:
+def _save_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple, items: list) -> None:
     os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
-    data = {"seed": seed, "count": count, "items": [_item_to_json(item) for item in items]}
+    data = {"schema_version": ANCHOR_CACHE_SCHEMA_VERSION, "seed": seed, "count": count,
+            "volumes": list(volumes), "items": [_item_to_json(item) for item in items]}
     with open(cache_path, "w") as f:
         json.dump(data, f)
 
@@ -228,18 +264,18 @@ def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, mode
     depends on the TotalSegmentator data being present); both are injectable
     so tests never touch either.
     """
-    cached = _load_anchor_cache(cache_path, count, seed)
-    if cached is not None:
-        return cached
-
     if volumes is None:
         from datasets import volumes_for_split
         volumes = volumes_for_split("train") + volumes_for_split("val")
+    sorted_volumes = tuple(sorted(volumes))
+    cached = _load_anchor_cache(cache_path, count, seed, sorted_volumes)
+    if cached is not None:
+        return cached
+
     if model_for_volume is None:
         import visibility
         model_for_volume = visibility.for_volume
 
-    sorted_volumes = sorted(volumes)
     rng = np.random.default_rng(seed)
     model_cache = {}
     items = []
@@ -251,5 +287,5 @@ def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, mode
             model_cache[volume] = model
         items.append(sample_item(volume, model, rng, policy=policy))
 
-    _save_anchor_cache(cache_path, count, seed, items)
+    _save_anchor_cache(cache_path, count, seed, sorted_volumes, items)
     return items

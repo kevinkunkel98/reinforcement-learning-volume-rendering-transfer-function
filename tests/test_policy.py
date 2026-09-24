@@ -15,6 +15,11 @@ class _LoadedPolicy:
     action_space = _Space((12,))
 
 
+class _ValidLoadedPolicy:
+    observation_space = _Space((97,))
+    action_space = _Space((24,))
+
+
 def test_load_policy_rejects_old_checkpoint_dimensions(monkeypatch, tmp_path):
     checkpoint = tmp_path / "old.zip"
     checkpoint.write_bytes(b"checkpoint")
@@ -45,7 +50,22 @@ def test_default_policy_path_uses_new_policy_namespace():
 def test_missing_policy_path_returns_none(monkeypatch, tmp_path):
     monkeypatch.setattr(policy, "POLICY_PATH", str(tmp_path / "missing.zip"))
     policy.reset_cache()
-
     assert policy.load_policy() is None
+    policy.reset_cache()
+
+
+def test_policy_cache_is_keyed_by_requested_canonical_path(monkeypatch, tmp_path):
+    first = tmp_path / "first.zip"
+    second = tmp_path / "second.zip"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    loaded = {str(first): _ValidLoadedPolicy(), str(second): _ValidLoadedPolicy()}
+    monkeypatch.setattr(policy, "_load_sac", lambda path: loaded[path])
+    policy.reset_cache()
+
+    assert policy.load_policy(str(first)) is loaded[str(first)]
+    assert policy.load_policy(str(second)) is loaded[str(second)]
+    assert policy.load_policy(str(first)) is loaded[str(first)]
 
     policy.reset_cache()
+    assert policy.load_policy(str(first)) is loaded[str(first)]

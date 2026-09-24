@@ -328,3 +328,50 @@ def test_anchor_items_regenerates_cache_with_mismatching_observation_metadata(mo
                                 model_for_volume=lambda name: model, cache_path=cache_path)
 
     assert regenerated[0]["metadata"] == candidates.observation_metadata()
+
+
+def _write_cache(path, items, **overrides):
+    data = {"schema_version": candidates.ANCHOR_CACHE_SCHEMA_VERSION,
+            "seed": 0, "count": len(items), "volumes": ["fake_a"], "items": items}
+    data.update(overrides)
+    with open(path, "w") as stream:
+        json.dump(data, stream)
+
+
+def test_anchor_items_rejects_truncated_cache(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    cache_path = str(tmp_path / "anchor_items.json")
+    items = anchor_items(count=2, seed=0, volumes=["fake_a"], model_for_volume=lambda name: model,
+                         cache_path=str(tmp_path / "valid.json"))
+    item = items[0]
+    _write_cache(cache_path, [candidates._item_to_json(item)], count=2)
+
+    regenerated = anchor_items(count=2, seed=0, volumes=["fake_a"],
+                                model_for_volume=lambda name: model, cache_path=cache_path)
+
+    assert len(regenerated) == 2
+
+
+def test_anchor_items_rejects_wrong_schema_and_volume(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    cache_path = str(tmp_path / "anchor_items.json")
+    [item] = anchor_items(count=1, seed=0, volumes=["fake_a"], model_for_volume=lambda name: model,
+                          cache_path=str(tmp_path / "valid.json"))
+    encoded = candidates._item_to_json(item)
+    _write_cache(cache_path, [encoded], schema_version="old", volumes=["other"])
+
+    regenerated = anchor_items(count=1, seed=0, volumes=["fake_a"],
+                                model_for_volume=lambda name: model, cache_path=cache_path)
+
+    assert regenerated[0]["volume"] == "fake_a"
+
+
+def test_anchor_items_rejects_malformed_item(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    cache_path = str(tmp_path / "anchor_items.json")
+    _write_cache(cache_path, [{"volume": "fake_a"}])
+
+    regenerated = anchor_items(count=1, seed=0, volumes=["fake_a"],
+                                model_for_volume=lambda name: model, cache_path=cache_path)
+
+    assert set(regenerated[0]) >= {"volume", "start_params", "instruction", "a", "b"}
