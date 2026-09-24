@@ -28,7 +28,11 @@ import numpy as np
 import torch
 
 from anatomy import CLASS_LAYOUT_VERSION, MEASURED_CLASSES
-from transfer import CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, anatomical_params, _opacity_and_color_at
+import transfer
+from transfer import (
+    CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK,
+    anatomical_params, _opacity_and_color_at,
+)
 from views import N_VIEWS, view_directions
 
 CLASSES = MEASURED_CLASSES[:-1]  # eight canonical classes; id 0 is "other"
@@ -169,9 +173,9 @@ class VisibilityModel:
         """{"vis": {class: float, "other": float}, "bright": {class: float}, "coverage": float}.
 
         "other" is voxels the label volume (or the intensity fallback)
-        assigned to none of the five classes -- fat, connective tissue,
+        assigned to none of the eight classes -- fat, connective tissue,
         partial-volume edges. A transfer function can still put opacity
-        there, so it is measured the same way the five classes are, instead
+        there, so it is measured the same way the eight classes are, instead
         of silently vanishing: `goals.distance` charges for it under the same
         keep-tolerance any unmentioned class gets, or a search/policy could
         satisfy "show only X" by rendering an opaque wall of unclassified
@@ -198,7 +202,7 @@ class VisibilityModel:
         return [float(masked[view].sum()) / per_ray for view in range(self.n_views)]
 
     def solo_max(self, name: str) -> float:
-        """Largest vis_c over the four single-peak transfer functions (peak i
+        """Largest vis_c over the eight single-peak transfer functions (peak i
         at height 1, the rest at 0) -- the reference for absolute levels
         ("fully shown"): what that means depends on how much of that class
         this volume contains and what sits in front of it.
@@ -215,7 +219,9 @@ class VisibilityModel:
 
     def cache_key(self, volume_version: str) -> str:
         parts = (self.volume_id, volume_version, self.n_views, self.indices.shape[1],
-                 LUT_SIZE, CACHE_VERSION, CLASS_LAYOUT_VERSION, ",".join(CLASSES))
+                 LUT_SIZE, CACHE_VERSION, CLASS_LAYOUT_VERSION,
+                 transfer.TRANSFER_LAYOUT_VERSION,
+                 ",".join(transfer.TRANSFER_LAYOUT_ORDER), ",".join(CLASSES))
         return hashlib.sha256(":".join(str(p) for p in parts).encode()).hexdigest()[:16]
 
     def save_cache(self, volume_version: str, cache_dir: str = None) -> str:

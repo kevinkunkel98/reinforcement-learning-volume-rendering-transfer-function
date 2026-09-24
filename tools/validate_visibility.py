@@ -1,6 +1,6 @@
 """Does the visibility estimate track real renders?
 
-For each anatomical class a volume's label volume carries, sweep 10 transfer
+For each current eight-class anatomical label a volume carries, sweep 10 transfer
 functions that isolate that class (the peak whose single-peak transfer
 function shows the most of it -- the same peak `visibility.solo_max` would
 find -- swept from height 0.02 to 1.0, the other peaks jittered by a seeded

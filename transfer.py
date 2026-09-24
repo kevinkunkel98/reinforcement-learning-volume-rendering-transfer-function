@@ -6,6 +6,10 @@ from anatomy import CANONICAL_PEAK_ORDER
 N_PEAKS = len(CANONICAL_PEAK_ORDER)
 PARAMS_PER_PEAK = 6  # center, width, height, r, g, b
 TOTAL_PARAMS = N_PEAKS * PARAMS_PER_PEAK
+# Cache identity for the fixed-centre transfer layout. Bump when peak order,
+# parameter grouping, or calibrated peak definitions change.
+TRANSFER_LAYOUT_VERSION = "transfer-v2"
+TRANSFER_LAYOUT_ORDER = CANONICAL_PEAK_ORDER
 
 CENTER_RANGE = (-1050.0, 2000.0)
 WIDTH_RANGE = (10.0, 400.0)

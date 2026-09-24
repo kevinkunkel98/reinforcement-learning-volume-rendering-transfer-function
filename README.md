@@ -45,8 +45,9 @@ the bone on that particular scan. An earlier version of this project scored
 transfer functions with a formula that never looked at the render: it called
 an invisible change "better" and a 9× visibility gain "no change."
 `visibility.py` replaced it with a cheap render-shaped estimate (14 ms
-against 50–210 ms for a real render), validated against real VTK renders
-(Pearson r 0.89–1.00 across five anatomical classes).
+against 50–210 ms for a real render). Historical five-class validation reached
+Pearson r 0.89–1.00 across its validated classes; current eight-class support
+uses the same validation gate and must be revalidated per volume and class.
 
 ## The policy
 

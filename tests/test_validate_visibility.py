@@ -80,3 +80,29 @@ def test_visibility_cache_key_changes_with_layout_metadata(monkeypatch):
     original = model.cache_key("volume-v1")
     monkeypatch.setattr("visibility.CLASS_LAYOUT_VERSION", "anatomy-test-layout")
     assert model.cache_key("volume-v1") != original
+
+
+def test_visibility_cache_key_changes_with_transfer_layout(monkeypatch):
+    import transfer
+    from visibility import VisibilityModel
+
+    model = VisibilityModel(
+        np.zeros((1, 2, 2, 2), dtype=np.uint8), 1.0, np.zeros(16),
+        np.zeros((1, 2, 2, 2), dtype=np.uint8), "intensity", "test",
+    )
+    original = model.cache_key("volume-v1")
+    monkeypatch.setattr(transfer, "TRANSFER_LAYOUT_VERSION", "transfer-test-layout")
+    assert model.cache_key("volume-v1") != original
+
+
+def test_visibility_cache_key_changes_with_transfer_peak_order(monkeypatch):
+    import transfer
+    from visibility import VisibilityModel
+
+    model = VisibilityModel(
+        np.zeros((1, 2, 2, 2), dtype=np.uint8), 1.0, np.zeros(16),
+        np.zeros((1, 2, 2, 2), dtype=np.uint8), "intensity", "test",
+    )
+    original = model.cache_key("volume-v1")
+    monkeypatch.setattr(transfer, "TRANSFER_LAYOUT_ORDER", tuple(reversed(transfer.TRANSFER_LAYOUT_ORDER)))
+    assert model.cache_key("volume-v1") != original
