@@ -24,8 +24,10 @@ import statistics
 import numpy as np
 
 import goals
+import provenance
 import visibility
 from rl.candidates import _apply_action, _observation_for, _predict
+from rl.oneshot_env import observation_metadata
 from rl.vis_eval import fixed_episodes
 
 
@@ -38,6 +40,32 @@ def _score(policy, episode, model) -> float:
     params = _apply_action(start_params, action)
     return goals.attainment(instruction["goal"], start_agg,
                             goals.aggregate(model.features(params)))
+
+
+def summarise_per_class(rows: list) -> dict:
+    """Summarise scores while retaining support and reachability accounting."""
+    grouped = collections.defaultdict(list)
+    counts = collections.defaultdict(collections.Counter)
+    for row in rows:
+        goal_class = row["class"]
+        status = row["status"]
+        counts[goal_class][status] += 1
+        if status == "reachable" and row["attainment"] is not None:
+            grouped[goal_class].append(float(row["attainment"]))
+
+    report = {}
+    for goal_class in sorted(set(grouped) | set(counts)):
+        values = grouped[goal_class]
+        report[goal_class] = {
+            "median": statistics.median(values) if values else None,
+            "share_positive": sum(value > 0 for value in values) / len(values) if values else None,
+            "n": len(values),
+            "supported": counts[goal_class]["reachable"] + counts[goal_class]["unreachable"],
+            "reachable": counts[goal_class]["reachable"],
+            "unsupported": counts[goal_class]["unsupported"],
+            "unreachable": counts[goal_class]["unreachable"],
+        }
+    return report
 
 
 def main():
@@ -61,21 +89,27 @@ def main():
     results = {}
     for path in args.policies:
         policy = SAC.load(path, device="cpu")
-        per_class = collections.defaultdict(list)
+        per_class_rows = []
         overall = []
         for episode in episodes:
-            attainment = _score(policy, episode, models[episode["volume"]])
-            overall.append(attainment)
+            model = models[episode["volume"]]
             for goal_class in episode["instruction"]["targets"]:
-                per_class[str(goal_class)].append(attainment)
+                supported = goal_class in goals.goal_classes_for_volume(episode["volume"])
+                reachable = supported and goal_class in goals.reachable_goal_classes(episode["volume"], model)
+                attainment = _score(policy, episode, model) if reachable else None
+                per_class_rows.append({
+                    "class": str(goal_class),
+                    "status": "reachable" if reachable else "unreachable" if supported else "unsupported",
+                    "attainment": attainment,
+                })
+            attainment = _score(policy, episode, model)
+            overall.append(attainment)
         results[path] = {
             "overall_median": statistics.median(overall),
             "overall_share_positive": sum(1 for a in overall if a > 0) / len(overall),
-            "per_class": {
-                c: {"median": statistics.median(v),
-                    "share_positive": sum(1 for a in v if a > 0) / len(v),
-                    "n": len(v)}
-                for c, v in sorted(per_class.items())},
+            "per_class": summarise_per_class(per_class_rows),
+            "metadata": observation_metadata(),
+            "provenance": provenance.IMPORT_TIME_PROVENANCE,
         }
 
     classes = sorted({c for r in results.values() for c in r["per_class"]})
@@ -83,7 +117,7 @@ def main():
     for path, r in results.items():
         row = f"{path[-42:]:44s} {r['overall_median']:+9.3f}  "
         row += "  ".join(
-            f"{r['per_class'][c]['median']:+9.3f}" if c in r["per_class"] else f"{'-':>9s}"
+            f"{r['per_class'][c]['median']:+9.3f}" if c in r["per_class"] and r["per_class"][c]["median"] is not None else f"{'-':>9s}"
             for c in classes)
         print(row)
 
