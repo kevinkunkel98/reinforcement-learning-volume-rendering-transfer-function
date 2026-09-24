@@ -11,10 +11,20 @@ CANONICAL_CLASSES = (
     "soft",
 )
 CLASS_NAMES = CANONICAL_CLASSES
-MEASURED_CLASSES = CANONICAL_CLASSES
+MEASURED_CLASSES = CANONICAL_CLASSES + ("other",)
 LAYOUT_VERSION = "anatomy-v2"
 CLASS_LAYOUT_VERSION = LAYOUT_VERSION
 PROMOTED_ORGAN_CLASSES = ("liver", "kidneys", "spleen", "heart")
+CANONICAL_PEAK_ORDER = (
+    "lungs",
+    "soft",
+    "liver",
+    "kidneys",
+    "spleen",
+    "heart",
+    "vessels",
+    "skeleton",
+)
 
 STRUCTURE_MAPPINGS = {
     "liver": "liver",

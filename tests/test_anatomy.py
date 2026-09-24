@@ -14,7 +14,17 @@ def test_registry_exposes_canonical_classes_and_layout_version():
     )
     assert anatomy.CANONICAL_CLASSES == expected_classes
     assert anatomy.CLASS_NAMES == expected_classes
-    assert anatomy.MEASURED_CLASSES == expected_classes
+    assert anatomy.MEASURED_CLASSES == expected_classes + ("other",)
+    assert anatomy.CANONICAL_PEAK_ORDER == (
+        "lungs",
+        "soft",
+        "liver",
+        "kidneys",
+        "spleen",
+        "heart",
+        "vessels",
+        "skeleton",
+    )
     assert anatomy.LAYOUT_VERSION == "anatomy-v2"
     assert anatomy.CLASS_LAYOUT_VERSION == "anatomy-v2"
     assert anatomy.PROMOTED_ORGAN_CLASSES == ("liver", "kidneys", "spleen", "heart")
@@ -45,3 +55,12 @@ def test_structure_class_maps_exact_and_prefixed_structures():
 
 def test_unknown_structure_has_no_class():
     assert anatomy.class_for_structure("not_a_structure") is None
+
+
+def test_promoted_structures_map_to_dedicated_classes():
+    assert anatomy.class_for_structure("liver") == "liver"
+    assert anatomy.class_for_structure("kidney_left") == "kidneys"
+    assert anatomy.class_for_structure("kidney_right") == "kidneys"
+    assert anatomy.class_for_structure("spleen") == "spleen"
+    assert anatomy.class_for_structure("heart") == "heart"
+    assert anatomy.class_for_structure("atrial_appendage_right") == "heart"
