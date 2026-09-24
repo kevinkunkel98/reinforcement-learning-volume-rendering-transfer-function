@@ -78,7 +78,7 @@ def load_volume(name: str):
 def has_labels(name: str) -> bool:
     entry = _subjects().get(name)
     if entry and entry.get("labels_path"):
-        _validate_label_layout(entry, _manifest().get("label_layout_version"))
+        _validate_label_layout(entry, _manifest_version_for(entry))
     return bool(entry and entry.get("labels_path") and os.path.exists(entry["labels_path"]))
 
 
@@ -96,7 +96,7 @@ def load_labels(name: str) -> np.ndarray:
     path = entry.get("labels_path")
     if not path or not os.path.exists(path):
         raise FileNotFoundError(f"{name} has no label volume; {_FETCH_HINT}")
-    _validate_label_layout(entry, _manifest().get("label_layout_version"))
+    _validate_label_layout(entry, _manifest_version_for(entry))
     image = nib.as_closest_canonical(nib.load(path))
     return np.ascontiguousarray(np.asarray(image.dataobj, dtype=np.uint8))
 
@@ -111,3 +111,11 @@ def _validate_label_layout(entry: dict, manifest_version: str | None = None) -> 
             f"manifest={manifest_version!r}; "
             "regenerate labels with `python -m tools.select_totalseg`"
         )
+
+
+def _manifest_version_for(entry: dict) -> str | None:
+    """Read root metadata, allowing tests to inject subject-only registries."""
+    manifest = _manifest()
+    if os.path.exists(MANIFEST_PATH):
+        return manifest.get("label_layout_version")
+    return entry.get("label_layout_version")

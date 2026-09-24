@@ -1,4 +1,5 @@
 {
+  "label_layout_version": "anatomy-v2",
   "source": {
     "dataset": "TotalSegmentator small subset v2.0.1",
     "zenodo_record": "10047263",
@@ -40,6 +41,7 @@
       "id": "s0357",
       "name": "ts_s0357",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax-neck",
       "region": "thorax",
       "shape": [
@@ -56,10 +58,13 @@
       "sha256": "12d35051f50cd2380fc3b615ca8462b35381a126ee24022a5746f87423f1d9ef",
       "labels_path": "data/totalseg/s0357/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -68,6 +73,7 @@
       "id": "s0358",
       "name": "ts_s0358",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct pelvis",
       "region": "abdomen_pelvis",
       "shape": [
@@ -84,10 +90,13 @@
       "sha256": "1bad23486921c90e111ad8645246b32674cdbaa5ef5298715d805371a29b6038",
       "labels_path": "data/totalseg/s0358/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -96,6 +105,7 @@
       "id": "s0363",
       "name": "ts_s0363",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax",
       "region": "thorax",
       "shape": [
@@ -112,10 +122,13 @@
       "sha256": "233d0688a243ad4110ba460fddbd3358fcfc59b2abe8293d10ba63ae190ffcd9",
       "labels_path": "data/totalseg/s0363/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -124,6 +137,7 @@
       "id": "s0407",
       "name": "ts_s0407",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax-neck",
       "region": "thorax",
       "shape": [
@@ -140,10 +154,13 @@
       "sha256": "0c18c152689f41ec3a99fab56f82c1488cb2d635b7903cbfa6862d09e85d8999",
       "labels_path": "data/totalseg/s0407/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -152,6 +169,7 @@
       "id": "s0425",
       "name": "ts_s0425",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax-neck",
       "region": "thorax",
       "shape": [
@@ -168,10 +186,13 @@
       "sha256": "e22d276c5b7d584adfc536737c99ff53cdcf76477abd18c6ca016a2ec83c8644",
       "labels_path": "data/totalseg/s0425/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -180,6 +201,7 @@
       "id": "s0454",
       "name": "ts_s0454",
       "split": "test",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct pelvis",
       "region": "abdomen_pelvis",
       "shape": [
@@ -196,9 +218,8 @@
       "sha256": "9eab49190fa863fc6aeec81267c4c886b990319067c376d57fd466abd670e5e0",
       "labels_path": "data/totalseg/s0454/labels.nii.gz",
       "classes_present": [
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
         "vessels"
       ],
       "contrast": false
@@ -207,6 +228,7 @@
       "id": "s0477",
       "name": "ts_s0477",
       "split": "test",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct neck-thorax-abdomen-pelvis",
       "region": "trunk",
       "shape": [
@@ -223,10 +245,13 @@
       "sha256": "f91ede7ead2a3b342a9e7733490c4910a9ea3e8c834595f049976a49deeb20b2",
       "labels_path": "data/totalseg/s0477/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -235,6 +260,7 @@
       "id": "s0513",
       "name": "ts_s0513",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct abdomen",
       "region": "abdomen_pelvis",
       "shape": [
@@ -251,10 +277,13 @@
       "sha256": "d5b415edaafa8df4c2c04448b9188df91faf340dc2e2f7dbe2fa4a26583e3f74",
       "labels_path": "data/totalseg/s0513/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -263,6 +292,7 @@
       "id": "s0573",
       "name": "ts_s0573",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct pelvis",
       "region": "abdomen_pelvis",
       "shape": [
@@ -279,9 +309,9 @@
       "sha256": "abfdbf4049e1c73e3fa458519b77e70ae514c0bfe0ad71bf8d77e2c0f6f6ba47",
       "labels_path": "data/totalseg/s0573/labels.nii.gz",
       "classes_present": [
-        "muscle",
-        "organs",
+        "liver",
         "skeleton",
+        "soft",
         "vessels"
       ],
       "contrast": false
@@ -290,6 +320,7 @@
       "id": "s0591",
       "name": "ts_s0591",
       "split": "test",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct polytrauma",
       "region": "whole_body",
       "shape": [
@@ -306,10 +337,13 @@
       "sha256": "e189b13e56507394f47ddbd2feacce0b1a6adf94557a8eea08436848124f8e72",
       "labels_path": "data/totalseg/s0591/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -318,6 +352,7 @@
       "id": "s0649",
       "name": "ts_s0649",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax-abdomen-pelvis",
       "region": "trunk",
       "shape": [
@@ -334,10 +369,13 @@
       "sha256": "1cf51df686c6e40bc67664820aab38170a5c20dc428102d51dfb9d12bb4e8e01",
       "labels_path": "data/totalseg/s0649/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -346,6 +384,7 @@
       "id": "s0763",
       "name": "ts_s0763",
       "split": "val",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct polytrauma",
       "region": "whole_body",
       "shape": [
@@ -362,10 +401,13 @@
       "sha256": "43de869b54aee1d6e4ddff764b54ec8f820fdc518194972b4e9fa93f378f1894",
       "labels_path": "data/totalseg/s0763/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -374,6 +416,7 @@
       "id": "s0811",
       "name": "ts_s0811",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax",
       "region": "thorax",
       "shape": [
@@ -390,10 +433,13 @@
       "sha256": "191d8abd9a8c7b6aede36e5c6da609794fe5af9b015eae88131da890467f92a9",
       "labels_path": "data/totalseg/s0811/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -402,6 +448,7 @@
       "id": "s0812",
       "name": "ts_s0812",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct polytrauma",
       "region": "whole_body",
       "shape": [
@@ -418,10 +465,13 @@
       "sha256": "6c6eeecfdf9813ed3179092369400486379f5a896a07f6fc0891af9d3d80cd04",
       "labels_path": "data/totalseg/s0812/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -430,6 +480,7 @@
       "id": "s0878",
       "name": "ts_s0878",
       "split": "val",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct neck-thorax-abdomen-pelvis",
       "region": "trunk",
       "shape": [
@@ -446,10 +497,13 @@
       "sha256": "4b9ba2b1d3660ec5ca1ea2cb5313f24b1a8af3ae7c0130d90bb11939dc288757",
       "labels_path": "data/totalseg/s0878/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -458,6 +512,7 @@
       "id": "s0903",
       "name": "ts_s0903",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct polytrauma",
       "region": "whole_body",
       "shape": [
@@ -474,10 +529,13 @@
       "sha256": "ab0a7c7866e6d7bf9e64c9f1899e5b401051aca8ec483725bea7f4fcd410dc89",
       "labels_path": "data/totalseg/s0903/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -486,6 +544,7 @@
       "id": "s0950",
       "name": "ts_s0950",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax-abdomen-pelvis",
       "region": "trunk",
       "shape": [
@@ -502,10 +561,13 @@
       "sha256": "b1bc2de9562302e53c722d079a905d25015f075f5bd9a5be0fcdee1009015577",
       "labels_path": "data/totalseg/s0950/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -514,6 +576,7 @@
       "id": "s1245",
       "name": "ts_s1245",
       "split": "val",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax",
       "region": "thorax",
       "shape": [
@@ -530,10 +593,13 @@
       "sha256": "7757f9a0b1b087c8da00e3ab64913ed0d6188e017a50467d5fa51faa2c2005a9",
       "labels_path": "data/totalseg/s1245/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -542,6 +608,7 @@
       "id": "s1267",
       "name": "ts_s1267",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax-abdomen-pelvis",
       "region": "trunk",
       "shape": [
@@ -558,10 +625,13 @@
       "sha256": "ee43efee236c7a61f85c05145cd2834f61b3b61dcbca0510635a760173b0395c",
       "labels_path": "data/totalseg/s1267/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -570,6 +640,7 @@
       "id": "s1287",
       "name": "ts_s1287",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct neck-thorax-abdomen-pelvis",
       "region": "trunk",
       "shape": [
@@ -586,10 +657,13 @@
       "sha256": "01bbb37c93f9c81bc77214e3f230d394e7d8f7ab7078881a1e4dd3af9ba377d5",
       "labels_path": "data/totalseg/s1287/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -598,6 +672,7 @@
       "id": "s1337",
       "name": "ts_s1337",
       "split": "test",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct thorax-neck",
       "region": "thorax",
       "shape": [
@@ -614,10 +689,13 @@
       "sha256": "23e9eb05c0d807ccbe799be56e9ef8f0d8299e4dab464204080c2b3974f6d9dc",
       "labels_path": "data/totalseg/s1337/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -626,6 +704,7 @@
       "id": "s1350",
       "name": "ts_s1350",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct polytrauma",
       "region": "whole_body",
       "shape": [
@@ -642,10 +721,13 @@
       "sha256": "f0178b02e19f57274888242cff0e08f4881148b9e4a13790c17862514a7ba64f",
       "labels_path": "data/totalseg/s1350/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -654,6 +736,7 @@
       "id": "s1365",
       "name": "ts_s1365",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct angiography thorax-abdomen-pelvis",
       "region": "trunk",
       "shape": [
@@ -670,10 +753,13 @@
       "sha256": "1d09af1748b768f910806f307c5aa00caff32cb4d6c7cf35abaafbe26c01b3ac",
       "labels_path": "data/totalseg/s1365/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": true
@@ -682,6 +768,7 @@
       "id": "s1366",
       "name": "ts_s1366",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct polytrauma",
       "region": "whole_body",
       "shape": [
@@ -698,10 +785,13 @@
       "sha256": "4632d9141096aeabeff324f75802adf4b7c7a53330b5f00bd17beb2fedb5551c",
       "labels_path": "data/totalseg/s1366/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -710,6 +800,7 @@
       "id": "s1371",
       "name": "ts_s1371",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct whole body",
       "region": "whole_body",
       "shape": [
@@ -726,10 +817,13 @@
       "sha256": "30a17da2e3d7a6baecb7c04f7a456275fbec7e3c7e9d1b1f508031fd0341dfad",
       "labels_path": "data/totalseg/s1371/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -738,6 +832,7 @@
       "id": "s1373",
       "name": "ts_s1373",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct angiography abdomen-pelvis",
       "region": "abdomen_pelvis",
       "shape": [
@@ -754,10 +849,13 @@
       "sha256": "e662261a114ff1d6802ec261bd0a1f4defaf95c206df569ab0e3510a5dfcc86d",
       "labels_path": "data/totalseg/s1373/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": true
@@ -766,6 +864,7 @@
       "id": "s1379",
       "name": "ts_s1379",
       "split": "test",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct angiography thorax-abdomen-pelvis",
       "region": "trunk",
       "shape": [
@@ -782,10 +881,13 @@
       "sha256": "4a8b75ede522b12aeae24d2b22456cee7c5143a42725dab568a27291d3bfc07a",
       "labels_path": "data/totalseg/s1379/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": true
@@ -794,6 +896,7 @@
       "id": "s1383",
       "name": "ts_s1383",
       "split": "val",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct angiography abdomen-pelvis",
       "region": "abdomen_pelvis",
       "shape": [
@@ -810,10 +913,12 @@
       "sha256": "45b25d6fcd4f7b6219853e66991902247614286d8d3583e6a189060404eaa9f0",
       "labels_path": "data/totalseg/s1383/labels.nii.gz",
       "classes_present": [
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": true
@@ -822,6 +927,7 @@
       "id": "s1388",
       "name": "ts_s1388",
       "split": "test",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct whole body",
       "region": "whole_body",
       "shape": [
@@ -838,10 +944,13 @@
       "sha256": "c1404097de0d436b190236d746183ba4f57458f29fb35aa077f1f49759f514da",
       "labels_path": "data/totalseg/s1388/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": false
@@ -850,6 +959,7 @@
       "id": "s1390",
       "name": "ts_s1390",
       "split": "train",
+      "label_layout_version": "anatomy-v2",
       "study_type": "ct angiography abdomen-pelvis",
       "region": "abdomen_pelvis",
       "shape": [
@@ -866,10 +976,13 @@
       "sha256": "b1f605c5233a7f301995251acfd41f39ced7a72988a01d9b51b18f17d08ae3be",
       "labels_path": "data/totalseg/s1390/labels.nii.gz",
       "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
         "lungs",
-        "muscle",
-        "organs",
         "skeleton",
+        "soft",
+        "spleen",
         "vessels"
       ],
       "contrast": true

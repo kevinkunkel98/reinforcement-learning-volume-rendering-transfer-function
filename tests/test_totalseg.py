@@ -168,3 +168,12 @@ def test_load_labels_rejects_missing_label_layout(labelled_manifest):
 
     with pytest.raises(ValueError, match="label_layout_version.*anatomy-v2"):
         totalseg.load_labels("ts_l0001")
+
+
+def test_has_labels_accepts_current_fixture_subject_when_manifest_is_patched(
+        labelled_manifest, monkeypatch):
+    entry = json.loads(open(totalseg.MANIFEST_PATH).read())["subjects"][0]
+    monkeypatch.setattr(totalseg, "_subjects", lambda: {entry["name"]: entry})
+    monkeypatch.setattr(totalseg, "MANIFEST_PATH", "/missing/manifest.json")
+
+    assert totalseg.has_labels("ts_l0001") is True
