@@ -397,6 +397,21 @@ def test_session_id_persists_across_reload():
     assert s2.session_id == original_id
 
 
+def test_session_with_legacy_transfer_function_is_migrated(tmp_path):
+    path = tmp_path / "legacy-session.json"
+    path.write_text(json.dumps({
+        "history": [{"params": [0.0] * 24}],
+        "cursor": 0,
+        "session_id": "legacy",
+    }))
+
+    session = Session(str(path))
+
+    assert len(session.history) == 1
+    assert len(session.history[0]["params"]) == transfer.TOTAL_PARAMS
+    assert session.session_id != "legacy"
+
+
 def test_command_saves_image_file_matching_image_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     os.makedirs("out", exist_ok=True)

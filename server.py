@@ -41,7 +41,7 @@ from render import features, grab, render
 from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
 from rl.oneshot_env import build_observation
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
-from transfer import TISSUE_BANDS, _opacity_and_color_at, default_params, opacity_mass
+from transfer import TOTAL_PARAMS, TISSUE_BANDS, _opacity_and_color_at, default_params, opacity_mass
 import visibility
 
 LOG_PATH = "out/log.jsonl"
@@ -536,7 +536,19 @@ class Session:
         if os.path.exists(self.path):
             with open(self.path) as f:
                 data = json.load(f)
-            self.history, self.cursor = data["history"], data["cursor"]
+            history = data.get("history", [])
+            # Persisted sessions from the four-peak viewer contain 24 values;
+            # they cannot be rendered by the eight-peak viewer. Reset stale
+            # sessions instead of passing invalid state to the browser.
+            if not history or any(len(step.get("params", [])) != TOTAL_PARAMS for step in history):
+                self.session_id = self._new_session_id()
+                step = _render_step(default_params(), None, None, False, 0,
+                                    self.session_id, default_camera_for(_dataset_name))
+                self.history = [step]
+                self.cursor = 0
+                self.save()
+                return
+            self.history, self.cursor = history, data["cursor"]
             self.session_id = data.get("session_id") or self._new_session_id()
             return
         self.session_id = self._new_session_id()
