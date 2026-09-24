@@ -4,6 +4,7 @@ from tools.select_totalseg import (
     CLASS_NAMES, SPLIT_COUNTS, build_label_volume, class_for_structure,
     passes_extent_filter, region_for_study_type, select_and_split,
 )
+from anatomy import CLASS_LAYOUT_VERSION, CLASS_NAMES
 
 
 def test_region_for_study_type_maps_all_known_types():
@@ -60,8 +61,10 @@ def test_class_for_structure_maps_prefixes():
     assert class_for_structure("rib_left_4") == "skeleton"
     assert class_for_structure("lung_upper_lobe_left") == "lungs"
     assert class_for_structure("aorta") == "vessels"
-    assert class_for_structure("autochthon_left") == "muscle"
-    assert class_for_structure("liver") == "organs"
+    assert class_for_structure("autochthon_left") == "soft"
+    assert class_for_structure("liver") == "liver"
+    assert class_for_structure("kidney_left") == "kidneys"
+    assert class_for_structure("heart") == "heart"
     assert class_for_structure("unknown_thing") is None
 
 
@@ -79,7 +82,7 @@ def test_build_label_volume_assigns_ids():
 
     assert labels.dtype == np.uint8
     assert labels[0, 0, 0] == CLASS_NAMES.index("skeleton") + 1
-    assert labels[1, 1, 1] == CLASS_NAMES.index("organs") + 1
+    assert labels[1, 1, 1] == CLASS_NAMES.index("liver") + 1
     assert labels[2, 2, 2] == 0
 
 
@@ -169,11 +172,13 @@ def test_build_manifest_selects_extracts_and_describes(tmp_path):
     assert len(first["sha256"]) == 64
     assert not (out_dir / "s0005").exists()     # pelvis not in split_counts
     assert os.path.exists(first["labels_path"])
-    assert first["classes_present"] == ["organs", "skeleton"]
+    assert first["classes_present"] == ["liver", "skeleton"]
     assert first["contrast"] is False
     labels = np.asarray(nib.load(first["labels_path"]).dataobj)
     assert labels[0, 0, 0] == CLASS_NAMES.index("skeleton") + 1
-    assert labels[20, 20, 20] == CLASS_NAMES.index("organs") + 1
+    assert labels[20, 20, 20] == CLASS_NAMES.index("liver") + 1
+    assert manifest["label_layout_version"] == CLASS_LAYOUT_VERSION
+    assert first["label_layout_version"] == CLASS_LAYOUT_VERSION
     assert manifest["source"]["zenodo_record"] == "10047263"
     assert manifest["selection"]["seed"] == 0
     assert manifest["selection"]["n_candidates"] == 4

@@ -10,19 +10,25 @@ import os
 import nibabel as nib
 import numpy as np
 
+from anatomy import CLASS_LAYOUT_VERSION
+
 MANIFEST_PATH = "data/totalseg_manifest.json"
 NAME_PREFIX = "ts_"
 SPLITS = ("train", "val", "test")
 _FETCH_HINT = "run `python -m tools.select_totalseg` to extract the volumes"
 
 
-def _subjects() -> dict:
+def _manifest() -> dict:
     # Resolved per call (not cached) so tests can point MANIFEST_PATH elsewhere;
     # the file is small.
     if not os.path.exists(MANIFEST_PATH):
         return {}
     with open(MANIFEST_PATH) as f:
-        return {s["name"]: s for s in json.load(f)["subjects"]}
+        return json.load(f)
+
+
+def _subjects() -> dict:
+    return {s["name"]: s for s in _manifest().get("subjects", [])}
 
 
 def is_totalseg(name: str) -> bool:
@@ -71,6 +77,8 @@ def load_volume(name: str):
 
 def has_labels(name: str) -> bool:
     entry = _subjects().get(name)
+    if entry and entry.get("labels_path"):
+        _validate_label_layout(entry, _manifest().get("label_layout_version"))
     return bool(entry and entry.get("labels_path") and os.path.exists(entry["labels_path"]))
 
 
@@ -88,5 +96,18 @@ def load_labels(name: str) -> np.ndarray:
     path = entry.get("labels_path")
     if not path or not os.path.exists(path):
         raise FileNotFoundError(f"{name} has no label volume; {_FETCH_HINT}")
+    _validate_label_layout(entry, _manifest().get("label_layout_version"))
     image = nib.as_closest_canonical(nib.load(path))
     return np.ascontiguousarray(np.asarray(image.dataobj, dtype=np.uint8))
+
+
+def _validate_label_layout(entry: dict, manifest_version: str | None = None) -> None:
+    """Reject label ids produced by a different anatomy registry."""
+    version = entry.get("label_layout_version")
+    if version != CLASS_LAYOUT_VERSION or manifest_version != CLASS_LAYOUT_VERSION:
+        raise ValueError(
+            "label_layout_version mismatch: "
+            f"expected {CLASS_LAYOUT_VERSION!r}, got subject={version!r}, "
+            f"manifest={manifest_version!r}; "
+            "regenerate labels with `python -m tools.select_totalseg`"
+        )

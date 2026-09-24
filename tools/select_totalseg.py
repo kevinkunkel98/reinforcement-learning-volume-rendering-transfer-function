@@ -17,6 +17,8 @@ import zipfile
 import nibabel as nib
 import numpy as np
 
+from anatomy import CLASS_LAYOUT_VERSION, CLASS_NAMES, class_for_structure
+
 DEFAULT_ZIP = "data/Totalsegmentator_dataset_small_v201.zip"
 DEFAULT_OUT_DIR = "data/totalseg"
 DEFAULT_MANIFEST = "data/totalseg_manifest.json"
@@ -53,32 +55,6 @@ MIN_SUPERIOR_INFERIOR_MM = 150.0
 # A class counts as "present" in a subject only once its mask clears this many
 # voxels, so stray single-voxel segmentation noise doesn't count as coverage.
 MIN_LABEL_VOXELS = 1000
-
-CLASS_NAMES = ("skeleton", "lungs", "organs", "muscle", "vessels")   # label ids 1..5; 0 = other
-
-CLASS_RULES = {
-    "skeleton": ("rib_", "vertebrae_", "hip_", "femur_", "humerus_", "scapula_",
-                 "clavicula_", "sacrum", "sternum", "skull", "costal_cartilages", "patella",
-                 "tibia", "fibula", "carpal", "metacarpal", "phalanges", "tarsal", "metatarsal"),
-    "lungs": ("lung_",),
-    "organs": ("liver", "spleen", "kidney_", "stomach", "pancreas", "gallbladder", "colon",
-               "small_bowel", "duodenum", "esophagus", "urinary_bladder", "prostate",
-               "adrenal_gland_", "thyroid_gland", "brain", "spinal_cord", "trachea"),
-    "muscle": ("autochthon_", "gluteus_", "iliopsoas_"),
-    "vessels": ("aorta", "heart", "atrial_appendage", "brachiocephalic_", "common_carotid_",
-                "subclavian_", "pulmonary_", "vena_cava", "portal_vein", "iliac_artery",
-                "iliac_vena", "superior_vena_cava", "inferior_vena_cava"),
-}
-
-
-def class_for_structure(structure: str):
-    """Which anatomical class a TotalSegmentator structure belongs to, or None."""
-    for name in CLASS_NAMES:
-        if any(structure.startswith(prefix) or structure == prefix.rstrip("_")
-               for prefix in CLASS_RULES[name]):
-            return name
-    return None
-
 
 def build_label_volume(masks: dict, shape) -> np.ndarray:
     """Collapse {structure name: boolean mask} into one uint8 label volume.
@@ -220,11 +196,13 @@ def build_manifest(zip_path, out_dir=DEFAULT_OUT_DIR, seed=0, split_counts=SPLIT
             print(f"  {sid}: " + ", ".join(f"{name}={count}" for name, count in class_counts.items()))
 
             subjects.append({"id": sid, "name": f"ts_{sid}", "split": assignment[sid],
+                             "label_layout_version": CLASS_LAYOUT_VERSION,
                              **info[sid], "path": os.path.relpath(path), "sha256": _sha256_file(path),
                              "labels_path": os.path.relpath(labels_path),
                              "classes_present": classes_present,
                              "contrast": "angiography" in info[sid]["study_type"].lower()})
     return {
+        "label_layout_version": CLASS_LAYOUT_VERSION,
         "source": {
             "dataset": "TotalSegmentator small subset v2.0.1",
             "zenodo_record": ZENODO_RECORD,

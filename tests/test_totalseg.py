@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 import totalseg
+from anatomy import CLASS_LAYOUT_VERSION
 
 
 def _write_subject(tmp_path, sid, split, data=None):
@@ -101,7 +102,8 @@ def test_missing_manifest_means_no_volumes(tmp_path, monkeypatch):
 def labelled_manifest(tmp_path, monkeypatch):
     with_labels = _write_subject(tmp_path, "l0001", "train")
     with_labels["labels_path"] = _write_labels(tmp_path, "l0001", (2, 3, 4))
-    with_labels["classes_present"] = ["organs", "skeleton"]
+    with_labels["classes_present"] = ["liver", "skeleton"]
+    with_labels["label_layout_version"] = CLASS_LAYOUT_VERSION
     with_labels["contrast"] = True
 
     no_labels_key = _write_subject(tmp_path, "l0002", "train")
@@ -109,9 +111,11 @@ def labelled_manifest(tmp_path, monkeypatch):
     missing_labels_file = _write_subject(tmp_path, "l0003", "train")
     missing_labels_file["labels_path"] = str(tmp_path / "totalseg" / "l0003" / "labels.nii.gz")
 
+    missing_labels_file["label_layout_version"] = CLASS_LAYOUT_VERSION
     subjects = [with_labels, no_labels_key, missing_labels_file]
     path = tmp_path / "manifest.json"
-    path.write_text(json.dumps({"subjects": subjects}))
+    path.write_text(json.dumps({"label_layout_version": CLASS_LAYOUT_VERSION,
+                                "subjects": subjects}))
     monkeypatch.setattr(totalseg, "MANIFEST_PATH", str(path))
     return subjects
 
@@ -137,10 +141,30 @@ def test_load_labels_raises_when_missing(labelled_manifest):
 
 
 def test_classes_present_returns_manifest_list(labelled_manifest):
-    assert totalseg.classes_present("ts_l0001") == ["organs", "skeleton"]
+    assert totalseg.classes_present("ts_l0001") == ["liver", "skeleton"]
     assert totalseg.classes_present("ts_l0002") == []
 
 
 def test_is_contrast_returns_flag(labelled_manifest):
     assert totalseg.is_contrast("ts_l0001") is True
     assert totalseg.is_contrast("ts_l0002") is False
+
+
+def test_has_labels_rejects_stale_label_layout(labelled_manifest, monkeypatch):
+    path = totalseg.MANIFEST_PATH
+    manifest = json.loads(open(path).read())
+    manifest["subjects"][0]["label_layout_version"] = "anatomy-v1"
+    open(path, "w").write(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="label_layout_version.*anatomy-v2"):
+        totalseg.has_labels("ts_l0001")
+
+
+def test_load_labels_rejects_missing_label_layout(labelled_manifest):
+    path = totalseg.MANIFEST_PATH
+    manifest = json.loads(open(path).read())
+    del manifest["subjects"][0]["label_layout_version"]
+    open(path, "w").write(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="label_layout_version.*anatomy-v2"):
+        totalseg.load_labels("ts_l0001")
