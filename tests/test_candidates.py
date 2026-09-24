@@ -228,7 +228,7 @@ def test_anchor_items_shape_matches_sample_item(monkeypatch, tmp_path):
                            cache_path=str(tmp_path / "a.json"))
 
     assert set(item.keys()) == {"volume", "start_params", "instruction", "a", "b",
-                                 "objective_choice", "near_duplicate", "features"}
+                                "objective_choice", "near_duplicate", "features", "metadata"}
     assert item["volume"] == "fake_a"
     assert len(item["start_params"]) == transfer.TOTAL_PARAMS
     assert item["a"]["source"] in SOURCES

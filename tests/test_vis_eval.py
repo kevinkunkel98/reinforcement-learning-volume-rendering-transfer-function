@@ -599,6 +599,14 @@ def test_cli_refine_can_be_set():
     assert args.refine == 10
 
 
+def test_compare_result_metadata_reports_one_shot_contract():
+    comparison = vis_eval.compare({"policy": [{"attainment": 0.5, "kind": "relative"}]})
+
+    assert comparison["metadata"]["observation_size"] == 97
+    assert comparison["metadata"]["action_size"] == 24
+    assert comparison["metadata"]["anatomy_layout"] == "anatomy-v2"
+
+
 # --- provenance ------------------------------------------------------------------
 
 def _stub_run(monkeypatch):

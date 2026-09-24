@@ -24,6 +24,7 @@ from datasets import load_dataset
 from plots.style import apply_style
 from rl.baselines import CONTROLLABLE, apply_controllable
 from rl.oneshot_env import build_observation
+from rl.oneshot_env import observation_metadata
 from rl.vis_eval import fixed_episodes
 
 OUTPUT_DIR = "plots/output"
@@ -111,6 +112,9 @@ def plot_qualitative(policy_path: str = DEFAULT_POLICY, episodes: int = 60,
     path = os.path.join(output_dir, "qualitative.png")
     fig.savefig(path, dpi=200)
     plt.close(fig)
+    with open(os.path.join(output_dir, "qualitative.metadata.json"), "w") as stream:
+        import json
+        json.dump(observation_metadata(), stream, indent=2)
     return path
 
 

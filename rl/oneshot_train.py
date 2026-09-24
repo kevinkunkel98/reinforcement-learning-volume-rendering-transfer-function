@@ -19,6 +19,7 @@ replay buffer.
 """
 import argparse
 import csv
+import json
 import os
 
 import numpy as np
@@ -27,7 +28,7 @@ from stable_baselines3.common.logger import configure
 
 import datasets
 import goals
-from rl.oneshot_env import OneShotEnv
+from rl.oneshot_env import OneShotEnv, observation_metadata
 
 VALIDATION_EPISODES = 40
 VALIDATION_SEED_BASE = 10_000   # fixed offset so validation seeds never collide with training
@@ -38,6 +39,7 @@ DEFAULT_OUT_TEMPLATE = "out/rl_v2/oneshot_seed{seed}"
 CHECKPOINT_NAME = "checkpoint_{timesteps}.zip"
 BEST_NAME = "best.zip"
 EVAL_PROGRESS_NAME = "eval_progress.csv"
+METADATA_NAME = "metadata.json"
 LEARNING_STARTS = 500
 
 
@@ -130,6 +132,9 @@ def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
     episodes = validation_episodes(eval_env, count=eval_episode_count)
     eval_path = os.path.join(out, EVAL_PROGRESS_NAME)
     best_path = os.path.join(out, BEST_NAME)
+    metadata = {**observation_metadata(), "seed": seed, "timesteps": timesteps}
+    with open(os.path.join(out, METADATA_NAME), "w") as stream:
+        json.dump(metadata, stream, indent=2)
 
     rows = []
     best_attainment = None
@@ -158,7 +163,8 @@ def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
                 best_attainment = median_attainment
                 model.save(best_path)
 
-    return {"out": out, "eval_progress_path": eval_path, "best_path": best_path, "rows": rows}
+    return {"out": out, "eval_progress_path": eval_path, "best_path": best_path,
+            "metadata": metadata, "rows": rows}
 
 
 def parse_args(argv=None):

@@ -12,6 +12,9 @@ is meant to learn from.
 Two callers, one constant. Anything that needs the policy imports it here.
 """
 import os
+import json
+
+from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, observation_metadata
 
 # v4: trained after goals.distance gained an "other" keep term (visibility.py's
 # unlabeled-tissue bucket) -- v3 and earlier let a transfer function satisfy
@@ -31,6 +34,26 @@ POLICY_PATH = "out/rl_v2/oneshot_v4_seed2/best.zip"
 _state = {"loaded": False, "policy": None}
 
 
+def _load_sac(path):
+    from stable_baselines3 import SAC
+    return SAC.load(path)
+
+
+def write_metadata(path: str) -> None:
+    with open(path, "w") as stream:
+        json.dump(observation_metadata(), stream, indent=2)
+
+
+def _validate_checkpoint(model, path: str) -> None:
+    observation_shape = tuple(model.observation_space.shape)
+    action_shape = tuple(model.action_space.shape)
+    if observation_shape != (OBSERVATION_SIZE,) or action_shape != (ACTION_SIZE,):
+        raise ValueError(
+            f"old one-shot checkpoint {path!r} has observation/action dimensions "
+            f"{observation_shape[0]}/{action_shape[0]}; expected "
+            f"{OBSERVATION_SIZE}/{ACTION_SIZE} for {POLICY_VERSION}")
+
+
 def load_policy(path: str = None):
     """The checkpoint, loaded on first use and cached after.
 
@@ -43,8 +66,8 @@ def load_policy(path: str = None):
     if not _state["loaded"]:
         _state["loaded"] = True
         if os.path.exists(path):
-            from stable_baselines3 import SAC
-            _state["policy"] = SAC.load(path)
+            _state["policy"] = _load_sac(path)
+            _validate_checkpoint(_state["policy"], path)
     return _state["policy"]
 
 

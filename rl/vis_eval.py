@@ -37,7 +37,7 @@ import goals
 import provenance
 import visibility
 from rl.baselines import BASELINES, hill_climb
-from rl.oneshot_env import OneShotEnv
+from rl.oneshot_env import OneShotEnv, observation_metadata
 from rl.vis_env import MAX_STEPS, VisibilityTFEnv, _ATTAINMENT_FLOOR
 
 EVAL_KINDS = tuple(kind for kind, _ in goals.INSTRUCTION_MIX)
@@ -423,7 +423,7 @@ def compare(results: dict, policy_name: str = "policy") -> dict:
         else:
             comparisons[name] = {"statistic": None, "p_value": None, "n": 0}
 
-    return {"summary": summary, "comparisons": comparisons}
+    return {"summary": summary, "comparisons": comparisons, "metadata": observation_metadata()}
 
 
 # --- CLI -----------------------------------------------------------------------
@@ -534,6 +534,7 @@ def main(argv=None):
     result = {"policy": args.policy, "split": args.split, "episodes": args.episodes,
               "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
               "provenance": provenance.IMPORT_TIME_PROVENANCE,
+              "metadata": observation_metadata(),
               "episodes_detail": episodes_detail(results, episodes),
               **compare(results)}
     _print_table(result)

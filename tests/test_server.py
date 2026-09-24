@@ -1143,8 +1143,9 @@ def test_policy_mode_on_ct_chest_falls_back_for_stale_checkpoint(ct_chest_sessio
 
     assert state["current"]["mode"] == "exact"
     assert state["current"]["message"] == (
-        "Error: Unexpected observation shape (97,) for Box environment, "
-        "please use (57,) or (n_env, 57) for the observation shape.")
+        "old one-shot checkpoint "
+        f"'{os.path.join(_REPO_ROOT, 'out/rl_v2/oneshot_v3_seed0/best.zip')}' "
+        "has observation/action dimensions 57/12; expected 97/24 for oneshot-v6")
     params = np.array(state["current"]["params"], dtype=np.float64)
     assert not np.array_equal(params, before_params)
 

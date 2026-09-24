@@ -22,11 +22,13 @@ from gymnasium import spaces
 
 import goals
 import visibility
+from anatomy import LAYOUT_VERSION
 from rl.baselines import CONTROLLABLE, apply_controllable
 
 N_GOAL_CLASSES = len(goals.GOAL_CLASSES)
 OBSERVATION_SIZE = 4 * N_GOAL_CLASSES + 16 + 3 * N_GOAL_CLASSES + len(CONTROLLABLE) + 1
 ACTION_SIZE = len(CONTROLLABLE)
+POLICY_VERSION = "oneshot-v6"
 USELESS_PENALTY = 1.0
 REWARD_CLIP = 1.0
 
@@ -64,6 +66,18 @@ OBSERVATION_BOUND = 10.0
 # effectively nothing) and attainment's ratio is meaningless -- report 0
 # instead of dividing by ~0.
 _ATTAINMENT_FLOOR = 1e-9
+
+
+def observation_metadata() -> dict:
+    """Return the serialized contract shared by training and inference."""
+    return {
+        "policy_version": POLICY_VERSION,
+        "anatomy_layout": LAYOUT_VERSION,
+        "observation_size": OBSERVATION_SIZE,
+        "action_size": ACTION_SIZE,
+        "goal_classes": list(goals.GOAL_CLASSES),
+        "controllable_groups": len(CONTROLLABLE),
+    }
 
 
 def build_observation(goal, histogram, start_agg: dict, solo_max_log, controllable) -> np.ndarray:

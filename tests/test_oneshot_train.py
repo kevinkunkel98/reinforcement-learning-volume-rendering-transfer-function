@@ -216,3 +216,18 @@ def test_default_out_template_includes_the_seed():
 
 def test_learning_starts_matches_the_plan():
     assert oneshot_train.LEARNING_STARTS == 500
+
+
+def test_run_writes_one_shot_contract_metadata(monkeypatch, tmp_path):
+    _patch_totalseg(monkeypatch)
+    out = str(tmp_path / "metadata_run")
+    result = oneshot_train.run_training(
+        out=out, timesteps=10, seed=0, eval_interval=10,
+        train_env=OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel()),
+        eval_env=OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel()),
+        eval_episode_count=1)
+
+    assert result["metadata"]["observation_size"] == 97
+    assert result["metadata"]["action_size"] == 24
+    assert result["metadata"]["anatomy_layout"] == "anatomy-v2"
+    assert os.path.exists(os.path.join(out, "metadata.json"))

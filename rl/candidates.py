@@ -20,7 +20,7 @@ import numpy as np
 
 import goals
 from rl.baselines import BASELINES, CONTROLLABLE, apply_controllable
-from rl.oneshot_env import build_observation
+from rl.oneshot_env import build_observation, observation_metadata
 
 SOURCES = ("policy", "policy", "B1_current_executor", "B3_hill_climb_10", "B5_occlusion_rule", "perturbation")
 NON_POLICY_SOURCES = tuple(source for source in dict.fromkeys(SOURCES) if source != "policy")
@@ -135,6 +135,7 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None) -> di
         "objective_choice": objective_choice,
         "near_duplicate": near_duplicate,
         "features": {"start": start_agg, "a": a_agg, "b": b_agg},
+        "metadata": observation_metadata(),
     }
 
 
@@ -165,6 +166,7 @@ def _item_to_json(item: dict) -> dict:
         "objective_choice": item["objective_choice"],
         "near_duplicate": bool(item["near_duplicate"]),
         "features": item["features"],
+        "metadata": item["metadata"],
     }
 
 
@@ -186,6 +188,7 @@ def _item_from_json(data: dict) -> dict:
         "objective_choice": data["objective_choice"],
         "near_duplicate": data["near_duplicate"],
         "features": data["features"],
+        "metadata": data.get("metadata", observation_metadata()),
     }
 
 

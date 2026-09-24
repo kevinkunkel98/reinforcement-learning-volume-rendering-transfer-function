@@ -7,7 +7,8 @@ import goals
 import transfer
 from anatomy import CANONICAL_CLASSES
 from rl.baselines import CONTROLLABLE, apply_controllable
-from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, USELESS_PENALTY, OneShotEnv
+from rl.oneshot_env import (ACTION_SIZE, OBSERVATION_SIZE, USELESS_PENALTY, OneShotEnv,
+                            observation_metadata)
 
 
 class _StubModel:
@@ -66,6 +67,19 @@ def test_observation_and_action_space_shapes(monkeypatch):
     assert ACTION_SIZE == len(CONTROLLABLE) == 24
     assert np.all(env.action_space.low == -1.0)
     assert np.all(env.action_space.high == 1.0)
+
+
+def test_observation_metadata_names_the_eight_class_contract():
+    metadata = observation_metadata()
+
+    assert metadata == {
+        "policy_version": "oneshot-v6",
+        "anatomy_layout": "anatomy-v2",
+        "observation_size": 97,
+        "action_size": 24,
+        "goal_classes": list(goals.GOAL_CLASSES),
+        "controllable_groups": 24,
+    }
 
 
 def test_observation_appends_log_solo_max_per_goal_class(monkeypatch):
