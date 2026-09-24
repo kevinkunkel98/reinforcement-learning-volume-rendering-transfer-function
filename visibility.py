@@ -25,10 +25,11 @@ import os
 import numpy as np
 import torch
 
+from anatomy import CLASS_LAYOUT_VERSION, MEASURED_CLASSES
 from transfer import CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, anatomical_params, _opacity_and_color_at
 from views import N_VIEWS, view_directions
 
-CLASSES = ("skeleton", "lungs", "organs", "muscle", "vessels")
+CLASSES = MEASURED_CLASSES[:-1]
 GRID_N = 80                     # samples per cube axis; 15 ms/features() on CPU
 LUT_SIZE = 256                  # quantization levels over CENTER_RANGE
 HISTOGRAM_BINS = 16
@@ -36,7 +37,7 @@ COVERAGE_THRESHOLD = 0.3        # accumulated opacity for a ray to count as cove
 AIR_HU = CENTER_RANGE[0]
 LUMINANCE = np.array([0.2126, 0.7152, 0.0722])
 CACHE_DIR = "out/cache/visibility"
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 def quantize(values: np.ndarray) -> np.ndarray:
@@ -54,10 +55,11 @@ def lut_values() -> np.ndarray:
 def _intensity_class_ids(hu: np.ndarray) -> np.ndarray:
     """Class ids from Hounsfield bands, for volumes with no anatomical label
     volume. Only skeleton/lungs/organs are separable by intensity alone --
-    muscle and vessels stay empty (id 0), matching CLASSES ordering."""
+    only skeleton, lungs and soft are populated; all promoted organs and
+    vessels stay empty because intensity alone cannot identify them."""
     ids = np.zeros(hu.shape, dtype=np.uint8)
     ids[hu <= -500.0] = CLASSES.index("lungs") + 1
-    ids[(hu >= -30.0) & (hu < 300.0)] = CLASSES.index("organs") + 1
+    ids[(hu >= -30.0) & (hu < 300.0)] = CLASSES.index("soft") + 1
     ids[hu >= 300.0] = CLASSES.index("skeleton") + 1
     return ids
 
@@ -177,7 +179,8 @@ class VisibilityModel:
             masked = torch.where(self._labels == index, weights, torch.zeros(()))
             total = float(masked.sum())
             vis[name] = total / self._rays
-            bright[name] = float((masked * luminance).sum() / total) if total > 1e-6 else 0.0
+            bright[name] = (float((masked * luminance).sum() / total)
+                            if total / self._rays > 1e-4 else 0.0)
         other_masked = torch.where(self._labels == -1, weights, torch.zeros(()))
         vis["other"] = float(other_masked.sum()) / self._rays
         coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
@@ -209,7 +212,7 @@ class VisibilityModel:
 
     def cache_key(self, volume_version: str) -> str:
         parts = (self.volume_id, volume_version, self.n_views, self.indices.shape[1],
-                 LUT_SIZE, CACHE_VERSION)
+                 LUT_SIZE, CACHE_VERSION, CLASS_LAYOUT_VERSION, ",".join(CLASSES))
         return hashlib.sha256(":".join(str(p) for p in parts).encode()).hexdigest()[:16]
 
     def save_cache(self, volume_version: str, cache_dir: str = None) -> str:

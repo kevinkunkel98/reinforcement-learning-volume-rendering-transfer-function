@@ -22,10 +22,10 @@ import numpy as np
 
 import totalseg
 import transfer
+from anatomy import CANONICAL_CLASSES
 
-GOAL_CLASSES = ("skeleton", "lungs", "soft", "vessels")
-MEASURED_FOR_GOAL = {"skeleton": ("skeleton",), "lungs": ("lungs",),
-                     "soft": ("organs", "muscle"), "vessels": ("vessels",)}
+GOAL_CLASSES = CANONICAL_CLASSES
+MEASURED_FOR_GOAL = {goal_class: (goal_class,) for goal_class in GOAL_CLASSES}
 
 # RL v2 peak order, by the class each peak is seeded for. Defined in transfer,
 # because visibility.solo_max must probe at these same centres and cannot
@@ -66,10 +66,17 @@ def aggregate(features: dict) -> dict:
     vis, bright = {}, {}
     for goal_class in GOAL_CLASSES:
         measured = MEASURED_FOR_GOAL[goal_class]
-        total_vis = sum(features["vis"][m] for m in measured)
+        # Read old synthetic feature fixtures while canonical models use only
+        # registry names. Legacy organs/muscle remain soft, never promoted.
+        if goal_class == "soft" and "soft" not in features["vis"]:
+            sources = ("organs", "muscle")
+        else:
+            sources = measured
+        total_vis = sum(features["vis"].get(m, 0.0) for m in sources)
         vis[goal_class] = total_vis
         if total_vis > 0.0:
-            bright[goal_class] = sum(features["vis"][m] * features["bright"][m] for m in measured) / total_vis
+            bright[goal_class] = (sum(features["vis"].get(m, 0.0) * features["bright"].get(m, 0.0)
+                                   for m in sources) / total_vis)
         else:
             bright[goal_class] = 0.0
     # Not a goal class -- no instruction ever names it -- but distance() still
@@ -105,9 +112,10 @@ def progress(start: dict, current: dict) -> tuple:
     """
     c, b = {}, {}
     for goal_class in GOAL_CLASSES:
-        c[goal_class] = (math.log10(current["vis"][goal_class] + EPSILON)
-                          - math.log10(start["vis"][goal_class] + EPSILON))
-        b[goal_class] = current["bright"][goal_class] - start["bright"][goal_class]
+        c[goal_class] = (math.log10(current["vis"].get(goal_class, 0.0) + EPSILON)
+                          - math.log10(start["vis"].get(goal_class, 0.0) + EPSILON))
+        b[goal_class] = (current["bright"].get(goal_class, 0.0)
+                         - start["bright"].get(goal_class, 0.0))
     c["other"] = (math.log10(current["vis"].get("other", 0.0) + EPSILON)
                   - math.log10(start["vis"].get("other", 0.0) + EPSILON))
     return c, b
@@ -195,6 +203,10 @@ CLASS_WORDS = {
     "lungs": ("lungs",),
     "soft": ("soft tissue",),
     "vessels": ("vessels", "blood vessels"),
+    "heart": ("heart",),
+    "liver": ("liver",),
+    "kidneys": ("kidneys", "kidney"),
+    "spleen": ("spleen",),
 }
 
 
@@ -208,7 +220,7 @@ CLASS_WORDS = {
 # .label_source` themselves; this function only reports which goals are
 # measurable either way, so policy mode and instruction sampling keep working
 # on every calibrated CT, not just TotalSegmentator subjects.
-FALLBACK_GOAL_CLASSES = tuple(c for c in GOAL_CLASSES if c != "vessels")
+FALLBACK_GOAL_CLASSES = ("skeleton", "lungs", "soft")
 
 
 def goal_classes_for_volume(name: str) -> list:

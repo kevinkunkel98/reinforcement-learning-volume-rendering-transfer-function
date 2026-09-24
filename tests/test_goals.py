@@ -6,6 +6,7 @@ import pytest
 import goals
 import totalseg
 import visibility
+from anatomy import CANONICAL_CLASSES
 from transfer import peak_internal
 
 
@@ -14,8 +15,9 @@ def _features(skeleton=(0.0, 0.0), lungs=(0.0, 0.0), organs=(0.0, 0.0),
     """A raw visibility.features()-shaped dict: each arg is (vis, bright).
     `other` is the unlabeled-tissue vis (visibility.py's "other" bucket) --
     no brightness, since nothing ever targets its colour."""
-    values = {"skeleton": skeleton, "lungs": lungs, "organs": organs,
-              "muscle": muscle, "vessels": vessels}
+    values = {name: (0.0, 0.0) for name in CANONICAL_CLASSES}
+    values.update({"skeleton": skeleton, "lungs": lungs, "soft": muscle,
+                   "vessels": vessels, "heart": organs})
     vis = {c: v[0] for c, v in values.items()}
     vis["other"] = other
     return {"vis": vis,
@@ -24,16 +26,20 @@ def _features(skeleton=(0.0, 0.0), lungs=(0.0, 0.0), organs=(0.0, 0.0),
 
 
 def _aggregated(skeleton=0.0, lungs=0.0, soft=0.0, vessels=0.0, other=0.0,
-                 skeleton_b=0.0, lungs_b=0.0, soft_b=0.0, vessels_b=0.0, coverage=0.5):
+                skeleton_b=0.0, lungs_b=0.0, soft_b=0.0, vessels_b=0.0, coverage=0.5):
     """An aggregate()-shaped dict directly, for tests that don't need aggregate() itself."""
-    return {"vis": {"skeleton": skeleton, "lungs": lungs, "soft": soft, "vessels": vessels, "other": other},
-            "bright": {"skeleton": skeleton_b, "lungs": lungs_b, "soft": soft_b, "vessels": vessels_b},
+    return {"vis": {**{name: 0.0 for name in CANONICAL_CLASSES},
+                     "skeleton": skeleton, "lungs": lungs, "soft": soft,
+                     "vessels": vessels, "other": other},
+            "bright": {**{name: 0.0 for name in CANONICAL_CLASSES},
+                        "skeleton": skeleton_b, "lungs": lungs_b,
+                        "soft": soft_b, "vessels": vessels_b},
             "coverage": coverage}
 
 
 def test_starting_params_places_one_peak_per_goal_class():
     params = goals.starting_params()
-    assert params.shape == (24,)
+    assert params.shape == (48,)
     for goal_class, index in goals.PEAK_INDEX.items():
         centre = peak_internal(params, index)["center"]
         assert centre == pytest.approx(goals.PEAK_CENTRES_HU[goal_class], abs=1.0)
@@ -42,8 +48,8 @@ def test_starting_params_places_one_peak_per_goal_class():
 def test_aggregate_sums_soft_and_weights_its_brightness():
     features = _features(skeleton=(0.3, 0.9), organs=(0.2, 0.4), muscle=(0.6, 0.8))
     aggregated = goals.aggregate(features)
-    assert aggregated["vis"]["soft"] == pytest.approx(0.8)
-    assert aggregated["bright"]["soft"] == pytest.approx(0.7)
+    assert aggregated["vis"]["soft"] == pytest.approx(0.6)
+    assert aggregated["bright"]["soft"] == pytest.approx(0.8)
     assert aggregated["vis"]["skeleton"] == pytest.approx(0.3)
     assert aggregated["bright"]["skeleton"] == pytest.approx(0.9)
 
@@ -66,13 +72,28 @@ def test_aggregate_passes_through_other():
 
 def test_goal_vector_layout():
     vector = goals.goal_vector({"skeleton": {"vis": 0.3}})
-    assert vector.shape == (16,)
-    d, m, _, _ = vector[0:4], vector[4:8], vector[8:12], vector[12:16]
+    assert vector.shape == (32,)
+    n = len(goals.GOAL_CLASSES)
+    d, m, _, _ = vector[0:n], vector[n:2*n], vector[2*n:3*n], vector[3*n:4*n]
     skeleton = goals.GOAL_CLASSES.index("skeleton")
     assert d[skeleton] == pytest.approx(0.3)
     assert m[skeleton] == 1.0
-    rest = np.delete(vector, [skeleton, 4 + skeleton])
+    rest = np.delete(vector, [skeleton, n + skeleton])
     assert np.all(rest == 0.0)
+
+
+def test_promoted_organs_are_goals_and_soft_is_not_them():
+    assert goals.GOAL_CLASSES == CANONICAL_CLASSES
+    assert goals.MEASURED_FOR_GOAL["soft"] == ("soft",)
+    for name in ("heart", "liver", "kidneys", "spleen"):
+        assert goals.MEASURED_FOR_GOAL[name] == (name,)
+
+
+def test_aggregate_keeps_promoted_organs_out_of_soft():
+    features = _features(organs=(0.2, 0.4), muscle=(0.6, 0.8))
+    aggregated = goals.aggregate(features)
+    assert aggregated["vis"]["soft"] == pytest.approx(0.6)
+    assert aggregated["vis"]["heart"] == pytest.approx(0.2)
 
 
 def test_progress_is_log_change_for_visibility_and_plain_change_for_brightness():
@@ -245,7 +266,7 @@ class _StubModel:
 
 
 def _all_classes_present():
-    return ["skeleton", "lungs", "organs", "muscle", "vessels"]
+    return list(CANONICAL_CLASSES)
 
 
 def test_goal_classes_exclude_vessels_without_contrast(monkeypatch):
@@ -262,7 +283,7 @@ def test_goal_classes_include_vessels_with_contrast(monkeypatch):
 
 def test_goal_classes_exclude_absent_classes(monkeypatch):
     monkeypatch.setattr(goals.totalseg, "classes_present",
-                        lambda name: ["skeleton", "organs", "muscle", "vessels"])
+                        lambda name: ["skeleton", "soft", "vessels"])
     monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
     supported = goals.goal_classes_for_volume("fake")
     assert "lungs" not in supported
@@ -348,8 +369,9 @@ def test_every_sampled_instruction_has_text_and_a_goal_vector(monkeypatch):
     for _ in range(50):
         instruction = goals.sample_instruction("fake", model, start, rng)
         assert instruction["text"]
-        assert instruction["goal"].shape == (16,)
-        assert instruction["goal"][4:8].sum() + instruction["goal"][12:16].sum() > 0.0
+        assert instruction["goal"].shape == (32,)
+        n = len(goals.GOAL_CLASSES)
+        assert instruction["goal"][n:2*n].sum() + instruction["goal"][3*n:4*n].sum() > 0.0
 
 
 def test_sampling_is_deterministic_for_a_seed(monkeypatch):
@@ -442,7 +464,7 @@ def test_goal_from_command_show_only_hides_the_rest(monkeypatch):
     assert result["kind"] == "show_only"
     assert result["targets"]["skeleton"]["vis"] == goals.HIDE_STRENGTH
     assert result["targets"]["lungs"]["vis"] == goals.HIDE_STRENGTH
-    assert result["targets"]["soft"]["vis"] == -goals.HIDE_STRENGTH
+    assert result["targets"]["heart"]["vis"] == -goals.HIDE_STRENGTH
     assert result["targets"]["vessels"]["vis"] == -goals.HIDE_STRENGTH
 
 
@@ -554,8 +576,7 @@ def test_reachability_sums_the_measured_classes_behind_a_goal_class(monkeypatch)
     monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
     per_class = {m: 0.0 for m in visibility.CLASSES}
     per_class["skeleton"] = 0.1
-    per_class["organs"] = goals.VISIBLE_CEILING * 0.6
-    per_class["muscle"] = goals.VISIBLE_CEILING * 0.6
+    per_class["soft"] = goals.VISIBLE_CEILING * 1.2
     model = _PerClassModel(per_class)
 
     assert "soft" in goals.reachable_goal_classes("ts_fake", model)

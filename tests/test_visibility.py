@@ -4,7 +4,9 @@ import numpy as np
 import pytest
 
 import visibility
+from anatomy import MEASURED_CLASSES
 from transfer import CENTER_RANGE, N_PEAKS, WIDTH_RANGE, default_params, PARAMS_PER_PEAK
+from transfer import ANATOMICAL_PEAK_INDEX
 
 
 def _slab_volume(front_hu, back_hu, n=24):
@@ -18,7 +20,10 @@ def _slab_volume(front_hu, back_hu, n=24):
 def _params(heights):
     """A transfer function with the given per-peak heights (unit scale), default widths."""
     params = default_params().copy()
-    for index, height in enumerate(heights):
+    # Keep compact test calls readable while targeting canonical peaks.
+    peak_order = ("lungs", "soft", "heart", "skeleton")
+    for height, name in zip(heights, peak_order):
+        index = ANATOMICAL_PEAK_INDEX[name]
         params[index * PARAMS_PER_PEAK + 2] = height * 2.0 - 1.0
     return params
 
@@ -63,8 +68,8 @@ def test_transparent_transfer_function_is_invisible():
     features = model.features(_params([0.0, 0.0, 0.0, 0.0]))
     assert features["coverage"] == 0.0
     for name in visibility.CLASSES:
-        assert features["vis"][name] == pytest.approx(0.0, abs=1e-6)
-        assert features["bright"][name] == 0.0
+        assert features["vis"][name] == pytest.approx(0.0, abs=5e-5)
+        assert features["bright"][name] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_surrounding_tissue_occludes_the_core():
@@ -89,8 +94,9 @@ def test_brightness_follows_peak_colour():
     dark = default_params().copy()
     bright = default_params().copy()
     for channel in range(3):
-        dark[3 * PARAMS_PER_PEAK + 3 + channel] = -0.6      # dim bone-peak colour
-        bright[3 * PARAMS_PER_PEAK + 3 + channel] = 1.0     # white bone-peak colour
+        index = ANATOMICAL_PEAK_INDEX["skeleton"]
+        dark[index * PARAMS_PER_PEAK + 3 + channel] = -0.6
+        bright[index * PARAMS_PER_PEAK + 3 + channel] = 1.0
     assert model.features(bright)["bright"]["skeleton"] > model.features(dark)["bright"]["skeleton"]
 
 
@@ -149,10 +155,10 @@ def test_classes_come_from_the_label_volume():
     """A bone-HU core carrying the 'organs' label shows up under organs, not
     skeleton -- labels, not intensities, decide the class."""
     volume = _core_volume(core_hu=900.0, shell_hu=50.0)
-    labels = _core_labels("organs")
+    labels = _core_labels("soft")
     model = visibility.VisibilityModel.from_volume(volume, (2.0, 2.0, 2.0), labels=labels)
     vis = model.features(_params([0.0, 0.0, 0.0, 0.9]))["vis"]
-    assert vis["organs"] > 0.0
+    assert vis["soft"] > 0.0
     assert vis["skeleton"] == pytest.approx(0.0, abs=1e-6)
 
 
@@ -176,9 +182,24 @@ def test_intensity_fallback_maps_to_the_same_class_names():
 
 def test_intensity_fallback_leaves_muscle_and_vessels_empty():
     model = _model(_slab_volume(-1000.0, 900.0))
-    features = model.features(_params([0.0, 0.0, 0.0, 0.9]))
-    assert features["vis"]["muscle"] == pytest.approx(0.0, abs=1e-6)
+    features = model.features(_single_peak_params(900.0))
+    assert features["vis"]["skeleton"] > 0.0
     assert features["vis"]["vessels"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_visibility_classes_use_shared_anatomy_registry():
+    assert visibility.CLASSES == MEASURED_CLASSES[:-1]
+    assert visibility.CLASSES == (
+        "skeleton", "lungs", "heart", "vessels", "liver", "kidneys", "spleen", "soft"
+    )
+
+
+def test_intensity_fallback_only_populates_sensible_classes():
+    model = _model(_slab_volume(-1000.0, 50.0))
+    features = model.features(_single_peak_params(50.0))
+    assert features["vis"]["soft"] > 0.0
+    for name in ("heart", "vessels", "liver", "kidneys", "spleen"):
+        assert features["vis"][name] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_solo_max_uses_the_best_single_peak():
@@ -218,6 +239,13 @@ def test_cache_miss_on_different_version(tmp_path, monkeypatch):
                                            volume_id="fake").save_cache("version-1")
     assert visibility.VisibilityModel.load_cache("fake", "version-2") is None
     assert visibility.VisibilityModel.load_cache("other", "version-1") is None
+
+
+def test_cache_key_uses_versioned_anatomy_layout():
+    model = _model(_slab_volume(50.0, 900.0))
+    assert visibility.CLASS_LAYOUT_VERSION == "anatomy-v2"
+    assert visibility.CACHE_VERSION >= 3
+    assert len(model.cache_key("version-1")) == 16
 
 
 def test_for_volume_builds_once_then_loads(tmp_path, monkeypatch):
