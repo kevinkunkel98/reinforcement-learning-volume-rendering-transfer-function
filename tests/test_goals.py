@@ -478,6 +478,22 @@ def test_goal_from_command_show_only_single_string_target(monkeypatch):
     assert result["targets"]["lungs"]["vis"] == -goals.HIDE_STRENGTH
 
 
+def test_show_only_reachability_ignores_hidden_classes(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.05, lungs=0.05, soft=0.05, vessels=0.05)
+    monkeypatch.setattr(
+        goals, "class_ceiling",
+        lambda _model, goal_class: 1.0 if goal_class == "lungs" else 0.0,
+    )
+    command = {"target": "lungs", "attribute": "opacity", "direction": "show_only",
+               "strength": None}
+
+    result = goals.goal_from_command(command, model, start, volume="fake")
+
+    assert result["targets"]["lungs"]["vis"] == goals.HIDE_STRENGTH
+
+
 def test_goal_from_command_compound_merges_subcommands(monkeypatch):
     _patch_contrast_volume(monkeypatch)
     model = _StubModel()

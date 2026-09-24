@@ -493,7 +493,9 @@ def goal_from_command(command: dict, model, start_features: dict, volume: str = 
     """
     goal = _goal_from_command(command, model, start_features, volume)
     if volume is not None:
-        for goal_class in goal["targets"]:
+        for goal_class, target in goal["targets"].items():
+            if target.get("vis", 0.0) <= 0.0:
+                continue
             ceiling = class_ceiling(model, goal_class)
             if ceiling < VISIBLE_CEILING:
                 raise ValueError(

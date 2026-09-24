@@ -695,7 +695,7 @@ def test_search_mode_reports_when_the_budget_is_too_small_to_move():
     assert state["current"]["mode"] == "search"
     assert state["current"]["message"] == (
         "search spent 5 evaluations without improving on the start; "
-        "a full sweep needs about 25")
+        f"a full sweep needs about {2 * len(CONTROLLABLE) + 1}")
 
 
 def test_search_mode_actually_reduces_distance_to_the_goal(ts_session):
@@ -713,7 +713,7 @@ def test_search_mode_actually_reduces_distance_to_the_goal(ts_session):
     instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
     start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
-    state = s.command("more bone", mode="search", steps=25)
+    state = s.command("more bone", mode="search", steps=2 * len(CONTROLLABLE) + 1)
 
     new_params = np.array(state["current"]["params"], dtype=np.float64)
     new_agg = goals.aggregate(model.features(new_params))
@@ -1132,19 +1132,19 @@ def ct_chest_session(monkeypatch):
         policy.reset_cache()
 
 
-def test_policy_mode_on_ct_chest_produces_a_real_policy_answer(ct_chest_session):
-    # ct_chest has no anatomy labels, so this only works because
-    # goals.goal_classes_for_volume falls back to what the intensity-label
-    # visibility model can measure (skeleton, lungs, soft) instead of
-    # raising -- confirming policy mode isn't limited to TotalSegmentator
-    # volumes any more.
+def test_policy_mode_on_ct_chest_falls_back_for_stale_checkpoint(ct_chest_session):
+    # The checked-in v4 checkpoint predates the eight-class observation layout.
+    # Do not claim policy availability until a compatible checkpoint is trained;
+    # policy mode must retain its exact-application fallback.
     s = ct_chest_session
     before_params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
 
     state = s.command("more bone", mode="policy")
 
-    assert state["current"]["mode"] == "policy"
-    assert state["current"]["message"] is None
+    assert state["current"]["mode"] == "exact"
+    assert state["current"]["message"] == (
+        "Error: Unexpected observation shape (97,) for Box environment, "
+        "please use (57,) or (n_env, 57) for the observation shape.")
     params = np.array(state["current"]["params"], dtype=np.float64)
     assert not np.array_equal(params, before_params)
 
