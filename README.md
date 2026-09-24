@@ -148,6 +148,13 @@ LLM parsing needs Ollama (`ollama serve && ollama pull qwen2.5:7b`); without
 it, commands fall back to the rule parser automatically. Full grammar in
 `COMMANDS.md`.
 
+Anatomical commands include heart, vessels/aorta, liver, kidneys, and spleen,
+for example `show only heart`, `more aorta`, `brighten liver`, `more kidneys`,
+and `show only spleen`. These targets use approximate Hounsfield-unit bands,
+not segmentation-driven opacity: overlapping tissues can remain visible, so
+"show only" is an approximate isolation request rather than an anatomical
+guarantee.
+
 ## Layout
 
 | Path | What's there |

@@ -1,8 +1,9 @@
 import numpy as np
 
 from tools.validate_visibility import (
-    CONTRIBUTION_FLOOR, pearson, rank_agreement, summarize, sweep_params,
+    CONTRIBUTION_FLOOR, _label_id, pearson, rank_agreement, summarize, sweep_params,
 )
+from anatomy import CANONICAL_CLASSES
 from transfer import peak_internal
 
 
@@ -52,3 +53,30 @@ def test_rank_agreement_penalizes_reordering():
     a = np.array([1.0, 2.0, 3.0, 4.0])
     b = np.array([2.0, 1.0, 3.0, 4.0])
     assert rank_agreement(a, b) < 1.0
+
+
+def test_label_ids_cover_all_eight_canonical_classes():
+    assert [_label_id(name) for name in CANONICAL_CLASSES] == list(range(1, 9))
+
+
+def test_visibility_cache_key_includes_eight_class_layout():
+    from visibility import VisibilityModel
+
+    model = VisibilityModel(
+        np.zeros((1, 2, 2, 2), dtype=np.uint8), 1.0, np.zeros(16),
+        np.zeros((1, 2, 2, 2), dtype=np.uint8), "intensity", "test",
+    )
+    key = model.cache_key("volume-v1")
+    assert len(key) == 16
+
+
+def test_visibility_cache_key_changes_with_layout_metadata(monkeypatch):
+    from visibility import VisibilityModel
+
+    model = VisibilityModel(
+        np.zeros((1, 2, 2, 2), dtype=np.uint8), 1.0, np.zeros(16),
+        np.zeros((1, 2, 2, 2), dtype=np.uint8), "intensity", "test",
+    )
+    original = model.cache_key("volume-v1")
+    monkeypatch.setattr("visibility.CLASS_LAYOUT_VERSION", "anatomy-test-layout")
+    assert model.cache_key("volume-v1") != original

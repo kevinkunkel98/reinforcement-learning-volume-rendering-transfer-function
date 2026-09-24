@@ -10,6 +10,11 @@ Nudge a class's visibility up or down by a relative amount. "hide"/"remove" are 
 - `decrease opacity for lungs slightly`
 - `more bone`
 - `a bit less soft tissue`
+- `more heart`
+- `more liver`
+- `more kidneys`
+- `more spleen`
+- `more aorta`
 - `hide the lungs`
 - `remove the skeleton`
 
@@ -22,10 +27,15 @@ Set a class's visibility to a fixed low/medium/high level.
 
 ## Show only
 
-Isolate one or more classes, crushing every other peak to zero.
+Isolate one or more classes, crushing every other peak to zero. Isolation uses approximate HU bands, not anatomical guarantees; overlapping tissues can remain visible.
 
 - `show only skeleton`
 - `show only skeleton and lungs`
+- `show only heart`
+- `show only vessels`
+- `show only liver`
+- `show only kidneys`
+- `show only spleen`
 - `show me the lungs`
 
 ## Compound
@@ -49,6 +59,10 @@ Adjust a class's color brightness.
 
 - `brighten skeleton`
 - `darken lungs`
+- `brighten heart`
+- `brighten liver`
+- `brighten kidneys`
+- `brighten spleen`
 - `low brightness for vessels`
 
 ## Center position

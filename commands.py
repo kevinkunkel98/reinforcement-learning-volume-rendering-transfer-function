@@ -110,7 +110,9 @@ COMMAND_REFERENCE = [
     {
         "category": "Opacity (relative)",
         "examples": ["increase opacity for skeleton strongly", "decrease opacity for lungs slightly",
-                     "more bone", "a bit less soft tissue", "hide the lungs", "remove the skeleton"],
+                     "more bone", "a bit less soft tissue", "more heart", "more liver",
+                     "more kidneys", "more spleen", "more aorta", "hide the lungs",
+                     "remove the skeleton"],
         "description": "Nudge a class's visibility up or down by a relative amount. "
                         "\"hide\"/\"remove\" are a decrease at strength \"strongly\".",
     },
@@ -121,8 +123,12 @@ COMMAND_REFERENCE = [
     },
     {
         "category": "Show only",
-        "examples": ["show only skeleton", "show only skeleton and lungs", "show me the lungs"],
-        "description": "Isolate one or more classes, crushing every other peak to zero.",
+        "examples": ["show only skeleton", "show only skeleton and lungs", "show only heart",
+                     "show only vessels", "show only liver", "show only kidneys",
+                     "show only spleen", "show me the lungs"],
+        "description": "Isolate one or more classes, crushing every other peak to zero. "
+                       "Isolation uses approximate HU bands, not anatomical guarantees; "
+                       "overlapping tissues can remain visible.",
     },
     {
         "category": "Compound",
@@ -137,7 +143,8 @@ COMMAND_REFERENCE = [
     },
     {
         "category": "Brightness",
-        "examples": ["brighten skeleton", "darken lungs", "low brightness for vessels"],
+        "examples": ["brighten skeleton", "darken lungs", "brighten heart", "brighten liver",
+                     "brighten kidneys", "brighten spleen", "low brightness for vessels"],
         "description": "Adjust a class's color brightness.",
     },
     {

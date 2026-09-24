@@ -34,6 +34,7 @@ import numpy as np
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk  # pyright: ignore[reportMissingImports]
 
+import anatomy
 import datasets
 import render
 import totalseg
@@ -46,6 +47,11 @@ DEFAULT_THRESHOLD = 0.7          # Pearson correlation required per validated cl
 COVERAGE_THRESHOLD = 0.9         # rank agreement required for coverage
 N_TRIALS = 10
 OUT_PATH = "out/visibility_validation.json"
+
+
+def _label_id(class_name: str) -> int:
+    """Return label-map ID for any canonical class in current layout."""
+    return anatomy.CANONICAL_CLASSES.index(class_name) + 1
 
 
 def pearson(a, b) -> float:
@@ -145,7 +151,7 @@ def _render_with_label_mask(volume, spacing, params, cameras, labels, black_labe
     mapper.SetMaskBlendFactor(1.0)
     try:
         colour, opacity = vector_to_vtk(params)
-        for label in range(1, len(visibility.CLASSES) + 1):
+        for label in range(1, len(anatomy.CANONICAL_CLASSES) + 1):
             prop.SetLabelColor(label, _black_colour() if label == black_label else colour)
             prop.SetLabelScalarOpacity(label, opacity)
         frames = [render.grab(render.render(volume, params, spacing, camera)) for camera in cameras]
@@ -172,7 +178,7 @@ def validate_volume(name: str, seed: int = 0, threshold: float = DEFAULT_THRESHO
 
     estimate, reference = {}, {}
     for class_name in totalseg.classes_present(name):
-        class_id = visibility.CLASSES.index(class_name) + 1
+        class_id = _label_id(class_name)
         peak = _best_peak(model, class_name)
         sampled = sweep_params(rng, peak, n_trials)
         feats = [model.features(p) for p in sampled]
