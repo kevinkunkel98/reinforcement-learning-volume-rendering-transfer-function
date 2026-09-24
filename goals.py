@@ -1,19 +1,19 @@
 """Turn an instruction into a measurable target.
 
-Visibility (`visibility.for_volume(...).features(...)`) is measured over five
-anatomical classes, but a transfer function cannot separate all of them:
-organs and muscle overlap in intensity on both plain and contrast scans, so no
-peak placement can show one without the other -- goals target them jointly as
-`soft`. Vessels only stand apart from soft tissue when the scan carries
-contrast, so vessels are only ever a goal on a contrast volume (see
-`goal_classes_for_volume`).
+Visibility (`visibility.for_volume(...).features(...)`) is measured over the
+eight canonical anatomy classes. Promoted organs (heart, liver, kidneys and
+spleen) each have their own measured class; generic `soft` is separate and is
+not an aggregate of promoted organs. Vessels only stand apart from soft tissue
+when the scan carries contrast, so vessels are only ever a goal on a contrast
+volume (see `goal_classes_for_volume`).
 
-A goal is a 16-value vector: a requested visibility/brightness change per goal
-class, plus a flag saying whether that aspect was even mentioned (an
-instruction that never mentions vessels should not be scored on what happens
-to them). Visibility changes are scored in log10 units because visibility
-spans three orders of magnitude (0.0003 to 0.5) -- a fixed absolute change
-means very different things at each end, but a fixed factor does not.
+A goal is a 32-value vector: four dynamic blocks, each with one value per
+`GOAL_CLASSES` entry: requested visibility change, visibility-mentioned flag,
+requested brightness change, and brightness-mentioned flag. An instruction
+that never mentions a class should not be scored on what happens to it.
+Visibility changes are scored in log10 units because visibility spans three
+orders of magnitude (0.0003 to 0.5) -- a fixed absolute change means very
+different things at each end, but a fixed factor does not.
 Brightness changes are scored in plain units.
 """
 import math
@@ -30,7 +30,7 @@ MEASURED_FOR_GOAL = {goal_class: (goal_class,) for goal_class in GOAL_CLASSES}
 # RL v2 peak order, by the class each peak is seeded for. Defined in transfer,
 # because visibility.solo_max must probe at these same centres and cannot
 # import goals (goals imports visibility). Keeping a second copy here is what
-# let solo_max drift onto the retired band layout's fat peak and report every
+# let solo_max drift away from the canonical peak layout and report every
 # volume's lungs as unreachable.
 PEAK_CENTRES_HU = transfer.ANATOMICAL_CENTRES_HU
 PEAK_INDEX = transfer.ANATOMICAL_PEAK_INDEX
@@ -59,9 +59,9 @@ def aggregate(features: dict) -> dict:
     """Measured classes -> goal classes.
 
     {"vis": {goal class: float}, "bright": {goal class: float}, "coverage": float}
-    `soft` sums the visibility of organs and muscle, because no transfer
-    function can separate them; its brightness is their visibility-weighted
-    mean (0 when neither is visible).
+    Each canonical goal class maps to its matching measured class. Legacy raw
+    feature dictionaries using `organs` and `muscle` are read as generic
+    `soft`; canonical models use the shared anatomy registry directly.
     """
     vis, bright = {}, {}
     for goal_class in GOAL_CLASSES:
@@ -86,11 +86,11 @@ def aggregate(features: dict) -> dict:
 
 
 def goal_vector(targets: dict) -> np.ndarray:
-    """A 16-value goal: requested change and a mentioned-flag per goal class.
+    """A 32-value goal with four dynamic class-aligned blocks.
 
     targets maps goal class -> {"vis": float, "bright": float}; a missing key
-    means that aspect is not part of the instruction. Layout: d[4], m[4],
-    e[4], n[4] in GOAL_CLASSES order.
+    means that aspect is not part of the instruction. Layout: d[n], m[n],
+    e[n], n[n], where n = len(GOAL_CLASSES), in class order.
     """
     vector = np.zeros(4 * len(GOAL_CLASSES), dtype=np.float64)
     for i, goal_class in enumerate(GOAL_CLASSES):
@@ -147,7 +147,8 @@ def distance(goal: np.ndarray, start: dict, current: dict) -> float:
     # "other" (unlabeled tissue) can never be named by an instruction, so it is
     # always the unmentioned case -- without this, a transfer function can
     # satisfy "show only X" by rendering an opaque wall of unclassified
-    # material instead of X, since none of the four goal classes charges for it.
+    # material instead of X, since "other" is not a goal class and is never
+    # charged by the mentioned-class terms.
     total += LAMBDA_KEEP * max(0.0, abs(c["other"]) - KEEP_TOLERANCE)
     return float(total)
 
@@ -212,14 +213,12 @@ CLASS_WORDS = {
 
 # Goal classes measurable on a volume with no anatomical labelling at all --
 # visibility.for_volume's intensity fallback (label_source == "intensity")
-# only separates skeleton, lungs and organs by Hounsfield value; muscle and
-# vessels are never populated by it, so `soft` is supported (via organs) but
-# `vessels` never is -- there is no contrast information to tell it apart
-# from soft tissue. Callers that need to know *why* (whether this volume
-# actually has anatomical labels) should read `visibility.for_volume(name)
-# .label_source` themselves; this function only reports which goals are
-# measurable either way, so policy mode and instruction sampling keep working
-# on every calibrated CT, not just TotalSegmentator subjects.
+# only separates skeleton, lungs and generic soft tissue by Hounsfield value;
+# promoted organs and vessels are not populated because intensity alone cannot
+# identify them. Callers that need to know *why* (whether this volume actually
+# has anatomical labels) should read `visibility.for_volume(name).label_source`;
+# this function reports which goals are measurable either way, so policy mode
+# and instruction sampling keep working on every calibrated CT.
 FALLBACK_GOAL_CLASSES = ("skeleton", "lungs", "soft")
 
 
@@ -264,8 +263,8 @@ VISIBLE_CEILING = 0.005
 
 def class_ceiling(model, goal_class: str) -> float:
     """The most of `goal_class` any single-peak transfer function can show,
-    summed over the measured classes behind it (`soft` is organs + muscle, so
-    neither alone need clear the threshold)."""
+    summed over the measured classes in `MEASURED_FOR_GOAL`; canonical classes
+    are one-to-one, including generic `soft`."""
     return sum(model.solo_max(m) for m in MEASURED_FOR_GOAL[goal_class])
 
 
