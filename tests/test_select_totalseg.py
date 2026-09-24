@@ -1,7 +1,7 @@
 import pytest
 
 from tools.select_totalseg import (
-    CLASS_NAMES, SPLIT_COUNTS, build_label_volume, class_for_structure,
+    SPLIT_COUNTS, build_label_volume, class_for_structure,
     passes_extent_filter, region_for_study_type, select_and_split,
 )
 from anatomy import CLASS_LAYOUT_VERSION, CLASS_NAMES
