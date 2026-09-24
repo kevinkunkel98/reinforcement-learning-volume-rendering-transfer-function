@@ -1,7 +1,7 @@
 import pytest
 
 from tools.baseline_report import summarise
-from tools.per_class_eval import summarise_per_class
+from tools.per_class_eval import _class_row, summarise_per_class
 
 
 def _rows():
@@ -85,3 +85,9 @@ def test_per_class_report_counts_all_statuses_even_without_scores():
     assert report["liver"]["unsupported"] == 1
     assert report["liver"]["unreachable"] == 1
     assert report["liver"]["n"] == 0
+
+
+def test_per_class_row_drops_attainment_for_nonreachable_class():
+    assert _class_row("liver", "unsupported", 0.8)["attainment"] is None
+    assert _class_row("liver", "unreachable", 0.8)["attainment"] is None
+    assert _class_row("liver", "reachable", 0.8)["attainment"] == 0.8

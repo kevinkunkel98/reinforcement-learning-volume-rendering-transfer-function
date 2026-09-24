@@ -414,6 +414,10 @@ def per_class_summary(results: dict, episodes: list, model_for_volume=None) -> d
     models = {}
     report = {}
     for method, rows in results.items():
+        if len(rows) != len(episodes):
+            raise ValueError(
+                f"{method}: {len(rows)} rows for {len(episodes)} episodes -- "
+                "per-class rows must align with episodes")
         grouped = collections.defaultdict(list)
         counts = collections.defaultdict(collections.Counter)
         for row, episode in zip(rows, episodes):

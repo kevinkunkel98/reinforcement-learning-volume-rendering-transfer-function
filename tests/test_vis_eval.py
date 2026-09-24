@@ -635,6 +635,12 @@ def test_compare_accepts_and_returns_per_class_summary(monkeypatch):
     assert set(comparison["per_class"]["policy"]) == set(goals.GOAL_CLASSES)
 
 
+def test_per_class_summary_rejects_row_episode_length_mismatch():
+    with pytest.raises(ValueError, match="rows.*episodes"):
+        vis_eval.per_class_summary(
+            {"policy": []}, [{"volume": "stub_a"}])
+
+
 # --- provenance ------------------------------------------------------------------
 
 def _stub_run(monkeypatch):

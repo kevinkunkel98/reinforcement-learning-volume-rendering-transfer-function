@@ -42,6 +42,11 @@ def _score(policy, episode, model) -> float:
                             goals.aggregate(model.features(params)))
 
 
+def _class_row(goal_class: str, status: str, attainment):
+    return {"class": goal_class, "status": status,
+            "attainment": attainment if status == "reachable" else None}
+
+
 def summarise_per_class(rows: list) -> dict:
     """Summarise scores while retaining support and reachability accounting."""
     grouped = collections.defaultdict(list)
@@ -99,21 +104,15 @@ def main():
             for goal_class in episode["instruction"]["targets"]:
                 supported = goal_class in supported_classes
                 reachable = goal_class in reachable_classes
-                per_class_rows.append({
-                    "class": str(goal_class),
-                    "status": "reachable" if reachable else "unreachable" if supported else "unsupported",
-                    "attainment": attainment,
-                })
+                status = "reachable" if reachable else "unreachable" if supported else "unsupported"
+                per_class_rows.append(_class_row(str(goal_class), status, attainment))
             mentioned = set(episode["instruction"]["targets"])
             for goal_class in goals.GOAL_CLASSES:
                 if goal_class in mentioned:
                     continue
-                per_class_rows.append({
-                    "class": goal_class,
-                    "status": "reachable" if goal_class in reachable_classes else
-                              "unreachable" if goal_class in supported_classes else "unsupported",
-                    "attainment": None,
-                })
+                status = ("reachable" if goal_class in reachable_classes else
+                          "unreachable" if goal_class in supported_classes else "unsupported")
+                per_class_rows.append(_class_row(goal_class, status, None))
             overall.append(attainment)
         results[path] = {
             "overall_median": statistics.median(overall),
