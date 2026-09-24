@@ -113,10 +113,10 @@ def test_judge_appends_one_well_formed_row_and_returns_next_item(monkeypatch, tm
     assert row["volume"] == "fake_a"
     assert row["volume_version"] == "version:fake_a"
     assert set(row["instruction"].keys()) == {"kind", "text", "targets", "goal"}
-    assert len(row["instruction"]["goal"]) == 16
-    assert len(row["start_params"]) == 24
+    assert len(row["instruction"]["goal"]) == 4 * len(goals.GOAL_CLASSES)
+    assert len(row["start_params"]) == transfer.TOTAL_PARAMS
     assert set(row["a"].keys()) == {"params", "source"}
-    assert len(row["a"]["params"]) == 24
+    assert len(row["a"]["params"]) == transfer.TOTAL_PARAMS
     assert row["a"]["source"] in SOURCES
     assert row["b"]["source"] in SOURCES
     assert row["choice"] == "a"

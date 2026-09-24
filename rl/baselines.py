@@ -2,7 +2,7 @@
 
 Every baseline has the signature `(model, start_params, instruction) ->
 final_params`, where `model` is a `visibility.VisibilityModel`, `start_params`
-is a 24-value transfer-function vector, and `instruction` is what
+is a `transfer.TOTAL_PARAMS`-value transfer-function vector, and `instruction` is what
 `goals.sample_instruction` returns (`{"kind", "text", "targets", "goal"}`).
 
 B0 `do_nothing` is the reference: it returns `start_params` unchanged, and

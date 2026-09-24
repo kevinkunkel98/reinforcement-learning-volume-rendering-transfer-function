@@ -19,6 +19,7 @@ from fastapi.responses import Response
 
 import goals
 import server
+import transfer
 import visibility
 from rl.baselines import CONTROLLABLE
 from server import Session
@@ -54,7 +55,7 @@ def _scene(scene_id, parent_scene_id):
             "scalar_type": "float32",
             "orientation": "dataset-normalized",
         },
-        "transfer_function": [0] * 24,
+        "transfer_function": [0] * transfer.TOTAL_PARAMS,
         "camera": {
             "position": [0, 0, 1],
             "focal_point": [0, 0, 0],
@@ -270,7 +271,7 @@ def test_initial_state_has_one_step_at_cursor_zero():
     assert state["cursor"] == 0
     assert state["total"] == 1
     assert state["current"]["cmd_text"] is None
-    assert len(state["current"]["params"]) == 24
+    assert len(state["current"]["params"]) == transfer.TOTAL_PARAMS
 
 
 def test_render_step_includes_a_transfer_curve():

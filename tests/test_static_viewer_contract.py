@@ -43,9 +43,10 @@ def test_viewer_fetches_typed_chunks_and_reconstructs_fortran_volume():
     assert "little-endian" in viewer
 
 
-def test_viewer_adapts_exactly_24_values_and_exposes_camera_state():
+def test_viewer_adapts_exactly_48_values_and_exposes_camera_state():
     viewer = read("viewer.js")
-    assert re.search(r"length\s*!==\s*24|length\s*===\s*24", viewer)
+    assert "const TOTAL_PARAMS = 48" in viewer
+    assert "params.length !== TOTAL_PARAMS" in viewer
     assert "setTransferFunction" in viewer
     assert "getCamera" in viewer
     assert "setCamera" in viewer

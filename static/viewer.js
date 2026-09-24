@@ -3,6 +3,9 @@
 
   const CENTER_RANGE = [-1050, 2000];
   const WIDTH_RANGE = [10, 400];
+  const TOTAL_PARAMS = 48;
+  const PARAMS_PER_PEAK = 6;
+  const N_PEAKS = TOTAL_PARAMS / PARAMS_PER_PEAK;
   const viewerEl = document.getElementById("vtk-viewer");
   const statusEl = document.getElementById("viewer-status");
   const errorEl = document.getElementById("viewer-error");
@@ -122,7 +125,7 @@
   }
 
   function internalPeak(params, index) {
-    const base = index * 6;
+    const base = index * PARAMS_PER_PEAK;
     const toRange = (value, range) => range[0] + (value + 1) / 2 * (range[1] - range[0]);
     const unit = (value) => (value + 1) / 2;
     return {
@@ -137,7 +140,7 @@
     if (!Array.isArray(params) && !(params instanceof Float32Array) && !(params instanceof Float64Array)) {
       throw new Error("transfer function must be an array");
     }
-    if (params.length !== 24) throw new Error("transfer function must contain 24 values");
+    if (params.length !== TOTAL_PARAMS) throw new Error(`transfer function must contain ${TOTAL_PARAMS} values`);
     const color = vtk.Rendering.Core.vtkColorTransferFunction.newInstance();
     const opacity = vtk.Common.DataModel.vtkPiecewiseFunction.newInstance();
     for (let i = 0; i < 256; i += 1) {
@@ -145,7 +148,7 @@
       let alpha = 0;
       const rgb = [0, 0, 0];
       let weight = 1e-6;
-      for (let peakIndex = 0; peakIndex < 4; peakIndex += 1) {
+      for (let peakIndex = 0; peakIndex < N_PEAKS; peakIndex += 1) {
         const peak = internalPeak(params, peakIndex);
         const contribution = peak.height * Math.exp(-0.5 * ((hu - peak.center) / peak.width) ** 2);
         alpha += contribution;

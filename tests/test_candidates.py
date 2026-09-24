@@ -17,8 +17,9 @@ class _StubModel:
     fast and deterministic, but still responsive to every controllable
     value, unlike the real renderer-backed VisibilityModel."""
 
-    MEASURED = {"skeleton": "skeleton", "lungs": "lungs", "soft": "organs", "vessels": "vessels"}
-    SOLO_MAX = {"skeleton": 0.6, "lungs": 0.3, "organs": 0.4, "muscle": 0.1, "vessels": 0.05}
+    MEASURED = {goal_class: goal_class for goal_class in goals.GOAL_CLASSES}
+    SOLO_MAX = {goal_class: 0.4 for goal_class in goals.GOAL_CLASSES}
+    SOLO_MAX.update({"skeleton": 0.6, "lungs": 0.3, "soft": 0.4, "vessels": 0.05})
 
     def __init__(self):
         self.histogram = np.full(16, 1.0 / 16.0, dtype=np.float32)
@@ -30,8 +31,8 @@ class _StubModel:
             peak = transfer.peak_internal(params, idx)
             vis[measured] = max(float(peak["height"]), 0.0)
             bright[measured] = float(sum(peak["rgb"]) / 3.0)
-        vis["muscle"] = 0.0
-        bright["muscle"] = 0.0
+        vis["other"] = 0.0
+        bright["other"] = 0.0
         coverage = min(1.0, sum(vis.values()))
         return {"vis": vis, "bright": bright, "coverage": coverage}
 
@@ -229,7 +230,7 @@ def test_anchor_items_shape_matches_sample_item(monkeypatch, tmp_path):
     assert set(item.keys()) == {"volume", "start_params", "instruction", "a", "b",
                                  "objective_choice", "near_duplicate", "features"}
     assert item["volume"] == "fake_a"
-    assert len(item["start_params"]) == 24
+    assert len(item["start_params"]) == transfer.TOTAL_PARAMS
     assert item["a"]["source"] in SOURCES
     assert item["b"]["source"] in SOURCES
 
