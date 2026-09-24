@@ -36,3 +36,16 @@ def test_policy_metadata_round_trips_as_json(tmp_path):
     assert metadata["observation_size"] == 97
     assert metadata["action_size"] == 24
     assert metadata["anatomy_layout"] == "anatomy-v2"
+
+
+def test_default_policy_path_uses_new_policy_namespace():
+    assert policy.POLICY_PATH == "out/rl_v3/oneshot_seed0/best.zip"
+
+
+def test_missing_policy_path_returns_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(policy, "POLICY_PATH", str(tmp_path / "missing.zip"))
+    policy.reset_cache()
+
+    assert policy.load_policy() is None
+
+    policy.reset_cache()

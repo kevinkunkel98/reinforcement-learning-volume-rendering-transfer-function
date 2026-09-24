@@ -188,7 +188,7 @@ def _item_from_json(data: dict) -> dict:
         "objective_choice": data["objective_choice"],
         "near_duplicate": data["near_duplicate"],
         "features": data["features"],
-        "metadata": data.get("metadata", observation_metadata()),
+        "metadata": data["metadata"],
     }
 
 
@@ -198,6 +198,8 @@ def _load_anchor_cache(cache_path: str, count: int, seed: int):
     with open(cache_path) as f:
         data = json.load(f)
     if data.get("seed") != seed or data.get("count") != count:
+        return None
+    if any(entry.get("metadata") != observation_metadata() for entry in data.get("items", [])):
         return None
     return [_item_from_json(entry) for entry in data["items"]]
 

@@ -29,7 +29,7 @@ from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, observ
 # v2's +0.247, as the median of the three seeds' own medians. On the paired
 # v2/v3 test (a different statistic -- do not cross the two): v3 +0.286
 # against v2 +0.201, Wilcoxon p = 0.0064.
-POLICY_PATH = "out/rl_v2/oneshot_v4_seed2/best.zip"
+POLICY_PATH = "out/rl_v3/oneshot_seed0/best.zip"
 
 _state = {"loaded": False, "policy": None}
 

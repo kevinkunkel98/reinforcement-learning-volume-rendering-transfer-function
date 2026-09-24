@@ -20,6 +20,7 @@ import goals
 import render as render_module
 import views
 import visibility
+import policy as policy_module
 from datasets import load_dataset
 from plots.style import apply_style
 from rl.baselines import CONTROLLABLE, apply_controllable
@@ -28,7 +29,14 @@ from rl.oneshot_env import observation_metadata
 from rl.vis_eval import fixed_episodes
 
 OUTPUT_DIR = "plots/output"
-DEFAULT_POLICY = "out/rl_v2/oneshot_v3_seed1/best.zip"
+DEFAULT_POLICY = policy_module.POLICY_PATH
+
+
+def _load_policy(policy_path):
+    policy = policy_module.load_policy(policy_path)
+    if policy is None:
+        raise FileNotFoundError(f"one-shot policy checkpoint not found: {policy_path}")
+    return policy
 
 
 def _observation(model, params, instruction):
@@ -71,11 +79,9 @@ def pick_episodes(episodes: list, policy, per_kind: int = 1) -> list:
 
 
 def plot_qualitative(policy_path: str = DEFAULT_POLICY, episodes: int = 60,
-                      output_dir: str = OUTPUT_DIR) -> str:
-    from stable_baselines3 import SAC
-
+                     output_dir: str = OUTPUT_DIR) -> str:
     apply_style()
-    policy = SAC.load(policy_path)
+    policy = _load_policy(policy_path)
     chosen = pick_episodes(fixed_episodes("test", episodes, seed=0, formulation="one_shot"), policy)
 
     fig, axes = plt.subplots(len(chosen), 2, figsize=(7.4, 2.15 * len(chosen)),

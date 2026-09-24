@@ -294,3 +294,37 @@ def test_anchor_items_regenerates_when_seed_differs_from_cache(monkeypatch, tmp_
     with open(cache_path) as f:
         data = json.load(f)
     assert data["seed"] == 1
+
+
+def test_anchor_items_regenerates_cache_missing_observation_metadata(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    cache_path = str(tmp_path / "anchor_items.json")
+    anchor_items(count=1, seed=0, volumes=["fake_a"], model_for_volume=lambda name: model,
+                 cache_path=cache_path)
+    with open(cache_path) as stream:
+        data = json.load(stream)
+    del data["items"][0]["metadata"]
+    with open(cache_path, "w") as stream:
+        json.dump(data, stream)
+
+    regenerated = anchor_items(count=1, seed=0, volumes=["fake_a"],
+                                model_for_volume=lambda name: model, cache_path=cache_path)
+
+    assert regenerated[0]["metadata"] == candidates.observation_metadata()
+
+
+def test_anchor_items_regenerates_cache_with_mismatching_observation_metadata(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    cache_path = str(tmp_path / "anchor_items.json")
+    anchor_items(count=1, seed=0, volumes=["fake_a"], model_for_volume=lambda name: model,
+                 cache_path=cache_path)
+    with open(cache_path) as stream:
+        data = json.load(stream)
+    data["items"][0]["metadata"]["observation_size"] = 57
+    with open(cache_path, "w") as stream:
+        json.dump(data, stream)
+
+    regenerated = anchor_items(count=1, seed=0, volumes=["fake_a"],
+                                model_for_volume=lambda name: model, cache_path=cache_path)
+
+    assert regenerated[0]["metadata"] == candidates.observation_metadata()
