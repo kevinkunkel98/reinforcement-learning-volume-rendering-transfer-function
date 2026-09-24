@@ -1,8 +1,9 @@
-"""24-float transfer-function vector <-> VTK objects, opacity_mass metric."""
+"""48-float transfer-function vector <-> VTK objects, opacity_mass metric."""
 import numpy as np
 import vtk
+from anatomy import CANONICAL_PEAK_ORDER
 
-N_PEAKS = 4
+N_PEAKS = len(CANONICAL_PEAK_ORDER)
 PARAMS_PER_PEAK = 6  # center, width, height, r, g, b
 TOTAL_PARAMS = N_PEAKS * PARAMS_PER_PEAK
 
@@ -48,16 +49,29 @@ def peak_internal(params: np.ndarray, i: int) -> dict:
     }
 
 
-# The anatomical peak layout: one peak per goal class, at the Hounsfield value
-# of that tissue. This is the layout the whole RL v2 system works in -- the
-# policy moves each peak's height, width and colour while the *centres stay
-# fixed* -- so anything asking "what can this transfer function reach" must
-# probe here. `default_params` below is the retired intensity-band layout
-# (fat/soft/spongy/bone) kept for the viewer's reset; its peak 0 sits at fat
-# (-100 HU), which is nowhere near lung parenchyma (-800 HU).
-ANATOMICAL_PEAK_INDEX = {"lungs": 0, "soft": 1, "vessels": 2, "skeleton": 3}
-ANATOMICAL_CENTRES_HU = {"lungs": -800.0, "soft": 40.0, "vessels": 300.0, "skeleton": 900.0}
-ANATOMICAL_WIDTHS_HU = {"lungs": 60.0, "soft": 80.0, "vessels": 80.0, "skeleton": 280.0}
+# One peak per canonical goal class, in the shared anatomy order. Centres stay
+# fixed; the policy changes each peak's height, width and colour.
+ANATOMICAL_PEAK_INDEX = {name: i for i, name in enumerate(CANONICAL_PEAK_ORDER)}
+ANATOMICAL_CENTRES_HU = {
+    "lungs": -800.0,
+    "soft": 40.0,
+    "liver": 65.0,
+    "kidneys": 45.0,
+    "spleen": 55.0,
+    "heart": 50.0,
+    "vessels": 300.0,
+    "skeleton": 900.0,
+}
+ANATOMICAL_WIDTHS_HU = {
+    "lungs": 60.0,
+    "soft": 80.0,
+    "liver": 45.0,
+    "kidneys": 45.0,
+    "spleen": 45.0,
+    "heart": 50.0,
+    "vessels": 80.0,
+    "skeleton": 280.0,
+}
 
 # "Show only X" sets X's height high and everything else's height to zero, but
 # a wide peak (skeleton's default is 280 HU) still has real opacity reaching
@@ -67,12 +81,28 @@ ANATOMICAL_WIDTHS_HU = {"lungs": 60.0, "soft": 80.0, "vessels": 80.0, "skeleton"
 # (3.98% -> 0.03%) and unlabeled bleed 28x (22.3% -> 0.8%) while costing only
 # 12% of skeleton's own visibility (11.1% -> 9.8%) -- narrower than 150
 # started cutting into skeleton itself for diminishing haze reduction. Applied
-# as a cap (`min(current, 150)`), never a widening, so classes already
-# narrower than this (lungs 60, soft/vessels 80) are untouched.
+# as a cap (`min(current, 150)`), never a widening.
 SHOW_ONLY_MAX_WIDTH_HU = 150.0
-ANATOMICAL_HEIGHTS = {"lungs": 0.05, "soft": 0.15, "vessels": 0.3, "skeleton": 0.6}
-ANATOMICAL_COLOURS = {"lungs": (0.55, 0.70, 0.95), "soft": (0.85, 0.35, 0.35),
-                      "vessels": (0.90, 0.45, 0.40), "skeleton": (0.95, 0.95, 0.90)}
+ANATOMICAL_HEIGHTS = {
+    "lungs": 0.05,
+    "soft": 0.15,
+    "liver": 0.22,
+    "kidneys": 0.24,
+    "spleen": 0.20,
+    "heart": 0.25,
+    "vessels": 0.30,
+    "skeleton": 0.60,
+}
+ANATOMICAL_COLOURS = {
+    "lungs": (0.55, 0.70, 0.95),
+    "soft": (0.85, 0.35, 0.35),
+    "liver": (0.75, 0.30, 0.20),
+    "kidneys": (0.90, 0.50, 0.40),
+    "spleen": (0.65, 0.25, 0.30),
+    "heart": (0.95, 0.20, 0.20),
+    "vessels": (0.90, 0.45, 0.40),
+    "skeleton": (0.95, 0.95, 0.90),
+}
 
 
 def anatomical_params() -> np.ndarray:

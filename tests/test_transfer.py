@@ -1,9 +1,33 @@
 import math
 import numpy as np
+import pytest
 from transfer import (
     default_params, opacity_mass, mass_fraction, vector_to_vtk,
-    TISSUE_BANDS, PARAMS_PER_PEAK, N_PEAKS,
+    anatomical_params, peak_internal, TISSUE_BANDS, PARAMS_PER_PEAK, N_PEAKS,
+    ANATOMICAL_PEAK_INDEX, ANATOMICAL_CENTRES_HU, ANATOMICAL_WIDTHS_HU,
+    ANATOMICAL_HEIGHTS, ANATOMICAL_COLOURS,
 )
+from anatomy import CANONICAL_PEAK_ORDER
+
+
+def test_anatomical_layout_uses_canonical_eight_peak_order_and_calibration():
+    assert N_PEAKS == 8
+    assert PARAMS_PER_PEAK == 6
+    assert tuple(ANATOMICAL_PEAK_INDEX) == CANONICAL_PEAK_ORDER
+    assert tuple(ANATOMICAL_PEAK_INDEX.values()) == tuple(range(N_PEAKS))
+    assert set(ANATOMICAL_CENTRES_HU) == set(CANONICAL_PEAK_ORDER)
+    assert set(ANATOMICAL_WIDTHS_HU) == set(CANONICAL_PEAK_ORDER)
+    assert set(ANATOMICAL_HEIGHTS) == set(CANONICAL_PEAK_ORDER)
+    assert set(ANATOMICAL_COLOURS) == set(CANONICAL_PEAK_ORDER)
+
+    params = anatomical_params()
+    assert params.shape == (48,)
+    for name in CANONICAL_PEAK_ORDER:
+        peak = peak_internal(params, ANATOMICAL_PEAK_INDEX[name])
+        assert peak["center"] == pytest.approx(ANATOMICAL_CENTRES_HU[name])
+        assert peak["width"] == pytest.approx(ANATOMICAL_WIDTHS_HU[name])
+        assert peak["height"] == pytest.approx(ANATOMICAL_HEIGHTS[name])
+        assert peak["rgb"] == pytest.approx(ANATOMICAL_COLOURS[name])
 
 
 def test_default_params_shape():
