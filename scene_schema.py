@@ -7,6 +7,7 @@ from numbers import Real
 from typing import Any, Mapping
 
 import anatomy
+import transfer
 
 
 _REQUIRED_SCENE_FIELDS = (
@@ -163,7 +164,8 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
     transfer_function = record["transfer_function"]
-    scene["transfer_function"] = _vector(transfer_function, "transfer_function", 24)
+    scene["transfer_function"] = _vector(
+        transfer_function, "transfer_function", transfer.TOTAL_PARAMS)
 
     camera = _fixed_mapping(record["camera"], "camera", {"position", "focal_point", "view_up", "zoom"})
     for field in ("position", "focal_point", "view_up", "zoom"):

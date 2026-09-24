@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import transfer
 from scene_schema import normalize_scene, scene_transition
 
 
@@ -21,7 +22,7 @@ def valid_scene(**overrides):
             "scalar_type": "float32",
             "orientation": "dataset-normalized",
         },
-        "transfer_function": [0.0] * 24,
+        "transfer_function": [0.0] * transfer.TOTAL_PARAMS,
         "camera": {
             "position": [0, 0, 1],
             "focal_point": [0, 0, 0],
@@ -46,7 +47,7 @@ def test_normalize_scene_preserves_goal_camera_and_transfer_function():
 
     assert scene["client"] == "web"
     assert scene["volume"]["dimensions"] == [4, 5, 6]
-    assert len(scene["transfer_function"]) == 24
+    assert len(scene["transfer_function"]) == transfer.TOTAL_PARAMS
     assert scene["camera"] == source["camera"]
     assert scene["goal"] == source["goal"]
     assert scene["command"] == source["command"]
@@ -67,8 +68,8 @@ def test_normalize_scene_preserves_goal_camera_and_transfer_function():
         {"volume": {"dimensions": [1.5, 1, 1]}},
         {"volume": {"spacing": [0.7, 0, 1.0]}},
         {"volume": {"scalar_type": "uint8"}},
-        {"transfer_function": [0.0] * 23},
-        {"transfer_function": [float("nan")] * 24},
+        {"transfer_function": [0.0] * (transfer.TOTAL_PARAMS - 1)},
+        {"transfer_function": [float("nan")] * transfer.TOTAL_PARAMS},
         {"camera": {"position": [0, 0], "focal_point": [0, 0, 0], "view_up": [0, 1, 0], "zoom": 1}},
         {"camera": {"position": [0, 0, 1], "focal_point": [0, 0, 0], "view_up": [0, 1, 0], "zoom": 0}},
         {"goal": {"target": "", "direction": "increase"}},
@@ -95,8 +96,8 @@ def test_normalize_scene_rejects_invalid_contract(change):
 
 def test_normalize_scene_rejects_non_json_numbers_and_wrong_shapes():
     for field, value in [
-        ("transfer_function", [float("inf")] * 24),
-        ("transfer_function", ["0"] * 24),
+        ("transfer_function", [float("inf")] * transfer.TOTAL_PARAMS),
+        ("transfer_function", ["0"] * transfer.TOTAL_PARAMS),
         ("camera", {"position": [0, 0, 1], "focal_point": [0, 0, 0], "view_up": [0, 1, 0], "zoom": float("nan")}),
         ("volume", {"dimensions": [1, 2, 3], "spacing": [0.7, 0.7, 1.0], "scalar_type": "float32"}),
     ]:
@@ -107,6 +108,13 @@ def test_normalize_scene_rejects_non_json_numbers_and_wrong_shapes():
             scene[field] = value
         with pytest.raises(ValueError):
             normalize_scene(scene)
+
+
+def test_normalize_scene_rejects_legacy_transfer_function_length():
+    scene = valid_scene(transfer_function=[0.0] * 24)
+
+    with pytest.raises(ValueError, match=str(transfer.TOTAL_PARAMS)):
+        normalize_scene(scene)
 
 
 @pytest.mark.parametrize("target", ["skeleton", "lungs", "soft", "vessels"])
