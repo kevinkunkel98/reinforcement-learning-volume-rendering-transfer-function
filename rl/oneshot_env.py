@@ -82,6 +82,9 @@ def resolve_policy_metadata(metadata=None) -> dict:
         raise ValueError("action_mode must be absolute or residual")
     if values["reward_mode"] not in ("attainment", "target"):
         raise ValueError("reward_mode must be attainment or target")
+    if values["policy_version"] == V7_POLICY_VERSION and (
+            values["action_mode"] != "residual" or values["reward_mode"] != "target"):
+        raise ValueError("oneshot-v7 requires residual actions and target reward")
     return values
 
 
@@ -366,8 +369,12 @@ class OneShotEnv(gym.Env):
             final_distance = goals.distance(self._instruction["goal"], self._start_agg, final_agg)
             reward = float(np.clip(start_distance - final_distance, -REWARD_CLIP, REWARD_CLIP))
             mentioned = set(self._instruction["targets"])
-            drift = sum(abs(value) for key, value in goals.progress(self._start_agg, final_agg)[0].items()
+            visibility_progress, brightness_progress = goals.progress(self._start_agg, final_agg)
+            drift = sum(abs(value) for key, value in visibility_progress.items()
                         if key not in mentioned)
+            drift += goals.KAPPA * sum(abs(value) for key, value in brightness_progress.items()
+                                       if key not in mentioned)
+            self._last_drift = float(drift)
             reward -= float(drift)
             if useless:
                 reward -= USELESS_PENALTY

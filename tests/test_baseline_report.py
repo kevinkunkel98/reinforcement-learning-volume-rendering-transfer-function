@@ -221,13 +221,48 @@ def test_per_class_eval_uses_each_policy_sidecar_contract(monkeypatch):
         calls.append((args, kwargs["policy_metadata"]))
         return [dict(episodes[0], policy_metadata=kwargs["policy_metadata"])]
     monkeypatch.setattr(per_class_eval, "fixed_episodes", make_episodes)
-    monkeypatch.setattr(per_class_eval.visibility, "for_volume", lambda name: object())
+    monkeypatch.setattr(per_class_eval.visibility, "for_volume", lambda name: None)
+    monkeypatch.setattr(per_class_eval.goals, "goal_classes_for_volume", lambda volume: [])
+    monkeypatch.setattr(per_class_eval.goals, "reachable_goal_classes", lambda volume, model, layers: [])
+    monkeypatch.setattr(per_class_eval.goals, "goal_classes_for_volume", lambda volume: [])
+    monkeypatch.setattr(per_class_eval.goals, "reachable_goal_classes", lambda volume, model, layers: [])
     monkeypatch.setattr(per_class_eval.goals, "goal_classes_for_volume", lambda volume: [])
     monkeypatch.setattr(per_class_eval.goals, "reachable_goal_classes", lambda volume, model, layers: [])
     import stable_baselines3
     monkeypatch.setattr(stable_baselines3.SAC, "load", lambda path, device: object())
     monkeypatch.setattr(per_class_eval, "_score", lambda *args: 0.0)
+    monkeypatch.setattr(per_class_eval, "expanded_hill_climb", lambda *args, **kwargs: [0.0])
+    monkeypatch.setattr(per_class_eval.goals, "features", lambda *args, **kwargs: {})
+    monkeypatch.setattr(per_class_eval.goals, "aggregate", lambda *args, **kwargs: {})
+    monkeypatch.setattr(per_class_eval.goals, "attainment", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr(per_class_eval.goals, "features", lambda *args, **kwargs: {})
+    monkeypatch.setattr(per_class_eval.goals, "aggregate", lambda *args, **kwargs: {})
+    monkeypatch.setattr(per_class_eval.goals, "attainment", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr(per_class_eval, "_score", lambda *args: 0.0)
     per_class_eval.main(argv=["v6.zip", "v7.zip", "--episodes", "1"])
 
     assert [metadata["policy_version"] for _, metadata in calls] == ["oneshot-v6", "oneshot-v7"]
     assert calls[0][0][1:3] == calls[1][0][1:3]
+
+
+def test_baseline_uses_independent_shared_episode_set(monkeypatch):
+    calls = []
+    monkeypatch.setattr(per_class_eval, "load_policy_metadata", lambda path: {
+        "policy_version": "oneshot-v6", "action_mode": "absolute", "reward_mode": "attainment"})
+    episode = {"volume": "stub", "start_params": [0.0],
+               "instruction": {"targets": {}, "goal": {}, "kind": "relative"}}
+    monkeypatch.setattr(per_class_eval, "fixed_episodes",
+                        lambda *args, **kwargs: calls.append(kwargs) or [episode])
+    monkeypatch.setattr(per_class_eval.visibility, "for_volume", lambda name: None)
+    monkeypatch.setattr(per_class_eval.goals, "goal_classes_for_volume", lambda volume: [])
+    monkeypatch.setattr(per_class_eval.goals, "reachable_goal_classes", lambda volume, model, layers: [])
+    import stable_baselines3
+    monkeypatch.setattr(stable_baselines3.SAC, "load", lambda path, device: object())
+    monkeypatch.setattr(per_class_eval, "_score", lambda *args: 0.0)
+    monkeypatch.setattr(per_class_eval, "expanded_hill_climb", lambda *args, **kwargs: [0.0])
+    monkeypatch.setattr(per_class_eval.goals, "features", lambda *args, **kwargs: {})
+    monkeypatch.setattr(per_class_eval.goals, "aggregate", lambda *args, **kwargs: {})
+    monkeypatch.setattr(per_class_eval.goals, "attainment", lambda *args, **kwargs: 0.0)
+    per_class_eval.main(argv=["v6.zip", "--baseline", "expanded_hill_climb"])
+    assert len(calls) == 2
+    assert calls[0]["policy_metadata"] == calls[1]["policy_metadata"]

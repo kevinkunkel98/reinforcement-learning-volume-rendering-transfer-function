@@ -292,6 +292,16 @@ def test_load_policy_metadata_reads_sidecar(tmp_path):
     assert load_policy_metadata(str(run / "best.zip"))["action_mode"] == "residual"
 
 
+@pytest.mark.parametrize("metadata", [
+    {"policy_version": "oneshot-v7", "action_mode": "absolute", "reward_mode": "target"},
+    {"policy_version": "oneshot-v7", "action_mode": "residual", "reward_mode": "attainment"},
+])
+def test_v7_metadata_requires_residual_target_contract(metadata):
+    from rl.oneshot_env import resolve_policy_metadata
+    with pytest.raises(ValueError):
+        resolve_policy_metadata(metadata)
+
+
 def test_v7_residual_action_is_added_to_start(monkeypatch):
     _patch_totalseg(monkeypatch)
     env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
@@ -322,3 +332,19 @@ def test_v7_target_reward_reports_progress_and_drift(monkeypatch):
     assert isinstance(reward, float)
     assert "target_progress" in info
     assert "drift" in info
+
+
+def test_v7_target_reward_drift_includes_brightness(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v7", action_mode="residual", reward_mode="target")
+    env.reset(seed=4)
+    env._instruction = {"kind": "brightness", "text": "test",
+                        "targets": {"skeleton": {"bright": 0.2}},
+                        "goal": goals.goal_vector({"skeleton": {"bright": 0.2}})}
+    monkeypatch.setattr(goals, "progress", lambda start, current:
+                        ({**{c: 0.0 for c in goals.GOAL_CLASSES}, "other": 0.0},
+                         {"skeleton": 0.0, "lungs": 0.2, "soft": 0.0, "vessels": 0.0,
+                          "heart": 0.0, "liver": 0.0, "kidneys": 0.0, "spleen": 0.0}))
+    env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
+    assert env._last_drift > 0.0

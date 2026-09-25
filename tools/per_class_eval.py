@@ -175,11 +175,18 @@ def main(active_layers=None, argv=None):
         }
 
     for name in args.baseline:
+        baseline_episodes = fixed_episodes(
+            args.split, args.episodes, seed=args.seed, formulation="one_shot",
+            active_layers=active_layers,
+            policy_metadata={"policy_version": "oneshot-v6", "action_mode": "absolute",
+                             "reward_mode": "attainment"})
+        baseline_models = {episode["volume"]: visibility.for_volume(episode["volume"])
+                           for episode in baseline_episodes}
         baseline_fn = expanded_hill_climb if name == "expanded_hill_climb" else BASELINES[name]
         rows = []
         overall = []
-        for episode in episodes:
-            model = models[episode["volume"]]
+        for episode in baseline_episodes:
+            model = baseline_models[episode["volume"]]
             final_params = baseline_fn(model, episode["start_params"], episode["instruction"],
                                        active_layers=active_layers)
             start_agg = goals.aggregate(goals.features(model, episode["start_params"], active_layers), active_layers)

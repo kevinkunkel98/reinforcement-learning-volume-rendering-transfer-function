@@ -181,7 +181,8 @@ def test_anchor_items_passes_policy_metadata_to_policy_candidates(monkeypatch, t
     monkeypatch.setattr(candidates, "_save_anchor_cache", lambda *args: None)
     candidates.anchor_items(count=1, seed=0, policy=_StubPolicy(), volumes=["fake_a"],
                             model_for_volume=lambda name: model, cache_path=str(tmp_path / "cache"),
-                            policy_metadata={"policy_version": "oneshot-v7", "action_mode": "residual"})
+                            policy_metadata={"policy_version": "oneshot-v7", "action_mode": "residual",
+                                             "reward_mode": "target"})
     assert seen[0]["action_mode"] == "residual"
 
 
@@ -190,12 +191,14 @@ def test_anchor_cache_rejects_v6_metadata_for_v7_policy(monkeypatch, tmp_path):
     cache = tmp_path / "cache.json"
     candidates.anchor_items(count=1, seed=0, policy=_StubPolicy(), volumes=["fake_a"],
                             model_for_volume=lambda name: model, cache_path=str(cache),
-                            policy_metadata={"policy_version": "oneshot-v7", "action_mode": "residual"})
+                            policy_metadata={"policy_version": "oneshot-v7", "action_mode": "residual",
+                                             "reward_mode": "target"})
     cache.write_text(cache.read_text().replace('"policy_version": "oneshot-v7"',
                                                '"policy_version": "oneshot-v6"'))
     assert candidates.anchor_items(count=1, seed=0, policy=_StubPolicy(), volumes=["fake_a"],
                                    model_for_volume=lambda name: model, cache_path=str(cache),
-                                   policy_metadata={"policy_version": "oneshot-v7", "action_mode": "residual"})
+                                   policy_metadata={"policy_version": "oneshot-v7", "action_mode": "residual",
+                                                    "reward_mode": "target"})
 
 
 # --- policy=None fallback ------------------------------------------------
