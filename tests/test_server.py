@@ -23,6 +23,7 @@ import transfer
 import visibility
 from rl.baselines import CONTROLLABLE
 from server import Session
+from scene_schema import normalize_scene
 
 TEST_SESSION_PATH = "/tmp/test_ui_session.json"
 
@@ -161,7 +162,7 @@ def test_scene_transition_route_normalizes_and_appends_jsonl(tmp_path, monkeypat
     assert len(lines) == 1
     logged = json.loads(lines[0])
     assert logged["after_scene"] == result
-    assert logged["before_scene"] == before
+    assert logged["before_scene"] == normalize_scene(before)
     assert logged["event_id"]
     assert logged["dedupe_key"]
 

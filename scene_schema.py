@@ -7,6 +7,7 @@ from numbers import Real
 from typing import Any, Mapping
 
 import anatomy
+import anatomy_layers
 import transfer
 
 
@@ -35,6 +36,7 @@ _OPTIONAL_SCENE_FIELDS = {
     "event_id",
     "dedupe_key",
     "carried_forward",
+    "label_layout",
     *_OPTIONAL_TRANSITION_FIELDS,
 }
 _TISSUES = set(anatomy.CANONICAL_CLASSES)
@@ -166,6 +168,16 @@ def normalize_scene(record: Mapping[str, Any]) -> dict[str, Any]:
     transfer_function = record["transfer_function"]
     scene["transfer_function"] = _vector(
         transfer_function, "transfer_function", transfer.TOTAL_PARAMS)
+    scene["anatomy_layers"] = anatomy_layers.normalize_layers(
+        record.get("anatomy_layers", {})
+    )
+    if "label_layout" in record:
+        label_layout = _text_value(record["label_layout"], "label_layout")
+        if label_layout != anatomy.CLASS_LAYOUT_VERSION:
+            raise ValueError(
+                "label_layout must be " + anatomy.CLASS_LAYOUT_VERSION
+            )
+        scene["label_layout"] = label_layout
 
     camera = _fixed_mapping(record["camera"], "camera", {"position", "focal_point", "view_up", "zoom"})
     for field in ("position", "focal_point", "view_up", "zoom"):

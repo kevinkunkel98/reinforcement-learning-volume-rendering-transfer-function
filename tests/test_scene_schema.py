@@ -55,6 +55,31 @@ def test_normalize_scene_preserves_goal_camera_and_transfer_function():
     assert scene["volume"] is not source["volume"]
 
 
+def test_normalize_scene_defaults_optional_anatomy_layers_for_legacy_scene():
+    scene = normalize_scene(valid_scene())
+
+    from anatomy_layers import default_layers
+
+    assert scene["anatomy_layers"] == default_layers()
+    assert "label_layout" not in scene
+
+
+def test_normalize_scene_accepts_anatomy_layers_and_label_layout():
+    scene = normalize_scene(valid_scene(
+        anatomy_layers={"liver": {"opacity": 0.25}},
+        label_layout="anatomy-v2",
+    ))
+
+    assert scene["anatomy_layers"]["liver"]["opacity"] == 0.25
+    assert scene["label_layout"] == "anatomy-v2"
+
+
+@pytest.mark.parametrize("label_layout", ["anatomy-v1", "", 3, None])
+def test_normalize_scene_rejects_invalid_label_layout(label_layout):
+    with pytest.raises(ValueError):
+        normalize_scene(valid_scene(label_layout=label_layout))
+
+
 @pytest.mark.parametrize(
     "change",
     [
