@@ -90,8 +90,7 @@ def clear_pipeline_cache() -> None:
     _MASKED_VOLUME_CACHE.clear()
     if _PIPELINE_CACHE:
         for entry in _PIPELINE_CACHE.values():
-            _, renderer, _, win = entry
-            actor = entry[3]
+            _, renderer, win, actor = entry
             if actor is not None:
                 renderer.RemoveViewProp(actor)
             win.Finalize()

@@ -11,4 +11,5 @@ data/totalseg/
 .DS_Store
 .worktrees/
 .idea/
+.superpowers/
 literature/*.pdf

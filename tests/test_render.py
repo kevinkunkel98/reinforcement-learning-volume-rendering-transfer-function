@@ -58,6 +58,22 @@ def test_switching_cached_labeled_volumes_keeps_one_anatomy_actor_each():
     assert first_renderer.GetVolumes().GetNumberOfItems() == 2
 
 
+def test_clear_pipeline_cache_releases_labeled_pipeline():
+    render_module.clear_pipeline_cache()
+    volume = np.full((12, 12, 12), 10.0, dtype=np.float32)
+    labels = np.full(volume.shape, CLASS_IDS["liver"], dtype=np.uint8)
+    layers = {"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]}}
+
+    render(volume, default_params(), labels=labels, layers=layers)
+    assert render_module._PIPELINE_CACHE
+
+    render_module.clear_pipeline_cache()
+
+    assert not render_module._PIPELINE_CACHE
+    assert not render_module._MASKED_VOLUME_CACHE
+    render(volume, default_params(), labels=labels, layers=layers)
+
+
 def test_render_grab_shape_and_dtype():
     vol = build_phantom(size=48)
     win = render(vol, default_params())
