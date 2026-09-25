@@ -115,6 +115,151 @@ hill-climb baselines specifically.]
 
 #pagebreak()
 
+= Plain-language guide: tissues, parameters, and the four answers <plain-guide>
+
+Everything in this section is the same system described everywhere else in
+this document, in the plainest terms that stay accurate. Read this first if
+the formulas elsewhere are more than you need.
+
+== What a "transfer function" actually is
+
+A CT scan is just a 3D grid of numbers — one density value (a Hounsfield
+unit, HU) per point in space. Air is very negative, water is 0, bone is very
+positive. On its own, that grid isn't a picture of anything.
+
+A *transfer function* is the rule that turns each density number into a
+colour and a see-through-ness (opacity) for the renderer to draw. Bone-dense
+numbers get painted white and solid; air-dense numbers get left invisible;
+everything in between gets some colour and some transparency. Change the
+rule, and the same scan can be made to show "mostly bone" or "mostly organs"
+or "everything at once," without re-scanning the patient.
+
+== The four dials (one per tissue)
+
+This system doesn't let you draw an arbitrary rule. It gives you exactly
+four *peaks* — one dial each for skeleton, lungs, soft tissue, and vessels —
+and every command, every search step, and every policy action can only turn
+these four dials. Nothing else is adjustable.
+
+#figure(
+  table(
+    columns: 4, align: (left, center, center, left), stroke: rule,
+    thead[Dial][Centred at][How wide][What it actually covers],
+    [skeleton], [900 HU (very dense)], [280 HU (wide)],
+      [bone — ribs, vertebrae, skull, limbs],
+    [lungs], [#sym.minus 800 HU (near air)], [60 HU (narrow)],
+      [air-filled lung tissue],
+    [soft tissue], [40 HU], [80 HU],
+      [organs *and* muscle, lumped together — see below],
+    [vessels], [300 HU], [80 HU],
+      [blood vessels; only meaningful with a contrast injection, see @vessels-gate],
+  ),
+  caption: [The four tissue dials. "Centred at" and "how wide" are the
+  *default* starting values — commands, search, and the policy can move
+  height, width, and colour, but never the centre.],
+)
+
+*Why only four, and why "soft tissue" is two things at once:* a dial can
+only grab one *range* of density values. Liver, kidney, spleen, and muscle
+all sit at nearly the same density as each other — there is no dial narrow
+enough to grab one and not the others, so this system doesn't pretend to and
+groups them as one "soft tissue" target instead. The same reasoning is why
+fat, skin, and connective tissue aren't targets at all: nobody segmented
+them as their own thing in the data this system trains on, and even if they
+were, fat overlaps muscle's density range too closely to isolate with one
+dial. This is a real, physical limit of "one number in, one colour out" —
+not something more coding fixes.
+
+== The four numbers behind every dial
+
+Each of the four dials is really six numbers (24 total, four dials times
+six). In plain terms:
+
+#figure(
+  table(
+    columns: 2, align: (left, left), stroke: rule,
+    thead[Number][In plain terms],
+    [Centre], [Which density this dial is "tuned to." Fixed forever — nothing in
+      this system ever moves it.],
+    [Width], [How much of the *neighbouring* density range gets grabbed too. A
+      wide dial bleeds into whatever tissue sits next to it on the density
+      scale; a narrow one stays surgical. (Skeleton's default width caused
+      exactly this problem — see the write-up on the "show only" fix.)],
+    [Height], [How solid/visible that tissue becomes. Zero is fully invisible;
+      higher is more opaque.],
+    [Colour (3 numbers)], [The red/green/blue paint applied to that tissue.],
+  ),
+  caption: [What the 24 numbers in every transfer function mean.],
+)
+
+== How each of the four answers handles each kind of instruction
+
+The viewer answers a command four ways at once: applied directly
+(*exact*), a cheap search (*10 evaluations*), a thorough search (*200
+evaluations*), and the trained *policy*. What each one actually does is
+different for every instruction kind — this is the plain-language version of
+@baselines and @oneshot-env.
+
+#finding[There is no single "how good is each answer" story — it depends
+entirely on which kind of instruction is being asked. That's the whole
+reason to break it down this way rather than quote one overall number.]
+
+=== "A bit less/more X" (relative) and several at once (compound)
+
+- *Exact* nudges that one dial's height by one fixed step in the requested
+  direction. It never checks the render — it doesn't know if that step was
+  enough, too much, or already done.
+- *Search* tries small nudges on all 12 adjustable values, keeps whichever
+  ones measurably help, and repeats — 10 times (cheap) or up to 200 times
+  (thorough). More tries means more chances to find the right combination.
+- *Policy* looks at the instruction plus what's currently visible and
+  reachable on this exact scan, and outputs where every dial should end up
+  in one shot, no trial and error.
+- Asking for *two things in one sentence* (compound) is where the policy is
+  weakest: it has to get both right in the same single output, with no
+  chance to check one change before making the other.
+
+=== "High/low/medium opacity for X" (absolute)
+
+- *Exact* jumps the dial straight to one of three fixed positions, regardless
+  of where it started or how much of that tissue is even visible on this scan.
+- *Search* is the same trial-and-error as above, aimed at the fixed target
+  instead of a step.
+- *Policy* is one of its *strongest* kinds. The reason: the policy is told,
+  as part of its input, exactly how much of that tissue *could ever* be shown
+  on this particular scan (the "reachable ceiling," @oneshot-env) — so
+  "high opacity" means something calibrated per patient, not a guess.
+
+=== "Show only X" (isolate one or more tissues)
+
+- *Exact* sets the named tissue(s) to a fixed opacity and switches every other
+  tissue fully off — plus, as of the width fix described in @show-only-width,
+  narrows the shown tissue's dial so it doesn't bleed into its neighbours.
+- *Search* aims for the same "way up / way down" goal by trial and error, but
+  (@v4-fix, @evolution) can get stuck hiding everything behind unlabeled
+  material instead of properly isolating the named tissue.
+- *Policy* is its documented weak spot: the reward no longer rewards that
+  same shortcut, but nothing has yet taught it the right behaviour instead.
+
+=== "Brighten/darken X" (brightness/colour)
+
+- *Exact* nudges that tissue's *colour* one fixed step brighter or darker —
+  a completely separate set of numbers from opacity.
+- *Search* often does *nothing at all* here with a cheap (10-evaluation)
+  budget: opacity moves come first in its search order, and it can run out of
+  tries before ever touching colour.
+- *Policy* is its single *best* kind — it doesn't need to "discover" that
+  colour is a separate dimension worth trying, it learned that directly
+  during training, and answers correctly in one pass.
+
+#caveat[These per-kind patterns are not folklore — every claim above is a
+measured result reproducible through the viewer's own *compare* button,
+not a general impression. "Brighten the skeleton" on `ts_s0477`, for
+instance, gives cheap search exactly $+0.000$ while the policy answers
+$+0.838$ for zero evaluations, live, every time.]
+
+#pagebreak()
+
 = Data pipeline
 
 30 CT scans from the TotalSegmentator "small" subset (CC-BY-4.0), stratified
@@ -157,6 +302,89 @@ projection images to verify it by eye.
 (@intensity-fallback), and the policy has never seen them during training. A
 live check found the policy performing at or below "do nothing" on
 `ct_skull`; see @limitations.]
+
+== Selecting and splitting the 30 subjects <selection>
+
+`tools/select_totalseg.py` doesn't take the first 30 scans it finds. Every
+candidate is first checked against a physical-extent filter —
+`MIN_INPLANE_MM = 250` and `MIN_SUPERIOR_INFERIOR_MM = 150` — so a heavily
+cropped scan (the module's own comment gives the example of "a single hip")
+is dropped before it can join the pool: a policy meant to reason about
+whole-body visibility shouldn't train on scans that only show a fragment of
+one.
+
+Every remaining candidate is classified into one of four body regions from
+its DICOM study-type text (`REGION_BY_STUDY_TYPE` — "ct thorax" #sym.arrow.r
+`thorax`, "ct angiography abdomen-pelvis" #sym.arrow.r `abdomen_pelvis`, and
+so on), and the split is filled to a *fixed target per region*
+(`SPLIT_COUNTS`: 5/1/2 for `whole_body` and `trunk`, 5/1/1 for `thorax` and
+`abdomen_pelvis` — summing to the 20/4/6 reported everywhere else),
+deterministically for a given `--seed`. The point of stratifying rather than
+drawing 30 scans at random: an unstratified sample could easily land all
+the whole-body scans in training and none in test, and every reported number
+would then be quietly measuring generalisation across body regions rather
+than across patients.
+
+== Collapsing 117 structures into 5 classes <collapsing>
+
+TotalSegmentator's own output names up to 117 individual structures per
+subject — every rib numbered separately, every vertebra by name
+(`vertebrae_L1`, `vertebrae_T7`, ...), each side of paired organs and vessels
+separately. `CLASS_RULES` collapses all of them into the five classes
+`visibility.py` measures, by name prefix:
+
+#figure(
+  table(
+    columns: 2, align: (left, left), stroke: rule,
+    thead[Class][Structures folded into it],
+    [skeleton], [every `rib_*`, `vertebrae_*`, `hip_*`, `femur_*`, `humerus_*`,
+      `scapula_*`, `clavicula_*`, plus `sacrum`, `sternum`, `skull`, `costal_cartilages`],
+    [lungs], [every `lung_*` lobe],
+    [organs], [`liver`, `spleen`, `kidney_*`, `stomach`, `pancreas`, `gallbladder`,
+      `colon`, `small_bowel`, `duodenum`, `esophagus`, `urinary_bladder`,
+      `prostate`, `adrenal_gland_*`, `thyroid_gland`, `brain`, `spinal_cord`, `trachea`],
+    [muscle], [`autochthon_*`, `gluteus_*`, `iliopsoas_*` — the only muscle
+      groups TotalSegmentator names individually],
+    [vessels], [`aorta`, `heart`, both `atrial_appendage_*`, `brachiocephalic_*`,
+      `common_carotid_artery_*`, `subclavian_artery_*`, `pulmonary_vein`,
+      `*_vena_cava`, `portal_vein_and_splenic_vein`, `iliac_artery_*`, `iliac_vena_*`],
+  ),
+  caption: [`CLASS_RULES`, the name-prefix mapping from TotalSegmentator's raw
+  structures to the five measured classes.],
+)
+
+#finding[Checked directly against a real subject's full structure list: all
+117 of TotalSegmentator's own segmented structures map into one of these five
+classes — nothing it actually provides is discarded. The "other" bucket
+(@other-bucket) is not a deliberate exclusion from this table; it's
+everything TotalSegmentator never attempted to segment in the first place —
+fat, skin, bowel contents, the scanner table — which is a different,
+larger, and more fundamental gap than anything a mapping-table change could
+close (see the discussion of adding a sixth tissue class in
+`docs/STATUS.md`).]
+
+A structure only counts as "present" in a subject once its mask clears
+`MIN_LABEL_VOXELS = 1000` voxels — enough to rule out stray single-voxel
+segmentation noise registering as real anatomical coverage.
+
+== Caching the visibility measurement <vis-cache>
+
+Resampling a full CT volume and its label mask into the $80^3$ six-view cube
+`visibility.py` scores against takes real, non-trivial time — and a single
+training run resets the environment tens of thousands of times. Paying that
+cost on every reset would make training impractical, so `VisibilityModel`
+caches itself to disk (`out/cache/visibility/`), keyed by the volume's id,
+a content hash of the volume itself, the view count, grid resolution, and a
+cache format version. `tools/build_visibility_cache.py` walks every
+train/val/test subject once, up front, so a training run only ever reads a
+cache it doesn't have to build.
+
+#caveat[The cache key does *not* include anything about `goals.py`'s scoring
+formula — deliberately, since the cache stores geometry (which voxel belongs
+to which class, from which direction), not a score. Today's "other" bucket
+addition (@other-bucket) needed no cache invalidation at all for exactly
+this reason: every existing cache file already had the label geometry
+needed, `features()` just started reading one more bucket out of it.]
 
 #pagebreak()
 
@@ -386,6 +614,41 @@ included, despite its name — because none of them are TotalSegmentator
 subjects at all. In the running viewer, vessels is answerable on exactly one
 dataset: `ts_s1379`.
 
+== Ground truth, layer by layer <ground-truth>
+
+"Ground truth" means something different at each layer of this pipeline, and
+a claim built on one layer is not automatically as strong as a claim built on
+another. Four distinct layers, from most to least externally verified:
+
++ *Anatomy.* TotalSegmentator's own segmentation masks (@collapsing) — a
+  pretrained model's output, taken as given. Nothing in this project
+  independently checks whether a voxel is correctly labelled; every
+  downstream number inherits whatever error already exists here.
++ *The visibility measurement.* `visibility.py`'s cheap per-class estimate,
+  independently checked against real VTK renders via the label-masked
+  colour-blackout method (@validation): Pearson $r = 0.89$–$1.00$ across
+  classes. This is the one layer with an external reference, and the check
+  is not a formality — it is what caught the lungs peak-centre bug reported
+  in @validation.
++ *The objective.* $D$ and attainment (@objective) — a designed proxy for
+  "did this satisfy the instruction," built on top of the validated
+  visibility measurement but not itself checked against anything external.
+  Every number in @results, for every arm, is this same definition applied
+  identically — the arms differ in mechanism, never in the ruler measuring
+  them.
++ *Human preference.* The layer meant to eventually check the objective
+  against real judgment (@preferences): blind pairwise comparison of exactly
+  the six-view renders a reward model would see. Built and cached, but not
+  yet populated — 0 clean judgments exist as of today.
+
+#caveat[The chain runs: validated data #sym.arrow.r validated measurement
+#sym.arrow.r *unvalidated* objective #sym.arrow.r not-yet-collected human
+preference. Layer 2 is the strongest empirical claim this project makes.
+Layer 3 is a carefully considered hypothesis, not a checked one, and stays
+that way until layer 4 exists — the honest answer to "how do you know the
+reward function is right" is that it is pixel-accurate about *what a render
+shows*, and unverified about *whether that is what a person wants*.]
+
 #pagebreak()
 
 = The reinforcement-learning formulation <rl-formulation>
@@ -454,14 +717,82 @@ python -m rl.oneshot_train --timesteps 150000 --seed {0,1,2} \
   --eval-interval 10000 --out out/rl_v2/oneshot_v{N}_seed{seed}
 ```
 
-SAC (`stable_baselines3.SAC`, `MlpPolicy`), one override from library
-defaults: `learning_starts=500` (vs. 100), giving the replay buffer a few
-more random episodes before learning starts. Every `eval-interval` steps: 40
-fixed validation episodes, deterministic action, logged to
-`eval_progress.csv`; the checkpoint is kept as `best.zip` by *median*
-attainment, not mean — a single very-negative episode on an easy goal
-(attainment is unbounded below) can otherwise swing which checkpoint looks
-best.
+*Why SAC.* The action space is continuous (12 real-valued controllable
+groups, @oneshot-env), which rules out a discrete-action algorithm outright.
+Soft Actor-Critic is a standard, sample-efficient choice for exactly this
+setting: off-policy (every environment step is reused via a replay buffer,
+not thrown away after one gradient update, which matters when each step
+already costs a real visibility computation) and entropy-regularised (it
+keeps exploring rather than collapsing onto one action early, useful here
+since the reward surface — a 12-dimensional space mapped through a
+non-convex, occlusion-dependent visibility function — is not smooth).
+
+#caveat[This is the algorithm that was tried and works, not the product of a
+comparison against alternatives. `docs/rl-paper.typ`'s own framing is
+explicit that the RL *algorithm* is not fixed methodology — the thesis
+question is whether a transfer function can be learned by RL at all, and SAC
+is the concrete instantiation used to test that, not a claimed-optimal
+choice. No PPO/TD3/other-algorithm ablation has been run.]
+
+Only one setting is overridden from `stable_baselines3`'s own SAC defaults:
+`learning_starts=500` rather than 100 — the replay buffer collects 500 random
+episodes before any gradient update, rather than 100, giving the critic a
+less sparse buffer to learn from before it starts shaping the actor. Every
+other hyperparameter (learning rate $3 times 10^(-4)$, discount $gamma =
+0.99$ — largely irrelevant here since every episode is exactly one step,
+@oneshot-env — replay buffer size $10^6$, batch size 256, a $[256, 256]$
+MLP) is the library default, unchanged and unswept.
+
+Every `eval-interval` (10,000) steps: 40 fixed validation episodes,
+deterministic action, logged to `eval_progress.csv`. The checkpoint kept as
+`best.zip` is selected by *median* validation attainment, not mean — since
+attainment is unbounded below (@objective), a single very-negative episode on
+an easy goal can otherwise swing which checkpoint looks best, rewarding
+noise rather than genuine improvement.
+
+*Reset noise:* each of the 12 controllable groups gets independent uniform
+$plus.minus 0.3$ noise (`START_NOISE`) added to the anatomical default before
+an episode starts (@oneshot-env), so the policy sees more than one exact
+starting transfer function per volume across training. Unlike
+`HINDSIGHT_NOISE` (@hindsight), this value was not swept or calibrated
+against held-out data — it is a reasonable-looking constant, not a validated
+one, and is worth treating as such if it's ever revisited.
+
+== What's implemented here vs. what's a library <implementation-stack>
+
+No RL algorithm is implemented from scratch in this project. `SAC` is
+`stable_baselines3.SAC`; its actor and critic networks are PyTorch
+`torch.nn.Module`s underneath, but that layer is never touched directly —
+`stable_baselines3` owns the network architecture, the replay buffer, the
+entropy-temperature tuning, and the gradient updates. `gymnasium` supplies
+the `Env` interface (`spaces.Box`, the `reset()`/`step()` contract) that lets
+`stable_baselines3` drive `OneShotEnv` generically, without either package
+knowing anything about transfer functions or CT scans.
+
+What this project's own code contributes is everything *around* the
+algorithm: the environment itself (`rl/oneshot_env.py` — the 57-dimensional
+observation, the 12-dimensional action, the one-shot episode structure,
+@oneshot-env), the reward (`goals.distance`/attainment, @objective), the
+training-loop specifics called out above (`learning_starts=500`, median-not-mean
+checkpoint selection, the reset-noise schedule), the baselines
+(@baselines), the fixed-episode evaluation harness (@eval-protocol), and the
+provenance guarantee tying a reported number to an exact checkpoint and code
+commit.
+
+`torch` itself does one more job outside the policy network: `visibility.py`'s
+per-class compositing (@measure) is written as vectorised tensor operations
+(`torch.where` masking by class label, weighted sums for luminance and
+coverage) rather than a Python loop, since it runs many times per training
+episode and even the cheap $80^3$-grid estimate benefits from that. It is
+the same library, but this second use has nothing to do with the RL
+algorithm — it would exist even if the policy were trained with a different
+framework entirely.
+
+#status[No `scipy` dependency: the paired Wilcoxon signed-rank test behind
+the significance claims in @results is hand-implemented rather than calling
+`scipy.stats.wilcoxon`, to avoid pulling in a heavy dependency for a test
+that's straightforward to implement directly. Worth mentioning only because
+its absence from `requirements.txt` is easy to misread as an oversight.]
 
 == Baselines <baselines>
 
@@ -514,6 +845,22 @@ generation's numbers never carry an earlier bug's habits forward.
   caption: [Directory names under `out/rl_v2/` match this table's version
   column exactly.],
 )
+
+*How this actually unfolded, chronologically:* all of v1 through v3 happened
+within about 24 hours (2026-09-16 to 2026-09-17), git commit by commit. The
+one-shot environment (`7a6e04b`) and its training script (`52d2f1a`) landed
+first and produced v1. The reachable-ceiling channel (`1ef698d`) landed the
+same day, immediately redefining the observation and starting the v2
+generation — and within hours, two more commits fixed the two bugs described
+below: `cc167af` (the colour fix) at 22:41, `62b5720` (the ceiling-probe fix)
+seven minutes later at 22:48. v3 is what training against the code as of
+those two fixes produces. The preference-collection page and the hindsight
+mechanism (@hindsight) both landed the following day, `2026-09-17`. v4, by
+contrast, is a single, isolated fix made five days later, on `2026-09-21`,
+after live investigation of a specific demo failure — a
+different kind of change from the rapid same-day iteration that produced
+v1–v3, and the reason its own section (@v4-fix) reads as a self-contained
+investigation rather than a quick same-evening turnaround.
 
 == v2's two bugs, and what fixing them was worth
 
@@ -625,7 +972,37 @@ its scoring never does. Significance is a paired Wilcoxon signed-rank test
 with the normal approximation and continuity correction
 (`rl.vis_eval.wilcoxon`) — hand-implemented, `scipy` is not installed in this
 environment, verified against a hand-computed worked example in its own
-docstring and a unit test.
+docstring and a unit test. Pairing is what makes the test valid here at all:
+because every arm answers the identical fixed episode, a paired test asks
+"does the policy beat search on the *same* instructions," a stronger and
+more relevant claim than comparing two unpaired samples would be.
+
+*Why 200 episodes, why three seeds, why median.* Three training seeds is
+enough to say a result isn't an artefact of one particular random
+initialisation, not enough to report a seed-to-seed confidence interval with
+real statistical power — the honest framing used throughout is "three seeds
+agree," not "the population of possible seeds looks like this." 200 episodes
+per seed balances covering the full instruction mix (@instruction-mix; at a
+25% compound share, 200 episodes still only gives #sym.tilde 50 compound
+examples) against the wall-clock cost of the 200-evaluation search baseline
+run on every one of them. The headline statistic is the *median of the three
+seeds' own medians* — not a median pooled across all 600 episodes — because
+attainment is unbounded below (@objective) and a mean is not robust to that;
+`goals.summarise_attainment` reports median, a mean clipped to $[-1, 1]$, the
+raw (unclipped) mean, and the share of episodes with positive attainment
+side by side for exactly this reason, so a single number can't quietly hide
+a heavy negative tail.
+
+*Reproducibility guarantee.* Every result file written by `rl.vis_eval`
+carries a `provenance` block (`provenance.py`): the git commit, a hash
+fingerprint of every scoring module actually imported (`goals`, `visibility`,
+`rl.vis_eval`, `rl.oneshot_env`), and a timestamp. `rl.vis_eval --show
+<file>` re-checks that fingerprint against the current checkout and prints a
+loud warning if they disagree. This exists because of a real incident
+(@evolution): an evaluation job that ran across a code deployment scored
+partly with old code and partly with new, silently, and produced a number
+that took real effort to notice was wrong. The fingerprint doesn't prevent
+that from happening again; it prevents it from happening *silently* again.
 
 #pagebreak()
 
@@ -862,6 +1239,44 @@ python -m pytest -q -m "not slow"    # fast suite, 678 passing as of today
 python -m pytest -q                  # everything
 python server.py                     # http://127.0.0.1:8000
 ```
+
+== Dependencies <dependencies>
+
+`requirements.txt`, unpinned, twelve packages, each doing one clear job:
+
+#figure(
+  table(
+    columns: 2, align: (left, left), stroke: rule,
+    thead[Package][What it's for],
+    [`numpy`], [array math throughout — parameter vectors, histograms, opacity thresholding],
+    [`nibabel`], [decodes the NIfTI (`.nii.gz`) CT volumes TotalSegmentator ships],
+    [`vtk`], [the real volume renderer (@measure, `render.py`) — also what
+      the fast visibility estimate is validated against (@validation)],
+    [`faster-whisper`], [speech-to-text for the voice command pipeline
+      (`asr.py`); an optional `mlx_whisper` path for Apple Silicon is not a
+      hard dependency and isn't pinned here],
+    [`Pillow`], [image resize/composite for the preference-collection grid
+      images (`collect_images.py`) and PNG encoding generally],
+    [`pytest`], [the test suite],
+    [`fastapi`], [the web server: every `/api/*` route, `Session` state],
+    [`uvicorn`], [ASGI server `fastapi` runs under],
+    [`python-multipart`], [parses the multipart body of the `/api/transcribe`
+      audio upload (`UploadFile`/`File(...)`) — easy to forget this exists,
+      since nothing calls it directly],
+    [`torch`], [tensor backend for two unrelated things: the RL policy
+      network (via `stable_baselines3`) and the visibility estimate's
+      vectorised compositing (@implementation-stack)],
+    [`stable-baselines3`], [the SAC implementation itself (@implementation-stack)],
+    [`gymnasium`], [the `Env` interface `OneShotEnv` implements so
+      `stable-baselines3` can drive it generically],
+    [`tensorboard`], [training-curve logging; `stable-baselines3` writes to
+      it natively],
+  ),
+  caption: [Every runtime dependency and what it's actually load-bearing for.
+  See @implementation-stack for how `torch`/`stable-baselines3`/`gymnasium`
+  divide the RL work, and @ground-truth for how `vtk`'s real renders anchor
+  the visibility estimate.],
+)
 
 Run everything from the repository root — the code uses relative paths such
 as `out/` and `static/`. LLM parsing needs Ollama running locally
