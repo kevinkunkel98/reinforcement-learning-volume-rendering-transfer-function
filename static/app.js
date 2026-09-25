@@ -253,12 +253,47 @@ async function refresh(data) {
 
   el("current-image").src = `data:image/png;base64,${state.current.image_b64}`;
   if (window.volumeViewer && state.dataset && state.current) {
-    await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera);
+    await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera,
+      state.current.anatomy_layers);
   }
 
   updateTelemetry(state.current.class_visibility, state.current.class_brightness);
+  updateLayerControls(state.current.anatomy_layers, data.anatomy);
   drawTfCurve(state.current.histogram, state.current.curve);
   return data;
+}
+
+function updateLayerControls(layers, anatomyState) {
+  if (!layers) return;
+  const available = new Set(anatomyState?.available_classes || CLASS_ORDER);
+  for (const name of CLASS_ORDER) {
+    const control = el(`layer-${name}`);
+    const opacity = el(`layer-${name}-opacity`);
+    const color = el(`layer-${name}-color`);
+    const layer = layers[name];
+    if (!control || !opacity || !color || !layer) continue;
+    const supported = available.has(name);
+    control.classList.toggle("layer-unavailable", !supported);
+    control.title = supported ? "" : "Unavailable: no anatomical label in this dataset";
+    opacity.disabled = !supported;
+    color.disabled = !supported;
+    opacity.value = layer.opacity;
+    color.value = `#${layer.rgb.map((value) => Math.round(value * 255).toString(16).padStart(2, "0")).join("")}`;
+  }
+}
+
+async function applyLayerCommand(action, targets) {
+  const text = action === "restore" ? "restore all anatomy"
+    : action === "show_only" ? `show only ${targets[0]}`
+      : action === "hide" ? `hide the ${targets[0]}`
+        : `show ${targets.join(" and ")}`;
+  await sendCommandImpl(text);
+}
+
+for (const name of CLASS_ORDER) {
+  el(`layer-${name}-opacity`)?.addEventListener("change", (event) => {
+    applyLayerCommand(event.target.value === "0" ? "hide" : "show", [name]);
+  });
 }
 
 // The readout is per-goal-class visibility (share of the rendered image), the

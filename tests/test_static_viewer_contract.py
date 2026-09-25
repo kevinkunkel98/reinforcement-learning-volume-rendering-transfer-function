@@ -65,6 +65,28 @@ def test_viewer_contract_exposes_label_transport_and_unlabeled_fallback():
     assert "labelStatus" in viewer[viewer.index("setStatus(`Local ${datasetName} volume${labelStatus}`)"):]
 
 
+def test_viewer_applies_label_aware_rendering_and_keeps_hu_fallback():
+    viewer = read("viewer.js")
+    assert "labelValues" in viewer
+    assert "setLabelAwareTransferFunction" in viewer
+    assert "label-aware" in viewer
+    assert "fallback" in viewer
+
+
+def test_app_exposes_editable_controls_for_all_anatomy_classes():
+    app = read("app.js")
+    html = read("index.html")
+    css = read("style.css")
+    for name in ("skeleton", "lungs", "heart", "vessels", "liver", "kidneys", "spleen", "soft"):
+        assert f'id="layer-{name}"' in html
+        assert f"layer-{name}-opacity" in html
+        assert f"layer-{name}-color" in html
+    assert "available_classes" in app
+    assert "layer-unavailable" in app
+    assert "applyLayerCommand" in app
+    assert ".layer-control" in css
+
+
 def test_viewer_adapts_exactly_48_values_and_exposes_camera_state():
     viewer = read("viewer.js")
     assert "const TOTAL_PARAMS = 48" in viewer

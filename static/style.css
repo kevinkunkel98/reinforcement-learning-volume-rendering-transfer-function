@@ -459,6 +459,12 @@ select:focus-visible {
 
 .telem-brightness { font-size: 10px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
 .telem-unavailable { color: hsl(var(--muted-foreground)); font-size: 10px; }
+.layer-control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+.layer-control { display: grid; grid-template-columns: 1fr auto; gap: 0.25rem; align-items: center; min-width: 0; }
+.layer-control label { font-size: 0.62rem; letter-spacing: 0.04em; }
+.layer-control input[type="range"] { grid-column: 1 / -1; width: 100%; }
+.layer-control input[type="color"] { width: 1.5rem; height: 1.2rem; padding: 0; }
+.layer-unavailable { opacity: 0.45; }
 .telem-bar { height: 4px; border-radius: 99px; background: hsl(var(--secondary)); overflow: hidden; }
 .telem-bar > span { display: block; height: 100%; border-radius: inherit; background: hsl(var(--primary)); transition: width .2s ease; }
 

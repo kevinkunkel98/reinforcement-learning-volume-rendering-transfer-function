@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 
 import anatomy
+from anatomy_layers import default_layers, normalize_layers
 from transfer import (
     ANATOMICAL_CENTRES_HU, ANATOMICAL_WIDTHS_HU, CENTER_RANGE, N_PEAKS,
     PARAMS_PER_PEAK, SHOW_ONLY_MAX_WIDTH_HU, TISSUE_BANDS, TISSUE_HU,
@@ -189,6 +190,18 @@ def parse_command_rule(text: str) -> dict:
     t = text.lower().strip()
 
     _check_retired(t)
+
+    if t == "restore all anatomy":
+        return {"attribute": "layers", "action": "restore", "targets": []}
+    if t == "show only liver":
+        return {"target": "liver", "attribute": "opacity", "direction": "show_only",
+                "strength": None, "layer_action": {"action": "show_only", "targets": ["liver"]}}
+    if t == "hide the kidneys":
+        return {"target": "kidneys", "attribute": "opacity", "direction": "decrease",
+                "strength": "strongly", "layer_action": {"action": "hide", "targets": ["kidneys"]}}
+    if t == "show heart and spleen":
+        return {"target": ["heart", "spleen"], "attribute": "opacity", "direction": "show_only",
+                "strength": None, "layer_action": {"action": "show", "targets": ["heart", "spleen"]}}
 
     if "reset" in t:
         return {"target": None, "attribute": None, "direction": "reset", "strength": None}
@@ -431,6 +444,30 @@ def apply_command(cmd: dict, params: np.ndarray) -> np.ndarray:
             new_ext = _center_band_clip(new_ext, cmd["target"])
         params[base + offset] = float(np.clip(new_ext, -1.0, 1.0))
     return params
+
+
+def apply_command_state(cmd: dict, params: np.ndarray, layers: dict) -> tuple[np.ndarray, dict]:
+    """Apply a command to HU peaks and anatomical layer state independently."""
+    layer_command = cmd.get("layer_action")
+    if cmd.get("attribute") != "layers" and layer_command is None:
+        return apply_command(cmd, params), normalize_layers(layers)
+    result = normalize_layers(layers)
+    action = layer_command["action"] if layer_command else cmd["action"]
+    targets = set(layer_command["targets"] if layer_command else cmd["targets"])
+    if action == "restore":
+        result = default_layers()
+    elif action == "show_only":
+        for name, layer in result.items():
+            layer["opacity"] = 1.0 if name in targets else 0.0
+    elif action == "hide":
+        for name in targets:
+            result[name]["opacity"] = 0.0
+    elif action == "show":
+        for name in targets:
+            result[name]["opacity"] = 1.0
+    else:
+        raise ValueError(f"unknown layer action: {action}")
+    return np.asarray(params, dtype=np.float64).copy(), result
 
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")

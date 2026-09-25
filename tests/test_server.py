@@ -409,6 +409,29 @@ def test_initial_state_has_one_step_at_cursor_zero():
     assert len(state["current"]["params"]) == transfer.TOTAL_PARAMS
 
 
+def test_layer_command_persists_layers_without_changing_48_hu_values():
+    s = _fresh_session()
+    before = np.array(s.state()["current"]["params"])
+    state = s.command("show only liver", parser="rule", search=False)
+
+    assert len(state["current"]["params"]) == 48
+    np.testing.assert_array_equal(state["current"]["params"], before)
+    assert state["current"]["anatomy_layers"]["liver"]["opacity"] == 1.0
+    assert all(item["opacity"] == 0.0 for name, item in state["current"]["anatomy_layers"].items()
+               if name != "liver")
+
+
+def test_state_exposes_anatomy_availability(monkeypatch):
+    s = _fresh_session()
+    monkeypatch.setattr(server, "label_metadata", lambda name: {
+        "label_layout_version": "anatomy-v2",
+        "classes": ["liver", "heart"],
+    })
+    state = s.state()
+    assert state["anatomy"]["label_available"] is True
+    assert state["anatomy"]["available_classes"] == ["heart", "liver"]
+
+
 def test_render_step_includes_a_transfer_curve():
     """The histogram/curve visual guide (README, "the hard part") needs the
     opacity+colour curve sampled over the HU range on every step, computed

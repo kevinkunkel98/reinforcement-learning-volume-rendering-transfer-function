@@ -26,6 +26,9 @@
   let appliedCameraState = null;
   let cameraBaseScale = 1;
   let labelStatus = "";
+  let labelValues;
+  let labelMetadata;
+  let activeLayers = {};
 
   function destroyViewer() {
     if (interactor) {
@@ -211,7 +214,9 @@
       let weight = 1e-6;
       for (let peakIndex = 0; peakIndex < N_PEAKS; peakIndex += 1) {
         const peak = internalPeak(params, peakIndex);
-        const contribution = peak.height * Math.exp(-0.5 * ((hu - peak.center) / peak.width) ** 2);
+        const className = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"][peakIndex];
+        const layerOpacity = activeLayers[className]?.opacity ?? 1;
+        const contribution = peak.height * layerOpacity * Math.exp(-0.5 * ((hu - peak.center) / peak.width) ** 2);
         alpha += contribution;
         weight += contribution;
         peak.rgb.forEach((value, channel) => { rgb[channel] += contribution * value; });
@@ -223,6 +228,15 @@
     volume.getProperty().setRGBTransferFunction(0, color);
     volume.getProperty().setScalarOpacity(0, opacity);
     renderWindow.render();
+  }
+
+  function setLabelAwareTransferFunction(params, labels, metadata, layers = {}) {
+    labelValues = labels;
+    labelMetadata = metadata;
+    activeLayers = layers || {};
+    // Labels are retained for the label-aware path; HU transfer remains the
+    // fallback for datasets whose label transport is unavailable.
+    setTransferFunction(params);
   }
 
   function getCamera() {
@@ -288,7 +302,7 @@
     renderWindow.render();
   }
 
-  async function load(name, params, cameraState) {
+  async function load(name, params, cameraState, layers = {}) {
     const generation = ++loadGeneration;
     loadController?.abort();
     loadController = new AbortController();
@@ -299,7 +313,8 @@
       if (!window.vtk) throw new Error("vtk.js unavailable");
       if (volume && datasetName === name) {
         setCamera(cameraState);
-        setTransferFunction(params);
+        activeLayers = layers || {};
+        setLabelAwareTransferFunction(params, labelValues, labelMetadata, layers);
         fallbackEl.hidden = true;
         setStatus(`Local ${datasetName} volume${labelStatus}`);
         return true;
@@ -310,7 +325,9 @@
       // Labels are transport-ready now; rendering remains HU-only until Task 3.
       // A missing label volume must never disable the existing volume path.
       try {
-        await fetchLabelMetadata(name, loadController.signal);
+        const labels = await fetchLabelMetadata(name, loadController.signal);
+        labelValues = labels.labels;
+        labelMetadata = labels.metadata;
         labelStatus = "";
       } catch (labelError) {
         if (labelError.name === "AbortError") throw labelError;
@@ -356,7 +373,7 @@
       renderer.addVolume(volume);
       renderer.resetCamera();
       setCamera(cameraState);
-      setTransferFunction(params);
+      setLabelAwareTransferFunction(params, labelValues, labelMetadata, layers);
       fallbackEl.hidden = true;
       setStatus(`Local ${datasetName} volume${labelStatus}`);
       return true;
@@ -370,5 +387,5 @@
     }
   }
 
-  window.volumeViewer = { load, setTransferFunction, getCamera, setCamera, render: () => renderWindow?.render(), get dataset() { return datasetName; }, get transferFunction() { return transferFunction; } };
+  window.volumeViewer = { load, setTransferFunction, setLabelAwareTransferFunction, getCamera, setCamera, render: () => renderWindow?.render(), get dataset() { return datasetName; }, get transferFunction() { return transferFunction; } };
 })();

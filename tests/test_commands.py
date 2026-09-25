@@ -36,6 +36,57 @@ def test_parse_show_only():
     assert cmd["target"] == "soft"
 
 
+@pytest.mark.parametrize("text, action, target", [
+    ("show only liver", "show_only", ["liver"]),
+    ("hide the kidneys", "hide", ["kidneys"]),
+    ("show heart and spleen", "show", ["heart", "spleen"]),
+    ("restore all anatomy", "restore", []),
+])
+def test_parse_deterministic_anatomy_layer_commands(text, action, target):
+    cmd = parse_command_rule(text)
+    if text == "restore all anatomy":
+        assert cmd == {"attribute": "layers", "action": action, "targets": target}
+    else:
+        assert cmd["layer_action"] == {"action": action, "targets": target}
+
+
+def test_layer_commands_do_not_change_hounsfield_parameters():
+    params = default_params()
+    layers = commands.default_layers()
+    before = params.copy()
+
+    params_after, layers_after = commands.apply_command_state(
+        parse_command_rule("show only liver"), params, layers
+    )
+
+    np.testing.assert_array_equal(params_after, before)
+    assert layers_after["liver"]["opacity"] == 1.0
+    assert all(layer["opacity"] == 0.0 for name, layer in layers_after.items() if name != "liver")
+
+
+def test_hide_and_show_layer_commands_are_deterministic():
+    layers = commands.default_layers()
+    _, hidden = commands.apply_command_state(
+        parse_command_rule("hide the kidneys"), default_params(), layers
+    )
+    assert hidden["kidneys"]["opacity"] == 0.0
+
+    _, shown = commands.apply_command_state(
+        parse_command_rule("show heart and spleen"), default_params(), hidden
+    )
+    assert shown["heart"]["opacity"] == 1.0
+    assert shown["spleen"]["opacity"] == 1.0
+
+
+def test_restore_all_anatomy_returns_layer_defaults():
+    layers = commands.default_layers()
+    layers["liver"]["opacity"] = 0.0
+    _, restored = commands.apply_command_state(
+        parse_command_rule("restore all anatomy"), default_params(), layers
+    )
+    assert restored == commands.default_layers()
+
+
 def test_parse_reset():
     cmd = parse_command_rule("reset")
     assert cmd == {"target": None, "attribute": None,

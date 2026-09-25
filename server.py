@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 import collect
-from commands import COMMAND_REFERENCE, apply_command, parse_command_with_meta
+from commands import COMMAND_REFERENCE, apply_command, apply_command_state, parse_command_with_meta
 from datasets import (_dataset_version, dataset_metadata, default_camera_for, get_label_chunk,
                       get_volume_chunk, label_metadata, list_datasets, load_dataset)
 from evaluate import jsonl_append
@@ -217,6 +217,18 @@ def _class_effective_contribution(params, layers, model_for_volume=visibility.fo
     except (ValueError, KeyError, FileNotFoundError) as exc:
         print(f"[telemetry] no effective layer visibility for {_dataset_name}: {exc}")
         return {name: None for name in visibility.CLASSES}
+
+
+def _anatomy_metadata(name):
+    try:
+        metadata = label_metadata(name)
+    except (FileNotFoundError, ValueError, OSError):
+        return {"label_available": False, "available_classes": []}
+    classes = metadata.get("classes", metadata.get("class_ids", {}).keys())
+    if isinstance(classes, dict):
+        classes = classes.keys()
+    return {"label_available": True, "available_classes": sorted(classes),
+            "label_layout_version": metadata.get("label_layout_version", "anatomy-v2")}
 
 
 def goal_channels(goal) -> dict:
@@ -637,6 +649,7 @@ class Session:
                 "spacing": list(spacing),
                 "dataset_version": _dataset_version(_dataset_name),
             },
+            "anatomy": _anatomy_metadata(_dataset_name),
         }
 
     def switch_dataset(self, name: str):
@@ -711,6 +724,17 @@ class Session:
 
         current_params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
         current_camera = dict(self.history[self.cursor].get("camera", DEFAULT_CAMERA))
+        current_layers = self.history[self.cursor].get("anatomy_layers", default_layers())
+
+        if cmd.get("attribute") == "layers" or "layer_action" in cmd:
+            new_params, new_layers = apply_command_state(cmd, current_params, current_layers)
+            step = _render_step(new_params, text, cmd, False, self.history[-1]["id"] + 1,
+                                self.session_id, current_camera, mode="layers",
+                                parser_meta=parser_meta, layers=new_layers)
+            self.history = self.history[:self.cursor + 1] + [step]
+            self.cursor = len(self.history) - 1
+            self.save()
+            return self.state()
 
         if "camera" in cmd:
             new_camera = apply_camera_command(cmd["camera"], current_camera)
