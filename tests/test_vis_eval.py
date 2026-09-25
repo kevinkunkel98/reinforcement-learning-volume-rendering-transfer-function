@@ -400,6 +400,22 @@ def test_run_policy_with_refinement_zero_evaluations_matches_plain_policy(monkey
     assert refined == plain
 
 
+def test_refinement_rejects_checkpoint_episode_metadata_mismatch(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        formulation="one_shot", policy_metadata={"policy_version": "oneshot-v6",
+                                                   "action_mode": "absolute",
+                                                   "reward_mode": "attainment"})
+    monkeypatch.setattr(vis_eval, "load_policy_metadata",
+                        lambda path: {"policy_version": "oneshot-v7", "action_mode": "residual",
+                                      "reward_mode": "target"})
+    with pytest.raises(ValueError, match="metadata mismatch"):
+        vis_eval.run_policy_with_refinement(
+            "v7.zip", episodes, evaluations=0, model_for_volume=_model_for_volume,
+            load_model=lambda path: _FixedActionModel())
+
+
 def test_run_policy_with_refinement_never_scores_worse_than_the_proposal(monkeypatch):
     # A hand-built episode (bypassing fixed_episodes' randomness) whose
     # instruction unambiguously wants more skeleton visibility, and a fixed

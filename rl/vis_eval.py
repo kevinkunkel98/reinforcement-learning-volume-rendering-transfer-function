@@ -157,6 +157,16 @@ def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dic
     return env, obs, info
 
 
+def _episode_policy_metadata(episode: dict, checkpoint_metadata: dict) -> dict:
+    episode_metadata = episode.get("policy_metadata")
+    if episode_metadata is None:
+        return checkpoint_metadata
+    episode_metadata = resolve_policy_metadata(episode_metadata)
+    if episode_metadata != checkpoint_metadata:
+        raise ValueError("policy metadata mismatch between checkpoint and episode")
+    return episode_metadata
+
+
 def run_policy(model_path: str, episodes: list, model_for_volume=None, load_model=None,
                formulation: str = "multi_step", active_layers=None) -> list:
     """Run the policy at `model_path` (an SB3 checkpoint) on every episode
@@ -175,13 +185,7 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
     results = []
     for episode in episodes:
         if formulation == "one_shot":
-            episode_metadata = episode.get("policy_metadata")
-            if episode_metadata is not None:
-                episode_metadata = resolve_policy_metadata(episode_metadata)
-                if episode_metadata != policy_metadata:
-                    raise ValueError("policy metadata mismatch between checkpoint and episode")
-            else:
-                episode_metadata = policy_metadata
+            episode_metadata = _episode_policy_metadata(episode, policy_metadata)
             env, obs, info = _frozen_one_shot_env(
                 episode["volume"], episode["start_params"], episode["instruction"],
                 active_layers=active_layers, policy_metadata=episode_metadata, **kwargs)
@@ -230,6 +234,7 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
     """
     loader = load_model or _load_sac
     model = loader(model_path)
+    policy_metadata = load_policy_metadata(model_path)
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
 
     results = []
@@ -237,7 +242,7 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
         env, obs, info = _frozen_one_shot_env(
             episode["volume"], episode["start_params"], episode["instruction"],
             active_layers=active_layers,
-            policy_metadata=episode.get("policy_metadata"), **kwargs)
+            policy_metadata=_episode_policy_metadata(episode, policy_metadata), **kwargs)
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
 
