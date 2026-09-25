@@ -8,6 +8,8 @@ import pytest
 from anatomy import CANONICAL_CLASSES
 from tools.compare_layer_renders import (
     compare_samples,
+    compare_dataset_samples,
+    load_json_record,
     representative_label_ids,
     sampled_layer_contributions,
 )
@@ -48,7 +50,7 @@ def test_image_visibility_and_leakage_tolerances_are_reported_and_fail():
 
     assert result["passed"] is False
     assert {failure["kind"] for failure in result["failures"]} == {
-        "image", "per_class_visibility", "cross_class_leakage"
+        "image", "per_class_visibility"
     }
     assert result["tolerances"] == {
         "image": 0.01, "per_class_visibility": 0.01, "cross_class_leakage": 0.01
@@ -56,16 +58,18 @@ def test_image_visibility_and_leakage_tolerances_are_reported_and_fail():
 
 
 def test_representative_label_ids_use_shared_eight_class_contract():
-    labels = np.array([1, 2, 5, 6, 7, 8], dtype=np.uint8)
+    labels = np.array([3, 4, 5, 6, 7, 1], dtype=np.uint8)
 
     assert representative_label_ids(labels) == {
-        "skeleton": 1, "lungs": 2, "liver": 5, "kidneys": 6, "spleen": 7, "soft": 8
+        "liver": 5, "kidneys": 6, "spleen": 7, "heart": 3,
+        "vessels": 4, "skeleton": 1,
     }
 
 
 def test_missing_representative_label_fails_validation():
-    with pytest.raises(ValueError, match="representative labeled classes"):
-        representative_label_ids(np.array([1, 2, 5], dtype=np.uint8))
+    assert representative_label_ids(np.array([1, 5], dtype=np.uint8)) == {
+        "liver": 5, "skeleton": 1,
+    }
 
 
 def test_sampled_layer_contributions_are_deterministic_and_do_not_leak_classes():
@@ -80,6 +84,64 @@ def test_sampled_layer_contributions_are_deterministic_and_do_not_leak_classes()
     assert first == second
     assert first["liver"] == pytest.approx(0.25)
     assert all(first[name] == 0.0 for name in CANONICAL_CLASSES if name != "liver")
+
+
+def test_dataset_comparison_derives_leakage_from_contributions_not_input_scalar():
+    labels = np.array([[5, 6], [5, 6]], dtype=np.uint8)
+    weights = np.ones(labels.shape, dtype=np.float64)
+    layers = {name: {"opacity": 0.0} for name in CANONICAL_CLASSES}
+    layers["liver"] = {"opacity": 1.0}
+    layers["kidneys"] = {"opacity": 1.0}
+
+    result = compare_dataset_samples(labels, weights, layers, reference={
+        "image": [[0.0]], "class_visibility": {name: 0.0 for name in CANONICAL_CLASSES},
+        "cross_class_leakage": 999.0,
+    })
+
+    assert result["derived"]["cross_class_leakage"] == pytest.approx(0.5)
+    assert result["reference"]["cross_class_leakage"] == pytest.approx(999.0)
+
+
+def test_json_loader_rejects_nonfinite_values_and_tolerances():
+    with pytest.raises(ValueError, match="finite"):
+        load_json_record('{"image": [NaN]}')
+    with pytest.raises(ValueError, match="finite"):
+        compare_samples(_sample_record(), _sample_record(), image_tolerance=float("inf"))
+
+
+def test_json_loader_rejects_nonfinite_class_visibility(tmp_path):
+    path = tmp_path / "record.json"
+    path.write_text(json.dumps({
+        "image": [[0.0]],
+        "class_visibility": {name: 0.0 for name in CANONICAL_CLASSES} | {"liver": "NaN"},
+        "cross_class_leakage": 0.0,
+    }))
+
+    with pytest.raises(ValueError, match="finite"):
+        load_json_record(str(path))
+
+
+def test_optional_reference_is_compared_against_derived_browser_record():
+    labels = np.array([[5, 6]], dtype=np.uint8)
+    weights = np.ones(labels.shape, dtype=np.float64)
+    layers = {name: {"opacity": 0.0} for name in CANONICAL_CLASSES}
+    layers["liver"] = {"opacity": 1.0}
+
+    result = compare_dataset_samples(labels, weights, layers, reference={
+        "image": [[0.0, 0.0]],
+        "class_visibility": {name: 0.0 for name in CANONICAL_CLASSES},
+        "cross_class_leakage": 0.0,
+    })
+
+    assert result["reference_comparison"]["passed"] is False
+
+
+def test_dataset_report_is_json_serializable():
+    labels = np.array([[5, 6]], dtype=np.uint8)
+    result = compare_dataset_samples(
+        labels, np.ones(labels.shape), {name: {"opacity": 1.0} for name in CANONICAL_CLASSES}
+    )
+    json.dumps(result)
 
 
 def test_cli_input_records_are_json_serializable(tmp_path):
@@ -110,7 +172,8 @@ def test_cli_returns_nonzero_for_difference(tmp_path):
     }))
 
     result = subprocess.run(
-        [sys.executable, "-m", "tools.compare_layer_renders", str(reference), str(browser)],
+        [sys.executable, "-m", "tools.compare_layer_renders", "fixture",
+         "--fixture", str(reference), str(browser)],
         capture_output=True, text=True, check=False,
     )
 

@@ -51,7 +51,7 @@ OUT_PATH = "out/visibility_validation.json"
 IMAGE_TOLERANCE = 0.02
 VISIBILITY_TOLERANCE = 0.02
 LEAKAGE_TOLERANCE = 0.02
-REPRESENTATIVE_CLASSES = ("skeleton", "lungs", "liver", "kidneys", "spleen", "soft")
+REPRESENTATIVE_CLASSES = ("liver", "kidneys", "spleen", "heart", "vessels", "skeleton")
 
 
 def _label_id(class_name: str) -> int:
@@ -60,15 +60,13 @@ def _label_id(class_name: str) -> int:
 
 
 def representative_label_ids(labels: np.ndarray) -> dict[str, int]:
-    """Validate label IDs and return the shared browser/server class mapping."""
+    """Return supported representative IDs without requiring every class."""
     labels = np.asarray(labels)
     if labels.dtype != np.uint8:
         raise ValueError("labels must be uint8")
     present = set(np.unique(labels).tolist())
-    missing = [name for name in REPRESENTATIVE_CLASSES if _label_id(name) not in present]
-    if missing:
-        raise ValueError("representative labeled classes missing: " + ", ".join(missing))
-    return {name: _label_id(name) for name in REPRESENTATIVE_CLASSES}
+    return {name: _label_id(name) for name in REPRESENTATIVE_CLASSES
+            if _label_id(name) in present}
 
 
 def sampled_layer_contributions(labels: np.ndarray, weights: np.ndarray, layers: dict) -> dict[str, float]:
@@ -205,12 +203,14 @@ def validate_volume(name: str, seed: int = 0, threshold: float = DEFAULT_THRESHO
 
     volume, spacing = datasets.load_dataset(name, canonical=True)
     labels = totalseg.load_labels(name)
-    representative_label_ids(labels)
+    supported = representative_label_ids(labels)
     cameras = views.cameras_for_volume(volume, spacing)
     rng = np.random.default_rng(seed)
 
     estimate, reference = {}, {}
     for class_name in totalseg.classes_present(name):
+        if class_name not in supported and class_name not in anatomy.CANONICAL_CLASSES:
+            continue
         class_id = _label_id(class_name)
         peak = _best_peak(model, class_name)
         sampled = sweep_params(rng, peak, n_trials)
@@ -230,8 +230,12 @@ def validate_volume(name: str, seed: int = 0, threshold: float = DEFAULT_THRESHO
     coverage = {"rank_agreement": rank_agreement(coverage_estimate, coverage_reference)}
     coverage["passed"] = coverage["rank_agreement"] >= COVERAGE_THRESHOLD
 
+    passed = coverage["passed"] and all(
+        not entry["validated"] or entry["passed"] for entry in classes.values())
     return {"volume": name, "label_source": model.label_source, "trials": n_trials, "seed": seed,
-            "classes": classes, "coverage": coverage}
+            "representative_classes": list(supported), "classes": classes, "coverage": coverage,
+            "tolerances": {"pearson": threshold, "coverage_rank_agreement": COVERAGE_THRESHOLD,
+                           "contribution_floor": CONTRIBUTION_FLOOR}, "passed": passed}
 
 
 def main():

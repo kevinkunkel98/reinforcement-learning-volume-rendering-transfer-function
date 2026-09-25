@@ -9,6 +9,9 @@ import sys
 import numpy as np
 
 from anatomy import CANONICAL_CLASSES
+import datasets
+import totalseg
+import visibility
 from tools import validate_visibility
 from tools.validate_visibility import (
     IMAGE_TOLERANCE,
@@ -25,6 +28,8 @@ def _difference(reference, browser) -> dict:
     browser = np.asarray(browser, dtype=np.float64)
     if reference.shape != browser.shape:
         return {"max_abs": float("inf"), "mean_abs": float("inf"), "nonzero": -1}
+    if not np.isfinite(reference).all() or not np.isfinite(browser).all():
+        raise ValueError("comparison metrics must be finite")
     difference = np.abs(reference - browser)
     return {"max_abs": float(difference.max(initial=0.0)),
             "mean_abs": float(difference.mean()), "nonzero": int(np.count_nonzero(difference))}
@@ -34,6 +39,9 @@ def compare_samples(reference: dict, browser: dict, image_tolerance=IMAGE_TOLERA
                     visibility_tolerance=VISIBILITY_TOLERANCE,
                     leakage_tolerance=LEAKAGE_TOLERANCE) -> dict:
     """Return a machine-readable comparison report; never hide nonzero failures."""
+    tolerances = (image_tolerance, visibility_tolerance, leakage_tolerance)
+    if not all(np.isfinite(value) and value >= 0 for value in tolerances):
+        raise ValueError("tolerances must be finite and nonnegative")
     image = _difference(reference["image"], browser["image"])
     per_class = {}
     failures = []
@@ -44,9 +52,13 @@ def compare_samples(reference: dict, browser: dict, image_tolerance=IMAGE_TOLERA
             failures.append({"kind": "per_class_visibility", "class": name, **difference})
     if image["max_abs"] > image_tolerance:
         failures.append({"kind": "image", **image})
-    leakage = abs(float(reference["cross_class_leakage"]) - float(browser["cross_class_leakage"]))
-    leakage_report = {"abs": leakage, "reference": float(reference["cross_class_leakage"]),
-                      "browser": float(browser["cross_class_leakage"])}
+    reference_leakage = _derived_leakage(reference["class_visibility"])
+    browser_leakage = _derived_leakage(browser["class_visibility"])
+    leakage = abs(reference_leakage - browser_leakage)
+    if not np.isfinite(leakage):
+        raise ValueError("comparison metrics must be finite")
+    leakage_report = {"abs": leakage, "reference": reference_leakage,
+                      "browser": browser_leakage}
     if leakage > leakage_tolerance:
         failures.append({"kind": "cross_class_leakage", **leakage_report})
     return {
@@ -60,28 +72,142 @@ def compare_samples(reference: dict, browser: dict, image_tolerance=IMAGE_TOLERA
     }
 
 
+def _derived_leakage(class_visibility: dict) -> float:
+    values = np.asarray([class_visibility[name] for name in CANONICAL_CLASSES], dtype=np.float64)
+    if not np.isfinite(values).all():
+        raise ValueError("comparison metrics must be finite")
+    total = float(values.sum())
+    return (total - float(values.max(initial=0.0))) / total if total else 0.0
+
+
+def compare_dataset_samples(labels, weights, layers, reference=None, image_tolerance=IMAGE_TOLERANCE,
+                            visibility_tolerance=VISIBILITY_TOLERANCE,
+                            leakage_tolerance=LEAKAGE_TOLERANCE) -> dict:
+    """Compare server and browser-contract contributions derived from samples."""
+    labels = np.asarray(labels)
+    weights = np.asarray(weights, dtype=np.float64)
+    derived = sampled_layer_contributions(labels, weights, layers)
+    normalized = validate_visibility.normalize_layers(layers or {})
+    opacity = np.zeros(labels.shape, dtype=np.float64)
+    ids = representative_label_ids(labels)
+    for name in CANONICAL_CLASSES:
+        opacity[labels == ids.get(name, -1)] = normalized[name]["opacity"]
+    browser = {
+        "image": weights * opacity,
+        "class_visibility": derived,
+        "cross_class_leakage": _derived_leakage(derived),
+    }
+    server = {
+        "image": weights,
+        "class_visibility": {name: float((weights[labels == representative_label_ids(labels).get(name, -1)]).sum()
+                                            / weights.sum()) if weights.sum() else 0.0
+                             for name in CANONICAL_CLASSES},
+        "cross_class_leakage": _derived_leakage({name: value for name, value in
+                                                  ((key, float((weights[labels == representative_label_ids(labels).get(key, -1)]).sum()
+                                                    / weights.sum()) if weights.sum() else 0.0)
+                                                   for key in CANONICAL_CLASSES)}),
+    }
+    result = compare_samples(server, browser, image_tolerance, visibility_tolerance,
+                             leakage_tolerance)
+    result["server"] = _record_summary(server)
+    result["derived"] = _record_summary(browser)
+    if reference is not None:
+        result["reference"] = _record_summary(reference)
+        result["reference_comparison"] = compare_samples(reference, browser, image_tolerance,
+                                                          visibility_tolerance, leakage_tolerance)
+    return _json_safe(result)
+
+
+def load_json_record(source):
+    """Load JSON with strict finite-number handling."""
+    try:
+        record = json.loads(source, parse_constant=lambda value: (_ for _ in ()).throw(
+            ValueError(f"JSON values must be finite: {value}"))) if isinstance(source, str) and source.lstrip().startswith("{") else _load(source)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(str(exc)) from exc
+    return record
+
+
 def _load(path):
     with open(path) as stream:
         record = json.load(stream)
     record["image"] = np.asarray(record["image"], dtype=np.float64)
+    if not np.isfinite(record["image"]).all():
+        raise ValueError("JSON values must be finite")
     record["class_visibility"] = {
         name: float(record["class_visibility"][name]) for name in CANONICAL_CLASSES
     }
+    if not np.isfinite(list(record["class_visibility"].values())).all():
+        raise ValueError("JSON values must be finite")
+    if not np.isfinite(float(record["cross_class_leakage"])):
+        raise ValueError("JSON values must be finite")
     return record
+
+
+def _json_safe(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _record_summary(record):
+    return {
+        "image": {"shape": list(np.asarray(record["image"]).shape),
+                  "mean": float(np.asarray(record["image"], dtype=np.float64).mean())},
+        "class_visibility": record["class_visibility"],
+        "cross_class_leakage": record["cross_class_leakage"],
+    }
+
+
+def _dataset_record(name, labels_path, layers, reference, image_tolerance,
+                    visibility_tolerance, leakage_tolerance):
+    datasets.load_dataset(name, canonical=True)
+    raw_labels = (totalseg.load_labels(name) if labels_path is None else
+                  (np.load(labels_path) if labels_path.endswith(".npy") else np.load(labels_path)["labels"]))
+    model = visibility.for_volume(name)
+    representative_label_ids(raw_labels)
+    params = np.zeros(48, dtype=np.float64)
+    weights, luminance, _ = model._weights(params)
+    generated_reference = {"image": luminance.detach().numpy(),
+                           "class_visibility": model.features(params)["vis"],
+                           "cross_class_leakage": 0.0}
+    return compare_dataset_samples(model.class_ids, weights.detach().numpy(), layers,
+                                   reference=(reference or generated_reference),
+                                   image_tolerance=image_tolerance,
+                                   visibility_tolerance=visibility_tolerance,
+                                   leakage_tolerance=leakage_tolerance)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("reference")
-    parser.add_argument("browser")
+    parser.add_argument("dataset")
+    parser.add_argument("--labels")
+    parser.add_argument("--layers")
+    parser.add_argument("--reference")
+    parser.add_argument("--fixture", nargs=2, metavar=("REFERENCE", "BROWSER"))
     parser.add_argument("--out")
     parser.add_argument("--image-tolerance", type=float, default=IMAGE_TOLERANCE)
     parser.add_argument("--visibility-tolerance", type=float, default=VISIBILITY_TOLERANCE)
     parser.add_argument("--leakage-tolerance", type=float, default=LEAKAGE_TOLERANCE)
     args = parser.parse_args()
-    report = compare_samples(_load(args.reference), _load(args.browser), args.image_tolerance,
-                             args.visibility_tolerance, args.leakage_tolerance)
-    payload = json.dumps(report, indent=2)
+    if args.fixture:
+        report = compare_samples(_load(args.fixture[0]), _load(args.fixture[1]), args.image_tolerance,
+                                 args.visibility_tolerance, args.leakage_tolerance)
+    else:
+        if not args.layers:
+            parser.error("dataset mode requires --layers")
+        with open(args.layers) as stream:
+            layers = json.load(stream, parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"JSON values must be finite: {value}")))
+        report = _dataset_record(args.dataset, args.labels, layers,
+                                 _load(args.reference) if args.reference else None,
+                                 args.image_tolerance,
+                                 args.visibility_tolerance, args.leakage_tolerance)
+    payload = json.dumps(_json_safe(report), indent=2, allow_nan=False)
     if args.out:
         with open(args.out, "w") as stream:
             stream.write(payload + "\n")
