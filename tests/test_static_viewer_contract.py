@@ -76,6 +76,34 @@ def test_viewer_applies_label_aware_rendering_and_keeps_hu_fallback():
     assert "label-aware masking" in viewer
 
 
+def test_viewer_builds_nearest_label_actor_with_layer_transfer_functions():
+    viewer = read("viewer.js")
+    assert "labelImageData" in viewer
+    assert "labelMapper" in viewer
+    assert "labelVolume" in viewer
+    assert "buildLabelImageData" in viewer
+    assert "vtkDataArray.newInstance" in viewer
+    assert "vtkPiecewiseFunction.newInstance" in viewer
+    assert "vtkColorTransferFunction.newInstance" in viewer
+    assert "setInterpolationTypeToNearest" in viewer
+    assert "CLASS_IDS" in viewer
+    assert "setLabelTransferFunction" in viewer
+    assert "class_id" in viewer or "classId" in viewer
+    assert "settings.rgb" in viewer
+    assert "settings.opacity" in viewer
+
+
+def test_viewer_masks_hu_actor_only_when_labels_are_active_and_clears_label_actor():
+    viewer = read("viewer.js")
+    assert "hasLabels" in viewer
+    assert "maskLabeledHuValues" in viewer
+    assert "removeLabelVolume" in viewer
+    assert "labelImageData = undefined" in viewer
+    assert "labelVolume = undefined" in viewer
+    assert "setScalarOpacity" in viewer
+    assert "activeLayers" in viewer
+
+
 def test_app_exposes_editable_controls_for_all_anatomy_classes():
     app = read("app.js")
     html = read("index.html")

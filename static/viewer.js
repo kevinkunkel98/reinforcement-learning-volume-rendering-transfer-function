@@ -18,6 +18,9 @@
   let volume;
   let mapper;
   let imageData;
+  let labelImageData;
+  let labelMapper;
+  let labelVolume;
   let camera;
   let datasetName;
   let transferFunction;
@@ -50,6 +53,9 @@
     volume = undefined;
     mapper = undefined;
     imageData = undefined;
+    labelImageData = undefined;
+    labelMapper = undefined;
+    labelVolume = undefined;
     rawVolumeValues = undefined;
     volumeMetadata = undefined;
   }
@@ -120,16 +126,73 @@
     return metadata;
   }
 
-  function applyLabelAwareMask(values, labels, metadata, volumeMetadata, layers) {
+  function maskLabeledHuValues(values, labels, metadata, volumeMetadata) {
     // label-aware masking removes anatomy from HU rendering before compositing.
     validateLabelDimensions(metadata, volumeMetadata);
     const masked = new Float32Array(values);
-    const classNames = ["skeleton", "lungs", "heart", "vessels", "liver", "kidneys", "spleen", "soft"];
     for (let index = 0; index < labels.length; index += 1) {
-      const className = classNames[labels[index] - 1];
-      if (className && (layers[className]?.opacity ?? 1) <= 0) masked[index] = CENTER_RANGE[0];
+      if (labels[index] > 0) masked[index] = CENTER_RANGE[0];
     }
     return masked;
+  }
+
+  const CLASS_IDS = {
+    skeleton: 1, lungs: 2, heart: 3, vessels: 4,
+    liver: 5, kidneys: 6, spleen: 7, soft: 8,
+  };
+  const CLASS_ORDER = Object.keys(CLASS_IDS);
+
+  function hasLabels() {
+    return labelValues instanceof Uint8Array && labelMetadata !== undefined;
+  }
+
+  function buildLabelImageData(metadata, values) {
+    labelImageData = vtk.Common.DataModel.vtkImageData.newInstance();
+    labelImageData.setDimensions(...metadata.dimensions);
+    labelImageData.setSpacing(...metadata.spacing);
+    labelImageData.getPointData().setScalars(vtk.Common.Core.vtkDataArray.newInstance({
+      name: "AnatomicalLabels", values, numberOfComponents: 1,
+    }));
+    return labelImageData;
+  }
+
+  function removeLabelVolume() {
+    if (labelVolume && renderer) renderer.removeVolume(labelVolume);
+    labelVolume = undefined;
+    labelMapper = undefined;
+    labelImageData = undefined;
+  }
+
+  function setLabelTransferFunction(layers = {}) {
+    if (!labelVolume) return;
+    const color = vtk.Rendering.Core.vtkColorTransferFunction.newInstance();
+    const opacity = vtk.Common.DataModel.vtkPiecewiseFunction.newInstance();
+    color.addRGBPoint(0, 0, 0, 0);
+    opacity.addPoint(0, 0);
+    for (const className of CLASS_ORDER) {
+      const classId = CLASS_IDS[className];
+      const settings = layers[className] || { rgb: [1, 1, 1], opacity: 1 };
+      color.addRGBPoint(classId, ...settings.rgb);
+      opacity.addPoint(classId, settings.opacity);
+    }
+    labelVolume.getProperty().setRGBTransferFunction(0, color);
+    labelVolume.getProperty().setScalarOpacity(0, opacity);
+    renderWindow.render();
+  }
+
+  function buildLabelVolume(metadata, values, layers) {
+    removeLabelVolume();
+    buildLabelImageData(metadata, values);
+    labelMapper = vtk.Rendering.Core.vtkVolumeMapper.newInstance();
+    labelMapper.setInputData(labelImageData);
+    labelMapper.setAutoAdjustSampleDistances(false);
+    labelMapper.setSampleDistance(Math.min(...metadata.spacing) / 2.0);
+    labelVolume = vtk.Rendering.Core.vtkVolume.newInstance();
+    labelVolume.setMapper(labelMapper);
+    labelVolume.getProperty().setInterpolationTypeToNearest();
+    labelVolume.getProperty().setShade(false);
+    renderer.addVolume(labelVolume);
+    setLabelTransferFunction(layers);
   }
 
   function reconstructLabels(metadata, chunks) {
@@ -238,7 +301,7 @@
       for (let peakIndex = 0; peakIndex < N_PEAKS; peakIndex += 1) {
         const peak = internalPeak(params, peakIndex);
         const className = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"][peakIndex];
-        const layerOpacity = activeLayers[className]?.opacity ?? 1;
+        const layerOpacity = hasLabels() ? 1 : (activeLayers[className]?.opacity ?? 1);
         const contribution = peak.height * layerOpacity * Math.exp(-0.5 * ((hu - peak.center) / peak.width) ** 2);
         alpha += contribution;
         weight += contribution;
@@ -258,14 +321,15 @@
     labelMetadata = metadata;
     activeLayers = layers || {};
     if (rawVolumeValues && volumeMetadata && mapper) {
-      const values = labelValues && labelMetadata
-        ? applyLabelAwareMask(rawVolumeValues, labelValues, labelMetadata, volumeMetadata, activeLayers)
+      const values = hasLabels()
+        ? maskLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
         : rawVolumeValues;
       buildImageData(volumeMetadata, values);
       mapper.setInputData(imageData);
     }
     // Labels are retained for the label-aware path; HU transfer remains the
     // fallback for datasets whose label transport is unavailable.
+    if (hasLabels()) setLabelTransferFunction(activeLayers);
     setTransferFunction(params);
   }
 
@@ -353,6 +417,7 @@
       labelValues = undefined;
       labelMetadata = undefined;
       activeLayers = {};
+      removeLabelVolume();
       const loaded = await fetchVolume(name, loadController.signal, generation);
       if (!isCurrentLoad(generation)) return false;
       // Labels are transport-ready now; rendering remains HU-only until Task 3.
@@ -389,8 +454,8 @@
       }
       rawVolumeValues = loaded.values;
       volumeMetadata = loaded.metadata;
-      const values = labelValues && labelMetadata
-        ? applyLabelAwareMask(rawVolumeValues, labelValues, labelMetadata, volumeMetadata, layers)
+      const values = hasLabels()
+        ? maskLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
         : rawVolumeValues;
       buildImageData(loaded.metadata, values);
       mapper = vtk.Rendering.Core.vtkVolumeMapper.newInstance();
@@ -409,6 +474,7 @@
       volume.getProperty().setSpecular(0.2);
       renderer.removeAllVolumes();
       renderer.addVolume(volume);
+      if (hasLabels()) buildLabelVolume(loaded.metadata, labelValues, layers);
       renderer.resetCamera();
       setCamera(cameraState);
       setLabelAwareTransferFunction(params, labelValues, labelMetadata, layers);
