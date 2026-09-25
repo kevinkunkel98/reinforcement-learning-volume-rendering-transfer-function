@@ -125,10 +125,15 @@ def main(active_layers=None, argv=None):
 
     from stable_baselines3 import SAC
 
-    policy_metadata = load_policy_metadata(args.policies[0])
-    episodes = fixed_episodes(args.split, args.episodes, seed=args.seed,
-                              formulation="one_shot", active_layers=active_layers,
-                              policy_metadata=policy_metadata)
+    policy_metadata = {}
+    episode_sets = {}
+    for path in args.policies:
+        metadata = load_policy_metadata(path)
+        policy_metadata[path] = metadata
+        episode_sets[path] = fixed_episodes(
+            args.split, args.episodes, seed=args.seed, formulation="one_shot",
+            active_layers=active_layers, policy_metadata=metadata)
+    episodes = next(iter(episode_sets.values()))
     models = {}
     for episode in episodes:
         if episode["volume"] not in models:
@@ -137,6 +142,9 @@ def main(active_layers=None, argv=None):
     results = {}
     for path in args.policies:
         policy = SAC.load(path, device="cpu")
+        episodes = episode_sets[path]
+        models = {episode["volume"]: visibility.for_volume(episode["volume"])
+                  for episode in episodes}
         per_class_rows = []
         overall = []
         for episode in episodes:
@@ -162,7 +170,7 @@ def main(active_layers=None, argv=None):
             "overall_median": statistics.median(overall),
             "overall_share_positive": sum(1 for a in overall if a > 0) / len(overall),
             "per_class": summarise_per_class(per_class_rows),
-            "metadata": policy_metadata,
+            "metadata": policy_metadata[path],
             "provenance": provenance.result_provenance(active_layers),
         }
 

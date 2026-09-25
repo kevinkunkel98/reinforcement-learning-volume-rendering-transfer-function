@@ -205,3 +205,29 @@ def test_baseline_rows_use_actual_volume_reachability(monkeypatch):
         {"volume": "stub", "instruction": {"targets": {"skeleton": {"vis": 0.3}}}},
         object(), None, 0.0)
     assert rows[0]["status"] == "unreachable"
+
+
+def test_per_class_eval_uses_each_policy_sidecar_contract(monkeypatch):
+    calls = []
+    episodes = [{"volume": "stub", "start_params": [0.0],
+                 "instruction": {"targets": {}, "goal": {}, "kind": "relative"},
+                 "policy_metadata": {"policy_version": "oneshot-v6",
+                                     "action_mode": "absolute", "reward_mode": "attainment"}}]
+    monkeypatch.setattr(per_class_eval, "load_policy_metadata", lambda path: {
+        "policy_version": "oneshot-v7" if path == "v7.zip" else "oneshot-v6",
+        "action_mode": "residual" if path == "v7.zip" else "absolute",
+        "reward_mode": "target" if path == "v7.zip" else "attainment"})
+    def make_episodes(*args, **kwargs):
+        calls.append((args, kwargs["policy_metadata"]))
+        return [dict(episodes[0], policy_metadata=kwargs["policy_metadata"])]
+    monkeypatch.setattr(per_class_eval, "fixed_episodes", make_episodes)
+    monkeypatch.setattr(per_class_eval.visibility, "for_volume", lambda name: object())
+    monkeypatch.setattr(per_class_eval.goals, "goal_classes_for_volume", lambda volume: [])
+    monkeypatch.setattr(per_class_eval.goals, "reachable_goal_classes", lambda volume, model, layers: [])
+    import stable_baselines3
+    monkeypatch.setattr(stable_baselines3.SAC, "load", lambda path, device: object())
+    monkeypatch.setattr(per_class_eval, "_score", lambda *args: 0.0)
+    per_class_eval.main(argv=["v6.zip", "v7.zip", "--episodes", "1"])
+
+    assert [metadata["policy_version"] for _, metadata in calls] == ["oneshot-v6", "oneshot-v7"]
+    assert calls[0][0][1:3] == calls[1][0][1:3]
