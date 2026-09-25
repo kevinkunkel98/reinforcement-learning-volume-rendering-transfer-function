@@ -635,9 +635,10 @@ def main(argv=None, active_layers=None):
     result = {"policy": args.policy, "split": args.split, "episodes": args.episodes,
               "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
               "provenance": provenance.result_provenance(active_layers),
-              "metadata": observation_metadata(),
               "episodes_detail": episodes_detail(results, episodes),
-               **compare(results, episodes=episodes, active_layers=active_layers)}
+                **compare(results, episodes=episodes, active_layers=active_layers),
+              "metadata": (policy_metadata or episodes[0].get("policy_metadata")
+                           if args.formulation == "one_shot" else observation_metadata())}
     _print_table(result, active_layers=active_layers)
 
     out = args.out or DEFAULT_OUT_TEMPLATE.format(split=args.split)

@@ -66,6 +66,17 @@ def _class_row(goal_class: str, status: str, attainment):
             "attainment": attainment if status == "reachable" else None}
 
 
+def _baseline_class_rows(episode, model, active_layers, attainment):
+    volume = episode["volume"]
+    supported = set(goals.goal_classes_for_volume(volume))
+    reachable = set(goals.reachable_goal_classes(volume, model, active_layers))
+    return [_class_row(goal_class,
+                       "reachable" if goal_class in reachable else
+                       "unreachable" if goal_class in supported else "unsupported",
+                       attainment if goal_class in episode["instruction"]["targets"] else None)
+            for goal_class in goals.GOAL_CLASSES]
+
+
 def summarise_per_class(rows: list) -> dict:
     """Summarise scores while retaining support and reachability accounting."""
     grouped = collections.defaultdict(list)
@@ -167,10 +178,7 @@ def main(active_layers=None, argv=None):
             final_agg = goals.aggregate(goals.features(model, final_params, active_layers), active_layers)
             attainment = goals.attainment(episode["instruction"]["goal"], start_agg, final_agg)
             overall.append(attainment)
-            mentioned = set(episode["instruction"]["targets"])
-            for goal_class in goals.GOAL_CLASSES:
-                rows.append(_class_row(goal_class, "reachable" if goal_class in mentioned else "unsupported",
-                                       attainment if goal_class in mentioned else None))
+            rows.extend(_baseline_class_rows(episode, model, active_layers, attainment))
         results[name] = {"overall_median": statistics.median(overall),
                          "overall_share_positive": sum(value > 0 for value in overall) / len(overall),
                          "per_class": summarise_per_class(rows),

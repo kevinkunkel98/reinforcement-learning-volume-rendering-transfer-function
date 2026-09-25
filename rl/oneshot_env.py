@@ -160,6 +160,8 @@ class OneShotEnv(gym.Env):
         self._model_for_volume = model_for_volume
         if policy_version not in (POLICY_VERSION, V7_POLICY_VERSION):
             raise ValueError("unsupported one-shot policy version")
+        if policy_version == POLICY_VERSION and action_mode != "absolute":
+            raise ValueError("v6 only supports absolute action mode")
         if policy_version == V7_POLICY_VERSION and action_mode != "residual":
             raise ValueError("oneshot-v7 requires residual action mode")
         if action_mode not in ("absolute", "residual"):

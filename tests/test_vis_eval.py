@@ -214,6 +214,25 @@ def test_frozen_v7_one_shot_env_applies_residual_action(monkeypatch):
     assert env._controllable_values(env._params) == pytest.approx(expected)
 
 
+def test_one_shot_result_persists_loaded_policy_metadata(monkeypatch, tmp_path):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes("val", 1, seed=0, volume_ids=("stub_a",),
+                                       model_for_volume=_model_for_volume, formulation="one_shot",
+                                       policy_metadata={"policy_version": "oneshot-v7",
+                                                        "action_mode": "residual",
+                                                        "reward_mode": "target"})
+    monkeypatch.setattr(vis_eval, "load_policy_metadata", lambda path: {
+        "policy_version": "oneshot-v7", "action_mode": "residual", "reward_mode": "target"})
+    monkeypatch.setattr(vis_eval, "fixed_episodes", lambda *args, **kwargs: episodes)
+    monkeypatch.setattr(vis_eval, "run_policy", lambda *args, **kwargs: [{"attainment": 0.0, "kind": "relative"}])
+    monkeypatch.setattr(vis_eval, "run_baseline", lambda *args, **kwargs: [{"attainment": 0.0, "kind": "relative"}])
+    monkeypatch.setattr(vis_eval, "_print_table", lambda *args, **kwargs: None)
+    out = tmp_path / "result.json"
+    vis_eval.main(["--policy", "policy.zip", "--formulation", "one_shot", "--episodes", "1",
+                   "--out", str(out)], active_layers=None)
+    assert json.loads(out.read_text())["metadata"]["action_mode"] == "residual"
+
+
 # --- run_policy -----------------------------------------------------------------
 
 def test_run_policy_replays_the_exact_episode_state(monkeypatch):

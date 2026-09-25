@@ -196,3 +196,12 @@ def test_per_class_policy_score_uses_episode_action_mode(monkeypatch):
     monkeypatch.setattr(per_class_eval.goals, "attainment", lambda *args: 0.0)
     per_class_eval._score(object(), episode, model)
     assert seen["mode"] == "residual"
+
+
+def test_baseline_rows_use_actual_volume_reachability(monkeypatch):
+    monkeypatch.setattr(per_class_eval.goals, "goal_classes_for_volume", lambda volume: ["skeleton"])
+    monkeypatch.setattr(per_class_eval.goals, "reachable_goal_classes", lambda volume, model, layers: [])
+    rows = per_class_eval._baseline_class_rows(
+        {"volume": "stub", "instruction": {"targets": {"skeleton": {"vis": 0.3}}}},
+        object(), None, 0.0)
+    assert rows[0]["status"] == "unreachable"

@@ -271,6 +271,11 @@ def test_v6_contract_defaults_remain_absolute_attainment():
     assert env.reward_mode == "attainment"
 
 
+def test_v6_rejects_residual_action_mode_at_init():
+    with pytest.raises(ValueError, match="v6"):
+        OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(), action_mode="residual")
+
+
 def test_load_policy_metadata_falls_back_to_v6(tmp_path):
     from rl.oneshot_env import load_policy_metadata
     metadata = load_policy_metadata(str(tmp_path / "missing.zip"))
