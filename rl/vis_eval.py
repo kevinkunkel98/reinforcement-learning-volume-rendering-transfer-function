@@ -53,7 +53,7 @@ _ENV_FOR_FORMULATION = {"multi_step": VisibilityTFEnv, "one_shot": OneShotEnv}
 
 def fixed_episodes(split: str, count: int, seed: int = 0,
                     volume_ids=None, model_for_volume=None,
-                    formulation: str = "multi_step") -> list:
+                    formulation: str = "multi_step", active_layers=None) -> list:
     """A deterministic list of `count` `{"volume", "start_params",
     "instruction"}` episodes drawn from `split` (or `volume_ids`, for tests):
     one `reset(seed=seed + i)` per episode, recording the exact state it
@@ -68,6 +68,7 @@ def fixed_episodes(split: str, count: int, seed: int = 0,
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
     env_cls = _ENV_FOR_FORMULATION[formulation]
     env = env_cls(list(ids), **kwargs)
+    env._active_layers = active_layers
 
     episodes = []
     for i in range(count):

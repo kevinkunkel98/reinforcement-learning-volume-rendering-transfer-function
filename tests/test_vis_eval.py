@@ -119,6 +119,15 @@ def test_fixed_episodes_is_deterministic(monkeypatch):
         assert np.array_equal(a["instruction"]["goal"], b["instruction"]["goal"])
 
 
+def test_fixed_episodes_excludes_zero_opacity_classes(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 20, seed=3, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        active_layers={"lungs": {"opacity": 0.0}})
+
+    assert all("lungs" not in episode["instruction"]["targets"] for episode in episodes)
+
+
 def test_fixed_episodes_only_uses_volumes_of_the_requested_split(monkeypatch):
     _patch_totalseg(monkeypatch)
     monkeypatch.setattr(vis_eval.datasets, "volumes_for_split",

@@ -17,6 +17,7 @@ import os
 import numpy as np
 
 import goals
+import provenance
 import visibility
 from rl.baselines import BASELINES
 
@@ -33,19 +34,21 @@ def _attainment_or_none(goal, start_agg, final_agg):
     return goals.attainment(goal, start_agg, final_agg)
 
 
-def run_volume(name: str, n_instructions: int, seed: int = 0) -> list:
+def run_volume(name: str, n_instructions: int, seed: int = 0, active_layers=None) -> list:
     """One row per (instruction, baseline) pair for this volume."""
     model = visibility.for_volume(name)
     start_params = goals.starting_params()
-    start_agg = goals.aggregate(model.features(start_params))
+    start_agg = goals.aggregate(goals.features(model, start_params, active_layers), active_layers)
     rng = np.random.default_rng(seed)
 
     rows = []
     for _ in range(n_instructions):
-        instruction = goals.sample_instruction(name, model, start_agg, rng)
+        instruction = goals.sample_instruction(name, model, start_agg, rng, active_layers)
         for baseline_name, baseline_fn in BASELINES.items():
-            final_params = baseline_fn(model, start_params, instruction)
-            final_agg = goals.aggregate(model.features(final_params))
+            final_params = baseline_fn(model, start_params, instruction,
+                                       active_layers=active_layers)
+            final_features = goals.features(model, final_params, active_layers)
+            final_agg = goals.aggregate(final_features, active_layers)
             attainment = _attainment_or_none(instruction["goal"], start_agg, final_agg)
             rows.append({"volume": name, "kind": instruction["kind"],
                          "baseline": baseline_name, "attainment": attainment})
@@ -88,17 +91,21 @@ def _print_table(summary: dict) -> None:
             print(f"{name:22s} {kind:12s} {entry['mean']:16.3f} {entry['n']:6d}")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--volumes", nargs="+", required=True)
     parser.add_argument("--instructions", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default=OUT_PATH)
-    args = parser.parse_args()
+    layers = parser.add_mutually_exclusive_group()
+    layers.add_argument("--layers", help="active anatomy layers as inline JSON")
+    layers.add_argument("--layers-file", help="JSON file containing active anatomy layers")
+    args = parser.parse_args(argv)
+    active_layers = provenance.load_active_layers(args.layers, args.layers_file)
 
     rows = []
     for name in args.volumes:
-        rows += run_volume(name, args.instructions, args.seed)
+        rows += run_volume(name, args.instructions, args.seed, active_layers)
 
     summary = summarise(rows)
     _print_table(summary)

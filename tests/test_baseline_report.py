@@ -1,7 +1,8 @@
 import pytest
 
-from tools.baseline_report import summarise
+from tools.baseline_report import run_volume, summarise
 from tools.per_class_eval import _class_row, summarise_per_class
+import transfer
 
 
 def test_per_class_cli_parser_accepts_layer_file(tmp_path):
@@ -13,6 +14,35 @@ def test_per_class_cli_parser_accepts_layer_file(tmp_path):
     args = per_class_eval.parse_args(["policy.zip", "--layers-file", str(path)])
 
     assert args.layers_file == str(path)
+
+
+def test_baseline_report_scoring_receives_active_layers(monkeypatch):
+    from tools import baseline_report
+
+    seen = {}
+    class Model:
+        def features(self, params, active_layers=None):
+            seen["features"] = active_layers
+            return {"vis": {}, "bright": {}, "coverage": 0.0}
+    monkeypatch.setattr(baseline_report.visibility, "for_volume", lambda name: Model())
+    monkeypatch.setattr(baseline_report.goals, "starting_params",
+                        lambda: [0.0] * transfer.TOTAL_PARAMS)
+    def aggregate(features, active_layers=None):
+        seen["aggregate"] = active_layers
+        return {"vis": {}, "bright": {}}
+    monkeypatch.setattr(baseline_report.goals, "aggregate", aggregate)
+    monkeypatch.setattr(baseline_report.goals, "sample_instruction",
+                        lambda *args: {"kind": "relative", "goal": {}, "targets": {}})
+    monkeypatch.setattr(baseline_report, "BASELINES", {"B0": lambda *args, **kwargs: (
+        seen.setdefault("baseline", kwargs.get("active_layers")) or
+        [0.0] * transfer.TOTAL_PARAMS)})
+    monkeypatch.setattr(baseline_report, "_attainment_or_none", lambda *args: 0.0)
+
+    layers = {"liver": {"opacity": 0.0}}
+    run_volume("stub", 1, active_layers=layers)
+
+    assert seen["aggregate"] == layers
+    assert seen["baseline"] == layers
 
 
 def _rows():
