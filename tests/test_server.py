@@ -114,6 +114,21 @@ def test_render_image_passes_labels_and_layers_to_renderer(monkeypatch):
     assert set(calls["layers"]) == set(server.default_layers())
 
 
+def test_render_step_persists_and_threads_anatomy_layers(monkeypatch, tmp_path):
+    layers = {"liver": {"opacity": 0.0, "rgb": [1.0, 0.0, 0.0]}}
+    seen = {}
+
+    def fake_render(params, camera, layers=None):
+        seen["layers"] = layers
+        return "b64", np.zeros((1, 1, 3), dtype=np.uint8), b"png"
+
+    monkeypatch.setattr(server, "_render_image_b64", fake_render)
+    step = server._render_step(np.zeros(48), None, None, False, 0, "session", {},
+                               layers=layers)
+    assert seen["layers"]["liver"] == layers["liver"]
+    assert step["anatomy_layers"]["liver"] == layers["liver"]
+
+
 def test_dataset_metadata_route_maps_unknown_dataset_to_404(monkeypatch):
     def unknown(name):
         raise ValueError("unknown dataset 'missing'")

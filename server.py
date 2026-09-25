@@ -270,8 +270,9 @@ def _scene_event_id(before, after, event_id=None):
 
 
 def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera,
-                  mode="exact", message=None, parser_meta=None):
-    image_b64, img, png_bytes = _render_image_b64(params, camera)
+                  mode="exact", message=None, parser_meta=None, layers=None):
+    layers = normalize_layers(layers or default_layers())
+    image_b64, img, png_bytes = _render_image_b64(params, camera, layers=layers)
     image_path = _save_image_file(session_id, f"step_{step_id}", png_bytes)
     return {
         "id": step_id,
@@ -280,6 +281,7 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
         "cmd_dict": cmd_dict,
         "params": params.tolist(),
         "camera": camera,
+        "anatomy_layers": layers,
         "image_b64": image_b64,
         "image_path": image_path,
         "masses": _masses(params),
@@ -359,7 +361,8 @@ COMPARE_BUDGET_THOROUGH = 200
 
 
 def compare_arms(model, policy, cmd, instruction, start_params, camera,
-                  cheap=COMPARE_BUDGET_CHEAP, thorough=COMPARE_BUDGET_THOROUGH):
+                 cheap=COMPARE_BUDGET_CHEAP, thorough=COMPARE_BUDGET_THOROUGH,
+                 layers=None):
     """Answer one parsed command four ways from the same start state.
 
     `exact` applies the command directly (0 evaluations), `search_cheap` and
@@ -405,7 +408,10 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
 
     def _finish(params, evaluations, elapsed_ms):
         final_agg = goals.aggregate(model.features(params))
-        image_b64, _img, _png = _render_image_b64(params, camera)
+        if layers is None:
+            image_b64, _img, _png = _render_image_b64(params, camera)
+        else:
+            image_b64, _img, _png = _render_image_b64(params, camera, layers=layers)
         return {
             "params": params.tolist(),
             "image_b64": image_b64,
@@ -561,16 +567,21 @@ class Session:
             if not history or any(len(step.get("params", [])) != TOTAL_PARAMS for step in history):
                 self.session_id = self._new_session_id()
                 step = _render_step(default_params(), None, None, False, 0,
-                                    self.session_id, default_camera_for(_dataset_name))
+                                    self.session_id, default_camera_for(_dataset_name),
+                                    layers=default_layers())
                 self.history = [step]
                 self.cursor = 0
                 self.save()
                 return
             self.history, self.cursor = history, data["cursor"]
+            for step in self.history:
+                step["anatomy_layers"] = normalize_layers(
+                    step.get("anatomy_layers", default_layers()))
             self.session_id = data.get("session_id") or self._new_session_id()
             return
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, False, 0, self.session_id, default_camera_for(_dataset_name))
+        step = _render_step(default_params(), None, None, False, 0, self.session_id,
+                            default_camera_for(_dataset_name), layers=default_layers())
         self.history = [step]
         self.cursor = 0
         self.save()
@@ -605,7 +616,8 @@ class Session:
     def switch_dataset(self, name: str):
         set_dataset(name)  # raises ValueError for an unknown name
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, False, 0, self.session_id, default_camera_for(name))
+        step = _render_step(default_params(), None, None, False, 0, self.session_id,
+                            default_camera_for(name), layers=default_layers())
         self.history = [step]
         self.cursor = 0
         self.save()
@@ -672,7 +684,9 @@ class Session:
             new_camera = apply_camera_command(cmd["camera"], current_camera)
             step = _render_step(current_params, text, cmd, False,
                                  self.history[-1]["id"] + 1, self.session_id, new_camera,
-                                 mode="camera", parser_meta=parser_meta)
+                                 mode="camera", parser_meta=parser_meta,
+                                 layers=self.history[self.cursor].get("anatomy_layers",
+                                                                       default_layers()))
             self.history = self.history[:self.cursor + 1] + [step]
             self.cursor = len(self.history) - 1
             self.save()
@@ -722,7 +736,9 @@ class Session:
 
         step = _render_step(new_params, text, cmd, search_flag,
                              self.history[-1]["id"] + 1, self.session_id, current_camera,
-                             mode=actual_mode, message=message, parser_meta=parser_meta)
+                             mode=actual_mode, message=message, parser_meta=parser_meta,
+                             layers=self.history[self.cursor].get("anatomy_layers",
+                                                                   default_layers()))
         if actual_mode == "exact":
             self._log_command(cmd, current_params, new_params, step)
 
@@ -936,7 +952,9 @@ async def compare_route(req: CompareRequest):
         loaded_policy = None
 
     arms = compare_arms(volume_model, loaded_policy, cmd, instruction,
-                         start_params, camera, cheap=req.cheap, thorough=req.thorough)
+                         start_params, camera, cheap=req.cheap, thorough=req.thorough,
+                         layers=session.history[session.cursor].get(
+                             "anatomy_layers", default_layers()))
     return {"applicable": True, "text": req.text, "goal_text": instruction["text"],
             "budgets": {"cheap": req.cheap, "thorough": req.thorough}, "arms": arms,
             "channels": goal_channels(instruction["goal"]),

@@ -175,3 +175,62 @@ def test_invalid_anatomical_layers_are_rejected():
     labels = np.zeros(volume.shape, dtype=np.uint8)
     with pytest.raises(ValueError, match="anatomy_layers"):
         render(volume, default_params(), labels=labels, layers={"unknown": {}})
+
+
+def test_disabling_liver_removes_only_liver_region_contribution():
+    volume = np.zeros((20, 20, 20), dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[:10, :, :] = CLASS_IDS["liver"]
+    params = default_params()
+    for peak in range(4):
+        params[peak * 6 + 2] = -0.98
+    camera = {"position": (0.0, 0.0, 80.0), "focal_point": (0.0, 0.0, 0.0),
+              "view_up": (0.0, 1.0, 0.0), "parallel_scale": 20.0}
+    baseline = grab(render(volume, params, camera=camera))
+    visible = grab(render(volume, params, camera=camera, labels=labels,
+                          layers={"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]}}))
+    hidden = grab(render(volume, params, camera=camera, labels=labels,
+                        layers={"liver": {"opacity": 0.0, "rgb": [1.0, 0.0, 0.0]}}))
+    assert np.count_nonzero(visible != baseline) > 0
+    assert np.array_equal(hidden, baseline)
+
+
+def test_label_zero_has_no_anatomical_pixels_when_hu_is_hidden():
+    volume = np.zeros((12, 12, 12), dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    params = default_params()
+    for peak in range(4):
+        params[peak * 6 + 2] = -0.98
+    baseline = grab(render(volume, params))
+    image = grab(render(volume, params, labels=labels,
+                        layers={"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]}}))
+    assert np.array_equal(image, baseline)
+
+
+def test_nearest_labels_do_not_mix_anatomical_class_colors():
+    volume = np.zeros((20, 20, 20), dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[:10, :, :] = CLASS_IDS["liver"]
+    labels[10:, :, :] = CLASS_IDS["kidneys"]
+    params = default_params()
+    for peak in range(4):
+        params[peak * 6 + 2] = -0.98
+    liver = grab(render(volume, params, labels=np.where(labels == CLASS_IDS["liver"], labels, 0), layers={
+        "liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]},
+        "kidneys": {"opacity": 1.0, "rgb": [0.0, 1.0, 0.0]},
+    }))
+    kidneys = grab(render(volume, params, labels=np.where(labels == CLASS_IDS["kidneys"], labels, 0), layers={
+        "liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]},
+        "kidneys": {"opacity": 1.0, "rgb": [0.0, 1.0, 0.0]},
+    }))
+    assert liver[..., 0].sum() > liver[..., 1].sum()
+    assert kidneys[..., 1].sum() > kidneys[..., 0].sum()
+
+
+def test_labels_none_matches_legacy_hu_only_output():
+    volume = build_phantom(size=24)
+    params = default_params()
+    camera = {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}
+    old = grab(render(volume, params, camera=camera))
+    explicit_none = grab(render(volume, params, camera=camera, labels=None, layers=None))
+    assert np.array_equal(old, explicit_none)
