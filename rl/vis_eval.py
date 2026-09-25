@@ -175,9 +175,16 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
     results = []
     for episode in episodes:
         if formulation == "one_shot":
+            episode_metadata = episode.get("policy_metadata")
+            if episode_metadata is not None:
+                episode_metadata = resolve_policy_metadata(episode_metadata)
+                if episode_metadata != policy_metadata:
+                    raise ValueError("policy metadata mismatch between checkpoint and episode")
+            else:
+                episode_metadata = policy_metadata
             env, obs, info = _frozen_one_shot_env(
                 episode["volume"], episode["start_params"], episode["instruction"],
-                active_layers=active_layers, policy_metadata=policy_metadata, **kwargs)
+                active_layers=active_layers, policy_metadata=episode_metadata, **kwargs)
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
         else:

@@ -344,6 +344,43 @@ def test_run_policy_loads_the_model_from_model_path(monkeypatch):
     assert seen_paths == ["some/path.zip"]
 
 
+def test_run_policy_uses_episode_metadata_for_one_shot(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        formulation="one_shot", policy_metadata={"policy_version": "oneshot-v7",
+                                                   "action_mode": "residual",
+                                                   "reward_mode": "target"})
+    monkeypatch.setattr(vis_eval, "load_policy_metadata",
+                        lambda path: {"policy_version": "oneshot-v7", "action_mode": "residual",
+                                      "reward_mode": "target"})
+    model = _FixedActionModel()
+    seen = {}
+    original = vis_eval._frozen_one_shot_env
+    def capture(*args, **kwargs):
+        seen["metadata"] = kwargs["policy_metadata"]
+        return original(*args, model_for_volume=_model_for_volume, **kwargs)
+    monkeypatch.setattr(vis_eval, "_frozen_one_shot_env", capture)
+    vis_eval.run_policy("v7.zip", episodes, formulation="one_shot", load_model=lambda path: model)
+    assert seen["metadata"]["action_mode"] == "residual"
+
+
+def test_run_policy_rejects_checkpoint_episode_metadata_mismatch(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        formulation="one_shot", policy_metadata={"policy_version": "oneshot-v6",
+                                                  "action_mode": "absolute",
+                                                  "reward_mode": "attainment"})
+    monkeypatch.setattr(vis_eval, "load_policy_metadata",
+                        lambda path: {"policy_version": "oneshot-v7", "action_mode": "residual",
+                                      "reward_mode": "target"})
+    with pytest.raises(ValueError, match="metadata mismatch"):
+        vis_eval.run_policy("v7.zip", episodes, formulation="one_shot",
+                            model_for_volume=_model_for_volume,
+                            load_model=lambda path: _FixedActionModel())
+
+
 # --- run_policy_with_refinement ----------------------------------------------------
 
 def test_run_policy_with_refinement_zero_evaluations_matches_plain_policy(monkeypatch):
