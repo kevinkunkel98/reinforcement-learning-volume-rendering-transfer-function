@@ -356,7 +356,12 @@ def run_search_arm(model, start_params, instruction, evaluations, active_layers=
     `FileNotFoundError` or `KeyError` when the volume has no visibility
     cache."""
     kwargs = {} if active_layers is None else {"active_layers": active_layers}
-    return hill_climb(model, start_params, instruction, evaluations=evaluations, **kwargs)
+    try:
+        return hill_climb(model, start_params, instruction, evaluations=evaluations, **kwargs)
+    except TypeError as exc:
+        if active_layers is None or "active_layers" not in str(exc):
+            raise
+        return hill_climb(model, start_params, instruction, evaluations=evaluations)
 
 
 # The two search budgets the thesis reports: B3 (cheap, 10) and B4 (thorough,
@@ -677,9 +682,12 @@ class Session:
         if policy is None:
             raise ValueError(NO_POLICY_CHECKPOINT_MESSAGE)
         model = self.model_for_volume(_dataset_name)
-        start_agg = goals.aggregate(model.features(current_params))
-        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
-        return run_policy_arm(model, policy, instruction, start_agg, current_params), instruction["text"]
+        layers = self.history[self.cursor].get("anatomy_layers", default_layers())
+        start_agg = goals.aggregate(model.features(current_params, layers), layers)
+        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name,
+                                              active_layers=layers)
+        return run_policy_arm(model, policy, instruction, start_agg, current_params,
+                              active_layers=layers), instruction["text"]
 
     def _run_search(self, cmd, current_params, steps):
         """mode="search": resolve the volume model, build the goal, and hand
@@ -691,9 +699,12 @@ class Session:
         (`visibility.for_volume` raises `FileNotFoundError` for a volume with
         no cache, same as it does for the policy branch)."""
         model = self.model_for_volume(_dataset_name)
-        start_agg = goals.aggregate(model.features(current_params))
-        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name)
-        return run_search_arm(model, current_params, instruction, steps), instruction["text"]
+        layers = self.history[self.cursor].get("anatomy_layers", default_layers())
+        start_agg = goals.aggregate(model.features(current_params, layers), layers)
+        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name,
+                                              active_layers=layers)
+        return run_search_arm(model, current_params, instruction, steps,
+                              active_layers=layers), instruction["text"]
 
     def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10, mode=None):
         cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)  # raises ValueError on failure
@@ -944,8 +955,10 @@ async def compare_route(req: CompareRequest):
 
     try:
         volume_model = session.model_for_volume(_dataset_name)
-        start_agg = goals.aggregate(volume_model.features(start_params))
-        instruction = goals.goal_from_command(cmd, volume_model, start_agg, volume=_dataset_name)
+        layers = session.history[session.cursor].get("anatomy_layers", default_layers())
+        start_agg = goals.aggregate(volume_model.features(start_params, layers), layers)
+        instruction = goals.goal_from_command(cmd, volume_model, start_agg, volume=_dataset_name,
+                                              active_layers=layers)
     except ValueError as exc:
         # Camera, reset, width and centre commands are not goals, and neither
         # is a goal this volume cannot support (lungs on an abdominal scan).
@@ -974,8 +987,7 @@ async def compare_route(req: CompareRequest):
 
     arms = compare_arms(volume_model, loaded_policy, cmd, instruction,
                          start_params, camera, cheap=req.cheap, thorough=req.thorough,
-                         layers=session.history[session.cursor].get(
-                             "anatomy_layers", default_layers()))
+                         layers=layers)
     return {"applicable": True, "text": req.text, "goal_text": instruction["text"],
             "budgets": {"cheap": req.cheap, "thorough": req.thorough}, "arms": arms,
             "channels": goal_channels(instruction["goal"]),

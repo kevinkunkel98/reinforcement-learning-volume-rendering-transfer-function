@@ -110,7 +110,8 @@ def main(active_layers=None, argv=None):
         for episode in episodes:
             model = models[episode["volume"]]
             supported_classes = set(goals.goal_classes_for_volume(episode["volume"]))
-            reachable_classes = set(goals.reachable_goal_classes(episode["volume"], model))
+            reachable_classes = set(goals.reachable_goal_classes(
+                episode["volume"], model, active_layers))
             attainment = _score(policy, episode, model, active_layers)
             for goal_class in episode["instruction"]["targets"]:
                 supported = goal_class in supported_classes

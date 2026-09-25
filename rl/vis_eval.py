@@ -256,7 +256,11 @@ def run_baseline(name: str, episodes: list, model_for_volume=None, active_layers
         try:
             model = get_model(episode["volume"])
             start_agg = goals.aggregate(_features(model, episode["start_params"], active_layers), active_layers)
-            final_params = baseline_fn(model, episode["start_params"], instruction)
+            if active_layers is None:
+                final_params = baseline_fn(model, episode["start_params"], instruction)
+            else:
+                final_params = baseline_fn(model, episode["start_params"], instruction,
+                                           active_layers=active_layers)
             final_agg = goals.aggregate(_features(model, final_params, active_layers), active_layers)
             attainment = _attainment_or_zero(instruction["goal"], start_agg, final_agg)
         except Exception:
