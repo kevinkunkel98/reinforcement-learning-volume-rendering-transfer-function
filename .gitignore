@@ -10,4 +10,5 @@ data/totalseg/
 .venv/
 .DS_Store
 .worktrees/
+.idea/
 literature/*.pdf
