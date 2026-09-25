@@ -134,6 +134,22 @@ def test_explicit_layer_opacity_populates_effective_fields():
     assert effective["effective_vis"]["skeleton"] == 0.0
 
 
+def test_hidden_foreground_reveals_background_in_effective_visibility():
+    n = 24
+    volume = _slab_volume(50.0, 900.0, n=n)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[:, n // 2:, :] = visibility.CLASSES.index("soft") + 1
+    labels[:, : n // 2, :] = visibility.CLASSES.index("skeleton") + 1
+    model = _model(volume, labels=labels)
+    params = _params([0.0, 0.9, 0.0, 0.9])
+
+    visible = model.features(params, {"soft": {"opacity": 1.0}})
+    hidden = model.features(params, {"soft": {"opacity": 0.0}})
+
+    assert hidden["effective_vis"]["skeleton"] > visible["effective_vis"]["skeleton"] * 1.5
+    assert hidden["effective_coverage"] < visible["effective_coverage"]
+
+
 def test_views_see_different_things():
     """Bone behind soft tissue is hidden from the front and open from behind."""
     n = 24

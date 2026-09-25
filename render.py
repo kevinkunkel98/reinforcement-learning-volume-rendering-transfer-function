@@ -1,4 +1,5 @@
 """Offscreen VTK volume rendering, pixel grab, image features."""
+import collections
 import numpy as np
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy  # pyright: ignore[reportMissingImports]
@@ -14,6 +15,8 @@ VISIBLE_BOUNDS_STRIDE = 4  # measured: ~10ms strided vs ~1-2s at full resolution
 VISIBLE_BOUNDS_THRESHOLD = 0.05
 VISIBLE_BOUNDS_MARGIN = 0.15  # fraction of extent added as padding so content isn't cropped tight
 LABEL_HIDDEN_HU = -1.0e6
+MASKED_VOLUME_CACHE_SIZE = 8
+_MASKED_VOLUME_CACHE = collections.OrderedDict()
 
 
 def _visible_bounds(volume: np.ndarray, params: np.ndarray, spacing) -> list | None:
@@ -64,11 +67,33 @@ def label_aware_volume(volume: np.ndarray, labels: np.ndarray, layers: dict) -> 
     labels = np.asarray(labels)
     if labels.dtype != np.uint8 or labels.ndim != 3 or labels.shape != volume.shape:
         raise ValueError("labels must be a uint8 array matching volume shape")
-    normalize_layers(layers or {})
+    normalized = normalize_layers(layers or {})
+    layer_state = tuple((name, settings["opacity"]) for name, settings in normalized.items())
+    key = (id(volume), id(labels), layer_state)
+    cached = _MASKED_VOLUME_CACHE.get(key)
+    if cached is not None and cached[0] is volume and cached[1] is labels:
+        _MASKED_VOLUME_CACHE.move_to_end(key)
+        return cached[2]
     masked = volume.copy()
     for class_id, _class_name in enumerate(CANONICAL_CLASSES, 1):
         masked[labels == class_id] = LABEL_HIDDEN_HU
+    _MASKED_VOLUME_CACHE[key] = (volume, labels, masked)
+    _MASKED_VOLUME_CACHE.move_to_end(key)
+    while len(_MASKED_VOLUME_CACHE) > MASKED_VOLUME_CACHE_SIZE:
+        _MASKED_VOLUME_CACHE.popitem(last=False)
     return masked
+
+
+def clear_pipeline_cache() -> None:
+    """Release cached VTK and masked-volume state between isolated renders/tests."""
+    global _PIPELINE_CACHE, _ANATOMY_ACTOR
+    _MASKED_VOLUME_CACHE.clear()
+    _ANATOMY_ACTOR = None
+    if _PIPELINE_CACHE is not None:
+        for entry in _PIPELINE_CACHE.values():
+            win = entry[-1]
+            win.Finalize()
+        _PIPELINE_CACHE.clear()
 
 
 def _make_mapper(vtk_image):
@@ -93,11 +118,12 @@ def _make_mapper(vtk_image):
     return mapper
 
 
-_PIPELINE_CACHE = None  # (key, prop, renderer, win) -- see _get_pipeline
+PIPELINE_CACHE_SIZE = 4
+_PIPELINE_CACHE = collections.OrderedDict()  # key -> (prop, renderer, win)
 _ANATOMY_ACTOR = None
 
 
-def _get_pipeline(volume: np.ndarray, spacing):
+def _get_pipeline(volume: np.ndarray, spacing, pipeline_key=None):
     """Build (or reuse) the offscreen render pipeline for `volume`.
 
     Every vtkRenderWindow.Render() call re-binds a native offscreen GL
@@ -118,14 +144,11 @@ def _get_pipeline(volume: np.ndarray, spacing):
     safe, cheap cache key here -- it is not a general-purpose memoization.
     """
     global _PIPELINE_CACHE, _ANATOMY_ACTOR
-    key = (id(volume), tuple(spacing))
-    if _PIPELINE_CACHE is not None and _PIPELINE_CACHE[0] == key:
-        return _PIPELINE_CACHE[1:]
-    if _PIPELINE_CACHE is not None:
-        if _ANATOMY_ACTOR is not None:
-            _PIPELINE_CACHE[2].RemoveViewProp(_ANATOMY_ACTOR)
-            _ANATOMY_ACTOR = None
-        _PIPELINE_CACHE[3].Finalize()
+    key = (pipeline_key or id(volume), tuple(spacing))
+    cached = _PIPELINE_CACHE.get(key)
+    if cached is not None:
+        _PIPELINE_CACHE.move_to_end(key)
+        return cached
 
     dx, dy, dz = volume.shape
     flat = np.ascontiguousarray(volume.ravel(order="F"))
@@ -173,7 +196,11 @@ def _get_pipeline(volume: np.ndarray, spacing):
     win.AddRenderer(renderer)
     win.SetSize(WIDTH, HEIGHT)
 
-    _PIPELINE_CACHE = (key, prop, renderer, win)
+    _PIPELINE_CACHE[key] = (prop, renderer, win)
+    _PIPELINE_CACHE.move_to_end(key)
+    while len(_PIPELINE_CACHE) > PIPELINE_CACHE_SIZE:
+        _, (_, _, old_win) = _PIPELINE_CACHE.popitem(last=False)
+        old_win.Finalize()
     return prop, renderer, win
 
 
@@ -220,7 +247,9 @@ def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), came
            frame_bounds: list | None = None, labels: np.ndarray | None = None,
            layers: dict | None = None) -> vtk.vtkRenderWindow:
     render_volume = label_aware_volume(volume, labels, layers) if labels is not None else volume
-    prop, renderer, win = _get_pipeline(render_volume, spacing)
+    pipeline_key = ((id(volume), volume.shape, id(labels), labels.shape)
+                    if labels is not None else id(volume))
+    prop, renderer, win = _get_pipeline(render_volume, spacing, pipeline_key)
 
     ctf, otf = vector_to_vtk(params)
     prop.SetColor(ctf)

@@ -23,6 +23,22 @@ def test_label_aware_hu_volume_masks_disabled_classes():
     assert masked[labels == 0].tolist() == [2.0, 5.0]
 
 
+def test_labeled_layer_states_reuse_bounded_masked_volume_cache():
+    render_module.clear_pipeline_cache()
+    volume = np.arange(27, dtype=np.float32).reshape((3, 3, 3))
+    labels = np.ones(volume.shape, dtype=np.uint8)
+    visible = {"skeleton": {"opacity": 1.0, "rgb": [1, 1, 1]}}
+    hidden = {"skeleton": {"opacity": 0.0, "rgb": [1, 1, 1]}}
+
+    first = render_module.label_aware_volume(volume, labels, visible)
+    second = render_module.label_aware_volume(volume, labels, hidden)
+    again = render_module.label_aware_volume(volume, labels, visible)
+
+    assert first is again
+    assert first is not second
+    assert len(render_module._MASKED_VOLUME_CACHE) <= render_module.MASKED_VOLUME_CACHE_SIZE
+
+
 def test_render_grab_shape_and_dtype():
     vol = build_phantom(size=48)
     win = render(vol, default_params())

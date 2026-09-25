@@ -162,12 +162,22 @@ class VisibilityModel:
         return cls(quantize(cubes), step, histogram, class_ids, label_source,
                    volume_id, spacing, label_identity)
 
-    def _weights(self, params):
+    def _weights(self, params, layers=None):
         """(contribution per sample, luminance per sample, accumulated opacity per ray)."""
         opacity_table, luminance_table = transfer_tables(params)
         index = self.indices.long()
         alpha = torch.from_numpy(opacity_table)[index]
         alpha = 1.0 - (1.0 - alpha) ** (self.step_mm / 1.0)
+        if layers is not None:
+            normalized = normalize_layers(layers)
+            layer_opacity = torch.ones_like(alpha)
+            for class_index, name in enumerate(CLASSES):
+                layer_opacity = torch.where(
+                    self._labels == class_index,
+                    layer_opacity.new_tensor(normalized[name]["opacity"]),
+                    layer_opacity,
+                )
+            alpha = alpha * layer_opacity
         luminance = torch.from_numpy(luminance_table)[index]
         transparency = 1.0 - alpha
         ones = torch.ones_like(transparency[:, :1])
@@ -185,8 +195,9 @@ class VisibilityModel:
         keep-tolerance any unmentioned class gets, or a search/policy could
         satisfy "show only X" by rendering an opaque wall of unclassified
         material instead of X (see goals.py's OTHER keep term)."""
-        weights, luminance, accumulated = self._weights(params)
         layers = normalize_layers(layers or {})
+        weights, luminance, accumulated = self._weights(params)
+        effective_weights, _, effective_accumulated = self._weights(params, layers)
         vis, bright = {}, {}
         effective_vis, effective_bright = {}, {}
         for index, name in enumerate(CLASSES):
@@ -195,7 +206,7 @@ class VisibilityModel:
             vis[name] = total / self._rays
             bright[name] = (float((masked * luminance).sum() / total)
                             if total / self._rays > 1e-4 else 0.0)
-            effective = masked * layers[name]["opacity"]
+            effective = torch.where(self._labels == index, effective_weights, torch.zeros(()))
             effective_total = float(effective.sum())
             effective_vis[name] = effective_total / self._rays
             effective_bright[name] = (
@@ -207,7 +218,7 @@ class VisibilityModel:
         effective_vis["other"] = vis["other"]
         effective_bright["other"] = bright.get("other", 0.0)
         coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
-        effective_coverage = float(sum(effective_vis.values()))
+        effective_coverage = float((effective_accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
         return {"vis": vis, "bright": bright, "effective_vis": effective_vis,
                 "effective_bright": effective_bright,
                 "effective_class_contribution": dict(effective_vis),
