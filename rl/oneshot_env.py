@@ -76,8 +76,12 @@ def resolve_policy_metadata(metadata=None) -> dict:
               "reward_mode": "attainment"}
     if metadata:
         values.update({key: metadata[key] for key in values if key in metadata})
+    if values["policy_version"] not in (POLICY_VERSION, V7_POLICY_VERSION):
+        raise ValueError(f"unsupported policy version: {values['policy_version']}")
     if values["policy_version"] == POLICY_VERSION and values["action_mode"] != "absolute":
         raise ValueError("v6 only supports absolute action mode")
+    if values["policy_version"] == POLICY_VERSION and values["reward_mode"] != "attainment":
+        raise ValueError("v6 only supports attainment reward")
     if values["action_mode"] not in ("absolute", "residual"):
         raise ValueError("action_mode must be absolute or residual")
     if values["reward_mode"] not in ("attainment", "target"):

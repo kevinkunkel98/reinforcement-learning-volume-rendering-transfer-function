@@ -312,6 +312,20 @@ def test_v7_metadata_requires_residual_target_contract(metadata):
         resolve_policy_metadata(metadata)
 
 
+def test_resolver_rejects_target_reward_for_v6():
+    from rl.oneshot_env import resolve_policy_metadata
+    with pytest.raises(ValueError, match="v6"):
+        resolve_policy_metadata({"policy_version": "oneshot-v6",
+                                 "action_mode": "absolute", "reward_mode": "target"})
+
+
+def test_resolver_rejects_unknown_policy_version():
+    from rl.oneshot_env import resolve_policy_metadata
+    with pytest.raises(ValueError, match="policy version"):
+        resolve_policy_metadata({"policy_version": "oneshot-v8",
+                                 "action_mode": "absolute", "reward_mode": "attainment"})
+
+
 def test_v7_environment_requires_target_reward_at_init():
     with pytest.raises(ValueError, match="target reward"):
         OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
