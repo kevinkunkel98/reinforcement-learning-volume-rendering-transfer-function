@@ -12,11 +12,19 @@ def _detail(attainments, kinds=None, volumes=None):
             for a, k, v in zip(attainments, kinds, volumes)]
 
 
-def _result_file(tmp_path, name, attainments, kinds=None, volumes=None, detail=True):
+def _result_file(tmp_path, name, attainments, kinds=None, volumes=None, detail=True,
+                 starts=None, targets=None, goals=None, provenance=None):
     payload = {"split": "test", "seed": 0, "episodes": len(attainments),
                "policy": f"out/{name}/best.zip"}
     if detail:
-        payload["episodes_detail"] = {"policy": _detail(attainments, kinds, volumes)}
+        rows = _detail(attainments, kinds, volumes)
+        for index, row in enumerate(rows):
+            row["start_params"] = (starts or [[0.0] for _ in rows])[index]
+            row["targets"] = (targets or [{"skeleton": {"vis": 0.1}} for _ in rows])[index]
+            row["goal"] = (goals or [[0.1] for _ in rows])[index]
+        payload["episodes_detail"] = {"policy": rows}
+    if provenance is not None:
+        payload["provenance"] = provenance
     path = tmp_path / f"{name}.json"
     path.write_text(json.dumps(payload))
     return str(path)
@@ -78,4 +86,26 @@ def test_compare_refuses_groups_that_were_not_scored_on_the_same_episodes(tmp_pa
     b = [_result_file(tmp_path, "b0", [0.3, 0.4], volumes=["ts_0", "ts_9"])]
 
     with pytest.raises(ValueError, match="episode 1"):
+        compare_groups(a, b)
+
+
+def test_compare_refuses_different_episode_start_or_instruction_identity(tmp_path):
+    provenance = {"scoring_fingerprint": "a", "label_layout": "anatomy-v2",
+                  "anatomy_layer_layout": "anatomy-layers-v1", "visibility_renderer": "visibility-v1",
+                  "anatomy_layers": None}
+    a = [_result_file(tmp_path, "a0", [0.1], starts=[[0.0]], provenance=provenance)]
+    b = [_result_file(tmp_path, "b0", [0.3], starts=[[1.0]], provenance=provenance)]
+
+    with pytest.raises(ValueError, match="episode 0"):
+        compare_groups(a, b)
+
+
+def test_compare_refuses_incompatible_provenance_or_active_layers(tmp_path):
+    base = {"scoring_fingerprint": "a", "label_layout": "anatomy-v2",
+            "anatomy_layer_layout": "anatomy-layers-v1", "visibility_renderer": "visibility-v1",
+            "anatomy_layers": None}
+    a = [_result_file(tmp_path, "a0", [0.1], provenance=base)]
+    b = [_result_file(tmp_path, "b0", [0.3], provenance={**base, "anatomy_layers": {"liver": {"opacity": 0.0}}})]
+
+    with pytest.raises(ValueError, match="provenance"):
         compare_groups(a, b)

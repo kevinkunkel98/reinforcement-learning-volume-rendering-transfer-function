@@ -102,6 +102,14 @@ def main(argv=None):
     layers.add_argument("--layers-file", help="JSON file containing active anatomy layers")
     args = parser.parse_args(argv)
     active_layers = provenance.load_active_layers(args.layers, args.layers_file)
+    if os.path.exists(args.out):
+        with open(args.out) as stream:
+            previous = json.load(stream)
+        if previous.get("provenance") is not None:
+            report = provenance.compare(previous["provenance"], expected_layers=active_layers)
+            if report["stale"]:
+                raise ValueError("existing baseline report provenance is incompatible: "
+                                 + "; ".join(report["reasons"]))
 
     rows = []
     for name in args.volumes:
@@ -121,6 +129,7 @@ def main(argv=None):
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as stream:
         json.dump({"volumes": args.volumes, "instructions": args.instructions, "seed": args.seed,
+                   "provenance": provenance.result_provenance(active_layers),
                    "summary": summary, "rows": rows}, stream, indent=2)
     print(f"\n[baseline_report] wrote {args.out}")
 

@@ -605,7 +605,8 @@ def main(argv=None, active_layers=None):
         _print_table(load_result(args.show), active_layers=active_layers)
         return
 
-    episodes = fixed_episodes(args.split, args.episodes, seed=args.seed, formulation=args.formulation)
+    episodes = fixed_episodes(args.split, args.episodes, seed=args.seed,
+                              formulation=args.formulation, active_layers=active_layers)
 
     results = {"policy": run_policy(args.policy, episodes, formulation=args.formulation,
                                       active_layers=active_layers)}

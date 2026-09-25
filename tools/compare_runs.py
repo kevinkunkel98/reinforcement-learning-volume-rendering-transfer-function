@@ -28,6 +28,7 @@ import json
 
 import numpy as np
 
+import provenance
 from rl.vis_eval import wilcoxon
 
 DEFAULT_ARM = "policy"
@@ -48,7 +49,7 @@ def load_arm(path: str, arm: str = DEFAULT_ARM) -> list:
             "Re-run the evaluation; a stored median cannot be re-aggregated.")
     if arm not in detail:
         raise ValueError(f"{path}: no arm {arm!r} (has: {', '.join(sorted(detail))})")
-    return detail[arm]
+    return detail[arm], payload.get("provenance")
 
 
 def seed_average(groups: list) -> list:
@@ -73,7 +74,12 @@ def _check_aligned(named_rows: list) -> None:
             raise ValueError(
                 f"{name}: {len(rows)} episodes against {len(reference)} in {reference_name}")
         for index, (row, expected) in enumerate(zip(rows, reference)):
-            if (row["kind"], row["volume"]) != (expected["kind"], expected["volume"]):
+            identity = (row.get("kind"), row.get("volume"), row.get("start_params"),
+                        row.get("targets"), row.get("goal"))
+            expected_identity = (expected.get("kind"), expected.get("volume"),
+                                 expected.get("start_params"), expected.get("targets"),
+                                 expected.get("goal"))
+            if identity != expected_identity:
                 raise ValueError(
                     f"episode {index} differs between {reference_name} and {name}: "
                     f"{expected['volume']}/{expected['kind']} against "
@@ -90,8 +96,20 @@ def compare_groups(a_paths: list, b_paths: list, arm: str = DEFAULT_ARM) -> dict
     per-episode attainment: each side's median, their difference, the share
     of episodes `b` wins, a paired Wilcoxon signed-rank test, and the same
     per instruction kind."""
-    a_groups = [load_arm(path, arm) for path in a_paths]
-    b_groups = [load_arm(path, arm) for path in b_paths]
+    loaded_a = [load_arm(path, arm) for path in a_paths]
+    loaded_b = [load_arm(path, arm) for path in b_paths]
+    provenance_records = [record for _, record in loaded_a + loaded_b]
+    if any(record is not None for record in provenance_records):
+        if any(record is None for record in provenance_records):
+            raise ValueError("result provenance is missing from one or more paired files")
+        reference_provenance = provenance_records[0]
+        for record in provenance_records[1:]:
+            report = provenance.compare(record, current=reference_provenance)
+            if report["stale"]:
+                raise ValueError("result provenance is incompatible: "
+                                 + "; ".join(report["reasons"]))
+    a_groups = [rows for rows, _ in loaded_a]
+    b_groups = [rows for rows, _ in loaded_b]
     _check_aligned(list(zip(a_paths, a_groups)) + list(zip(b_paths, b_groups)))
 
     a_rows, b_rows = seed_average(a_groups), seed_average(b_groups)

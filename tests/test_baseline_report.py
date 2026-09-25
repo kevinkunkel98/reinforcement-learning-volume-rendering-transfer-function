@@ -1,3 +1,4 @@
+import json
 import pytest
 
 from tools.baseline_report import run_volume, summarise
@@ -43,6 +44,20 @@ def test_baseline_report_scoring_receives_active_layers(monkeypatch):
 
     assert seen["aggregate"] == layers
     assert seen["baseline"] == layers
+
+
+def test_baseline_report_persists_active_layer_provenance(tmp_path, monkeypatch):
+    from tools import baseline_report
+
+    monkeypatch.setattr(baseline_report, "run_volume", lambda *args, **kwargs: [])
+    monkeypatch.setattr(baseline_report, "_print_table", lambda summary: None)
+    out = tmp_path / "report.json"
+
+    baseline_report.main(["--volumes", "stub", "--instructions", "0", "--layers",
+                          '{"liver": {"opacity": 0.0}}', "--out", str(out)])
+
+    payload = json.loads(out.read_text())
+    assert payload["provenance"]["anatomy_layers"]["liver"]["opacity"] == 0.0
 
 
 def _rows():

@@ -720,6 +720,19 @@ def test_main_loads_cli_layers_into_provenance(tmp_path, monkeypatch):
     assert json.loads(out.read_text())["provenance"]["anatomy_layers"]["liver"]["opacity"] == 0.0
 
 
+def test_main_passes_active_layers_to_episode_generation(tmp_path, monkeypatch):
+    _stub_run(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(vis_eval, "fixed_episodes", lambda *args, **kwargs: (
+        seen.setdefault("layers", kwargs["active_layers"]), [{"volume": "stub_a",
+        "start_params": None, "instruction": {"kind": "relative", "goal": {}}}])[1])
+
+    vis_eval.main(["--policy", "p.zip", "--layers", '{"liver": {"opacity": 0.0}}',
+                   "--out", str(tmp_path / "eval.json")])
+
+    assert seen["layers"]["liver"]["opacity"] == 0.0
+
+
 def test_main_records_non_default_evaluation_layers(tmp_path, monkeypatch):
     _stub_run(monkeypatch)
     layers = {"liver": {"opacity": 0.0}}

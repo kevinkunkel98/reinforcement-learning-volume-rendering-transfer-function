@@ -96,7 +96,7 @@ def main(active_layers=None, argv=None):
     from stable_baselines3 import SAC
 
     episodes = fixed_episodes(args.split, args.episodes, seed=args.seed,
-                              formulation="one_shot")
+                              formulation="one_shot", active_layers=active_layers)
     models = {}
     for episode in episodes:
         if episode["volume"] not in models:
