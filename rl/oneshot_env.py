@@ -171,6 +171,8 @@ class OneShotEnv(gym.Env):
             raise ValueError("action_mode must be absolute or residual")
         if reward_mode not in ("attainment", "target"):
             raise ValueError("reward_mode must be attainment or target")
+        if policy_version == V7_POLICY_VERSION and reward_mode != "target":
+            raise ValueError("oneshot-v7 requires target reward")
         if not 0.0 <= hindsight_ratio <= 1.0:
             raise ValueError("hindsight_ratio must be between 0 and 1")
         self.policy_version = policy_version

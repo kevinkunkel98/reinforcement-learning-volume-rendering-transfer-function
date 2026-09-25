@@ -302,10 +302,17 @@ def test_v7_metadata_requires_residual_target_contract(metadata):
         resolve_policy_metadata(metadata)
 
 
+def test_v7_environment_requires_target_reward_at_init():
+    with pytest.raises(ValueError, match="target reward"):
+        OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
+                   policy_version="oneshot-v7", action_mode="residual",
+                   reward_mode="attainment")
+
+
 def test_v7_residual_action_is_added_to_start(monkeypatch):
     _patch_totalseg(monkeypatch)
     env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
-                     policy_version="oneshot-v7", action_mode="residual")
+                     policy_version="oneshot-v7", action_mode="residual", reward_mode="target")
     env.reset(seed=2)
     action = np.zeros(ACTION_SIZE, dtype=np.float32)
     action[0] = 0.1
@@ -317,7 +324,8 @@ def test_v7_residual_action_is_added_to_start(monkeypatch):
 def test_v7_hindsight_ratio_one_exposes_oracle_action(monkeypatch):
     _patch_totalseg(monkeypatch)
     env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
-                     policy_version="oneshot-v7", action_mode="residual", hindsight_ratio=1.0)
+                     policy_version="oneshot-v7", action_mode="residual", reward_mode="target",
+                     hindsight_ratio=1.0)
     _, info = env.reset(seed=3)
     assert info["goal_source"] == "hindsight"
     assert env.hindsight_action() is not None
