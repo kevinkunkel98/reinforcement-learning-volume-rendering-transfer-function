@@ -671,14 +671,31 @@ def test_main_records_code_provenance_and_explicit_layer_absence(tmp_path, monke
 def test_main_records_non_default_evaluation_layers(tmp_path, monkeypatch):
     _stub_run(monkeypatch)
     layers = {"liver": {"opacity": 0.0}}
+    received = {}
     real_result_provenance = provenance.result_provenance
     monkeypatch.setattr(vis_eval.provenance, "result_provenance",
-                        lambda active_layers=None: real_result_provenance(layers))
+                        lambda active_layers=None: (received.setdefault("layers", active_layers),
+                                                    real_result_provenance(active_layers))[1])
     out = tmp_path / "eval-layers.json"
 
-    vis_eval.main(["--policy", "p.zip", "--out", str(out)])
+    vis_eval.main(["--policy", "p.zip", "--out", str(out)], active_layers=layers)
 
     assert json.loads(out.read_text())["provenance"]["anatomy_layers"]["liver"]["opacity"] == 0.0
+    assert received["layers"] == layers
+
+
+def test_check_provenance_passes_active_layers_as_expected_layers(monkeypatch):
+    layers = {"liver": {"opacity": 0.0}}
+    received = {}
+
+    def compare(recorded, current=None, expected_layers=None):
+        received["layers"] = expected_layers
+        return {"stale": False, "reasons": [], "recorded_dirty": False}
+
+    monkeypatch.setattr(vis_eval.provenance, "compare", compare)
+
+    assert vis_eval.check_provenance({"provenance": {}}, active_layers=layers)["stale"] is False
+    assert received["layers"] == layers
 
 
 def _comparison_with(provenance_record) -> dict:

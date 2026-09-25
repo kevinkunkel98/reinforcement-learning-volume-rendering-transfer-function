@@ -73,7 +73,7 @@ def summarise_per_class(rows: list) -> dict:
     return report
 
 
-def main():
+def main(active_layers=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("policies", nargs="+")
     ap.add_argument("--split", default="test")
@@ -119,8 +119,7 @@ def main():
             "overall_share_positive": sum(1 for a in overall if a > 0) / len(overall),
             "per_class": summarise_per_class(per_class_rows),
             "metadata": observation_metadata(),
-            # Per-class episodes do not carry renderer layer state.
-            "provenance": provenance.result_provenance(None),
+            "provenance": provenance.result_provenance(active_layers),
         }
 
     classes = sorted({c for r in results.values() for c in r["per_class"]})
