@@ -34,12 +34,14 @@ from rl.vis_eval import fixed_episodes
 def _score(policy, episode, model, active_layers=None) -> float:
     instruction = episode["instruction"]
     start_params = episode["start_params"]
-    start_agg = goals.aggregate(model.features(start_params, active_layers))
+    start_features = goals.features(model, start_params, active_layers)
+    start_agg = goals.aggregate(start_features, active_layers)
     observation = _observation_for(model, start_params, instruction, start_agg)
     action = _predict(policy, observation, np.random.default_rng(0), True)
     params = _apply_action(start_params, action)
+    final_features = goals.features(model, params, active_layers)
     return goals.attainment(instruction["goal"], start_agg,
-                            goals.aggregate(model.features(params, active_layers)))
+                            goals.aggregate(final_features, active_layers))
 
 
 def _class_row(goal_class: str, status: str, attainment):

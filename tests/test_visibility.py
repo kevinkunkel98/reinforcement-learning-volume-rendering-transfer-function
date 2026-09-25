@@ -124,6 +124,16 @@ def test_features_reports_unlabeled_tissue_as_other():
     assert features["vis"]["other"] > 0.3
 
 
+def test_explicit_layer_opacity_populates_effective_fields():
+    model = _model(_slab_volume(-1000.0, 900.0))
+    params = _params([0.0, 0.0, 0.0, 0.9])
+    raw = model.features(params)
+    effective = model.features(params, {"skeleton": {"opacity": 0.0}})
+
+    assert effective["vis"]["skeleton"] == pytest.approx(raw["vis"]["skeleton"])
+    assert effective["effective_vis"]["skeleton"] == 0.0
+
+
 def test_views_see_different_things():
     """Bone behind soft tissue is hidden from the front and open from behind."""
     n = 24

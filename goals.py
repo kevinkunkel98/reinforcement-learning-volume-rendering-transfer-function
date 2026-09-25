@@ -55,7 +55,13 @@ def starting_params() -> np.ndarray:
     return transfer.anatomical_params()
 
 
-def aggregate(features: dict) -> dict:
+def features(model, params, active_layers=None) -> dict:
+    """Evaluate model features with optional active anatomy layers."""
+    return (model.features(params, active_layers) if active_layers is not None
+            else model.features(params))
+
+
+def aggregate(features: dict, active_layers=None) -> dict:
     """Measured classes -> goal classes.
 
     {"vis": {goal class: float}, "bright": {goal class: float}, "coverage": float}
@@ -63,26 +69,31 @@ def aggregate(features: dict) -> dict:
     feature dictionaries using `organs` and `muscle` are read as generic
     `soft`; canonical models use the shared anatomy registry directly.
     """
+    source_vis = features.get("effective_vis", features["vis"]) if active_layers is not None else features["vis"]
+    source_bright = (features.get("effective_bright", features["bright"])
+                     if active_layers is not None else features["bright"])
     vis, bright = {}, {}
     for goal_class in GOAL_CLASSES:
         measured = MEASURED_FOR_GOAL[goal_class]
         # Read old synthetic feature fixtures while canonical models use only
         # registry names. Legacy organs/muscle remain soft, never promoted.
-        if goal_class == "soft" and "soft" not in features["vis"]:
+        if goal_class == "soft" and "soft" not in source_vis:
             sources = ("organs", "muscle")
         else:
             sources = measured
-        total_vis = sum(features["vis"].get(m, 0.0) for m in sources)
+        total_vis = sum(source_vis.get(m, 0.0) for m in sources)
         vis[goal_class] = total_vis
         if total_vis > 0.0:
-            bright[goal_class] = (sum(features["vis"].get(m, 0.0) * features["bright"].get(m, 0.0)
+            bright[goal_class] = (sum(source_vis.get(m, 0.0) * source_bright.get(m, 0.0)
                                    for m in sources) / total_vis)
         else:
             bright[goal_class] = 0.0
     # Not a goal class -- no instruction ever names it -- but distance() still
     # needs it to tell "hidden" apart from "hidden behind unlabeled material".
-    vis["other"] = features["vis"].get("other", 0.0)
-    return {"vis": vis, "bright": bright, "coverage": features["coverage"]}
+    vis["other"] = source_vis.get("other", 0.0)
+    coverage = (features.get("effective_coverage", features["coverage"])
+                if active_layers is not None else features["coverage"])
+    return {"vis": vis, "bright": bright, "coverage": coverage}
 
 
 def goal_vector(targets: dict) -> np.ndarray:
@@ -153,15 +164,24 @@ def distance(goal: np.ndarray, start: dict, current: dict) -> float:
     return float(total)
 
 
-def attainment(goal, start, final) -> float:
+def scoring(goal, start_features, final_features, active_layers=None) -> float:
+    """Score final model features against start features using effective layers."""
+    start = aggregate(start_features, active_layers)
+    final = aggregate(final_features, active_layers)
+    return attainment(goal, start, final)
+
+
+def attainment(goal, start, final, active_layers=None) -> float:
     """1 - distance(final) / distance(start); 1 = goal reached, < 0 = worse."""
     return 1.0 - distance(goal, start, final) / distance(goal, start, start)
 
 
-def is_useless(features: dict) -> bool:
+def is_useless(features: dict, active_layers=None) -> bool:
     """Nothing drawn, or an opaque wall hiding everything."""
-    return (features["coverage"] < 0.01
-            or sum(features["vis"].values()) < 0.001)
+    vis = features.get("effective_vis", features["vis"]) if active_layers is not None else features["vis"]
+    coverage = (features.get("effective_coverage", features["coverage"])
+                if active_layers is not None else features["coverage"])
+    return (coverage < 0.01 or sum(vis.values()) < 0.001)
 
 
 ATTAINMENT_CLIP = 1.0

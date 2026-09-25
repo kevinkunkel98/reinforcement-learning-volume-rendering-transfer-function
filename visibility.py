@@ -207,10 +207,11 @@ class VisibilityModel:
         effective_vis["other"] = vis["other"]
         effective_bright["other"] = bright.get("other", 0.0)
         coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
+        effective_coverage = float(sum(effective_vis.values()))
         return {"vis": vis, "bright": bright, "effective_vis": effective_vis,
                 "effective_bright": effective_bright,
                 "effective_class_contribution": dict(effective_vis),
-                "coverage": coverage}
+                "coverage": coverage, "effective_coverage": effective_coverage}
 
     def layer_metrics(self, params, target: str, layers=None) -> dict:
         """Report target isolation and cross-class leakage for one layer."""

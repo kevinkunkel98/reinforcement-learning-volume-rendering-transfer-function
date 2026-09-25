@@ -101,7 +101,7 @@ def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict
     env = VisibilityTFEnv([volume], model_for_volume=model_for_volume)
     model = model_for_volume(volume)
     raw_features = _features(model, start_params, active_layers)
-    start_agg = goals.aggregate(raw_features)
+    start_agg = goals.aggregate(raw_features, active_layers)
     start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
     env._volume = volume
@@ -115,7 +115,7 @@ def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict
     env._active_layers = active_layers
 
     obs = env._build_observation(env._params, start_agg)
-    info = env._info(start_distance, start_agg, goals.is_useless(raw_features))
+    info = env._info(start_distance, start_agg, goals.is_useless(raw_features, active_layers))
     return env, obs, info
 
 
@@ -126,7 +126,7 @@ def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dic
     env = OneShotEnv([volume], model_for_volume=model_for_volume)
     model = model_for_volume(volume)
     raw_features = _features(model, start_params, active_layers)
-    start_agg = goals.aggregate(raw_features)
+    start_agg = goals.aggregate(raw_features, active_layers)
     start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
     env._volume = volume
@@ -139,7 +139,7 @@ def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dic
     env._active_layers = active_layers
 
     obs = env._build_observation()
-    info = env._info(env._attainment(start_agg), goals.is_useless(raw_features))
+    info = env._info(env._attainment(start_agg), goals.is_useless(raw_features, active_layers))
     return env, obs, info
 
 
@@ -221,7 +221,7 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
         if evaluations > 0:
             refined_params = hill_climb(env._model, env._params, episode["instruction"],
                                          evaluations=evaluations)
-            refined_agg = goals.aggregate(_features(env._model, refined_params, active_layers))
+            refined_agg = goals.aggregate(_features(env._model, refined_params, active_layers), active_layers)
             refined_attainment = env._attainment(refined_agg)
             if refined_attainment > info["attainment"]:
                 info = {**info, "attainment": refined_attainment}
@@ -254,9 +254,9 @@ def run_baseline(name: str, episodes: list, model_for_volume=None, active_layers
         instruction = episode["instruction"]
         try:
             model = get_model(episode["volume"])
-            start_agg = goals.aggregate(_features(model, episode["start_params"], active_layers))
+            start_agg = goals.aggregate(_features(model, episode["start_params"], active_layers), active_layers)
             final_params = baseline_fn(model, episode["start_params"], instruction)
-            final_agg = goals.aggregate(_features(model, final_params, active_layers))
+            final_agg = goals.aggregate(_features(model, final_params, active_layers), active_layers)
             attainment = _attainment_or_zero(instruction["goal"], start_agg, final_agg)
         except Exception:
             attainment = None
@@ -412,7 +412,8 @@ def episodes_detail(results: dict, episodes: list) -> dict:
     return detail
 
 
-def per_class_summary(results: dict, episodes: list, model_for_volume=None) -> dict:
+def per_class_summary(results: dict, episodes: list, model_for_volume=None,
+                      active_layers=None) -> dict:
     """Report class support/reachability for every episode and scored classes.
 
     Every canonical class gets one status count per episode. Attainment is
@@ -466,7 +467,7 @@ def per_class_summary(results: dict, episodes: list, model_for_volume=None) -> d
 
 
 def compare(results: dict, policy_name: str = "policy", episodes=None,
-            model_for_volume=None) -> dict:
+            model_for_volume=None, active_layers=None) -> dict:
     """Robust attainment stats per method (overall and per instruction kind),
     plus a paired Wilcoxon signed-rank test of `results[policy_name]` against
     every other method in `results`. Episodes where either side's
@@ -491,7 +492,8 @@ def compare(results: dict, policy_name: str = "policy", episodes=None,
     comparison = {"summary": summary, "comparisons": comparisons,
                   "metadata": observation_metadata()}
     if episodes is not None:
-        comparison["per_class"] = per_class_summary(results, episodes, model_for_volume)
+        comparison["per_class"] = per_class_summary(
+            results, episodes, model_for_volume, active_layers)
     return comparison
 
 
@@ -611,7 +613,7 @@ def main(argv=None, active_layers=None):
               "provenance": provenance.result_provenance(active_layers),
               "metadata": observation_metadata(),
               "episodes_detail": episodes_detail(results, episodes),
-               **compare(results, episodes=episodes)}
+               **compare(results, episodes=episodes, active_layers=active_layers)}
     _print_table(result, active_layers=active_layers)
 
     out = args.out or DEFAULT_OUT_TEMPLATE.format(split=args.split)

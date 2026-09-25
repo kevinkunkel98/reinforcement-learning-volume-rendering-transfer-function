@@ -99,6 +99,9 @@ class VisibilityTFEnv(gym.Env):
             self._model_cache[volume] = model
         return model
 
+    def _features(self, params):
+        return goals.features(self._model, params, getattr(self, "_active_layers", None))
+
     def _sample_start_params(self, rng) -> np.ndarray:
         params = goals.starting_params()
         for index in goals.PEAK_INDEX.values():
@@ -151,8 +154,9 @@ class VisibilityTFEnv(gym.Env):
         volume = str(rng.choice(self.volume_ids))
         model = self._get_model(volume)
         params = self._sample_start_params(rng)
-        raw_features = model.features(params)
-        start_agg = goals.aggregate(raw_features)
+        self._active_layers = getattr(self, "_active_layers", None)
+        raw_features = goals.features(model, params, self._active_layers)
+        start_agg = goals.aggregate(raw_features, self._active_layers)
         instruction = goals.sample_instruction(volume, model, start_agg, rng)
         start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
@@ -178,10 +182,12 @@ class VisibilityTFEnv(gym.Env):
                 params[index] = float(np.clip(params[index] + delta, -1.0, 1.0))
         self._params = params
 
-        raw_features = self._model.features(params)
-        agg = goals.aggregate(raw_features)
+        raw_features = self._features(params)
+        active_layers = getattr(self, "_active_layers", None)
+        agg = goals.aggregate(raw_features, active_layers)
         distance = goals.distance(self._instruction["goal"], self._start_agg, agg)  # pyright: ignore[reportOptionalSubscript]
-        useless = goals.is_useless(raw_features)
+        useless = (goals.is_useless(raw_features, active_layers)
+                   if active_layers is not None else goals.is_useless(raw_features))
         denom = max(self._start_distance, DISTANCE_FLOOR)
         normalized_drop = np.clip((self._prev_distance - distance) / denom, -REWARD_CLIP, REWARD_CLIP)
         reward = float(normalized_drop) - (USELESS_PENALTY if useless else 0.0)

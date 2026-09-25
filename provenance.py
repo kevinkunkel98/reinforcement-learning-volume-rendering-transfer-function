@@ -28,7 +28,7 @@ import sys
 
 from anatomy import CLASS_LAYOUT_VERSION
 from anatomy_layers import LAYER_LAYOUT_VERSION
-from anatomy_layers import normalize_layers
+from anatomy_layers import default_layers, normalize_layers
 
 # The modules that actually turn a rendered state into a number. A change in
 # any of them invalidates comparisons across result files, which is exactly
@@ -236,6 +236,9 @@ def compare(recorded: dict, current: dict = None, expected_layers=None) -> dict:
         if recorded.get("anatomy_layers") != expected:
             reasons.append("anatomy_layers changed: recorded runtime layers do not "
                            "match expected layers")
+    elif recorded.get("anatomy_layers") is not None:
+        if recorded["anatomy_layers"] != default_layers():
+            reasons.append("recorded custom anatomy layers require --layers or --layers-file")
 
     return {"stale": bool(reasons), "reasons": reasons,
             "recorded_dirty": bool(recorded.get("git_dirty"))}

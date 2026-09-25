@@ -199,6 +199,9 @@ class OneShotEnv(gym.Env):
         return build_observation(self._instruction["goal"], self._model.histogram, self._start_agg,  # pyright: ignore[reportOptionalSubscript]
                                   solo_max_log, controllable)
 
+    def _features(self, params):
+        return goals.features(self._model, params, getattr(self, "_active_layers", None))
+
     def _attainment(self, agg: dict) -> float:
         if self._start_distance <= _ATTAINMENT_FLOOR:
             return 0.0
@@ -221,7 +224,7 @@ class OneShotEnv(gym.Env):
             noise = rng.uniform(-HINDSIGHT_NOISE, HINDSIGHT_NOISE, size=len(CONTROLLABLE))
             action = np.clip(start_controllable + noise, -1.0, 1.0)
             target_params = apply_controllable(start_params, action)
-            target_agg = goals.aggregate(model.features(target_params))
+            target_agg = goals.aggregate(self._features(target_params), self._active_layers)
 
             deltas = {}
             for goal_class in goals.GOAL_CLASSES:
@@ -258,9 +261,11 @@ class OneShotEnv(gym.Env):
 
         volume = str(rng.choice(self.volume_ids))
         model = self._get_model(volume)
+        self._model = model
         start_params = self._sample_start_params(rng)
-        raw_features = model.features(start_params)
-        start_agg = goals.aggregate(raw_features)
+        self._active_layers = getattr(self, "_active_layers", None)
+        raw_features = goals.features(model, start_params, self._active_layers)
+        start_agg = goals.aggregate(raw_features, self._active_layers)
         if rng.random() < self.hindsight_ratio:
             instruction, hindsight_action = self._sample_hindsight_goal(rng, model, start_params, start_agg)
         else:
@@ -268,7 +273,6 @@ class OneShotEnv(gym.Env):
         start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
         self._volume = volume
-        self._model = model
         self._start_params = start_params
         self._params = start_params
         self._instruction = instruction
@@ -285,9 +289,11 @@ class OneShotEnv(gym.Env):
         params = apply_controllable(self._start_params, action)
         self._params = params
 
-        raw_features = self._model.features(params)
-        final_agg = goals.aggregate(raw_features)
-        useless = goals.is_useless(raw_features)
+        raw_features = self._features(params)
+        active_layers = getattr(self, "_active_layers", None)
+        final_agg = goals.aggregate(raw_features, active_layers)
+        useless = (goals.is_useless(raw_features, active_layers)
+                   if active_layers is not None else goals.is_useless(raw_features))
         attainment = self._attainment(final_agg)
         reward = float(np.clip(attainment, -REWARD_CLIP, REWARD_CLIP)) - (USELESS_PENALTY if useless else 0.0)
 

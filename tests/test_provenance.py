@@ -213,13 +213,14 @@ def test_compare_flags_a_changed_anatomy_layer_layout():
     assert any("anatomy_layer_layout" in reason for reason in report["reasons"])
 
 
-def test_compare_ignores_runtime_layer_difference_without_expected_layers():
+def test_compare_requires_recorded_custom_layers_without_expected_layers():
     recorded = provenance.result_provenance({"liver": {"opacity": 0.0}})
     current = provenance.result_provenance()
 
     report = provenance.compare(recorded, current)
 
-    assert report["stale"] is False
+    assert report["stale"] is True
+    assert any("--layers" in reason for reason in report["reasons"])
 
 
 def test_compare_checks_runtime_layers_when_expected_layers_are_explicit():
@@ -230,6 +231,15 @@ def test_compare_checks_runtime_layers_when_expected_layers_are_explicit():
 
     assert report["stale"] is True
     assert any("anatomy_layers" in reason for reason in report["reasons"])
+
+
+def test_compare_requires_layers_for_recorded_custom_layers():
+    recorded = provenance.result_provenance({"liver": {"opacity": 0.0}})
+
+    report = provenance.compare(recorded, provenance.result_provenance())
+
+    assert report["stale"] is True
+    assert any("--layers" in reason for reason in report["reasons"])
 
 
 def test_compare_treats_a_result_without_provenance_as_stale():

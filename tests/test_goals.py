@@ -96,6 +96,34 @@ def test_aggregate_keeps_promoted_organs_out_of_soft():
     assert aggregated["vis"]["heart"] == pytest.approx(0.2)
 
 
+def test_aggregate_uses_effective_features_for_explicit_layers():
+    features = _features(organs=(0.8, 0.4), muscle=(0.2, 0.6))
+    features["effective_vis"] = dict(features["vis"])
+    features["effective_bright"] = dict(features["bright"])
+    features["effective_vis"]["heart"] = 0.0
+    features["effective_bright"]["heart"] = 0.0
+
+    aggregated = goals.aggregate(features, active_layers={"heart": {"opacity": 0.0}})
+
+    assert aggregated["vis"]["heart"] == 0.0
+    assert aggregated["bright"]["heart"] == 0.0
+
+
+def test_features_and_scoring_accept_active_layers():
+    class Model:
+        def features(self, params, layers=None):
+            assert layers == {"heart": {"opacity": 0.0}}
+            return _features()
+
+    layers = {"heart": {"opacity": 0.0}}
+    raw = goals.features(Model(), np.zeros(1), layers)
+    assert raw["coverage"] == 0.5
+
+    goal = goals.goal_vector({"skeleton": {"vis": 0.2}})
+    score = goals.scoring(goal, raw, raw, layers)
+    assert isinstance(score, float)
+
+
 def test_progress_is_log_change_for_visibility_and_plain_change_for_brightness():
     start = _aggregated(skeleton=0.001, skeleton_b=0.4)
     current = _aggregated(skeleton=0.011, skeleton_b=0.55)
