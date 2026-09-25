@@ -28,6 +28,7 @@ import numpy as np
 import torch
 
 from anatomy import CLASS_LAYOUT_VERSION, MEASURED_CLASSES
+from anatomy_layers import LAYER_LAYOUT_VERSION, normalize_layers
 import transfer
 from transfer import (
     CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK,
@@ -44,6 +45,7 @@ AIR_HU = CENTER_RANGE[0]
 LUMINANCE = np.array([0.2126, 0.7152, 0.0722])
 CACHE_DIR = "out/cache/visibility"
 CACHE_VERSION = 3
+VISIBILITY_RENDERER_VERSION = "visibility-v1"
 
 
 def quantize(values: np.ndarray) -> np.ndarray:
@@ -172,7 +174,7 @@ class VisibilityModel:
         before = torch.cat([ones, torch.cumprod(transparency, dim=1)[:, :-1]], dim=1)
         return before * alpha, luminance, 1.0 - transparency.prod(dim=1)
 
-    def features(self, params) -> dict:
+    def features(self, params, layers=None) -> dict:
         """{"vis": {class: float, "other": float}, "bright": {class: float}, "coverage": float}.
 
         "other" is voxels the label volume (or the intensity fallback)
@@ -184,17 +186,48 @@ class VisibilityModel:
         satisfy "show only X" by rendering an opaque wall of unclassified
         material instead of X (see goals.py's OTHER keep term)."""
         weights, luminance, accumulated = self._weights(params)
+        layers = normalize_layers(layers or {})
         vis, bright = {}, {}
+        effective_vis, effective_bright = {}, {}
         for index, name in enumerate(CLASSES):
             masked = torch.where(self._labels == index, weights, torch.zeros(()))
             total = float(masked.sum())
             vis[name] = total / self._rays
             bright[name] = (float((masked * luminance).sum() / total)
                             if total / self._rays > 1e-4 else 0.0)
+            effective = masked * layers[name]["opacity"]
+            effective_total = float(effective.sum())
+            effective_vis[name] = effective_total / self._rays
+            effective_bright[name] = (
+                float((effective * luminance).sum() / effective_total)
+                if effective_total / self._rays > 1e-4 else 0.0
+            )
         other_masked = torch.where(self._labels == -1, weights, torch.zeros(()))
         vis["other"] = float(other_masked.sum()) / self._rays
+        effective_vis["other"] = vis["other"]
+        effective_bright["other"] = bright.get("other", 0.0)
         coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
-        return {"vis": vis, "bright": bright, "coverage": coverage}
+        return {"vis": vis, "bright": bright, "effective_vis": effective_vis,
+                "effective_bright": effective_bright,
+                "effective_class_contribution": dict(effective_vis),
+                "coverage": coverage}
+
+    def layer_metrics(self, params, target: str, layers=None) -> dict:
+        """Report target isolation and cross-class leakage for one layer."""
+        if target not in CLASSES:
+            raise ValueError(f"unknown anatomy class: {target}")
+        selected = normalize_layers(layers or {})
+        for name in CLASSES:
+            if name != target:
+                selected[name]["opacity"] = 0.0
+        effective = self.features(params, selected)
+        contributions = effective["effective_class_contribution"]
+        target_contribution = contributions[target]
+        total = sum(contributions[name] for name in CLASSES)
+        leakage = total - target_contribution
+        return {"target": target, "target_contribution": target_contribution,
+                "isolation": target_contribution / total if total else 0.0,
+                "cross_class_leakage": leakage / total if total else 0.0}
 
     def per_view_visibility(self, params, name: str) -> list:
         """Visibility of one class in each view separately (diagnostics, tests)."""
@@ -220,10 +253,13 @@ class VisibilityModel:
             self._solo_max[name] = best
         return self._solo_max[name]
 
-    def cache_key(self, volume_version: str, label_identity: str = "") -> str:
+    def cache_key(self, volume_version: str, label_identity: str = "",
+                  layer_layout: str = LAYER_LAYOUT_VERSION,
+                  renderer_version: str = VISIBILITY_RENDERER_VERSION) -> str:
         parts = (self.volume_id, volume_version, self.n_views, self.indices.shape[1],
                  LUT_SIZE, CACHE_VERSION, CLASS_LAYOUT_VERSION,
-                 label_identity, transfer.TRANSFER_LAYOUT_VERSION,
+                  label_identity, layer_layout, renderer_version,
+                  transfer.TRANSFER_LAYOUT_VERSION,
                  ",".join(transfer.TRANSFER_LAYOUT_ORDER), ",".join(CLASSES))
         return hashlib.sha256(":".join(str(p) for p in parts).encode()).hexdigest()[:16]
 

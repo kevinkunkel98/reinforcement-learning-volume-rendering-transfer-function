@@ -277,6 +277,10 @@ def scene_transition(
         raise ValueError("scene_id values must be distinct")
     if after_scene["parent_scene_id"] != before_scene["scene_id"]:
         raise ValueError("after.parent_scene_id must equal before.scene_id")
+    if after_scene["anatomy_layers"] != before_scene["anatomy_layers"]:
+        raise ValueError("transition anatomy_layers must not change")
+    if after_scene.get("label_layout") != before_scene.get("label_layout"):
+        raise ValueError("transition label_layout must not change")
     for field in ("session_id", "client"):
         if after_scene[field] != before_scene[field]:
             raise ValueError(f"transition {field} must not change")

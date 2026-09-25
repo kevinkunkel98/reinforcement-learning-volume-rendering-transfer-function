@@ -74,6 +74,23 @@ def test_normalize_scene_accepts_anatomy_layers_and_label_layout():
     assert scene["label_layout"] == "anatomy-v2"
 
 
+def test_scene_transition_rejects_mismatched_anatomy_layers():
+    before = valid_scene(scene_id="s:0", parent_scene_id=None)
+    after = valid_scene(scene_id="s:1", parent_scene_id="s:0",
+                        anatomy_layers={"liver": {"opacity": 0.0}})
+
+    with pytest.raises(ValueError, match="anatomy_layers"):
+        scene_transition(before, after)
+
+
+def test_scene_transition_rejects_mismatched_label_layout():
+    before = valid_scene(scene_id="s:0", parent_scene_id=None, label_layout="anatomy-v2")
+    after = valid_scene(scene_id="s:1", parent_scene_id="s:0", label_layout="anatomy-v1")
+
+    with pytest.raises(ValueError, match="label_layout"):
+        scene_transition(before, after)
+
+
 @pytest.mark.parametrize("label_layout", ["anatomy-v1", "", 3, None])
 def test_normalize_scene_rejects_invalid_label_layout(label_layout):
     with pytest.raises(ValueError):

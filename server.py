@@ -209,6 +209,16 @@ def _class_brightness(params, model_for_volume=visibility.for_volume):
             for goal_class in goals.GOAL_CLASSES}
 
 
+def _class_effective_contribution(params, layers, model_for_volume=visibility.for_volume):
+    try:
+        model = model_for_volume(_dataset_name)
+        return model.features(np.asarray(params, dtype=np.float64), layers)[
+            "effective_class_contribution"]
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        print(f"[telemetry] no effective layer visibility for {_dataset_name}: {exc}")
+        return {name: None for name in visibility.CLASSES}
+
+
 def goal_channels(goal) -> dict:
     """Which channel each goal class is named on, from the 16-value goal
     vector: targets and masks for `vis`, then targets and masks for `bright`.
@@ -286,6 +296,7 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
         "image_path": image_path,
         "masses": _masses(params),
         "class_visibility": _class_visibility(params),
+        "effective_class_contribution": _class_effective_contribution(params, layers),
         "curve": _transfer_curve(params),
         "histogram": _histogram(),
         "features": features(img),
@@ -416,6 +427,9 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
             "params": params.tolist(),
             "image_b64": image_b64,
             "class_visibility": _class_visibility(params),
+            "anatomy_layers": normalize_layers(layers or default_layers()),
+            "effective_class_contribution": _class_effective_contribution(
+                params, layers or default_layers()),
             "class_brightness": _class_brightness(params),
             "attainment": float(goals.attainment(instruction["goal"], start_agg, final_agg)),
             # An arm that returned its own input is not an arm that *agrees*
@@ -440,6 +454,8 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
         # has to special-case a failed one before reading a field.
         return {"params": None, "unavailable": reason, "detail": str(exc),
                 "attainment": None, "class_visibility": None, "class_brightness": None,
+                "anatomy_layers": normalize_layers(layers or default_layers()),
+                "effective_class_contribution": None,
                 "image_b64": None, "evaluations": None, "unchanged": None,
                 "elapsed_ms": elapsed_ms}
 
@@ -575,6 +591,8 @@ class Session:
                 return
             self.history, self.cursor = history, data["cursor"]
             for step in self.history:
+                if step.get("label_layout") not in (None, "anatomy-v2"):
+                    raise ValueError("label_layout is stale and cannot be reinterpreted")
                 step["anatomy_layers"] = normalize_layers(
                     step.get("anatomy_layers", default_layers()))
             self.session_id = data.get("session_id") or self._new_session_id()

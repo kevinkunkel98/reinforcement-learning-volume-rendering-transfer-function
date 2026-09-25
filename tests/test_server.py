@@ -129,6 +129,63 @@ def test_render_step_persists_and_threads_anatomy_layers(monkeypatch, tmp_path):
     assert step["anatomy_layers"]["liver"] == layers["liver"]
 
 
+def test_render_step_reports_effective_layer_contribution(monkeypatch):
+    layers = server.default_layers()
+    monkeypatch.setattr(server, "_render_image_b64",
+                        lambda *args, **kwargs: ("b64", np.zeros((1, 1, 3), dtype=np.uint8), b"png"))
+    monkeypatch.setattr(server, "_class_effective_contribution",
+                        lambda params, layers: {"liver": 0.25})
+
+    step = server._render_step(np.zeros(48), None, None, False, 0, "session", {}, layers=layers)
+
+    assert step["effective_class_contribution"] == {"liver": 0.25}
+
+
+def test_legacy_session_steps_get_default_layers(monkeypatch, tmp_path):
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps({"history": [{"params": [0.0] * transfer.TOTAL_PARAMS,
+                                               "id": 0}], "cursor": 0,
+                               "session_id": "old"}))
+    monkeypatch.setattr(server, "_render_step", lambda *args, **kwargs: {
+        "id": 0, "params": [0.0] * transfer.TOTAL_PARAMS,
+        "anatomy_layers": server.default_layers()})
+
+    session = Session(str(path), policy_provider=lambda: None)
+
+    assert session.history[0]["anatomy_layers"] == server.default_layers()
+
+
+def test_session_rejects_stale_label_layout(tmp_path):
+    path = tmp_path / "stale.json"
+    path.write_text(json.dumps({"history": [{"params": [0.0] * transfer.TOTAL_PARAMS,
+                                               "id": 0, "label_layout": "anatomy-v1"}],
+                               "cursor": 0, "session_id": "old"}))
+
+    with pytest.raises(ValueError, match="label_layout"):
+        Session(str(path), policy_provider=lambda: None)
+
+
+def test_compare_arms_includes_anatomy_layers_in_each_arm(monkeypatch):
+    layers = server.default_layers()
+    model = type("Model", (), {
+        "features": lambda self, params: {"vis": {name: 0.0 for name in visibility.CLASSES},
+                                           "bright": {name: 0.0 for name in visibility.CLASSES},
+                                           "coverage": 0.0},
+        "solo_max": lambda self, name: 1.0,
+        "histogram": np.zeros(16),
+    })()
+    instruction = {"goal": np.zeros(32), "text": "test"}
+    monkeypatch.setattr(server, "_render_image_b64", lambda *args, **kwargs: ("", None, b""))
+    monkeypatch.setattr(server, "_class_visibility", lambda params: {})
+    monkeypatch.setattr(server, "_class_brightness", lambda params: {})
+    monkeypatch.setattr(server.goals, "attainment", lambda *args: 0.0)
+
+    arms = server.compare_arms(model, None, {"attribute": "camera"}, instruction,
+                               np.zeros(48), {}, cheap=1, thorough=1, layers=layers)
+
+    assert all(arm["anatomy_layers"] == layers for arm in arms.values())
+
+
 def test_dataset_metadata_route_maps_unknown_dataset_to_404(monkeypatch):
     def unknown(name):
         raise ValueError("unknown dataset 'missing'")

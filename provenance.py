@@ -25,11 +25,15 @@ import os
 import subprocess
 import sys
 
+from anatomy import CLASS_LAYOUT_VERSION
+from anatomy_layers import LAYER_LAYOUT_VERSION
+from anatomy_layers import normalize_layers
+
 # The modules that actually turn a rendered state into a number. A change in
 # any of them invalidates comparisons across result files, which is exactly
 # what the incident's numbers hid.
 DEFAULT_SCORING_MODULES = ("goals", "visibility", "rl.vis_eval", "rl.oneshot_env",
-                            "tools.per_class_eval")
+                           "tools.per_class_eval")
 
 FINGERPRINT_CHARS = 12
 _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -123,7 +127,7 @@ def scoring_fingerprint(modules=None) -> str:
 
 # --- the record ------------------------------------------------------------------
 
-def provenance(modules=None) -> dict:
+def provenance(modules=None, anatomy_layers=None) -> dict:
     """A record of what is about to compute (or has just computed) a result:
     the commit, whether the tree was dirty, the scoring fingerprint, the
     interpreter and the capture time."""
@@ -135,6 +139,10 @@ def provenance(modules=None) -> dict:
         "git_dirty": git_dirty(),
         "scoring_fingerprint": scoring_fingerprint(modules),
         "scoring_modules": names,
+        "label_layout": CLASS_LAYOUT_VERSION,
+        "anatomy_layers": normalize_layers(anatomy_layers or {}),
+        "anatomy_layer_layout": LAYER_LAYOUT_VERSION,
+        "visibility_renderer": "visibility-v1",
         "python": sys.version,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
@@ -191,6 +199,12 @@ def compare(recorded: dict, current: dict = None) -> dict:
     if recorded_commit and current_commit and recorded_commit != current_commit:
         reasons.append(f"git commit changed: {_short(recorded_commit, 8)} -> "
                        f"{_short(current_commit, 8)}")
+
+    for field in ("label_layout", "anatomy_layers", "visibility_renderer"):
+        recorded_value = recorded.get(field)
+        current_value = current.get(field)
+        if recorded_value and current_value and recorded_value != current_value:
+            reasons.append(f"{field} changed: {recorded_value} -> {current_value}")
 
     return {"stale": bool(reasons), "reasons": reasons,
             "recorded_dirty": bool(recorded.get("git_dirty"))}

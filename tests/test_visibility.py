@@ -217,6 +217,35 @@ def test_features_are_deterministic():
     assert model.features(params) == model.features(params)
 
 
+def test_features_report_hu_and_effective_layer_contributions_separately():
+    volume = _slab_volume(-1000.0, 900.0)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[:, : volume.shape[1] // 2, :] = visibility.CLASSES.index("liver") + 1
+    model = _model(volume, labels=labels)
+    params = _single_peak_params(900.0)
+
+    features = model.features(params, {"liver": {"opacity": 0.0}})
+
+    assert features["vis"]["liver"] > 0.0
+    assert features["effective_vis"]["liver"] == pytest.approx(0.0)
+    assert features["effective_class_contribution"]["liver"] == pytest.approx(0.0)
+    assert features["effective_vis"]["other"] == pytest.approx(features["vis"]["other"])
+
+
+def test_layer_isolation_metrics_measure_target_and_cross_class_leakage():
+    volume = _slab_volume(900.0, 900.0)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[:, : volume.shape[1] // 2, :] = visibility.CLASSES.index("liver") + 1
+    labels[:, volume.shape[1] // 2 :, :] = visibility.CLASSES.index("kidneys") + 1
+    model = _model(volume, labels=labels)
+
+    metrics = model.layer_metrics(_single_peak_params(900.0), "liver")
+
+    assert metrics["target_contribution"] > 0.0
+    assert metrics["isolation"] == pytest.approx(1.0)
+    assert metrics["cross_class_leakage"] == pytest.approx(0.0)
+
+
 def test_cache_round_trip_reproduces_features(tmp_path, monkeypatch):
     monkeypatch.setattr(visibility, "CACHE_DIR", str(tmp_path))
     volume = _slab_volume(50.0, 900.0)
@@ -246,6 +275,14 @@ def test_cache_key_uses_versioned_anatomy_layout():
     assert visibility.CLASS_LAYOUT_VERSION == "anatomy-v2"
     assert visibility.CACHE_VERSION >= 3
     assert len(model.cache_key("version-1")) == 16
+
+
+def test_cache_key_includes_layer_layout_renderer_and_label_metadata():
+    model = _model(_slab_volume(50.0, 900.0))
+    base = model.cache_key("version-1", "labels-v1")
+    assert base != model.cache_key("version-1", "labels-v2")
+    assert base != model.cache_key("version-1", "labels-v1", layer_layout="other")
+    assert base != model.cache_key("version-1", "labels-v1", renderer_version="other")
 
 
 def test_label_cache_identity_changes_visibility_key():

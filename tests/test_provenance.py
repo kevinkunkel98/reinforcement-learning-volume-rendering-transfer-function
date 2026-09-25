@@ -27,12 +27,20 @@ def test_provenance_records_commit_dirtiness_fingerprint_python_and_time():
     assert isinstance(record["git_dirty"], bool)
     assert isinstance(record["python"], str) and record["python"]
     assert isinstance(record["timestamp"], str) and "T" in record["timestamp"]
+    assert "anatomy_layers" in record
 
 
 def test_scoring_fingerprint_is_twelve_hex_characters():
     fingerprint = provenance.provenance()["scoring_fingerprint"]
     assert len(fingerprint) == 12
     assert all(character in "0123456789abcdef" for character in fingerprint)
+
+
+def test_provenance_can_record_the_active_anatomy_layers():
+    record = provenance.provenance(anatomy_layers={"liver": {"opacity": 0.0}})
+
+    assert record["anatomy_layers"]["liver"]["opacity"] == 0.0
+    assert record["label_layout"] == "anatomy-v2"
 
 
 def test_fingerprint_is_read_from_disk_so_editing_a_scoring_module_changes_it(tmp_path):
