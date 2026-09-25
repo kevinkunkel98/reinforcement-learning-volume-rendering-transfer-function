@@ -4,6 +4,8 @@ tools/select_totalseg.py, plus loading one selected CT volume.
 Volumes are returned in canonical RAS axis order (numpy axis 0 -> patient
 right, 1 -> anterior, 2 -> superior) as float32 Hounsfield units.
 """
+import functools
+import hashlib
 import json
 import os
 
@@ -107,6 +109,24 @@ def load_labels(name: str) -> np.ndarray:
     if not np.isfinite(labels).all():
         raise ValueError("label volume values must be finite")
     return np.ascontiguousarray(labels)
+
+
+@functools.lru_cache(maxsize=64)
+def _label_digest_cached(path: str, mtime_ns: int, size: int) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def label_digest(name: str) -> str:
+    """Return label-file digest, avoiding repeated full reads while unchanged."""
+    path = subject(name).get("labels_path")
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError(f"{name} has no label volume; {_FETCH_HINT}")
+    stat = os.stat(path)
+    return _label_digest_cached(path, stat.st_mtime_ns, stat.st_size)
 
 
 def _validate_label_layout(entry: dict, manifest_version: str | None = None) -> None:

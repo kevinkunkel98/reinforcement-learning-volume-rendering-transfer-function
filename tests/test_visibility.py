@@ -255,6 +255,13 @@ def test_label_cache_identity_changes_visibility_key():
     assert labeled != base
 
 
+def test_label_file_digest_changes_label_cache_identity(monkeypatch):
+    model = _model(_slab_volume(50.0, 900.0))
+    first = model.cache_key("volume-v1", "labels-a")
+    second = model.cache_key("volume-v1", "labels-b")
+    assert first != second
+
+
 def test_for_volume_builds_once_then_loads(tmp_path, monkeypatch):
     monkeypatch.setattr(visibility, "CACHE_DIR", str(tmp_path))
     calls = []

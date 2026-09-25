@@ -89,13 +89,15 @@
         metadata.label_layout_version !== "anatomy-v2" || metadata.total_bytes !== expectedBytes) {
       throw new Error("unsupported label transport format");
     }
-    if (!Array.isArray(metadata.chunks) || metadata.chunks.length === 0) {
+    if (!Number.isInteger(metadata.chunk_count) || metadata.chunk_count <= 0 ||
+        !Array.isArray(metadata.chunks) || metadata.chunks.length !== metadata.chunk_count) {
       throw new Error("labels have no chunks");
     }
     let offset = 0;
     metadata.chunks.forEach((chunk, index) => {
       if (chunk.index !== index || chunk.byte_offset !== offset ||
-          !Number.isInteger(chunk.byte_length) || chunk.byte_length <= 0) {
+          !Number.isInteger(chunk.byte_length) || chunk.byte_length <= 0 ||
+          chunk.byte_offset < 0 || chunk.byte_offset + chunk.byte_length > metadata.total_bytes) {
         throw new Error("invalid label chunk descriptors");
       }
       offset += chunk.byte_length;
@@ -105,8 +107,16 @@
   }
 
   function reconstructLabels(metadata, chunks) {
+    if (chunks.length !== metadata.chunk_count) throw new Error("label chunk count mismatch");
     const raw = new Uint8Array(metadata.total_bytes);
-    chunks.forEach(({ byte_offset: offset, bytes }) => raw.set(bytes, offset));
+    chunks.forEach(({ index, byte_offset: offset, byte_length: length, bytes }) => {
+      const expected = metadata.chunks[index];
+      if (!expected || expected.byte_offset !== offset || expected.byte_length !== length ||
+          bytes.byteLength !== length || offset < 0 || offset + length > raw.byteLength) {
+        throw new Error("invalid label chunk payload");
+      }
+      raw.set(bytes, offset);
+    });
     return new Uint8Array(raw.buffer);
   }
 
@@ -282,7 +292,6 @@
     const generation = ++loadGeneration;
     loadController?.abort();
     loadController = new AbortController();
-    labelStatus = "";
     viewerEl.hidden = false;
     fallbackEl.hidden = false;
     setStatus("Loading local volume...");
@@ -295,6 +304,7 @@
         setStatus(`Local ${datasetName} volume${labelStatus}`);
         return true;
       }
+      labelStatus = "";
       const loaded = await fetchVolume(name, loadController.signal, generation);
       if (!isCurrentLoad(generation)) return false;
       // Labels are transport-ready now; rendering remains HU-only until Task 3.

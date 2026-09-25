@@ -432,7 +432,7 @@ def label_cache_identity(name: str) -> str:
     classes = ",".join(f"{key}={value}" for key, value in sorted(metadata["class_ids"].items()))
     return "|".join((metadata["label_layout_version"],
                       ",".join(map(str, metadata["dimensions"])), classes,
-                      metadata["dataset_version"]))
+                      metadata["dataset_version"], totalseg.label_digest(name)))
 
 
 def get_label_chunk(name: str, index: int) -> bytes:

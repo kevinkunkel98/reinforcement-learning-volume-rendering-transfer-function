@@ -218,3 +218,14 @@ def test_load_labels_rejects_non_uint8_source(dtype, labelled_manifest):
 
     with pytest.raises(ValueError, match="uint8"):
         totalseg.load_labels("ts_l0001")
+
+
+def test_label_digest_changes_when_label_file_changes(labelled_manifest):
+    first = totalseg.label_digest("ts_l0001")
+    path = json.loads(open(totalseg.MANIFEST_PATH).read())["subjects"][0]["labels_path"]
+    with open(path, "ab") as stream:
+        stream.write(b"changed")
+
+    second = totalseg.label_digest("ts_l0001")
+
+    assert second != first

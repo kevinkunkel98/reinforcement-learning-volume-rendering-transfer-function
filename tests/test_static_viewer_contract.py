@@ -55,6 +55,13 @@ def test_viewer_contract_exposes_label_transport_and_unlabeled_fallback():
     assert "label_layout_version" in viewer
     assert "anatomy-v2" in viewer
     assert "labelStatus" in viewer
+    assert "metadata.chunks.length !== metadata.chunk_count" in viewer
+    assert "chunk.byte_offset + chunk.byte_length > metadata.total_bytes" in viewer
+    assert "chunks.length !== metadata.chunk_count" in viewer
+    assert "bytes.byteLength !== length" in viewer
+    assert "offset + length > raw.byteLength" in viewer
+    assert "bytes.byteLength !== chunk.byte_length" in viewer
+    assert "chunks.length !== metadata.chunk_count" in viewer
     assert "labelStatus" in viewer[viewer.index("setStatus(`Local ${datasetName} volume${labelStatus}`)"):]
 
 
