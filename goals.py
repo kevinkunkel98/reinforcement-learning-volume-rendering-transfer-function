@@ -351,8 +351,14 @@ def _sample_kind(rng) -> str:
     return str(rng.choice(kinds, p=weights))
 
 
-def _sample_relative(classes: list, rng) -> tuple:
-    goal_class = rng.choice(classes)
+def _choose_class(classes: list, rng, preferred=None) -> str:
+    if preferred is not None and preferred in classes:
+        return preferred
+    return str(rng.choice(classes))
+
+
+def _sample_relative(classes: list, rng, preferred=None) -> tuple:
+    goal_class = _choose_class(classes, rng, preferred)
     direction = rng.choice(("increase", "decrease"))
     strength = rng.choice(list(VISIBILITY_STRENGTH))
     sign = 1.0 if direction == "increase" else -1.0
@@ -360,9 +366,12 @@ def _sample_relative(classes: list, rng) -> tuple:
     return targets, _relative_text(goal_class, direction, strength, rng)
 
 
-def _sample_compound(classes: list, rng) -> tuple:
+def _sample_compound(classes: list, rng, preferred=None) -> tuple:
     n = min(2, len(classes))
-    chosen = list(rng.choice(classes, size=n, replace=False))
+    chosen = ([preferred] if preferred in classes else [])
+    remaining = [c for c in classes if c not in chosen]
+    if len(chosen) < n:
+        chosen.extend(list(rng.choice(remaining, size=n - len(chosen), replace=False)))
     targets, phrases = {}, []
     for goal_class in chosen:
         direction = rng.choice(("increase", "decrease"))
@@ -373,9 +382,12 @@ def _sample_compound(classes: list, rng) -> tuple:
     return targets, ", ".join(phrases)
 
 
-def _sample_show_only(classes: list, rng) -> tuple:
+def _sample_show_only(classes: list, rng, preferred=None) -> tuple:
     n = min(int(rng.integers(1, 3)), len(classes))
-    shown = list(rng.choice(classes, size=n, replace=False))
+    shown = ([preferred] if preferred in classes else [])
+    remaining = [c for c in classes if c not in shown]
+    if len(shown) < n:
+        shown.extend(list(rng.choice(remaining, size=n - len(shown), replace=False)))
     targets = {goal_class: {"vis": HIDE_STRENGTH} for goal_class in shown}
     for goal_class in classes:
         if goal_class not in shown:
@@ -385,16 +397,16 @@ def _sample_show_only(classes: list, rng) -> tuple:
     return targets, text
 
 
-def _sample_absolute(classes: list, model, start_features: dict, rng) -> tuple:
-    goal_class = rng.choice(classes)
+def _sample_absolute(classes: list, model, start_features: dict, rng, preferred=None) -> tuple:
+    goal_class = _choose_class(classes, rng, preferred)
     level = rng.choice(list(ABSOLUTE_LEVEL))
     delta = _absolute_target_delta(model, goal_class, level, start_features["vis"][goal_class])
     targets = {goal_class: {"vis": delta}}
     return targets, _absolute_text(goal_class, level, rng)
 
 
-def _sample_brightness(classes: list, rng) -> tuple:
-    goal_class = rng.choice(classes)
+def _sample_brightness(classes: list, rng, preferred=None) -> tuple:
+    goal_class = _choose_class(classes, rng, preferred)
     direction = rng.choice(("increase", "decrease"))
     strength = rng.choice(list(BRIGHTNESS_STRENGTH))
     sign = 1.0 if direction == "increase" else -1.0
@@ -402,7 +414,8 @@ def _sample_brightness(classes: list, rng) -> tuple:
     return targets, _brightness_text(goal_class, direction, rng)
 
 
-def sample_instruction(name, model, start_features, rng, active_layers=None) -> dict:
+def sample_instruction(name, model, start_features, rng, active_layers=None,
+                       class_counts=None, balance_classes=False) -> dict:
     """One instruction: {"kind", "text", "targets", "goal"}.
 
     `targets` is the goal_vector input; `text` is the spoken form. Absolute
@@ -412,17 +425,23 @@ def sample_instruction(name, model, start_features, rng, active_layers=None) -> 
     """
     classes = (reachable_goal_classes(name, model, active_layers)
                if active_layers is not None else reachable_goal_classes(name, model))
+    preferred = None
+    if balance_classes and class_counts:
+        minimum = min(class_counts.get(goal_class, 0) for goal_class in classes)
+        least_seen = [goal_class for goal_class in classes
+                      if class_counts.get(goal_class, 0) == minimum]
+        preferred = str(rng.choice(least_seen))
     kind = _sample_kind(rng)
     if kind == "relative":
-        targets, text = _sample_relative(classes, rng)
+        targets, text = _sample_relative(classes, rng, preferred)
     elif kind == "compound":
-        targets, text = _sample_compound(classes, rng)
+        targets, text = _sample_compound(classes, rng, preferred)
     elif kind == "show_only":
-        targets, text = _sample_show_only(classes, rng)
+        targets, text = _sample_show_only(classes, rng, preferred)
     elif kind == "absolute":
-        targets, text = _sample_absolute(classes, model, start_features, rng)
+        targets, text = _sample_absolute(classes, model, start_features, rng, preferred)
     else:
-        targets, text = _sample_brightness(classes, rng)
+        targets, text = _sample_brightness(classes, rng, preferred)
     return {"kind": kind, "text": text, "targets": targets, "goal": goal_vector(targets)}
 
 

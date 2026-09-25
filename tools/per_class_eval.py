@@ -26,9 +26,25 @@ import numpy as np
 import goals
 import provenance
 import visibility
+from rl.baselines import hill_climb
 from rl.candidates import _apply_action, _observation_for, _predict
 from rl.oneshot_env import observation_metadata
 from rl.vis_eval import fixed_episodes
+
+BASELINE_EVALUATIONS = {"expanded_hill_climb": 1000}
+
+
+def baseline_name(name: str) -> str:
+    if name not in BASELINE_EVALUATIONS:
+        raise ValueError(f"unknown baseline: {name}")
+    return name
+
+
+def expanded_hill_climb(model, start_params, instruction, active_layers=None):
+    """Fixed-episode baseline using larger search budget than legacy B4."""
+    return hill_climb(model, start_params, instruction,
+                      evaluations=BASELINE_EVALUATIONS["expanded_hill_climb"],
+                      active_layers=active_layers)
 
 
 def _score(policy, episode, model, active_layers=None) -> float:

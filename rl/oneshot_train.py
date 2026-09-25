@@ -41,22 +41,23 @@ BEST_NAME = "best.zip"
 EVAL_PROGRESS_NAME = "eval_progress.csv"
 METADATA_NAME = "metadata.json"
 LEARNING_STARTS = 500
+SHORT_EXPERIMENT = {"timesteps": 1_000, "eval_interval": 500, "eval_episode_count": 8}
 
 
-def build_env(volume_ids=None, model_for_volume=None) -> OneShotEnv:
+def build_env(volume_ids=None, model_for_volume=None, **env_kwargs) -> OneShotEnv:
     """The training environment: `OneShotEnv` over the training split, or
     `volume_ids` when given (tests inject a stub volume list)."""
     ids = volume_ids if volume_ids is not None else datasets.volumes_for_split("train")
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
-    return OneShotEnv(ids, **kwargs)
+    return OneShotEnv(ids, **kwargs, **env_kwargs)
 
 
-def build_eval_env(volume_ids=None, model_for_volume=None) -> OneShotEnv:
+def build_eval_env(volume_ids=None, model_for_volume=None, **env_kwargs) -> OneShotEnv:
     """The validation environment: `OneShotEnv` over the validation split, or
     `volume_ids` when given."""
     ids = volume_ids if volume_ids is not None else datasets.volumes_for_split("val")
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
-    return OneShotEnv(ids, **kwargs)
+    return OneShotEnv(ids, **kwargs, **env_kwargs)
 
 
 def validation_episodes(env, count: int = VALIDATION_EPISODES, seed_base: int = VALIDATION_SEED_BASE) -> list:
@@ -117,14 +118,16 @@ def _eval_row(timesteps: int, summary: dict) -> dict:
 
 
 def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
-                  train_env=None, eval_env=None, eval_episode_count: int = VALIDATION_EPISODES) -> dict:
+                  train_env=None, eval_env=None, eval_episode_count: int = VALIDATION_EPISODES,
+                  env_kwargs=None) -> dict:
     """Train SAC on `train_env` (default: the training split), evaluating on
     `eval_env` (default: the validation split) every `eval_interval` steps.
     Returns the run directory's paths and the logged rows, for tests and the
     CLI alike."""
     ensure_run_dir(out)
-    train_env = train_env if train_env is not None else build_env()
-    eval_env = eval_env if eval_env is not None else build_eval_env()
+    env_kwargs = {} if env_kwargs is None else dict(env_kwargs)
+    train_env = train_env if train_env is not None else build_env(**env_kwargs)
+    eval_env = eval_env if eval_env is not None else build_eval_env(**env_kwargs)
 
     model = SAC("MlpPolicy", train_env, seed=seed, verbose=1, learning_starts=LEARNING_STARTS)
     model.set_logger(configure(out, ["stdout", "csv"]))
@@ -132,7 +135,8 @@ def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
     episodes = validation_episodes(eval_env, count=eval_episode_count)
     eval_path = os.path.join(out, EVAL_PROGRESS_NAME)
     best_path = os.path.join(out, BEST_NAME)
-    metadata = {**observation_metadata(), "seed": seed, "timesteps": timesteps}
+    metadata = {**observation_metadata(train_env.policy_version, train_env.action_mode,
+                                        train_env.reward_mode), "seed": seed, "timesteps": timesteps}
     with open(os.path.join(out, METADATA_NAME), "w") as stream:
         json.dump(metadata, stream, indent=2)
 
@@ -173,13 +177,26 @@ def parse_args(argv=None):
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--eval-interval", type=int, default=10_000)
     parser.add_argument("--out", type=str, default=None)
+    parser.add_argument("--policy-version", choices=("oneshot-v6", "oneshot-v7"), default="oneshot-v6")
+    parser.add_argument("--hindsight-ratio", type=float, default=0.0)
+    parser.add_argument("--balance-classes", action="store_true")
+    parser.add_argument("--reward-mode", choices=("attainment", "target"), default="attainment")
+    parser.add_argument("--short", action="store_true", help="use the short smoke experiment preset")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
     out = args.out or DEFAULT_OUT_TEMPLATE.format(seed=args.seed)
-    result = run_training(out=out, timesteps=args.timesteps, seed=args.seed, eval_interval=args.eval_interval)
+    timesteps = SHORT_EXPERIMENT["timesteps"] if args.short else args.timesteps
+    eval_interval = SHORT_EXPERIMENT["eval_interval"] if args.short else args.eval_interval
+    result = run_training(out=out, timesteps=timesteps, seed=args.seed, eval_interval=eval_interval,
+                          eval_episode_count=(SHORT_EXPERIMENT["eval_episode_count"]
+                                               if args.short else VALIDATION_EPISODES),
+                          env_kwargs={"policy_version": args.policy_version,
+                                      "hindsight_ratio": args.hindsight_ratio,
+                                      "balance_classes": args.balance_classes,
+                                      "reward_mode": args.reward_mode})
     print(f"\n[oneshot_train] wrote {result['eval_progress_path']} and {result['best_path']}")
 
 

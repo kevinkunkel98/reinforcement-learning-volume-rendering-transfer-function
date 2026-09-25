@@ -29,6 +29,7 @@ N_GOAL_CLASSES = len(goals.GOAL_CLASSES)
 OBSERVATION_SIZE = 4 * N_GOAL_CLASSES + 16 + 3 * N_GOAL_CLASSES + len(CONTROLLABLE) + 1
 ACTION_SIZE = len(CONTROLLABLE)
 POLICY_VERSION = "oneshot-v6"
+V7_POLICY_VERSION = "oneshot-v7"
 USELESS_PENALTY = 1.0
 REWARD_CLIP = 1.0
 
@@ -68,15 +69,18 @@ OBSERVATION_BOUND = 10.0
 _ATTAINMENT_FLOOR = 1e-9
 
 
-def observation_metadata() -> dict:
+def observation_metadata(policy_version: str = POLICY_VERSION, action_mode: str = "absolute",
+                         reward_mode: str = "attainment") -> dict:
     """Return the serialized contract shared by training and inference."""
     return {
-        "policy_version": POLICY_VERSION,
+        "policy_version": policy_version,
         "anatomy_layout": LAYOUT_VERSION,
         "observation_size": OBSERVATION_SIZE,
         "action_size": ACTION_SIZE,
         "goal_classes": list(goals.GOAL_CLASSES),
         "controllable_groups": len(CONTROLLABLE),
+        **({"action_mode": action_mode, "reward_mode": reward_mode}
+           if policy_version == V7_POLICY_VERSION else {}),
     }
 
 
@@ -119,12 +123,29 @@ class OneShotEnv(gym.Env):
     HINDSIGHT_MAX_TRIES = 20
 
     def __init__(self, volume_ids, model_for_volume=visibility.for_volume,
-                 hindsight_ratio: float = 0.0):
+                 hindsight_ratio: float = 0.0, policy_version: str = POLICY_VERSION,
+                 action_mode: str = "absolute", reward_mode: str = "attainment",
+                 balance_classes: bool = False):
         super().__init__()
         if not volume_ids:
             raise ValueError("volume_ids must not be empty")
         self.volume_ids = list(volume_ids)
         self._model_for_volume = model_for_volume
+        if policy_version not in (POLICY_VERSION, V7_POLICY_VERSION):
+            raise ValueError("unsupported one-shot policy version")
+        if policy_version == V7_POLICY_VERSION and action_mode == "absolute":
+            action_mode = "residual"
+        if action_mode not in ("absolute", "residual"):
+            raise ValueError("action_mode must be absolute or residual")
+        if reward_mode not in ("attainment", "target"):
+            raise ValueError("reward_mode must be attainment or target")
+        if not 0.0 <= hindsight_ratio <= 1.0:
+            raise ValueError("hindsight_ratio must be between 0 and 1")
+        self.policy_version = policy_version
+        self.action_mode = action_mode
+        self.reward_mode = reward_mode
+        self.balance_classes = balance_classes
+        self._class_counts = {}
         # A sampled instruction can be unanswerable on the volume it lands on
         # ("a bit more lungs" on a pelvis scan, where the lung ceiling is a
         # fraction of a percent of the image): the episode teaches nothing and
@@ -150,6 +171,9 @@ class OneShotEnv(gym.Env):
         # Set by reset() in both branches, so a hindsight episode can never
         # leave its oracle action behind for a later instruction episode.
         self._hindsight_action = None
+
+    def contract_metadata(self) -> dict:
+        return observation_metadata(self.policy_version, self.action_mode, self.reward_mode)
 
     def _get_model(self, volume: str):
         # visibility.for_volume() already caches to disk; this in-memory cache
@@ -212,9 +236,12 @@ class OneShotEnv(gym.Env):
         return goals.attainment(self._instruction["goal"], self._start_agg, agg)  # pyright: ignore[reportOptionalSubscript]
 
     def _info(self, attainment: float, useless: bool) -> dict:
-        return {"attainment": attainment, "kind": self._instruction["kind"],  # pyright: ignore[reportOptionalSubscript]
+        info = {"attainment": attainment, "kind": self._instruction["kind"],  # pyright: ignore[reportOptionalSubscript]
                 "volume": self._volume, "text": self._instruction["text"], "useless": useless,  # pyright: ignore[reportOptionalSubscript]
                 "goal_source": "hindsight" if self._hindsight_action is not None else "instruction"}
+        if self.policy_version == V7_POLICY_VERSION:
+            info["policy_version"] = self.policy_version
+        return info
 
     def hindsight_action(self):
         """The action that produced this episode's target, or None when the
@@ -274,7 +301,10 @@ class OneShotEnv(gym.Env):
             instruction, hindsight_action = self._sample_hindsight_goal(rng, model, start_params, start_agg)
         else:
             instruction, hindsight_action = (goals.sample_instruction(
-                volume, model, start_agg, rng, self._active_layers), None)
+                volume, model, start_agg, rng, self._active_layers,
+                self._class_counts, self.balance_classes), None)
+            for goal_class in instruction["targets"]:
+                self._class_counts[goal_class] = self._class_counts.get(goal_class, 0) + 1
         start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
         self._volume = volume
@@ -291,7 +321,9 @@ class OneShotEnv(gym.Env):
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
-        params = apply_controllable(self._start_params, action)
+        if self.action_mode == "residual":
+            action = np.asarray(self._controllable_values(self._start_params)) + action
+        params = apply_controllable(self._start_params, np.clip(action, -1.0, 1.0))
         self._params = params
 
         raw_features = self._features(params)
@@ -300,8 +332,21 @@ class OneShotEnv(gym.Env):
         useless = (goals.is_useless(raw_features, active_layers)
                    if active_layers is not None else goals.is_useless(raw_features))
         attainment = self._attainment(final_agg)
-        reward = float(np.clip(attainment, -REWARD_CLIP, REWARD_CLIP)) - (USELESS_PENALTY if useless else 0.0)
+        if self.reward_mode == "target":
+            start_distance = goals.distance(self._instruction["goal"], self._start_agg, self._start_agg)
+            final_distance = goals.distance(self._instruction["goal"], self._start_agg, final_agg)
+            reward = float(np.clip(start_distance - final_distance, -REWARD_CLIP, REWARD_CLIP))
+            mentioned = set(self._instruction["targets"])
+            drift = sum(abs(value) for key, value in goals.progress(self._start_agg, final_agg)[0].items()
+                        if key not in mentioned)
+            reward -= float(drift)
+            if useless:
+                reward -= USELESS_PENALTY
+            info = self._info(attainment, useless)
+            info.update({"target_progress": start_distance - final_distance, "drift": drift})
+        else:
+            reward = float(np.clip(attainment, -REWARD_CLIP, REWARD_CLIP)) - (USELESS_PENALTY if useless else 0.0)
+            info = self._info(attainment, useless)
 
         obs = self._build_observation()
-        info = self._info(attainment, useless)
         return obs, float(reward), True, False, info

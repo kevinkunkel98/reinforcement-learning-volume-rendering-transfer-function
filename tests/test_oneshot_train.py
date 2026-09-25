@@ -7,7 +7,7 @@ import pytest
 import goals
 import transfer
 from rl import oneshot_train
-from rl.oneshot_env import ACTION_SIZE, OneShotEnv
+from rl.oneshot_env import ACTION_SIZE, POLICY_VERSION, OneShotEnv
 
 
 class _StubModel:
@@ -218,6 +218,30 @@ def test_learning_starts_matches_the_plan():
     assert oneshot_train.LEARNING_STARTS == 500
 
 
+def test_parse_args_accepts_v7_short_experiment_options():
+    args = oneshot_train.parse_args(["--policy-version", "oneshot-v7",
+                                     "--hindsight-ratio", "0.4", "--balance-classes",
+                                     "--reward-mode", "target"])
+    assert args.policy_version == "oneshot-v7"
+    assert args.hindsight_ratio == pytest.approx(0.4)
+    assert args.balance_classes is True
+    assert args.reward_mode == "target"
+
+
+def test_short_experiment_preset_is_bounded():
+    assert oneshot_train.SHORT_EXPERIMENT["timesteps"] <= 1_000
+    assert oneshot_train.SHORT_EXPERIMENT["eval_episode_count"] <= 10
+
+
+def test_short_experiment_cli_uses_bounded_validation_count(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setattr(oneshot_train, "run_training",
+                        lambda **kwargs: captured.update(kwargs) or {
+                            "eval_progress_path": "eval.csv", "best_path": "best.zip"})
+    oneshot_train.main(["--short", "--out", str(tmp_path / "run")])
+    assert captured["eval_episode_count"] == oneshot_train.SHORT_EXPERIMENT["eval_episode_count"]
+
+
 def test_run_writes_one_shot_contract_metadata(monkeypatch, tmp_path):
     _patch_totalseg(monkeypatch)
     out = str(tmp_path / "metadata_run")
@@ -231,3 +255,43 @@ def test_run_writes_one_shot_contract_metadata(monkeypatch, tmp_path):
     assert result["metadata"]["action_size"] == 24
     assert result["metadata"]["anatomy_layout"] == "anatomy-v2"
     assert os.path.exists(os.path.join(out, "metadata.json"))
+
+
+def test_v6_contract_defaults_remain_absolute_attainment():
+    assert POLICY_VERSION == "oneshot-v6"
+    env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel())
+    assert env.policy_version == "oneshot-v6"
+    assert env.action_mode == "absolute"
+    assert env.reward_mode == "attainment"
+
+
+def test_v7_residual_action_is_added_to_start(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v7", action_mode="residual")
+    env.reset(seed=2)
+    action = np.zeros(ACTION_SIZE, dtype=np.float32)
+    action[0] = 0.1
+    expected = np.clip(env._controllable_values(env._start_params) + action, -1.0, 1.0)
+    env.step(action)
+    assert env._controllable_values(env._params) == pytest.approx(expected)
+
+
+def test_v7_hindsight_ratio_one_exposes_oracle_action(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v7", hindsight_ratio=1.0)
+    _, info = env.reset(seed=3)
+    assert info["goal_source"] == "hindsight"
+    assert env.hindsight_action() is not None
+
+
+def test_v7_target_reward_reports_progress_and_drift(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v7", reward_mode="target")
+    env.reset(seed=4)
+    _, reward, _, _, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
+    assert isinstance(reward, float)
+    assert "target_progress" in info
+    assert "drift" in info

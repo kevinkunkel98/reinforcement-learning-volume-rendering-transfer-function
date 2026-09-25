@@ -3,6 +3,7 @@ import pytest
 
 from tools.baseline_report import run_volume, summarise
 from tools.per_class_eval import _class_row, summarise_per_class
+from tools import per_class_eval
 import transfer
 
 
@@ -159,3 +160,19 @@ def test_per_class_row_drops_attainment_for_nonreachable_class():
     assert _class_row("liver", "unsupported", 0.8)["attainment"] is None
     assert _class_row("liver", "unreachable", 0.8)["attainment"] is None
     assert _class_row("liver", "reachable", 0.8)["attainment"] == 0.8
+
+
+def test_expanded_hill_climb_baseline_uses_fixed_episode_budget():
+    assert per_class_eval.BASELINE_EVALUATIONS["expanded_hill_climb"] > 200
+
+
+def test_expanded_hill_climb_name_is_reportable():
+    assert per_class_eval.baseline_name("expanded_hill_climb") == "expanded_hill_climb"
+
+
+def test_expanded_hill_climb_passes_fixed_budget(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(per_class_eval, "hill_climb",
+                        lambda *args, **kwargs: seen.update(kwargs) or "params")
+    assert per_class_eval.expanded_hill_climb("model", "start", "instruction") == "params"
+    assert seen["evaluations"] == per_class_eval.BASELINE_EVALUATIONS["expanded_hill_climb"]

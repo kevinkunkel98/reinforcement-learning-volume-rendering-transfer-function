@@ -660,6 +660,19 @@ def test_sampled_instructions_never_name_an_unreachable_class(monkeypatch):
         assert "lung" not in instruction["text"], instruction["text"]
 
 
+def test_balanced_sampler_prefers_least_sampled_reachable_class(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _PerClassModel(_reachable_everything())
+    start = {"vis": {c: 0.01 for c in goals.GOAL_CLASSES},
+             "bright": {c: 0.5 for c in goals.GOAL_CLASSES}, "coverage": 0.5}
+    counts = {c: 100 for c in goals.GOAL_CLASSES}
+    counts["skeleton"] = 0
+    instruction = goals.sample_instruction("ts_fake", model, start, np.random.default_rng(0),
+                                           class_counts=counts, balance_classes=True)
+    assert "skeleton" in instruction["targets"]
+
+
 def test_goal_from_command_rejects_a_class_the_scan_cannot_show(monkeypatch):
     """Typing "more lungs" on an abdomen scan must say so rather than build a
     goal nothing can reach -- otherwise policy mode silently returns a transfer
