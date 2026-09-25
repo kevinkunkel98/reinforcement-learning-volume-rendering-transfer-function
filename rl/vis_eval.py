@@ -87,15 +87,20 @@ def _load_sac(path: str):
     return SAC.load(path)
 
 
+def _features(model, params, active_layers=None):
+    return (model.features(params, active_layers) if active_layers is not None
+            else model.features(params))
+
+
 def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict,
-                         model_for_volume=visibility.for_volume):
+                         model_for_volume=visibility.for_volume, active_layers=None):
     """A `VisibilityTFEnv` loaded directly into one episode's exact state,
     instead of relying on `reset(seed=...)` reproducing it -- exact and
     independent of the length/order of whatever volume list the episode was
     originally generated from."""
     env = VisibilityTFEnv([volume], model_for_volume=model_for_volume)
     model = model_for_volume(volume)
-    raw_features = model.features(start_params)
+    raw_features = _features(model, start_params, active_layers)
     start_agg = goals.aggregate(raw_features)
     start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
@@ -107,6 +112,7 @@ def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict
     env._start_distance = start_distance
     env._prev_distance = start_distance
     env._step_count = 0
+    env._active_layers = active_layers
 
     obs = env._build_observation(env._params, start_agg)
     info = env._info(start_distance, start_agg, goals.is_useless(raw_features))
@@ -114,12 +120,12 @@ def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict
 
 
 def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dict,
-                          model_for_volume=visibility.for_volume):
+                          model_for_volume=visibility.for_volume, active_layers=None):
     """A `OneShotEnv` loaded directly into one episode's exact state, the
     `OneShotEnv` counterpart of `_frozen_episode_env` above."""
     env = OneShotEnv([volume], model_for_volume=model_for_volume)
     model = model_for_volume(volume)
-    raw_features = model.features(start_params)
+    raw_features = _features(model, start_params, active_layers)
     start_agg = goals.aggregate(raw_features)
     start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
@@ -130,6 +136,7 @@ def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dic
     env._instruction = instruction
     env._start_agg = start_agg
     env._start_distance = start_distance
+    env._active_layers = active_layers
 
     obs = env._build_observation()
     info = env._info(env._attainment(start_agg), goals.is_useless(raw_features))
@@ -137,7 +144,7 @@ def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dic
 
 
 def run_policy(model_path: str, episodes: list, model_for_volume=None, load_model=None,
-               formulation: str = "multi_step") -> list:
+               formulation: str = "multi_step", active_layers=None) -> list:
     """Run the policy at `model_path` (an SB3 checkpoint) on every episode
     with the deterministic action; return one `{"attainment", "kind"}` dict
     per episode, from the final step's info. For `formulation="multi_step"`
@@ -154,12 +161,14 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
     for episode in episodes:
         if formulation == "one_shot":
             env, obs, info = _frozen_one_shot_env(
-                episode["volume"], episode["start_params"], episode["instruction"], **kwargs)
+                episode["volume"], episode["start_params"], episode["instruction"],
+                active_layers=active_layers, **kwargs)
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
         else:
             env, obs, info = _frozen_episode_env(
-                episode["volume"], episode["start_params"], episode["instruction"], **kwargs)
+                episode["volume"], episode["start_params"], episode["instruction"],
+                active_layers=active_layers, **kwargs)
             for _ in range(MAX_STEPS):
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)
@@ -170,7 +179,7 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
 
 
 def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int = 3,
-                                model_for_volume=None, load_model=None) -> list:
+                                model_for_volume=None, load_model=None, active_layers=None) -> list:
     """Run the one-shot policy's proposal (as `run_policy` does for
     `formulation="one_shot"`), then, when `evaluations > 0`, refine it with
     `rl.baselines.hill_climb`'s coordinate search -- the same search the
@@ -204,14 +213,15 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
     results = []
     for episode in episodes:
         env, obs, info = _frozen_one_shot_env(
-            episode["volume"], episode["start_params"], episode["instruction"], **kwargs)
+            episode["volume"], episode["start_params"], episode["instruction"],
+            active_layers=active_layers, **kwargs)
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
 
         if evaluations > 0:
             refined_params = hill_climb(env._model, env._params, episode["instruction"],
                                          evaluations=evaluations)
-            refined_agg = goals.aggregate(env._model.features(refined_params))
+            refined_agg = goals.aggregate(_features(env._model, refined_params, active_layers))
             refined_attainment = env._attainment(refined_agg)
             if refined_attainment > info["attainment"]:
                 info = {**info, "attainment": refined_attainment}
@@ -231,7 +241,7 @@ def _attainment_or_zero(goal, start_agg: dict, final_agg: dict) -> float:
     return goals.attainment(goal, start_agg, final_agg)
 
 
-def run_baseline(name: str, episodes: list, model_for_volume=None) -> list:
+def run_baseline(name: str, episodes: list, model_for_volume=None, active_layers=None) -> list:
     """Run baseline `name` (from `rl.baselines.BASELINES`) on every episode;
     return one `{"attainment", "kind"}` dict per episode. `attainment` is
     `None` when the baseline function raises on that episode, so `compare`
@@ -244,9 +254,9 @@ def run_baseline(name: str, episodes: list, model_for_volume=None) -> list:
         instruction = episode["instruction"]
         try:
             model = get_model(episode["volume"])
-            start_agg = goals.aggregate(model.features(episode["start_params"]))
+            start_agg = goals.aggregate(_features(model, episode["start_params"], active_layers))
             final_params = baseline_fn(model, episode["start_params"], instruction)
-            final_agg = goals.aggregate(model.features(final_params))
+            final_agg = goals.aggregate(_features(model, final_params, active_layers))
             attainment = _attainment_or_zero(instruction["goal"], start_agg, final_agg)
         except Exception:
             attainment = None
@@ -561,9 +571,12 @@ def parse_args(argv=None):
     parser.add_argument("--formulation", default=DEFAULT_FORMULATION, choices=("one_shot", "multi_step"),
                          help="which policy formulation to evaluate (default: %(default)s)")
     parser.add_argument("--refine", type=int, default=0,
-                         help="visibility-evaluation budget to refine the one-shot policy's proposal "
-                              "with a hill_climb search (0 = off, default: %(default)s); adds a "
-                              "policy_plus_refine row to the comparison")
+                        help="visibility-evaluation budget to refine the one-shot policy's proposal "
+                             "with a hill_climb search (0 = off, default: %(default)s); adds a "
+                             "policy_plus_refine row to the comparison")
+    layers = parser.add_mutually_exclusive_group()
+    layers.add_argument("--layers", help="active anatomy layers as inline JSON")
+    layers.add_argument("--layers-file", help="JSON file containing active anatomy layers")
     args = parser.parse_args(argv)
     if args.show is None and not args.policy:
         parser.error("--policy is required unless --show is given")
@@ -572,18 +585,21 @@ def parse_args(argv=None):
 
 def main(argv=None, active_layers=None):
     args = parse_args(argv)
+    if active_layers is None:
+        active_layers = provenance.load_active_layers(args.layers, args.layers_file)
     if args.show:
         _print_table(load_result(args.show), active_layers=active_layers)
         return
 
     episodes = fixed_episodes(args.split, args.episodes, seed=args.seed, formulation=args.formulation)
 
-    results = {"policy": run_policy(args.policy, episodes, formulation=args.formulation)}
+    results = {"policy": run_policy(args.policy, episodes, formulation=args.formulation,
+                                      active_layers=active_layers)}
     if args.refine > 0:
         results["policy_plus_refine"] = run_policy_with_refinement(
-            args.policy, episodes, evaluations=args.refine)
+            args.policy, episodes, evaluations=args.refine, active_layers=active_layers)
     for name in BASELINES:
-        results[name] = run_baseline(name, episodes)
+        results[name] = run_baseline(name, episodes, active_layers=active_layers)
 
     # The import-time record, not a fresh one: this job scored with the code
     # it loaded when it started, which may be hours old by now. Printing the

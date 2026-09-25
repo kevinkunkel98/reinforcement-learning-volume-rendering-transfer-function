@@ -21,6 +21,7 @@ script must never die because provenance could not be read.
 import datetime
 import hashlib
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -155,6 +156,20 @@ def result_provenance(anatomy_layers=None) -> dict:
     record["anatomy_layers"] = (normalize_layers(anatomy_layers)
                                  if anatomy_layers is not None else None)
     return record
+
+
+def load_active_layers(inline_json=None, json_path=None):
+    """Load optional layer state from inline JSON or a JSON file."""
+    if inline_json is not None and json_path is not None:
+        raise ValueError("active layers require either inline JSON or a JSON file, not both")
+    if inline_json is None and json_path is None:
+        return None
+    if json_path is not None:
+        with open(json_path, encoding="utf-8") as stream:
+            value = json.load(stream)
+    else:
+        value = json.loads(inline_json)
+    return normalize_layers(value)
 
 
 # Frozen at import, which is the only moment at which "the code on disk" and

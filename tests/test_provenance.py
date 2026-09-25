@@ -55,6 +55,21 @@ def test_result_provenance_marks_unavailable_active_layers_explicitly():
     assert provenance.result_provenance()["anatomy_layers"] is None
 
 
+def test_load_active_layers_accepts_inline_json_and_normalizes_it():
+    layers = provenance.load_active_layers('{"liver": {"opacity": 0.0}}', None)
+
+    assert layers["liver"]["opacity"] == 0.0
+
+
+def test_load_active_layers_accepts_json_file(tmp_path):
+    path = tmp_path / "layers.json"
+    path.write_text('{"liver": {"opacity": 0.0}}')
+
+    layers = provenance.load_active_layers(None, str(path))
+
+    assert layers["liver"]["opacity"] == 0.0
+
+
 def test_fingerprint_is_read_from_disk_so_editing_a_scoring_module_changes_it(tmp_path):
     path = tmp_path / "scoring.py"
     module = _module_at(path, "def score(x):\n    return x\n")

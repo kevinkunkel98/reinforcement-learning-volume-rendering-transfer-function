@@ -4,6 +4,17 @@ from tools.baseline_report import summarise
 from tools.per_class_eval import _class_row, summarise_per_class
 
 
+def test_per_class_cli_parser_accepts_layer_file(tmp_path):
+    from tools import per_class_eval
+
+    path = tmp_path / "layers.json"
+    path.write_text('{"liver": {"opacity": 0.0}}')
+
+    args = per_class_eval.parse_args(["policy.zip", "--layers-file", str(path)])
+
+    assert args.layers_file == str(path)
+
+
 def _rows():
     return [
         {"volume": "v1", "kind": "relative", "baseline": "B1", "attainment": 0.5},

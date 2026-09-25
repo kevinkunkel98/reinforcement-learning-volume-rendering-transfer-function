@@ -31,15 +31,15 @@ from rl.oneshot_env import observation_metadata
 from rl.vis_eval import fixed_episodes
 
 
-def _score(policy, episode, model) -> float:
+def _score(policy, episode, model, active_layers=None) -> float:
     instruction = episode["instruction"]
     start_params = episode["start_params"]
-    start_agg = goals.aggregate(model.features(start_params))
+    start_agg = goals.aggregate(model.features(start_params, active_layers))
     observation = _observation_for(model, start_params, instruction, start_agg)
     action = _predict(policy, observation, np.random.default_rng(0), True)
     params = _apply_action(start_params, action)
     return goals.attainment(instruction["goal"], start_agg,
-                            goals.aggregate(model.features(params)))
+                            goals.aggregate(model.features(params, active_layers)))
 
 
 def _class_row(goal_class: str, status: str, attainment):
@@ -73,14 +73,23 @@ def summarise_per_class(rows: list) -> dict:
     return report
 
 
-def main(active_layers=None):
+def parse_args(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("policies", nargs="+")
     ap.add_argument("--split", default="test")
     ap.add_argument("--episodes", type=int, default=200)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out")
-    args = ap.parse_args()
+    layers = ap.add_mutually_exclusive_group()
+    layers.add_argument("--layers", help="active anatomy layers as inline JSON")
+    layers.add_argument("--layers-file", help="JSON file containing active anatomy layers")
+    return ap.parse_args(argv)
+
+
+def main(active_layers=None, argv=None):
+    args = parse_args(argv)
+    if active_layers is None:
+        active_layers = provenance.load_active_layers(args.layers, args.layers_file)
 
     from stable_baselines3 import SAC
 
@@ -100,7 +109,7 @@ def main(active_layers=None):
             model = models[episode["volume"]]
             supported_classes = set(goals.goal_classes_for_volume(episode["volume"]))
             reachable_classes = set(goals.reachable_goal_classes(episode["volume"], model))
-            attainment = _score(policy, episode, model)
+            attainment = _score(policy, episode, model, active_layers)
             for goal_class in episode["instruction"]["targets"]:
                 supported = goal_class in supported_classes
                 reachable = goal_class in reachable_classes

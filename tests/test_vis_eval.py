@@ -668,6 +668,23 @@ def test_main_records_code_provenance_and_explicit_layer_absence(tmp_path, monke
     assert written["anatomy_layer_layout"] == provenance.IMPORT_TIME_PROVENANCE["anatomy_layer_layout"]
 
 
+def test_parse_args_accepts_inline_active_layers_json():
+    args = vis_eval.parse_args(["--policy", "p.zip", "--layers",
+                                '{"liver": {"opacity": 0.0}}'])
+
+    assert args.layers == '{"liver": {"opacity": 0.0}}'
+
+
+def test_main_loads_cli_layers_into_provenance(tmp_path, monkeypatch):
+    _stub_run(monkeypatch)
+    out = tmp_path / "eval-cli-layers.json"
+
+    vis_eval.main(["--policy", "p.zip", "--layers",
+                   '{"liver": {"opacity": 0.0}}', "--out", str(out)])
+
+    assert json.loads(out.read_text())["provenance"]["anatomy_layers"]["liver"]["opacity"] == 0.0
+
+
 def test_main_records_non_default_evaluation_layers(tmp_path, monkeypatch):
     _stub_run(monkeypatch)
     layers = {"liver": {"opacity": 0.0}}
