@@ -11,6 +11,7 @@ from tools.compare_layer_renders import (
     compare_dataset_samples,
     load_json_record,
     sampled_contribution_contract,
+    server_reference_contributions,
     representative_label_ids,
     sampled_layer_contributions,
 )
@@ -172,6 +173,28 @@ def test_non_default_opacity_applies_to_weights_luminance_and_leakage():
     assert contract["image"] == pytest.approx(0.45)
     assert contract["class_visibility"]["liver"] == pytest.approx(1 / 3)
     assert contract["class_visibility"]["kidneys"] == pytest.approx(2 / 3)
+
+
+def test_dataset_compare_detects_mismatch_between_independent_paths(monkeypatch):
+    labels = np.array([[5, 6]], dtype=np.uint8)
+    weights = np.ones((1, 2), dtype=np.float64)
+    luminance = np.array([[0.2, 0.8]], dtype=np.float64)
+    layers = {name: {"opacity": 1.0} for name in CANONICAL_CLASSES}
+    original = server_reference_contributions(labels, weights, luminance, layers)
+
+    def shifted_server(*args):
+        result = dict(original)
+        result["image"] += 0.5
+        return result
+
+    monkeypatch.setattr(
+        "tools.compare_layer_renders.server_reference_contributions", shifted_server
+    )
+    result = compare_dataset_samples(labels, weights, layers, luminance=luminance)
+
+    assert result["passed"] is False
+    assert any(failure["kind"] == "image" for failure in result["failures"])
+    assert result["server"]["image"]["mean"] != result["derived"]["image"]["mean"]
 
 
 def test_inline_and_file_layers_use_same_strict_validator(tmp_path):

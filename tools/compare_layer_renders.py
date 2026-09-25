@@ -44,7 +44,7 @@ def _aligned_class_values(labels, weights, luminance, layers):
     return contributions
 
 
-def sampled_contribution_contract(labels, weights, luminance, layers):
+def browser_sampled_contributions(labels, weights, luminance, layers):
     """Aggregate one aligned sampled-label/HU compositing contract."""
     contributions = _aligned_class_values(labels, weights, luminance, layers)
     total_weight = sum(item["weight"] for item in contributions.values())
@@ -58,6 +58,33 @@ def sampled_contribution_contract(labels, weights, luminance, layers):
         "class_visibility": class_visibility,
         "cross_class_leakage": _derived_leakage(class_visibility),
     }
+
+
+def server_reference_contributions(labels, weights, luminance, layers):
+    """Independently aggregate sampled server reference contributions."""
+    labels = np.asarray(labels)
+    weights = np.asarray(weights, dtype=np.float64)
+    luminance = np.asarray(luminance, dtype=np.float64)
+    normalized = validate_visibility.normalize_layers(layers or {})
+    ids = representative_label_ids(labels)
+    class_weights = {}
+    class_luminance = {}
+    for name in CANONICAL_CLASSES:
+        mask = labels == ids.get(name, -1)
+        opacity = normalized[name]["opacity"]
+        class_weights[name] = float(np.sum(weights[mask] * opacity))
+        class_luminance[name] = float(np.sum(weights[mask] * opacity * luminance[mask]))
+    total = sum(class_weights.values())
+    return {
+        "image": sum(class_luminance.values()) / weights.size if weights.size else 0.0,
+        "class_visibility": {name: value / total if total else 0.0
+                             for name, value in class_weights.items()},
+        "cross_class_leakage": _derived_leakage({name: value / total if total else 0.0
+                                                   for name, value in class_weights.items()}),
+    }
+
+
+sampled_contribution_contract = browser_sampled_contributions
 
 
 def _difference(reference, browser) -> dict:
@@ -125,8 +152,8 @@ def compare_dataset_samples(labels, weights, layers, luminance=None, reference=N
     labels = np.asarray(labels)
     weights = np.asarray(weights, dtype=np.float64)
     luminance = weights if luminance is None else luminance
-    browser = sampled_contribution_contract(labels, weights, luminance, layers)
-    server = sampled_contribution_contract(labels, weights, luminance, layers)
+    browser = browser_sampled_contributions(labels, weights, luminance, layers)
+    server = server_reference_contributions(labels, weights, luminance, layers)
     result = compare_samples(server, browser, image_tolerance, visibility_tolerance,
                              leakage_tolerance)
     result["server"] = _record_summary(server)
@@ -206,7 +233,7 @@ def _dataset_record(name, labels_path, layers, reference, image_tolerance,
     representative_label_ids(raw_labels)
     params = np.zeros(48, dtype=np.float64)
     weights, luminance, _ = model._weights(params)
-    generated_reference = sampled_contribution_contract(
+    generated_reference = server_reference_contributions(
         model.class_ids, weights.detach().numpy(), luminance.detach().numpy(), layers
     )
     return compare_dataset_samples(model.class_ids, weights.detach().numpy(), layers,
