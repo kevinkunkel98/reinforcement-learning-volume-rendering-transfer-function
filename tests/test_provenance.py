@@ -43,6 +43,14 @@ def test_provenance_can_record_the_active_anatomy_layers():
     assert record["label_layout"] == "anatomy-v2"
 
 
+def test_result_provenance_overlays_active_layers_on_import_snapshot():
+    record = provenance.result_provenance({"liver": {"opacity": 0.0}})
+
+    assert record["anatomy_layers"]["liver"]["opacity"] == 0.0
+    assert record["scoring_fingerprint"] == provenance.IMPORT_TIME_PROVENANCE["scoring_fingerprint"]
+    assert record["timestamp"] == provenance.IMPORT_TIME_PROVENANCE["timestamp"]
+
+
 def test_fingerprint_is_read_from_disk_so_editing_a_scoring_module_changes_it(tmp_path):
     path = tmp_path / "scoring.py"
     module = _module_at(path, "def score(x):\n    return x\n")
@@ -174,6 +182,16 @@ def test_compare_flags_a_changed_commit():
 
     assert report["stale"] is True
     assert any("commit" in reason for reason in report["reasons"])
+
+
+def test_compare_flags_a_changed_anatomy_layer_layout():
+    recorded = provenance.provenance()
+    current = {**recorded, "anatomy_layer_layout": "anatomy-layers-v2"}
+
+    report = provenance.compare(recorded, current)
+
+    assert report["stale"] is True
+    assert any("anatomy_layer_layout" in reason for reason in report["reasons"])
 
 
 def test_compare_treats_a_result_without_provenance_as_stale():

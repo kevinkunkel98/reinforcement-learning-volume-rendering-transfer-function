@@ -592,7 +592,7 @@ def main(argv=None):
     # and the run says so before anyone quotes it.
     result = {"policy": args.policy, "split": args.split, "episodes": args.episodes,
               "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
-              "provenance": provenance.IMPORT_TIME_PROVENANCE,
+               "provenance": provenance.result_provenance(),
               "metadata": observation_metadata(),
               "episodes_detail": episodes_detail(results, episodes),
                **compare(results, episodes=episodes)}

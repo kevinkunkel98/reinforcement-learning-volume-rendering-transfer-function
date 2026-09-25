@@ -148,6 +148,13 @@ def provenance(modules=None, anatomy_layers=None) -> dict:
     }
 
 
+def result_provenance(anatomy_layers=None) -> dict:
+    """Return import-time code identity with the run's active layer state."""
+    record = dict(IMPORT_TIME_PROVENANCE)
+    record["anatomy_layers"] = normalize_layers(anatomy_layers or {})
+    return record
+
+
 # Frozen at import, which is the only moment at which "the code on disk" and
 # "the code this process is running" are known to agree. Writers record this,
 # not a fresh call at write time -- the whole incident is the gap between the
@@ -200,7 +207,8 @@ def compare(recorded: dict, current: dict = None) -> dict:
         reasons.append(f"git commit changed: {_short(recorded_commit, 8)} -> "
                        f"{_short(current_commit, 8)}")
 
-    for field in ("label_layout", "anatomy_layers", "visibility_renderer"):
+    for field in ("label_layout", "anatomy_layers", "anatomy_layer_layout",
+                  "visibility_renderer"):
         recorded_value = recorded.get(field)
         current_value = current.get(field)
         if recorded_value and current_value and recorded_value != current_value:

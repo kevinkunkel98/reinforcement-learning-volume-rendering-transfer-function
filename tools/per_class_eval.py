@@ -119,7 +119,7 @@ def main():
             "overall_share_positive": sum(1 for a in overall if a > 0) / len(overall),
             "per_class": summarise_per_class(per_class_rows),
             "metadata": observation_metadata(),
-            "provenance": provenance.IMPORT_TIME_PROVENANCE,
+            "provenance": provenance.result_provenance(),
         }
 
     classes = sorted({c for r in results.values() for c in r["per_class"]})
