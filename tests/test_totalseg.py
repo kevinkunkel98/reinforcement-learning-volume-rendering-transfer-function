@@ -204,3 +204,17 @@ def test_label_metadata_rejects_unlabeled_dataset(labelled_manifest):
 def test_iter_label_chunks_rejects_invalid_labels(bad):
     with pytest.raises(ValueError):
         list(totalseg.iter_label_chunks(bad, chunk_bytes=8))
+
+
+@pytest.mark.parametrize("dtype", [np.int16, np.float32, np.float64])
+def test_load_labels_rejects_non_uint8_source(dtype, labelled_manifest):
+    manifest = json.loads(open(totalseg.MANIFEST_PATH).read())
+    entry = manifest["subjects"][0]
+    source = nib.load(entry["labels_path"])
+    invalid_path = entry["labels_path"].replace("labels.nii.gz", f"labels-{dtype.__name__}.nii.gz")
+    nib.save(nib.Nifti1Image(np.asarray(source.dataobj, dtype=dtype), source.affine), invalid_path)
+    entry["labels_path"] = invalid_path
+    open(totalseg.MANIFEST_PATH, "w").write(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="uint8"):
+        totalseg.load_labels("ts_l0001")

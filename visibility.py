@@ -128,7 +128,7 @@ class VisibilityModel:
 
     def __init__(self, indices: np.ndarray, step_mm: float, histogram: np.ndarray,
                  class_ids: np.ndarray, label_source: str,
-                 volume_id: str = "", spacing=None):
+                 volume_id: str = "", spacing=None, label_identity: str = ""):
         self.indices = torch.from_numpy(np.ascontiguousarray(indices))
         self.step_mm = float(step_mm)
         self.histogram = np.asarray(histogram, dtype=np.float32)
@@ -136,6 +136,7 @@ class VisibilityModel:
         self.label_source = label_source
         self.volume_id = volume_id
         self.spacing = tuple(spacing) if spacing is not None else None
+        self.label_identity = label_identity
         # class id 0 ("other") -> -1 (matches no class); id i -> CLASSES[i - 1]
         self._labels = torch.from_numpy(self.class_ids.astype(np.int32) - 1)
         self._rays = int(self.indices.shape[0] * self.indices.shape[2] * self.indices.shape[3])
@@ -146,7 +147,8 @@ class VisibilityModel:
         return int(self.indices.shape[0])
 
     @classmethod
-    def from_volume(cls, volume, spacing, labels=None, n=GRID_N, n_views=N_VIEWS, volume_id=""):
+    def from_volume(cls, volume, spacing, labels=None, n=GRID_N, n_views=N_VIEWS,
+                    volume_id="", label_identity=""):
         directions = view_directions(n_views)
         cubes, step, label_cubes = _sample_cubes(volume, spacing, directions, n, labels)
         counts, _ = np.histogram(volume, bins=HISTOGRAM_BINS, range=CENTER_RANGE)
@@ -155,7 +157,8 @@ class VisibilityModel:
             class_ids, label_source = label_cubes, "anatomy"
         else:
             class_ids, label_source = _intensity_class_ids(cubes), "intensity"
-        return cls(quantize(cubes), step, histogram, class_ids, label_source, volume_id, spacing)
+        return cls(quantize(cubes), step, histogram, class_ids, label_source,
+                   volume_id, spacing, label_identity)
 
     def _weights(self, params):
         """(contribution per sample, luminance per sample, accumulated opacity per ray)."""
@@ -217,17 +220,19 @@ class VisibilityModel:
             self._solo_max[name] = best
         return self._solo_max[name]
 
-    def cache_key(self, volume_version: str) -> str:
+    def cache_key(self, volume_version: str, label_identity: str = "") -> str:
         parts = (self.volume_id, volume_version, self.n_views, self.indices.shape[1],
                  LUT_SIZE, CACHE_VERSION, CLASS_LAYOUT_VERSION,
-                 transfer.TRANSFER_LAYOUT_VERSION,
+                 label_identity, transfer.TRANSFER_LAYOUT_VERSION,
                  ",".join(transfer.TRANSFER_LAYOUT_ORDER), ",".join(CLASSES))
         return hashlib.sha256(":".join(str(p) for p in parts).encode()).hexdigest()[:16]
 
-    def save_cache(self, volume_version: str, cache_dir: str = None) -> str:
+    def save_cache(self, volume_version: str, cache_dir: str = None,
+                   label_identity: str = "") -> str:
         cache_dir = cache_dir or CACHE_DIR
         os.makedirs(cache_dir, exist_ok=True)
-        path = os.path.join(cache_dir, f"{self.volume_id}-{self.cache_key(volume_version)}.npz")
+        label_identity = label_identity or self.label_identity
+        path = os.path.join(cache_dir, f"{self.volume_id}-{self.cache_key(volume_version, label_identity)}.npz")
         temporary = path + ".tmp.npz"     # np.savez_compressed appends .npz unless it is there
         np.savez_compressed(temporary, indices=self.indices.numpy(),
                             step_mm=np.float64(self.step_mm), histogram=self.histogram,
@@ -238,19 +243,19 @@ class VisibilityModel:
 
     @classmethod
     def load_cache(cls, volume_id: str, volume_version: str, cache_dir: str = None,
-                   n=GRID_N, n_views=N_VIEWS):
+                   n=GRID_N, n_views=N_VIEWS, label_identity: str = ""):
         cache_dir = cache_dir or CACHE_DIR
         probe = cls(np.zeros((n_views, n, n, n), dtype=np.uint8), 1.0,
                     np.zeros(HISTOGRAM_BINS), np.zeros((n_views, n, n, n), dtype=np.uint8),
                     "intensity", volume_id)
-        path = os.path.join(cache_dir, f"{volume_id}-{probe.cache_key(volume_version)}.npz")
+        path = os.path.join(cache_dir, f"{volume_id}-{probe.cache_key(volume_version, label_identity)}.npz")
         if not os.path.exists(path):
             return None
         with np.load(path) as data:
             spacing = tuple(float(v) for v in data["spacing"])
             return cls(data["indices"], float(data["step_mm"]), data["histogram"],
                        data["class_ids"], data["label_source"].item(),
-                       volume_id, spacing if any(spacing) else None)
+                       volume_id, spacing if any(spacing) else None, label_identity)
 
 
 def _load_volume(name: str):
@@ -303,17 +308,22 @@ def for_volume(name: str, cache_dir: str = None) -> VisibilityModel:
     assigns to a model after `__init__` except `solo_max`'s own memo, which is
     what the sharing exists to preserve."""
     version = _volume_version(name)
-    key = (name, version, os.path.abspath(cache_dir or CACHE_DIR))
+    label_identity = ""
+    if _has_labels(name):
+        from datasets import label_cache_identity
+        label_identity = label_cache_identity(name)
+    key = (name, version, label_identity, os.path.abspath(cache_dir or CACHE_DIR))
     if key in _MODEL_CACHE:
         _MODEL_CACHE.move_to_end(key)
         return _MODEL_CACHE[key]
 
-    model = VisibilityModel.load_cache(name, version, cache_dir)
+    model = VisibilityModel.load_cache(name, version, cache_dir, label_identity=label_identity)
     if model is None:
         volume, spacing = _load_volume(name)
         labels = _load_labels(name) if _has_labels(name) else None
-        model = VisibilityModel.from_volume(volume, spacing, labels=labels, volume_id=name)
-        model.save_cache(version, cache_dir)
+        model = VisibilityModel.from_volume(volume, spacing, labels=labels, volume_id=name,
+                                            label_identity=label_identity)
+        model.save_cache(version, cache_dir, label_identity=label_identity)
 
     _MODEL_CACHE[key] = model
     _MODEL_CACHE.move_to_end(key)

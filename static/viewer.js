@@ -25,6 +25,7 @@
   let loadController;
   let appliedCameraState = null;
   let cameraBaseScale = 1;
+  let labelStatus = "";
 
   function destroyViewer() {
     if (interactor) {
@@ -281,6 +282,7 @@
     const generation = ++loadGeneration;
     loadController?.abort();
     loadController = new AbortController();
+    labelStatus = "";
     viewerEl.hidden = false;
     fallbackEl.hidden = false;
     setStatus("Loading local volume...");
@@ -290,7 +292,7 @@
         setCamera(cameraState);
         setTransferFunction(params);
         fallbackEl.hidden = true;
-        setStatus(`Local ${datasetName} volume`);
+        setStatus(`Local ${datasetName} volume${labelStatus}`);
         return true;
       }
       const loaded = await fetchVolume(name, loadController.signal, generation);
@@ -299,9 +301,10 @@
       // A missing label volume must never disable the existing volume path.
       try {
         await fetchLabelMetadata(name, loadController.signal);
+        labelStatus = "";
       } catch (labelError) {
         if (labelError.name === "AbortError") throw labelError;
-        setStatus(`Local volume; ${labelError.message}`);
+        labelStatus = `; ${labelError.message}`;
       }
       datasetName = name;
       if (!renderer) {
@@ -345,7 +348,7 @@
       setCamera(cameraState);
       setTransferFunction(params);
       fallbackEl.hidden = true;
-      setStatus(`Local ${datasetName} volume`);
+      setStatus(`Local ${datasetName} volume${labelStatus}`);
       return true;
     } catch (error) {
       if (!isCurrentLoad(generation) || error.name === "AbortError") return false;

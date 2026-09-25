@@ -16,15 +16,17 @@ from PIL import Image
 
 import render as render_module
 import views
-from datasets import _dataset_version, load_dataset
+from datasets import _dataset_version, label_cache_identity, load_dataset
 
 CACHE_DIR = "out/cache/collect_images"
 CACHE_VERSION = 1
 
 
-def _cache_key(volume_id: str, volume_version: str, params: np.ndarray, size: int, columns: int) -> str:
+def _cache_key(volume_id: str, volume_version: str, params: np.ndarray, size: int,
+               columns: int, label_identity: str = "") -> str:
     param_str = ",".join(f"{v:.6f}" for v in np.asarray(params, dtype=np.float64).tolist())
-    payload = "|".join([volume_id, volume_version, param_str, str(size), str(columns), str(CACHE_VERSION)])
+    payload = "|".join([volume_id, volume_version, label_identity, param_str,
+                         str(size), str(columns), str(CACHE_VERSION)])
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -55,14 +57,19 @@ def _compose_grid(frames: list, size: int, columns: int) -> Image.Image:
 
 
 def view_grid(volume_id: str, params: np.ndarray, size: int = 224, columns: int = 3,
-              cache_dir: str = None) -> bytes:
+              cache_dir: str = None, label_identity: str = "") -> bytes:
     """PNG bytes of the six standard views of `volume_id` under `params`,
     laid out `columns`-wide. Cached on disk under `<cache_dir>/<sha256 of
     volume version, params and size>.png`; written atomically (`.tmp` then
     `os.replace`) so a reader never sees a partial file."""
     volume_version = _dataset_version(volume_id)
     params = np.asarray(params, dtype=np.float64)
-    key = _cache_key(volume_id, volume_version, params, size, columns)
+    if not label_identity:
+        try:
+            label_identity = label_cache_identity(volume_id)
+        except FileNotFoundError:
+            pass
+    key = _cache_key(volume_id, volume_version, params, size, columns, label_identity)
     path = _cache_path(key, cache_dir)
     if os.path.exists(path):
         with open(path, "rb") as f:
@@ -83,8 +90,9 @@ def view_grid(volume_id: str, params: np.ndarray, size: int = 224, columns: int 
 
 
 def grid_data_url(volume_id: str, params: np.ndarray, size: int = 224, columns: int = 3,
-                  cache_dir: str = None) -> str:
+                  cache_dir: str = None, label_identity: str = "") -> str:
     """`view_grid`'s PNG as a `data:image/png;base64,...` string, for
     embedding directly in a JSON response."""
-    png_bytes = view_grid(volume_id, params, size=size, columns=columns, cache_dir=cache_dir)
+    png_bytes = view_grid(volume_id, params, size=size, columns=columns,
+                          cache_dir=cache_dir, label_identity=label_identity)
     return "data:image/png;base64," + base64.b64encode(png_bytes).decode()

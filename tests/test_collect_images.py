@@ -55,6 +55,12 @@ def test_a_different_transfer_function_produces_a_different_cache_key(tmp_path, 
     assert len(glob.glob(os.path.join(str(tmp_path), "*.png"))) == 2
 
 
+def test_label_identity_changes_collect_image_cache_key():
+    params = goals.starting_params()
+    assert collect_images._cache_key("synthetic", "v1", params, 224, 3) != collect_images._cache_key(
+        "synthetic", "v1", params, 224, 3, "anatomy-v2|dims=2,3,4|classes=liver|version=labels-v1")
+
+
 def test_no_tmp_file_remains(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(collect_images, "_render_views", _stub_frames(calls))

@@ -99,7 +99,14 @@ def load_labels(name: str) -> np.ndarray:
         raise FileNotFoundError(f"{name} has no label volume; {_FETCH_HINT}")
     _validate_label_layout(entry, _manifest_version_for(entry))
     image = nib.as_closest_canonical(nib.load(path))
-    return np.ascontiguousarray(np.asarray(image.dataobj, dtype=np.uint8))
+    labels = np.asarray(image.dataobj)
+    if labels.dtype != np.dtype(np.uint8):
+        raise ValueError("label volume must have dtype uint8")
+    if labels.ndim != 3 or labels.size == 0:
+        raise ValueError("label volume must be a non-empty three-dimensional array")
+    if not np.isfinite(labels).all():
+        raise ValueError("label volume values must be finite")
+    return np.ascontiguousarray(labels)
 
 
 def _validate_label_layout(entry: dict, manifest_version: str | None = None) -> None:

@@ -426,6 +426,15 @@ def label_metadata(name: str) -> dict:
     return metadata
 
 
+def label_cache_identity(name: str) -> str:
+    """Stable identity for caches that consume anatomical labels."""
+    metadata = label_metadata(name)
+    classes = ",".join(f"{key}={value}" for key, value in sorted(metadata["class_ids"].items()))
+    return "|".join((metadata["label_layout_version"],
+                      ",".join(map(str, metadata["dimensions"])), classes,
+                      metadata["dataset_version"]))
+
+
 def get_label_chunk(name: str, index: int) -> bytes:
     """Return one Fortran-order uint8 label chunk."""
     metadata = label_metadata(name)

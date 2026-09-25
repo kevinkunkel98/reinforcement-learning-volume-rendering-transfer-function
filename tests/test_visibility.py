@@ -248,6 +248,13 @@ def test_cache_key_uses_versioned_anatomy_layout():
     assert len(model.cache_key("version-1")) == 16
 
 
+def test_label_cache_identity_changes_visibility_key():
+    model = _model(_slab_volume(50.0, 900.0))
+    base = model.cache_key("volume-v1")
+    labeled = model.cache_key("volume-v1", "anatomy-v2|dims=2,3,4|classes=liver|version=labels-v1")
+    assert labeled != base
+
+
 def test_for_volume_builds_once_then_loads(tmp_path, monkeypatch):
     monkeypatch.setattr(visibility, "CACHE_DIR", str(tmp_path))
     calls = []

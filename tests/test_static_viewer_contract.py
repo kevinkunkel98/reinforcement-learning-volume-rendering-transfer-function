@@ -54,6 +54,8 @@ def test_viewer_contract_exposes_label_transport_and_unlabeled_fallback():
     assert "label-unavailable" in viewer
     assert "label_layout_version" in viewer
     assert "anatomy-v2" in viewer
+    assert "labelStatus" in viewer
+    assert "labelStatus" in viewer[viewer.index("setStatus(`Local ${datasetName} volume${labelStatus}`)"):]
 
 
 def test_viewer_adapts_exactly_48_values_and_exposes_camera_state():
