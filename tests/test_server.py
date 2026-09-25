@@ -84,6 +84,36 @@ def test_dataset_metadata_route_returns_transport_metadata(monkeypatch):
     assert result == metadata
 
 
+def test_render_image_passes_labels_and_layers_to_renderer(monkeypatch):
+    volume = np.zeros((2, 2, 2), dtype=np.float32)
+    labels = np.ones(volume.shape, dtype=np.uint8)
+    layers = {"liver": {"opacity": 0.25, "rgb": [1.0, 0.0, 0.0]}}
+    calls = {}
+
+    monkeypatch.setattr(server, "get_volume", lambda: (volume, (1.0, 1.0, 1.0)))
+    monkeypatch.setattr(server, "get_labels", lambda: labels)
+    monkeypatch.setattr(server.render_module, "frame_bounds", lambda *args: None)
+
+    def fake_render(*args, **kwargs):
+        calls.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(server, "render", fake_render)
+    monkeypatch.setattr(server, "grab", lambda _win: np.zeros((1, 1, 3), dtype=np.uint8))
+    monkeypatch.setattr(server.Image, "fromarray", lambda _img: None)
+
+    class FakeBuffer:
+        def save(self, buf, format):
+            buf.write(b"png")
+
+    monkeypatch.setattr(server.Image, "fromarray", lambda _img: FakeBuffer())
+    server._render_image_b64(np.zeros(48), {}, layers=layers)
+
+    assert calls["labels"] is labels
+    assert calls["layers"]["liver"] == layers["liver"]
+    assert set(calls["layers"]) == set(server.default_layers())
+
+
 def test_dataset_metadata_route_maps_unknown_dataset_to_404(monkeypatch):
     def unknown(name):
         raise ValueError("unknown dataset 'missing'")

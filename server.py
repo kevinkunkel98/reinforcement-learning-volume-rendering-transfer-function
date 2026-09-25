@@ -44,6 +44,7 @@ from rl.oneshot_env import build_observation
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
 from transfer import TOTAL_PARAMS, TISSUE_BANDS, _opacity_and_color_at, default_params, opacity_mass
 import visibility
+from anatomy_layers import default_layers, normalize_layers
 
 LOG_PATH = "out/log.jsonl"
 SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
@@ -103,6 +104,7 @@ def _resolve_dataset_name():
 _dataset_name = _resolve_dataset_name()
 _volume = None
 _spacing = None
+_labels = None
 
 
 def get_volume():
@@ -112,12 +114,26 @@ def get_volume():
     return _volume, _spacing
 
 
+def get_labels():
+    """Return active dataset labels, or None for HU-only datasets."""
+    global _labels
+    if _labels is None and _dataset_name.startswith("ts_"):
+        try:
+            import totalseg
+            if totalseg.has_labels(_dataset_name):
+                _labels = totalseg.load_labels(_dataset_name)
+        except (FileNotFoundError, ValueError):
+            _labels = None
+    return _labels
+
+
 def set_dataset(name: str):
     """Switch the active dataset. Raises ValueError for an unknown name."""
-    global _dataset_name, _volume, _spacing
+    global _dataset_name, _volume, _spacing, _labels
     volume, spacing = load_dataset(name)  # validates name, raises ValueError if unknown
     _dataset_name = name
     _volume, _spacing = volume, spacing
+    _labels = None
 
 
 def _masses(params):
@@ -222,9 +238,10 @@ def _frame_bounds():
     return _frame_bounds_cache["bounds"]
 
 
-def _render_image_b64(params, camera):
+def _render_image_b64(params, camera, layers=None):
     volume, spacing = get_volume()
-    img = grab(render(volume, params, spacing=spacing, camera=camera, frame_bounds=_frame_bounds()))
+    img = grab(render(volume, params, spacing=spacing, camera=camera, frame_bounds=_frame_bounds(),
+                     labels=get_labels(), layers=normalize_layers(layers or default_layers())))
     buf = io.BytesIO()
     Image.fromarray(img).save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode(), img, buf.getvalue()

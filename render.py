@@ -2,6 +2,8 @@
 import numpy as np
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy  # pyright: ignore[reportMissingImports]
+from anatomy import CANONICAL_CLASSES
+from anatomy_layers import normalize_layers
 from transfer import N_PEAKS, peak_internal, vector_to_vtk
 
 WIDTH, HEIGHT = 1024, 800
@@ -78,6 +80,7 @@ def _make_mapper(vtk_image):
 
 
 _PIPELINE_CACHE = None  # (key, prop, renderer, win) -- see _get_pipeline
+_ANATOMY_ACTOR = None
 
 
 def _get_pipeline(volume: np.ndarray, spacing):
@@ -100,11 +103,14 @@ def _get_pipeline(volume: np.ndarray, spacing):
     volume array alive for the caller's entire lifetime, so identity is a
     safe, cheap cache key here -- it is not a general-purpose memoization.
     """
-    global _PIPELINE_CACHE
+    global _PIPELINE_CACHE, _ANATOMY_ACTOR
     key = (id(volume), tuple(spacing))
     if _PIPELINE_CACHE is not None and _PIPELINE_CACHE[0] == key:
         return _PIPELINE_CACHE[1:]
     if _PIPELINE_CACHE is not None:
+        if _ANATOMY_ACTOR is not None:
+            _PIPELINE_CACHE[2].RemoveViewProp(_ANATOMY_ACTOR)
+            _ANATOMY_ACTOR = None
         _PIPELINE_CACHE[3].Finalize()
 
     dx, dy, dz = volume.shape
@@ -157,13 +163,54 @@ def _get_pipeline(volume: np.ndarray, spacing):
     return prop, renderer, win
 
 
+def _set_anatomy_actor(renderer, volume, spacing, labels, layers):
+    global _ANATOMY_ACTOR
+    normalized = normalize_layers(layers or {})
+    if _ANATOMY_ACTOR is not None:
+        renderer.RemoveViewProp(_ANATOMY_ACTOR)
+        _ANATOMY_ACTOR = None
+    if labels is None:
+        return
+    labels = np.asarray(labels)
+    if labels.dtype != np.uint8 or labels.ndim != 3 or labels.shape != volume.shape:
+        raise ValueError("labels must be a uint8 array matching volume shape")
+    image = vtk.vtkImageData()
+    image.SetDimensions(*labels.shape)
+    image.SetSpacing(*spacing)
+    image.GetPointData().SetScalars(
+        numpy_to_vtk(np.ascontiguousarray(labels.ravel(order="F")), deep=True,
+                     array_type=vtk.VTK_UNSIGNED_CHAR)
+    )
+
+    color = vtk.vtkColorTransferFunction()
+    opacity = vtk.vtkPiecewiseFunction()
+    opacity.AddPoint(0.0, 0.0)
+    for class_id, class_name in enumerate(CANONICAL_CLASSES, 1):
+        settings = normalized[class_name]
+        # Integer labels plus nearest interpolation prevent cross-class mixing.
+        color.AddRGBPoint(float(class_id), *settings["rgb"])
+        opacity.AddPoint(float(class_id), settings["opacity"])
+    prop = vtk.vtkVolumeProperty()
+    prop.SetColor(color)
+    prop.SetScalarOpacity(opacity)
+    prop.SetInterpolationTypeToNearest()
+    prop.ShadeOff()
+    actor = vtk.vtkVolume()
+    actor.SetMapper(_make_mapper(image))
+    actor.SetProperty(prop)
+    renderer.AddVolume(actor)
+    _ANATOMY_ACTOR = actor
+
+
 def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), camera: dict | None = None,
-            frame_bounds: list | None = None) -> vtk.vtkRenderWindow:
+           frame_bounds: list | None = None, labels: np.ndarray | None = None,
+           layers: dict | None = None) -> vtk.vtkRenderWindow:
     prop, renderer, win = _get_pipeline(volume, spacing)
 
     ctf, otf = vector_to_vtk(params)
     prop.SetColor(ctf)
     prop.SetScalarOpacity(otf)
+    _set_anatomy_actor(renderer, volume, spacing, labels, layers)
 
     cam = renderer.GetActiveCamera()
     cam_state = camera or {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}

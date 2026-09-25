@@ -1,9 +1,14 @@
 import numpy as np
+import pytest
 from phantom import build_phantom
 from transfer import default_params
 import render as render_module
 import views
 from render import render, grab, features
+from anatomy import CANONICAL_CLASSES
+
+
+CLASS_IDS = {name: index for index, name in enumerate(CANONICAL_CLASSES, 1)}
 
 
 def test_render_grab_shape_and_dtype():
@@ -131,3 +136,42 @@ def test_same_camera_dict_renders_the_same_viewpoint_every_time():
     for _ in range(3):
         again = _camera_state(render(volume, params, camera=camera))
         assert np.allclose(first, again)
+
+
+def test_equal_hu_labels_render_independently_without_label_leakage():
+    volume = np.full((20, 20, 20), 100.0, dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[:10, :, :] = CLASS_IDS["liver"]
+    labels[10:, :, :] = CLASS_IDS["kidneys"]
+    params = default_params()
+    camera = {"position": (0.0, 0.0, 80.0), "focal_point": (0.0, 0.0, 0.0),
+              "view_up": (0.0, 1.0, 0.0), "parallel_scale": 20.0}
+
+    liver = {"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]},
+             "kidneys": {"opacity": 0.0, "rgb": [0.0, 1.0, 0.0]}}
+    kidneys = {"liver": {"opacity": 0.0, "rgb": [1.0, 0.0, 0.0]},
+               "kidneys": {"opacity": 1.0, "rgb": [0.0, 1.0, 0.0]}}
+
+    liver_img = grab(render(volume, params, camera=camera, labels=labels, layers=liver))
+    kidney_img = grab(render(volume, params, camera=camera, labels=labels, layers=kidneys))
+
+    assert liver_img[..., 0].sum() > liver_img[..., 1].sum()
+    assert kidney_img[..., 1].sum() > kidney_img[..., 0].sum()
+
+
+def test_label_zero_is_background_and_labels_are_nearest_sampled():
+    volume = np.full((12, 12, 12), 100.0, dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[2:10, 2:10, 2:10] = CLASS_IDS["liver"]
+    params = default_params()
+    layers = {"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]}}
+
+    image = grab(render(volume, params, labels=labels, layers=layers))
+    assert image[..., 0].sum() > image[..., 1].sum()
+
+
+def test_invalid_anatomical_layers_are_rejected():
+    volume = np.zeros((8, 8, 8), dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    with pytest.raises(ValueError, match="anatomy_layers"):
+        render(volume, default_params(), labels=labels, layers={"unknown": {}})
