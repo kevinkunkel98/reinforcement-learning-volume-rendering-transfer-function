@@ -664,6 +664,14 @@ class Session:
 
     def set_layer(self, class_name: str, *, opacity=None, rgb=None):
         layers = normalize_layers(self.history[self.cursor].get("anatomy_layers", default_layers()))
+        try:
+            metadata = label_metadata(_dataset_name)
+        except FileNotFoundError:
+            metadata = None
+        if metadata is not None:
+            available = set(metadata.get("classes", metadata.get("class_ids", {})))
+            if class_name not in available:
+                raise ValueError(f"{class_name} is not available in active labeled dataset")
         if opacity is not None:
             layers[class_name]["opacity"] = opacity
         if rgb is not None:

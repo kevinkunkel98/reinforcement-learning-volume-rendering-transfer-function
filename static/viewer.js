@@ -34,6 +34,7 @@
   let activeLayers = {};
   let rawVolumeValues;
   let volumeMetadata;
+  let anatomyAvailability;
 
   function destroyViewer() {
     if (interactor) {
@@ -396,7 +397,7 @@
     renderWindow.render();
   }
 
-  async function load(name, params, cameraState, layers = {}) {
+  async function load(name, params, cameraState, layers = {}, availability = null) {
     const generation = ++loadGeneration;
     loadController?.abort();
     loadController = new AbortController();
@@ -408,6 +409,7 @@
       if (volume && datasetName === name) {
         setCamera(cameraState);
         activeLayers = layers || {};
+        anatomyAvailability = availability;
         setLabelAwareTransferFunction(params, labelValues, labelMetadata, layers);
         fallbackEl.hidden = true;
         setStatus(`Local ${datasetName} volume${labelStatus}`);
@@ -417,19 +419,25 @@
       labelValues = undefined;
       labelMetadata = undefined;
       activeLayers = {};
+      anatomyAvailability = availability;
       removeLabelVolume();
       const loaded = await fetchVolume(name, loadController.signal, generation);
       if (!isCurrentLoad(generation)) return false;
       // Labels are transport-ready now; rendering remains HU-only until Task 3.
       // A missing label volume must never disable the existing volume path.
-      try {
-        const labels = await fetchLabelMetadata(name, loadController.signal);
-        labelMetadata = validateLabelDimensions(labels.metadata, loaded.metadata);
-        labelValues = labels.labels;
-        labelStatus = "";
-      } catch (labelError) {
-        if (labelError.name === "AbortError") throw labelError;
-        labelStatus = `; ${labelError.message}`;
+      const knownUnlabeled = availability && availability.label_available === false;
+      if (!knownUnlabeled) {
+        try {
+          const labels = await fetchLabelMetadata(name, loadController.signal);
+          labelMetadata = validateLabelDimensions(labels.metadata, loaded.metadata);
+          labelValues = labels.labels;
+          labelStatus = "";
+        } catch (labelError) {
+          if (labelError.name === "AbortError") throw labelError;
+          if (!String(labelError.message).includes("label-unavailable")) {
+            labelStatus = `; ${labelError.message}`;
+          }
+        }
       }
       datasetName = name;
       if (!renderer) {

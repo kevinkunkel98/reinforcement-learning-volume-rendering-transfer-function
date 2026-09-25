@@ -104,6 +104,18 @@ def test_viewer_masks_hu_actor_only_when_labels_are_active_and_clears_label_acto
     assert "activeLayers" in viewer
 
 
+def test_viewer_uses_state_availability_before_fetching_labels():
+    viewer = read("viewer.js")
+    app = read("app.js")
+    assert "anatomyAvailability" in viewer
+    assert "label_available" in viewer
+    assert "fetchLabelMetadata" in viewer
+    assert "data.anatomy" in app
+    assert "state.anatomy" in app or "data.anatomy" in app
+    assert "knownUnlabeled" in viewer
+    assert "label-unavailable" in viewer
+
+
 def test_app_exposes_editable_controls_for_all_anatomy_classes():
     app = read("app.js")
     html = read("index.html")

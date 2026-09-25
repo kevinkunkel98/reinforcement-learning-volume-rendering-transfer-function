@@ -440,6 +440,22 @@ def test_layer_update_persists_exact_opacity_and_rgb():
     assert state["current"]["params"] == s.history[0]["params"]
 
 
+def test_layer_update_rejects_missing_class_on_active_labeled_dataset(monkeypatch):
+    s = _fresh_session()
+    monkeypatch.setattr(server, "label_metadata", lambda name: {
+        "label_layout_version": "anatomy-v2", "classes": ["liver"]})
+    with pytest.raises(ValueError, match="not available in active labeled dataset"):
+        s.set_layer("kidneys", opacity=0.0)
+
+
+def test_layer_update_keeps_unlabeled_dataset_behavior(monkeypatch):
+    s = _fresh_session()
+    monkeypatch.setattr(server, "label_metadata", lambda name: (_ for _ in ()).throw(
+        FileNotFoundError("no anatomical labels")))
+    state = s.set_layer("kidneys", opacity=0.0)
+    assert state["current"]["anatomy_layers"]["kidneys"]["opacity"] == 0.0
+
+
 def test_render_step_includes_a_transfer_curve():
     """The histogram/curve visual guide (README, "the hard part") needs the
     opacity+colour curve sampled over the HU range on every step, computed

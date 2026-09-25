@@ -254,7 +254,7 @@ async function refresh(data) {
   el("current-image").src = `data:image/png;base64,${state.current.image_b64}`;
   if (window.volumeViewer && state.dataset && state.current) {
     await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera,
-      state.current.anatomy_layers);
+      state.current.anatomy_layers, data.anatomy);
   }
 
   updateTelemetry(state.current.class_visibility, state.current.class_brightness);
