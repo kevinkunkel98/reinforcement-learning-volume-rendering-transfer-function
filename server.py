@@ -32,7 +32,8 @@ from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 import collect
 from commands import COMMAND_REFERENCE, apply_command, parse_command_with_meta
-from datasets import _dataset_version, dataset_metadata, default_camera_for, get_volume_chunk, list_datasets, load_dataset
+from datasets import (_dataset_version, dataset_metadata, default_camera_for, get_label_chunk,
+                      get_volume_chunk, label_metadata, list_datasets, load_dataset)
 from evaluate import jsonl_append
 import goals
 import policy as policy_module
@@ -781,6 +782,41 @@ async def dataset_chunk(name: str, index: str):
         media_type="application/octet-stream",
         headers={"X-Dataset-Version": _dataset_version(name)},
     )
+
+
+@app.get("/api/datasets/{name}/labels/metadata")
+async def label_metadata_route(name: str):
+    if name not in list_datasets():
+        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
+    try:
+        return label_metadata(name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/datasets/{name}/labels/chunks/{index}")
+async def label_chunk(name: str, index: str):
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="label chunk index must be an integer")
+    if name not in list_datasets():
+        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
+    try:
+        chunk = get_label_chunk(name, index)
+        metadata = label_metadata(name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (ValueError, IndexError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return Response(content=chunk, media_type="application/octet-stream",
+                    headers={"X-Dataset-Version": metadata["dataset_version"]})
 
 
 @app.get("/api/commands")

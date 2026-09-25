@@ -149,6 +149,38 @@ def test_dataset_chunk_route_maps_non_integer_index_to_400():
     assert "integer" in exc.value.detail
 
 
+def test_label_metadata_route_returns_metadata(monkeypatch):
+    metadata = {"name": "ts_test", "scalar_type": "uint8", "order": "F"}
+    monkeypatch.setattr(server, "list_datasets", lambda: ["ts_test"])
+    monkeypatch.setattr(server, "label_metadata", lambda name: metadata)
+
+    assert asyncio.run(server.label_metadata_route("ts_test")) == metadata
+
+
+def test_label_metadata_route_reports_unavailable_labels(monkeypatch):
+    monkeypatch.setattr(server, "list_datasets", lambda: ["synthetic"])
+    monkeypatch.setattr(server, "label_metadata", lambda name: (_ for _ in ()).throw(
+        FileNotFoundError("dataset has no anatomical labels")))
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.label_metadata_route("synthetic"))
+    assert exc.value.status_code == 404
+    assert "no anatomical labels" in exc.value.detail
+
+
+def test_label_chunk_route_returns_uint8_response(monkeypatch):
+    monkeypatch.setattr(server, "list_datasets", lambda: ["ts_test"])
+    monkeypatch.setattr(server, "get_label_chunk", lambda name, index: b"\x01\x02")
+    monkeypatch.setattr(server, "label_metadata", lambda name: {"dataset_version": "v1"})
+
+    result = asyncio.run(server.label_chunk("ts_test", 0))
+
+    assert isinstance(result, Response)
+    assert result.media_type == "application/octet-stream"
+    assert result.body == b"\x01\x02"
+    assert result.headers["X-Dataset-Version"] == "v1"
+
+
 def test_scene_transition_route_normalizes_and_appends_jsonl(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     before = _scene("scene-0", None)

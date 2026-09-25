@@ -177,3 +177,30 @@ def test_has_labels_accepts_current_fixture_subject_when_manifest_is_patched(
     monkeypatch.setattr(totalseg, "MANIFEST_PATH", "/missing/manifest.json")
 
     assert totalseg.has_labels("ts_l0001") is True
+
+
+def test_label_metadata_reports_anatomy_v2_layout_and_classes(labelled_manifest):
+    metadata = totalseg.label_metadata("ts_l0001")
+
+    assert metadata["dimensions"] == [2, 3, 4]
+    assert metadata["scalar_type"] == "uint8"
+    assert metadata["order"] == "F"
+    assert metadata["label_layout_version"] == CLASS_LAYOUT_VERSION
+    assert metadata["class_ids"] == {"skeleton": 1, "liver": 5}
+    assert metadata["dataset_version"] == "sha256:" + "ab" * 32
+
+
+def test_label_metadata_rejects_unlabeled_dataset(labelled_manifest):
+    with pytest.raises(FileNotFoundError, match="no label volume"):
+        totalseg.label_metadata("ts_l0002")
+
+
+@pytest.mark.parametrize("bad", [
+    np.zeros((2, 2), dtype=np.uint8),
+    np.zeros((0, 2, 2), dtype=np.uint8),
+    np.zeros((1, 1, 1), dtype=np.float32),
+    np.array([[[np.nan]]], dtype=np.float64),
+])
+def test_iter_label_chunks_rejects_invalid_labels(bad):
+    with pytest.raises(ValueError):
+        list(totalseg.iter_label_chunks(bad, chunk_bytes=8))

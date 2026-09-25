@@ -78,6 +78,56 @@
     return metadata;
   }
 
+  function validateLabelMetadata(metadata) {
+    if (!metadata || !Array.isArray(metadata.dimensions) || metadata.dimensions.length !== 3 ||
+        metadata.dimensions.some((value) => !Number.isInteger(value) || value <= 0)) {
+      throw new Error("invalid label dimensions");
+    }
+    const expectedBytes = metadata.dimensions.reduce((product, value) => product * value, 1);
+    if (metadata.scalar_type !== "uint8" || metadata.order !== "F" ||
+        metadata.label_layout_version !== "anatomy-v2" || metadata.total_bytes !== expectedBytes) {
+      throw new Error("unsupported label transport format");
+    }
+    if (!Array.isArray(metadata.chunks) || metadata.chunks.length === 0) {
+      throw new Error("labels have no chunks");
+    }
+    let offset = 0;
+    metadata.chunks.forEach((chunk, index) => {
+      if (chunk.index !== index || chunk.byte_offset !== offset ||
+          !Number.isInteger(chunk.byte_length) || chunk.byte_length <= 0) {
+        throw new Error("invalid label chunk descriptors");
+      }
+      offset += chunk.byte_length;
+    });
+    if (offset !== metadata.total_bytes) throw new Error("label chunks do not cover payload");
+    return metadata;
+  }
+
+  function reconstructLabels(metadata, chunks) {
+    const raw = new Uint8Array(metadata.total_bytes);
+    chunks.forEach(({ byte_offset: offset, bytes }) => raw.set(bytes, offset));
+    return new Uint8Array(raw.buffer);
+  }
+
+  async function fetchLabelMetadata(name, signal) {
+    const response = await fetch(`/api/datasets/${encodeURIComponent(name)}/labels/metadata`, { signal });
+    if (response.status === 404) throw new Error("no anatomical labels (label-unavailable)");
+    if (!response.ok) throw new Error(`label metadata request failed (${response.status})`);
+    const metadata = validateLabelMetadata(await response.json());
+    if (metadata.name !== name) throw new Error("label metadata dataset mismatch");
+    const chunks = await Promise.all(metadata.chunks.map(async (chunk) => {
+      const chunkResponse = await fetch(`/api/datasets/${encodeURIComponent(name)}/labels/chunks/${chunk.index}`, { signal });
+      if (!chunkResponse.ok) throw new Error(`label chunk ${chunk.index} request failed (${chunkResponse.status})`);
+      if (chunkResponse.headers.get("X-Dataset-Version") !== metadata.dataset_version) {
+        throw new Error(`label chunk ${chunk.index} has mismatched dataset version`);
+      }
+      const bytes = new Uint8Array(await chunkResponse.arrayBuffer());
+      if (bytes.byteLength !== chunk.byte_length) throw new Error(`label chunk ${chunk.index} has invalid length`);
+      return { ...chunk, bytes };
+    }));
+    return { metadata, labels: reconstructLabels(metadata, chunks) };
+  }
+
   function isCurrentLoad(generation) {
     return generation === loadGeneration;
   }
@@ -245,6 +295,14 @@
       }
       const loaded = await fetchVolume(name, loadController.signal, generation);
       if (!isCurrentLoad(generation)) return false;
+      // Labels are transport-ready now; rendering remains HU-only until Task 3.
+      // A missing label volume must never disable the existing volume path.
+      try {
+        await fetchLabelMetadata(name, loadController.signal);
+      } catch (labelError) {
+        if (labelError.name === "AbortError") throw labelError;
+        setStatus(`Local volume; ${labelError.message}`);
+      }
       datasetName = name;
       if (!renderer) {
         openGLRenderWindow = vtk.Rendering.OpenGL.vtkRenderWindow.newInstance();

@@ -395,6 +395,50 @@ def iter_volume_chunks(volume: np.ndarray, chunk_bytes: int = DEFAULT_CHUNK_BYTE
         yield raw[offset:offset + chunk_bytes].tobytes()
 
 
+def iter_label_chunks(labels: np.ndarray, chunk_bytes: int = DEFAULT_CHUNK_BYTES):
+    """Yield uint8 label chunks using the volume transport's chunk size/order."""
+    if chunk_bytes != DEFAULT_CHUNK_BYTES:
+        return totalseg.iter_label_chunks(labels, chunk_bytes)
+    return totalseg.iter_label_chunks(labels, DEFAULT_CHUNK_BYTES)
+
+
+def label_metadata(name: str) -> dict:
+    """Return transport metadata for a TotalSegmentator label volume."""
+    if not totalseg.is_totalseg(name) or not totalseg.has_labels(name):
+        raise FileNotFoundError(f"{name} has no anatomical labels")
+    labels = np.asarray(totalseg.load_labels(name))
+    metadata = dict(totalseg.label_metadata(name))
+    metadata["dataset_version"] = _dataset_version(name)
+    metadata.setdefault("classes", totalseg.classes_present(name))
+    metadata.setdefault("dimensions", list(labels.shape))
+    metadata.setdefault("scalar_type", "uint8")
+    metadata.setdefault("byte_order", "little")
+    metadata.setdefault("order", "F")
+    metadata.setdefault("chunk_bytes", DEFAULT_CHUNK_BYTES)
+    metadata.setdefault("total_bytes", labels.nbytes)
+    metadata.setdefault("chunk_count", math.ceil(labels.nbytes / DEFAULT_CHUNK_BYTES))
+    metadata.setdefault("chunks", [{
+        "index": index,
+        "byte_offset": index * DEFAULT_CHUNK_BYTES,
+        "byte_length": min(DEFAULT_CHUNK_BYTES, labels.nbytes - index * DEFAULT_CHUNK_BYTES),
+    } for index in range(metadata["chunk_count"])])
+    metadata["chunks"] = [dict(chunk) for chunk in metadata["chunks"]]
+    return metadata
+
+
+def get_label_chunk(name: str, index: int) -> bytes:
+    """Return one Fortran-order uint8 label chunk."""
+    metadata = label_metadata(name)
+    if isinstance(index, bool) or not isinstance(index, int):
+        raise IndexError("label chunk index must be an integer")
+    if index < 0 or index >= metadata["chunk_count"]:
+        raise IndexError(f"label chunk index out of range: {index}")
+    labels = totalseg.load_labels(name)
+    raw = b"".join(iter_label_chunks(labels, DEFAULT_CHUNK_BYTES))
+    descriptor = metadata["chunks"][index]
+    return raw[descriptor["byte_offset"]:descriptor["byte_offset"] + descriptor["byte_length"]]
+
+
 def dataset_metadata(name: str) -> dict:
     """Return transport metadata for the normalized volume loaded by ``name``."""
     if name not in list_datasets():

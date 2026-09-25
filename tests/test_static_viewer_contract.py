@@ -43,6 +43,19 @@ def test_viewer_fetches_typed_chunks_and_reconstructs_fortran_volume():
     assert "little-endian" in viewer
 
 
+def test_viewer_contract_exposes_label_transport_and_unlabeled_fallback():
+    viewer = read("viewer.js")
+    assert "/labels/metadata" in viewer
+    assert "/labels/chunks/" in viewer
+    assert "Uint8Array" in viewer
+    assert "reconstructLabels" in viewer
+    assert "fetchLabelMetadata" in viewer
+    assert "no anatomical labels" in viewer
+    assert "label-unavailable" in viewer
+    assert "label_layout_version" in viewer
+    assert "anatomy-v2" in viewer
+
+
 def test_viewer_adapts_exactly_48_values_and_exposes_camera_state():
     viewer = read("viewer.js")
     assert "const TOTAL_PARAMS = 48" in viewer

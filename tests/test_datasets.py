@@ -171,6 +171,44 @@ def test_iter_volume_chunks_rejects_invalid_chunk_size(chunk_bytes):
         list(datasets.iter_volume_chunks(volume, chunk_bytes=chunk_bytes))
 
 
+def test_label_chunks_round_trip_fortran_uint8():
+    labels = np.arange(24, dtype=np.uint8).reshape(2, 3, 4)[:, :, ::-1]
+    chunks = list(datasets.iter_label_chunks(labels, chunk_bytes=8))
+    restored = np.frombuffer(b"".join(chunks), dtype=np.uint8).reshape(labels.shape, order="F")
+
+    np.testing.assert_array_equal(restored, labels)
+    assert [len(chunk) for chunk in chunks] == [8, 8, 8]
+
+
+def test_label_metadata_reports_transport_and_anatomy_fields(monkeypatch):
+    labels = np.zeros((2, 3, 4), dtype=np.uint8)
+    monkeypatch.setattr(datasets.totalseg, "has_labels", lambda name: True)
+    monkeypatch.setattr(datasets.totalseg, "load_labels", lambda name: labels)
+    monkeypatch.setattr(datasets.totalseg, "classes_present", lambda name: ["liver"])
+    monkeypatch.setattr(datasets.totalseg, "label_metadata", lambda name: {
+        "label_layout_version": "anatomy-v2", "class_ids": {"liver": 1},
+        "chunks": [{"index": 0, "byte_offset": 0, "byte_length": 24}],
+    })
+    monkeypatch.setattr(datasets, "_dataset_version", lambda name: "sha256:test")
+
+    metadata = datasets.label_metadata("ts_test")
+
+    assert metadata["dimensions"] == [2, 3, 4]
+    assert metadata["scalar_type"] == "uint8"
+    assert metadata["order"] == "F"
+    assert metadata["label_layout_version"] == "anatomy-v2"
+    assert metadata["classes"] == ["liver"]
+    assert metadata["dataset_version"] == "sha256:test"
+    assert metadata["chunks"]
+
+
+def test_label_metadata_rejects_unlabeled_dataset(monkeypatch):
+    monkeypatch.setattr(datasets.totalseg, "has_labels", lambda name: False)
+
+    with pytest.raises(FileNotFoundError, match="no anatomical labels"):
+        datasets.label_metadata("synthetic")
+
+
 import json
 
 import nibabel as nib

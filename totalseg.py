@@ -10,12 +10,13 @@ import os
 import nibabel as nib
 import numpy as np
 
-from anatomy import CLASS_LAYOUT_VERSION
+from anatomy import CANONICAL_CLASSES, CLASS_LAYOUT_VERSION
 
 MANIFEST_PATH = "data/totalseg_manifest.json"
 NAME_PREFIX = "ts_"
 SPLITS = ("train", "val", "test")
 _FETCH_HINT = "run `python -m tools.select_totalseg` to extract the volumes"
+LABEL_CHUNK_BYTES = 8 * 1024 * 1024
 
 
 def _manifest() -> dict:
@@ -119,3 +120,53 @@ def _manifest_version_for(entry: dict) -> str | None:
     if os.path.exists(MANIFEST_PATH):
         return manifest.get("label_layout_version")
     return entry.get("label_layout_version")
+
+
+def _validated_labels(labels: np.ndarray) -> np.ndarray:
+    labels = np.asarray(labels)
+    if labels.dtype != np.dtype(np.uint8):
+        raise ValueError("labels must have dtype uint8")
+    if labels.ndim != 3:
+        raise ValueError("labels must have three dimensions")
+    if labels.size == 0:
+        raise ValueError("labels must be non-empty")
+    return np.asfortranarray(labels, dtype=np.uint8)
+
+
+def iter_label_chunks(labels: np.ndarray, chunk_bytes: int = LABEL_CHUNK_BYTES):
+    """Yield uint8 label bytes in the same Fortran order as volume transport."""
+    if isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int) or chunk_bytes <= 0:
+        raise ValueError("chunk_bytes must be a positive integer")
+    labels = _validated_labels(labels)
+    raw = memoryview(labels.ravel(order="F")).cast("B")
+    for offset in range(0, raw.nbytes, chunk_bytes):
+        yield raw[offset:offset + chunk_bytes].tobytes()
+
+
+def label_metadata(name: str) -> dict:
+    """Return validated label layout metadata for one labeled subject."""
+    labels = _validated_labels(load_labels(name))
+    present = classes_present(name)
+    class_ids = {class_name: index for index, class_name in enumerate(CANONICAL_CLASSES, 1)
+                 if class_name in present}
+    total_bytes = labels.nbytes
+    chunks = [{
+        "index": index,
+        "byte_offset": index * LABEL_CHUNK_BYTES,
+        "byte_length": min(LABEL_CHUNK_BYTES, total_bytes - index * LABEL_CHUNK_BYTES),
+    } for index in range((total_bytes + LABEL_CHUNK_BYTES - 1) // LABEL_CHUNK_BYTES)]
+    return {
+        "name": name,
+        "dataset_version": version(name),
+        "dimensions": list(labels.shape),
+        "scalar_type": "uint8",
+        "byte_order": "little",
+        "order": "F",
+        "label_layout_version": CLASS_LAYOUT_VERSION,
+        "class_ids": class_ids,
+        "classes": list(class_ids),
+        "chunk_bytes": LABEL_CHUNK_BYTES,
+        "total_bytes": total_bytes,
+        "chunk_count": len(chunks),
+        "chunks": chunks,
+    }
