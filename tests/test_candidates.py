@@ -161,6 +161,43 @@ def test_candidates_observation_matches_oneshot_env_observation(monkeypatch):
     assert np.array_equal(env_observation, candidates_observation)
 
 
+def test_candidate_residual_action_mode_adds_action_to_start(monkeypatch):
+    _make_model(monkeypatch)
+    start = goals.starting_params()
+    action = np.zeros(len(CONTROLLABLE))
+    action[0] = 0.1
+    got = candidates._apply_action(start, action, action_mode="residual")
+    expected = candidates._apply_action(start, np.asarray(
+        [np.mean([start[i] for i in group]) for group in CONTROLLABLE]) + action)
+    assert np.array_equal(got, expected)
+
+
+def test_anchor_items_passes_policy_metadata_to_policy_candidates(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    seen = []
+    monkeypatch.setattr(candidates, "sample_item",
+                        lambda *args, **kwargs: seen.append(kwargs["policy_metadata"]) or {
+                            "volume": "fake_a"})
+    monkeypatch.setattr(candidates, "_save_anchor_cache", lambda *args: None)
+    candidates.anchor_items(count=1, seed=0, policy=_StubPolicy(), volumes=["fake_a"],
+                            model_for_volume=lambda name: model, cache_path=str(tmp_path / "cache"),
+                            policy_metadata={"policy_version": "oneshot-v7", "action_mode": "residual"})
+    assert seen[0]["action_mode"] == "residual"
+
+
+def test_anchor_cache_rejects_v6_metadata_for_v7_policy(monkeypatch, tmp_path):
+    model = _make_model(monkeypatch)
+    cache = tmp_path / "cache.json"
+    candidates.anchor_items(count=1, seed=0, policy=_StubPolicy(), volumes=["fake_a"],
+                            model_for_volume=lambda name: model, cache_path=str(cache),
+                            policy_metadata={"policy_version": "oneshot-v7", "action_mode": "residual"})
+    cache.write_text(cache.read_text().replace('"policy_version": "oneshot-v7"',
+                                               '"policy_version": "oneshot-v6"'))
+    assert candidates.anchor_items(count=1, seed=0, policy=_StubPolicy(), volumes=["fake_a"],
+                                   model_for_volume=lambda name: model, cache_path=str(cache),
+                                   policy_metadata={"policy_version": "oneshot-v7", "action_mode": "residual"})
+
+
 # --- policy=None fallback ------------------------------------------------
 
 def test_no_policy_falls_back_to_non_policy_sources(monkeypatch):

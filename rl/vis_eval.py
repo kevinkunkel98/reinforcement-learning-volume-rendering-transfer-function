@@ -38,7 +38,8 @@ import goals
 import provenance
 import visibility
 from rl.baselines import BASELINES, hill_climb
-from rl.oneshot_env import OneShotEnv, observation_metadata
+from rl.oneshot_env import (OneShotEnv, load_policy_metadata, observation_metadata,
+                            resolve_policy_metadata)
 from rl.vis_env import MAX_STEPS, VisibilityTFEnv, _ATTAINMENT_FLOOR
 
 EVAL_KINDS = tuple(kind for kind, _ in goals.INSTRUCTION_MIX)
@@ -53,7 +54,8 @@ _ENV_FOR_FORMULATION = {"multi_step": VisibilityTFEnv, "one_shot": OneShotEnv}
 
 def fixed_episodes(split: str, count: int, seed: int = 0,
                     volume_ids=None, model_for_volume=None,
-                    formulation: str = "multi_step", active_layers=None) -> list:
+                     formulation: str = "multi_step", active_layers=None,
+                     policy_metadata=None) -> list:
     """A deterministic list of `count` `{"volume", "start_params",
     "instruction"}` episodes drawn from `split` (or `volume_ids`, for tests):
     one `reset(seed=seed + i)` per episode, recording the exact state it
@@ -67,7 +69,9 @@ def fixed_episodes(split: str, count: int, seed: int = 0,
     ids = volume_ids if volume_ids is not None else datasets.volumes_for_split(split)
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
     env_cls = _ENV_FOR_FORMULATION[formulation]
-    env = env_cls(list(ids), **kwargs)
+    metadata = resolve_policy_metadata(policy_metadata)
+    env_kwargs = metadata if formulation == "one_shot" else {}
+    env = env_cls(list(ids), **kwargs, **env_kwargs)
     env._active_layers = active_layers
 
     episodes = []
@@ -77,6 +81,7 @@ def fixed_episodes(split: str, count: int, seed: int = 0,
             "volume": info["volume"],
             "start_params": env._params.copy(),
             "instruction": env._instruction,
+            "policy_metadata": metadata,
         })
     return episodes
 
@@ -127,10 +132,12 @@ def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict
 
 
 def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dict,
-                          model_for_volume=visibility.for_volume, active_layers=None):
+                          model_for_volume=visibility.for_volume, active_layers=None,
+                          policy_metadata=None):
     """A `OneShotEnv` loaded directly into one episode's exact state, the
     `OneShotEnv` counterpart of `_frozen_episode_env` above."""
-    env = OneShotEnv([volume], model_for_volume=model_for_volume)
+    metadata = resolve_policy_metadata(policy_metadata)
+    env = OneShotEnv([volume], model_for_volume=model_for_volume, **metadata)
     model = model_for_volume(volume)
     raw_features = _features(model, start_params, active_layers)
     start_agg = goals.aggregate(raw_features, active_layers)
@@ -162,6 +169,7 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
     checkpoint."""
     loader = load_model or _load_sac
     model = loader(model_path)
+    policy_metadata = load_policy_metadata(model_path)
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
 
     results = []
@@ -169,7 +177,7 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
         if formulation == "one_shot":
             env, obs, info = _frozen_one_shot_env(
                 episode["volume"], episode["start_params"], episode["instruction"],
-                active_layers=active_layers, **kwargs)
+                active_layers=active_layers, policy_metadata=policy_metadata, **kwargs)
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
         else:
@@ -221,7 +229,8 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
     for episode in episodes:
         env, obs, info = _frozen_one_shot_env(
             episode["volume"], episode["start_params"], episode["instruction"],
-            active_layers=active_layers, **kwargs)
+            active_layers=active_layers,
+            policy_metadata=episode.get("policy_metadata"), **kwargs)
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
 
@@ -605,8 +614,10 @@ def main(argv=None, active_layers=None):
         _print_table(load_result(args.show), active_layers=active_layers)
         return
 
+    policy_metadata = load_policy_metadata(args.policy) if args.formulation == "one_shot" else None
     episodes = fixed_episodes(args.split, args.episodes, seed=args.seed,
-                              formulation=args.formulation, active_layers=active_layers)
+                              formulation=args.formulation, active_layers=active_layers,
+                              policy_metadata=policy_metadata)
 
     results = {"policy": run_policy(args.policy, episodes, formulation=args.formulation,
                                       active_layers=active_layers)}

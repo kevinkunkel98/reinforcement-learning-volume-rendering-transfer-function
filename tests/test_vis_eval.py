@@ -187,6 +187,33 @@ def test_fixed_episodes_one_shot_start_params_differ_from_multi_step_convention(
     assert not np.array_equal(multi_step_episode["start_params"], one_shot_episode["start_params"])
 
 
+def test_fixed_one_shot_episodes_carry_policy_metadata(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    [episode] = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        formulation="one_shot", policy_metadata={"policy_version": "oneshot-v7",
+                                                  "action_mode": "residual",
+                                                  "reward_mode": "target"})
+    assert episode["policy_metadata"]["action_mode"] == "residual"
+
+
+def test_frozen_v7_one_shot_env_applies_residual_action(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    [episode] = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        formulation="one_shot", policy_metadata={"policy_version": "oneshot-v7",
+                                                  "action_mode": "residual",
+                                                  "reward_mode": "target"})
+    env, _, _ = vis_eval._frozen_one_shot_env(
+        episode["volume"], episode["start_params"], episode["instruction"],
+        model_for_volume=_model_for_volume, policy_metadata=episode["policy_metadata"])
+    action = np.zeros(ACTION_SIZE, dtype=np.float32)
+    action[0] = 0.1
+    env.step(action)
+    expected = np.clip(env._controllable_values(env._start_params) + action, -1.0, 1.0)
+    assert env._controllable_values(env._params) == pytest.approx(expected)
+
+
 # --- run_policy -----------------------------------------------------------------
 
 def test_run_policy_replays_the_exact_episode_state(monkeypatch):

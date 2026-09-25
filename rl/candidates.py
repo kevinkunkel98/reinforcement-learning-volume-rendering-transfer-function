@@ -21,7 +21,7 @@ import numpy as np
 import goals
 import transfer
 from rl.baselines import BASELINES, CONTROLLABLE, apply_controllable
-from rl.oneshot_env import build_observation, observation_metadata
+from rl.oneshot_env import build_observation, observation_metadata, resolve_policy_metadata
 
 SOURCES = ("policy", "policy", "B1_current_executor", "B3_hill_climb_10", "B5_occlusion_rule", "perturbation")
 NON_POLICY_SOURCES = tuple(source for source in dict.fromkeys(SOURCES) if source != "policy")
@@ -47,7 +47,12 @@ def _observation_for(model, start_params: np.ndarray, instruction: dict, start_a
     return build_observation(instruction["goal"], model.histogram, start_agg, solo_max_log, controllable)
 
 
-def _apply_action(start_params: np.ndarray, action: np.ndarray) -> np.ndarray:
+def _apply_action(start_params: np.ndarray, action: np.ndarray, action_mode: str = "absolute") -> np.ndarray:
+    if action_mode == "residual":
+        action = np.asarray(action) + np.asarray(
+            [float(np.mean([start_params[i] for i in group])) for group in CONTROLLABLE])
+    elif action_mode != "absolute":
+        raise ValueError("action_mode must be absolute or residual")
     return apply_controllable(start_params, action)
 
 
@@ -81,11 +86,13 @@ def _choose_sources(rng: np.random.Generator, policy) -> tuple:
 
 
 def _sample_candidate(source: str, model, start_params: np.ndarray, instruction: dict,
-                       start_agg: dict, rng: np.random.Generator, policy) -> np.ndarray:
+                       start_agg: dict, rng: np.random.Generator, policy,
+                       policy_metadata=None) -> np.ndarray:
     if source == "policy":
         observation = _observation_for(model, start_params, instruction, start_agg)
         action = _predict(policy, observation, rng, deterministic=False)
-        return _apply_action(start_params, action)
+        return _apply_action(start_params, action,
+                             (policy_metadata or {}).get("action_mode", "absolute"))
     if source == "perturbation":
         return _perturb(start_params, rng)
     return np.asarray(BASELINES[source](model, start_params, instruction), dtype=np.float64)
@@ -100,7 +107,8 @@ def _is_near_duplicate(agg_a: dict, agg_b: dict) -> bool:
     return vis_close and bright_close
 
 
-def sample_item(volume: str, model, rng: np.random.Generator, policy=None) -> dict:
+def sample_item(volume: str, model, rng: np.random.Generator, policy=None,
+                policy_metadata=None) -> dict:
     """One preference item: a start transfer function, an instruction, and
     two candidates from different sources (see module docstring). Regenerates
     the pair (up to `MAX_ATTEMPTS` times) while the candidates are visually
@@ -108,6 +116,7 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None) -> di
     `"near_duplicate"`. `objective_choice` -- the candidate with the lower
     `goals.distance` to the instruction -- is recorded for analysis but never
     shown to the rater."""
+    policy_metadata = resolve_policy_metadata(policy_metadata)
     start_params = goals.starting_params()
     start_agg = goals.aggregate(model.features(start_params))
     instruction = goals.sample_instruction(volume, model, start_agg, rng)
@@ -117,8 +126,10 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None) -> di
     near_duplicate = True
     a_params = b_params = a_agg = b_agg = None
     for _ in range(MAX_ATTEMPTS):
-        a_params = _sample_candidate(a_source, model, start_params, instruction, start_agg, rng, policy)
-        b_params = _sample_candidate(b_source, model, start_params, instruction, start_agg, rng, policy)
+        a_params = _sample_candidate(a_source, model, start_params, instruction, start_agg, rng, policy,
+                                     policy_metadata)
+        b_params = _sample_candidate(b_source, model, start_params, instruction, start_agg, rng, policy,
+                                     policy_metadata)
         a_agg = goals.aggregate(model.features(a_params))
         b_agg = goals.aggregate(model.features(b_params))
         if not _is_near_duplicate(a_agg, b_agg):
@@ -138,7 +149,7 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None) -> di
         "objective_choice": objective_choice,
         "near_duplicate": near_duplicate,
         "features": {"start": start_agg, "a": a_agg, "b": b_agg},
-        "metadata": observation_metadata(),
+        "metadata": observation_metadata(**policy_metadata),
     }
 
 
@@ -226,12 +237,12 @@ def _valid_features(features: dict) -> bool:
     return True
 
 
-def _cache_item_is_valid(item: dict, volumes: tuple) -> bool:
+def _cache_item_is_valid(item: dict, volumes: tuple, metadata=None) -> bool:
     if not isinstance(item, dict) or set(item) != {
         "volume", "start_params", "instruction", "a", "b", "objective_choice",
         "near_duplicate", "features", "metadata"}:
         return False
-    if item["volume"] not in volumes or item["metadata"] != observation_metadata():
+    if item["volume"] not in volumes or item["metadata"] != observation_metadata(**resolve_policy_metadata(metadata)):
         return False
     if not _finite_vector(item["start_params"], transfer.TOTAL_PARAMS):
         return False
@@ -263,7 +274,7 @@ def _cache_item_is_valid(item: dict, volumes: tuple) -> bool:
     return item["objective_choice"] in ("a", "b") and isinstance(item["near_duplicate"], bool)
 
 
-def _load_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple):
+def _load_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple, metadata=None):
     if not os.path.exists(cache_path):
         return None
     try:
@@ -279,7 +290,7 @@ def _load_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple):
         return None
     if len(data["items"]) != count:
         return None
-    if any(not _cache_item_is_valid(entry, volumes) for entry in data["items"]):
+    if any(not _cache_item_is_valid(entry, volumes, metadata) for entry in data["items"]):
         return None
     return [_item_from_json(entry) for entry in data["items"]]
 
@@ -293,7 +304,7 @@ def _save_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple, i
 
 
 def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, model_for_volume=None,
-                  cache_path: str = ANCHOR_CACHE_PATH) -> list:
+                  cache_path: str = ANCHOR_CACHE_PATH, policy_metadata=None) -> list:
     """`count` items (see `sample_item`) generated deterministically from
     `seed` alone -- independent of any rater's history -- so every rater on
     every machine judging the same `cache_path` sees byte-identical items.
@@ -313,7 +324,8 @@ def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, mode
         from datasets import volumes_for_split
         volumes = volumes_for_split("train") + volumes_for_split("val")
     sorted_volumes = tuple(sorted(volumes))
-    cached = _load_anchor_cache(cache_path, count, seed, sorted_volumes)
+    metadata = resolve_policy_metadata(policy_metadata)
+    cached = _load_anchor_cache(cache_path, count, seed, sorted_volumes, metadata)
     if cached is not None:
         return cached
 
@@ -330,7 +342,7 @@ def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, mode
         if model is None:
             model = model_for_volume(volume)
             model_cache[volume] = model
-        items.append(sample_item(volume, model, rng, policy=policy))
+        items.append(sample_item(volume, model, rng, policy=policy, policy_metadata=metadata))
 
     _save_anchor_cache(cache_path, count, seed, sorted_volumes, items)
     return items

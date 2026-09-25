@@ -220,12 +220,18 @@ def test_learning_starts_matches_the_plan():
 
 def test_parse_args_accepts_v7_short_experiment_options():
     args = oneshot_train.parse_args(["--policy-version", "oneshot-v7",
-                                     "--hindsight-ratio", "0.4", "--balance-classes",
+                                     "--action-mode", "residual", "--hindsight-ratio", "0.4", "--balance-classes",
                                      "--reward-mode", "target"])
     assert args.policy_version == "oneshot-v7"
+    assert args.action_mode == "residual"
     assert args.hindsight_ratio == pytest.approx(0.4)
     assert args.balance_classes is True
     assert args.reward_mode == "target"
+
+
+def test_parse_args_rejects_v7_without_explicit_action_mode():
+    with pytest.raises(SystemExit):
+        oneshot_train.parse_args(["--policy-version", "oneshot-v7"])
 
 
 def test_short_experiment_preset_is_bounded():
@@ -265,6 +271,22 @@ def test_v6_contract_defaults_remain_absolute_attainment():
     assert env.reward_mode == "attainment"
 
 
+def test_load_policy_metadata_falls_back_to_v6(tmp_path):
+    from rl.oneshot_env import load_policy_metadata
+    metadata = load_policy_metadata(str(tmp_path / "missing.zip"))
+    assert metadata == {"policy_version": "oneshot-v6", "action_mode": "absolute",
+                        "reward_mode": "attainment"}
+
+
+def test_load_policy_metadata_reads_sidecar(tmp_path):
+    from rl.oneshot_env import load_policy_metadata
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "metadata.json").write_text(
+        '{"policy_version": "oneshot-v7", "action_mode": "residual", "reward_mode": "target"}')
+    assert load_policy_metadata(str(run / "best.zip"))["action_mode"] == "residual"
+
+
 def test_v7_residual_action_is_added_to_start(monkeypatch):
     _patch_totalseg(monkeypatch)
     env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
@@ -280,7 +302,7 @@ def test_v7_residual_action_is_added_to_start(monkeypatch):
 def test_v7_hindsight_ratio_one_exposes_oracle_action(monkeypatch):
     _patch_totalseg(monkeypatch)
     env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
-                     policy_version="oneshot-v7", hindsight_ratio=1.0)
+                     policy_version="oneshot-v7", action_mode="residual", hindsight_ratio=1.0)
     _, info = env.reset(seed=3)
     assert info["goal_source"] == "hindsight"
     assert env.hindsight_action() is not None
@@ -289,7 +311,7 @@ def test_v7_hindsight_ratio_one_exposes_oracle_action(monkeypatch):
 def test_v7_target_reward_reports_progress_and_drift(monkeypatch):
     _patch_totalseg(monkeypatch)
     env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
-                     policy_version="oneshot-v7", reward_mode="target")
+                     policy_version="oneshot-v7", action_mode="residual", reward_mode="target")
     env.reset(seed=4)
     _, reward, _, _, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
     assert isinstance(reward, float)

@@ -176,3 +176,23 @@ def test_expanded_hill_climb_passes_fixed_budget(monkeypatch):
                         lambda *args, **kwargs: seen.update(kwargs) or "params")
     assert per_class_eval.expanded_hill_climb("model", "start", "instruction") == "params"
     assert seen["evaluations"] == per_class_eval.BASELINE_EVALUATIONS["expanded_hill_climb"]
+
+
+def test_per_class_cli_accepts_selectable_baseline():
+    args = per_class_eval.parse_args(["policy.zip", "--baseline", "expanded_hill_climb"])
+    assert args.baseline == ["expanded_hill_climb"]
+
+
+def test_per_class_policy_score_uses_episode_action_mode(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(per_class_eval, "_apply_action",
+                        lambda start, action, action_mode="absolute": seen.setdefault("mode", action_mode) or start)
+    episode = {"start_params": [0.0], "instruction": {"goal": {}, "targets": { }, "kind": "relative"},
+               "policy_metadata": {"action_mode": "residual"}}
+    model = type("Model", (), {"features": lambda self, params: {"vis": {}, "bright": {}, "coverage": 0.0}})()
+    monkeypatch.setattr(per_class_eval.goals, "aggregate", lambda *args, **kwargs: {})
+    monkeypatch.setattr(per_class_eval, "_observation_for", lambda *args: [])
+    monkeypatch.setattr(per_class_eval, "_predict", lambda *args: [0.0])
+    monkeypatch.setattr(per_class_eval.goals, "attainment", lambda *args: 0.0)
+    per_class_eval._score(object(), episode, model)
+    assert seen["mode"] == "residual"

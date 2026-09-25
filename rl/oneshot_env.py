@@ -15,6 +15,8 @@ did not work, while amortising a single forward pass over the mapping from
 (instruction, start state) to transfer function does.
 """
 import math
+import json
+import os
 
 import gymnasium as gym
 import numpy as np
@@ -69,11 +71,36 @@ OBSERVATION_BOUND = 10.0
 _ATTAINMENT_FLOOR = 1e-9
 
 
+def resolve_policy_metadata(metadata=None) -> dict:
+    values = {"policy_version": POLICY_VERSION, "action_mode": "absolute",
+              "reward_mode": "attainment"}
+    if metadata:
+        values.update({key: metadata[key] for key in values if key in metadata})
+    if values["policy_version"] == POLICY_VERSION and values["action_mode"] != "absolute":
+        raise ValueError("v6 only supports absolute action mode")
+    if values["action_mode"] not in ("absolute", "residual"):
+        raise ValueError("action_mode must be absolute or residual")
+    if values["reward_mode"] not in ("attainment", "target"):
+        raise ValueError("reward_mode must be attainment or target")
+    return values
+
+
+def load_policy_metadata(checkpoint_path: str) -> dict:
+    path = os.path.join(os.path.dirname(os.path.abspath(checkpoint_path)), "metadata.json")
+    if not os.path.exists(path):
+        return resolve_policy_metadata()
+    with open(path) as stream:
+        return resolve_policy_metadata(json.load(stream))
+
+
 def observation_metadata(policy_version: str = POLICY_VERSION, action_mode: str = "absolute",
                          reward_mode: str = "attainment") -> dict:
     """Return the serialized contract shared by training and inference."""
+    resolved = resolve_policy_metadata({"policy_version": policy_version,
+                                        "action_mode": action_mode,
+                                        "reward_mode": reward_mode})
     return {
-        "policy_version": policy_version,
+        "policy_version": resolved["policy_version"],
         "anatomy_layout": LAYOUT_VERSION,
         "observation_size": OBSERVATION_SIZE,
         "action_size": ACTION_SIZE,
@@ -133,8 +160,8 @@ class OneShotEnv(gym.Env):
         self._model_for_volume = model_for_volume
         if policy_version not in (POLICY_VERSION, V7_POLICY_VERSION):
             raise ValueError("unsupported one-shot policy version")
-        if policy_version == V7_POLICY_VERSION and action_mode == "absolute":
-            action_mode = "residual"
+        if policy_version == V7_POLICY_VERSION and action_mode != "residual":
+            raise ValueError("oneshot-v7 requires residual action mode")
         if action_mode not in ("absolute", "residual"):
             raise ValueError("action_mode must be absolute or residual")
         if reward_mode not in ("attainment", "target"):

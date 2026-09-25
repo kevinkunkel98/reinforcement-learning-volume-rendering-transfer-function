@@ -178,11 +178,20 @@ def parse_args(argv=None):
     parser.add_argument("--eval-interval", type=int, default=10_000)
     parser.add_argument("--out", type=str, default=None)
     parser.add_argument("--policy-version", choices=("oneshot-v6", "oneshot-v7"), default="oneshot-v6")
+    parser.add_argument("--action-mode", choices=("absolute", "residual"), default=None)
     parser.add_argument("--hindsight-ratio", type=float, default=0.0)
     parser.add_argument("--balance-classes", action="store_true")
     parser.add_argument("--reward-mode", choices=("attainment", "target"), default="attainment")
     parser.add_argument("--short", action="store_true", help="use the short smoke experiment preset")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.policy_version == "oneshot-v7" and args.action_mode is None:
+        parser.error("--action-mode is required for oneshot-v7")
+    if args.policy_version == "oneshot-v7" and args.action_mode != "residual":
+        parser.error("oneshot-v7 requires --action-mode residual")
+    if args.policy_version == "oneshot-v6" and args.action_mode == "residual":
+        parser.error("oneshot-v6 requires --action-mode absolute")
+    args.action_mode = args.action_mode or "absolute"
+    return args
 
 
 def main(argv=None):
@@ -194,6 +203,7 @@ def main(argv=None):
                           eval_episode_count=(SHORT_EXPERIMENT["eval_episode_count"]
                                                if args.short else VALIDATION_EPISODES),
                           env_kwargs={"policy_version": args.policy_version,
+                                      "action_mode": args.action_mode,
                                       "hindsight_ratio": args.hindsight_ratio,
                                       "balance_classes": args.balance_classes,
                                       "reward_mode": args.reward_mode})

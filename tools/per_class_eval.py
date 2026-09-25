@@ -26,9 +26,9 @@ import numpy as np
 import goals
 import provenance
 import visibility
-from rl.baselines import hill_climb
+from rl.baselines import BASELINES, hill_climb
 from rl.candidates import _apply_action, _observation_for, _predict
-from rl.oneshot_env import observation_metadata
+from rl.oneshot_env import load_policy_metadata, observation_metadata
 from rl.vis_eval import fixed_episodes
 
 BASELINE_EVALUATIONS = {"expanded_hill_climb": 1000}
@@ -54,7 +54,8 @@ def _score(policy, episode, model, active_layers=None) -> float:
     start_agg = goals.aggregate(start_features, active_layers)
     observation = _observation_for(model, start_params, instruction, start_agg)
     action = _predict(policy, observation, np.random.default_rng(0), True)
-    params = _apply_action(start_params, action)
+    params = _apply_action(start_params, action,
+                           episode.get("policy_metadata", {}).get("action_mode", "absolute"))
     final_features = goals.features(model, params, active_layers)
     return goals.attainment(instruction["goal"], start_agg,
                             goals.aggregate(final_features, active_layers))
@@ -98,6 +99,8 @@ def parse_args(argv=None):
     ap.add_argument("--episodes", type=int, default=200)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out")
+    ap.add_argument("--baseline", action="append",
+                    choices=tuple(BASELINES) + tuple(BASELINE_EVALUATIONS), default=[])
     layers = ap.add_mutually_exclusive_group()
     layers.add_argument("--layers", help="active anatomy layers as inline JSON")
     layers.add_argument("--layers-file", help="JSON file containing active anatomy layers")
@@ -111,8 +114,10 @@ def main(active_layers=None, argv=None):
 
     from stable_baselines3 import SAC
 
+    policy_metadata = load_policy_metadata(args.policies[0])
     episodes = fixed_episodes(args.split, args.episodes, seed=args.seed,
-                              formulation="one_shot", active_layers=active_layers)
+                              formulation="one_shot", active_layers=active_layers,
+                              policy_metadata=policy_metadata)
     models = {}
     for episode in episodes:
         if episode["volume"] not in models:
@@ -146,9 +151,31 @@ def main(active_layers=None, argv=None):
             "overall_median": statistics.median(overall),
             "overall_share_positive": sum(1 for a in overall if a > 0) / len(overall),
             "per_class": summarise_per_class(per_class_rows),
-            "metadata": observation_metadata(),
+            "metadata": policy_metadata,
             "provenance": provenance.result_provenance(active_layers),
         }
+
+    for name in args.baseline:
+        baseline_fn = expanded_hill_climb if name == "expanded_hill_climb" else BASELINES[name]
+        rows = []
+        overall = []
+        for episode in episodes:
+            model = models[episode["volume"]]
+            final_params = baseline_fn(model, episode["start_params"], episode["instruction"],
+                                       active_layers=active_layers)
+            start_agg = goals.aggregate(goals.features(model, episode["start_params"], active_layers), active_layers)
+            final_agg = goals.aggregate(goals.features(model, final_params, active_layers), active_layers)
+            attainment = goals.attainment(episode["instruction"]["goal"], start_agg, final_agg)
+            overall.append(attainment)
+            mentioned = set(episode["instruction"]["targets"])
+            for goal_class in goals.GOAL_CLASSES:
+                rows.append(_class_row(goal_class, "reachable" if goal_class in mentioned else "unsupported",
+                                       attainment if goal_class in mentioned else None))
+        results[name] = {"overall_median": statistics.median(overall),
+                         "overall_share_positive": sum(value > 0 for value in overall) / len(overall),
+                         "per_class": summarise_per_class(rows),
+                         "metadata": observation_metadata(),
+                         "provenance": provenance.result_provenance(active_layers)}
 
     classes = sorted({c for r in results.values() for c in r["per_class"]})
     print(f"{'policy':44s} {'overall':>9s}  " + "  ".join(f"{c:>9s}" for c in classes))
