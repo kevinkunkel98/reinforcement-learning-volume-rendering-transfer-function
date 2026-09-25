@@ -138,6 +138,25 @@ def test_app_does_not_fabricate_opacity_goals_for_non_opacity_commands():
     assert "cmd_dict?.target || \"soft\"" not in app
 
 
+def test_app_defines_grouped_eight_class_anatomy_metadata():
+    app = read("app.js")
+    html = read("index.html")
+    for name in ("skeleton", "lungs", "heart", "vessels", "liver", "kidneys", "spleen", "soft"):
+        assert name in app
+        assert f"telem-{name}" in html
+    for group in ("Thoracic", "Abdominal", "Structural"):
+        assert group in html
+    assert "ANATOMY_CLASSES" in app
+    assert "updateTelemetry(state.current.class_visibility, state.current.class_brightness)" in app
+
+
+def test_app_compare_and_curve_use_shared_anatomy_metadata():
+    app = read("app.js")
+    assert "ANATOMY_CLASSES.map" in app
+    assert "collision" in app.lower()
+    assert "CLASS_ORDER = ANATOMY_CLASSES.map" in app
+
+
 def test_dataset_boundary_identity_includes_document_and_scene_identity():
     app = read("app.js")
     assert "boundaryEventId" in app

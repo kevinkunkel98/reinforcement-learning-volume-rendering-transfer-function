@@ -405,12 +405,21 @@ select:focus-visible {
   text-align: center;
 }
 
-/* ---------- telemetry strip ---------- */
+/* ---------- grouped anatomy telemetry ---------- */
 
 #telemetry {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   width: 100%;
-  max-width: 720px;
+  max-width: 900px;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.telem-group {
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
   background: hsl(var(--card));
@@ -418,11 +427,15 @@ select:focus-visible {
   overflow: hidden;
 }
 
+.telem-group:last-child { grid-column: 1 / -1; }
+.telem-group-title { margin: 0; padding: 8px 12px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: hsl(var(--muted-foreground)); border-bottom: 1px solid hsl(var(--border)); }
+.telem-group-rows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
 .telem-item {
-  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 3px;
   padding: 10px 4px;
   border-right: 1px solid hsl(var(--border));
@@ -443,6 +456,11 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
   color: hsl(var(--primary));
 }
+
+.telem-brightness { font-size: 10px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+.telem-unavailable { color: hsl(var(--muted-foreground)); font-size: 10px; }
+.telem-bar { height: 4px; border-radius: 99px; background: hsl(var(--secondary)); overflow: hidden; }
+.telem-bar > span { display: block; height: 100%; border-radius: inherit; background: hsl(var(--primary)); transition: width .2s ease; }
 
 /* ---------- transfer-function curve over the histogram ---------- */
 
@@ -1161,6 +1179,21 @@ select:focus-visible {
   --class-lungs:    #d95926;
   --class-soft:     #199e70;
   --class-vessels:  #c98500;
+  --class-heart:    #d97866;
+  --class-liver:    #b98755;
+  --class-kidneys:  #9e7d66;
+  --class-spleen:   #8f7390;
+}
+
+.compare-class-groups { display: grid; gap: 5px; }
+.compare-class-row { display: grid; grid-template-columns: 74px minmax(0, 1fr) 48px; align-items: center; gap: 7px; min-width: 0; }
+.compare-progress { min-width: 0; }
+
+@media (max-width: 700px) {
+  #telemetry { grid-template-columns: 1fr; }
+  .telem-group:last-child { grid-column: auto; }
+  .telem-group-rows { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compare-class-row { grid-template-columns: 64px minmax(0, 1fr) 42px; gap: 5px; }
 }
 
 /* shadcn Separator */

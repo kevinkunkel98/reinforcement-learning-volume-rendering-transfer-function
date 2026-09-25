@@ -59,11 +59,30 @@
 
         </div>
 
-        <div id="telemetry" data-readout="visibility">
-          <div class="telem-item" data-tissue="skeleton"><span class="telem-label">SKELETON</span><span class="telem-value" id="telem-skeleton">—</span></div>
-          <div class="telem-item" data-tissue="lungs"><span class="telem-label">LUNGS</span><span class="telem-value" id="telem-lungs">—</span></div>
-          <div class="telem-item" data-tissue="soft"><span class="telem-label">SOFT TISSUE</span><span class="telem-value" id="telem-soft">—</span></div>
-          <div class="telem-item" data-tissue="vessels"><span class="telem-label">VESSELS</span><span class="telem-value" id="telem-vessels">—</span></div>
+        <div id="telemetry" data-readout="visibility" aria-label="Anatomy visibility">
+          <section class="telem-group" data-group="thoracic">
+            <h3 class="telem-group-title">Thoracic</h3>
+            <div class="telem-group-rows">
+              <div class="telem-item" data-tissue="lungs"><span class="telem-label">LUNGS</span><span class="telem-value" id="telem-lungs">—</span><span class="telem-brightness" id="telem-lungs-bright">—</span><span class="telem-bar"><span id="telem-lungs-bar"></span></span></div>
+              <div class="telem-item" data-tissue="heart"><span class="telem-label">HEART</span><span class="telem-value" id="telem-heart">—</span><span class="telem-brightness" id="telem-heart-bright">—</span><span class="telem-bar"><span id="telem-heart-bar"></span></span></div>
+              <div class="telem-item" data-tissue="vessels"><span class="telem-label">VESSELS</span><span class="telem-value" id="telem-vessels">—</span><span class="telem-brightness" id="telem-vessels-bright">—</span><span class="telem-bar"><span id="telem-vessels-bar"></span></span></div>
+            </div>
+          </section>
+          <section class="telem-group" data-group="abdominal">
+            <h3 class="telem-group-title">Abdominal</h3>
+            <div class="telem-group-rows">
+              <div class="telem-item" data-tissue="liver"><span class="telem-label">LIVER</span><span class="telem-value" id="telem-liver">—</span><span class="telem-brightness" id="telem-liver-bright">—</span><span class="telem-bar"><span id="telem-liver-bar"></span></span></div>
+              <div class="telem-item" data-tissue="kidneys"><span class="telem-label">KIDNEYS</span><span class="telem-value" id="telem-kidneys">—</span><span class="telem-brightness" id="telem-kidneys-bright">—</span><span class="telem-bar"><span id="telem-kidneys-bar"></span></span></div>
+              <div class="telem-item" data-tissue="spleen"><span class="telem-label">SPLEEN</span><span class="telem-value" id="telem-spleen">—</span><span class="telem-brightness" id="telem-spleen-bright">—</span><span class="telem-bar"><span id="telem-spleen-bar"></span></span></div>
+            </div>
+          </section>
+          <section class="telem-group" data-group="structural">
+            <h3 class="telem-group-title">Structural</h3>
+            <div class="telem-group-rows">
+              <div class="telem-item" data-tissue="skeleton"><span class="telem-label">SKELETON</span><span class="telem-value" id="telem-skeleton">—</span><span class="telem-brightness" id="telem-skeleton-bright">—</span><span class="telem-bar"><span id="telem-skeleton-bar"></span></span></div>
+              <div class="telem-item" data-tissue="soft"><span class="telem-label">SOFT TISSUE</span><span class="telem-value" id="telem-soft">—</span><span class="telem-brightness" id="telem-soft-bright">—</span><span class="telem-bar"><span id="telem-soft-bar"></span></span></div>
+            </div>
+          </section>
         </div>
 
         <div id="tf-curve-panel" aria-label="Transfer function curve over the intensity histogram">

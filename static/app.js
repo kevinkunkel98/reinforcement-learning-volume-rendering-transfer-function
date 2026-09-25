@@ -91,21 +91,22 @@ function initAboutDialog() {
 initTheme();
 initAboutDialog();
 
-// The four goal classes, in a fixed order, shared by the chat replies and the
-// comparison panel so a class keeps the same name and hue everywhere.
-const CLASS_ORDER = ["skeleton", "lungs", "soft", "vessels"];
-const CLASS_LABEL = { skeleton: "skeleton", lungs: "lungs", soft: "soft tissue", vessels: "vessels" };
-// Must match transfer.ANATOMICAL_CENTRES_HU -- fixed, never sent by the
-// server, so it's duplicated here the same way CLASS_LABEL already is.
-const CLASS_CENTER_HU = { lungs: -800, soft: 40, vessels: 300, skeleton: 900 };
-// Must match transfer.ANATOMICAL_COLOURS -- the actual peak colour the render
-// composites, not --class-* (the telemetry tiles' own accent hues, picked for
-// UI contrast and unrelated to a tissue's real transfer-function colour). A
-// tick drawn in a --class-* colour would contradict the colour ramp under it.
-const CLASS_ANATOMICAL_RGB = {
-  lungs: [0.55, 0.70, 0.95], soft: [0.85, 0.35, 0.35],
-  vessels: [0.90, 0.45, 0.40], skeleton: [0.95, 0.95, 0.90],
-};
+// Shared anatomy metadata keeps telemetry, comparison bars, and curve markers
+// aligned with the eight canonical backend goal classes.
+const ANATOMY_CLASSES = [
+  { name: "skeleton", label: "skeleton", group: "structural", center: 900, rgb: [0.95, 0.95, 0.90] },
+  { name: "lungs", label: "lungs", group: "thoracic", center: -800, rgb: [0.55, 0.70, 0.95] },
+  { name: "heart", label: "heart", group: "thoracic", center: 120, rgb: [0.85, 0.25, 0.25] },
+  { name: "vessels", label: "vessels", group: "thoracic", center: 300, rgb: [0.90, 0.45, 0.40] },
+  { name: "liver", label: "liver", group: "abdominal", center: 70, rgb: [0.75, 0.45, 0.25] },
+  { name: "kidneys", label: "kidneys", group: "abdominal", center: 45, rgb: [0.70, 0.40, 0.35] },
+  { name: "spleen", label: "spleen", group: "abdominal", center: 65, rgb: [0.55, 0.30, 0.45] },
+  { name: "soft", label: "soft tissue", group: "structural", center: 40, rgb: [0.85, 0.35, 0.35] },
+];
+const CLASS_ORDER = ANATOMY_CLASSES.map((item) => item.name);
+const CLASS_LABEL = Object.fromEntries(ANATOMY_CLASSES.map((item) => [item.name, item.label]));
+const CLASS_CENTER_HU = Object.fromEntries(ANATOMY_CLASSES.map((item) => [item.name, item.center]));
+const CLASS_ANATOMICAL_RGB = Object.fromEntries(ANATOMY_CLASSES.map((item) => [item.name, item.rgb]));
 
 const messagesEl = el("messages");
 const emptyState = el("empty-state");
@@ -255,7 +256,7 @@ async function refresh(data) {
     await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera);
   }
 
-  updateTelemetry(state.current.class_visibility);
+  updateTelemetry(state.current.class_visibility, state.current.class_brightness);
   drawTfCurve(state.current.histogram, state.current.curve);
   return data;
 }
@@ -264,13 +265,19 @@ async function refresh(data) {
 // same quantity the policy is scored on -- not opacity mass over the retired
 // fat/air/spongy bands. A class this volume cannot support (vessels without
 // contrast) arrives as null and stays a dash.
-function updateTelemetry(classVisibility) {
+function updateTelemetry(classVisibility, classBrightness) {
   if (!classVisibility) return;
-  for (const goalClass of ["skeleton", "lungs", "soft", "vessels"]) {
-    const v = classVisibility[goalClass];
-    const node = el(`telem-${goalClass}`);
+  for (const { name } of ANATOMY_CLASSES) {
+    const value = classVisibility[name];
+    const available = value !== undefined && value !== null;
+    const node = el(`telem-${name}`);
+    const bright = el(`telem-${name}-bright`);
+    const bar = el(`telem-${name}-bar`);
     if (!node) continue;
-    node.textContent = (v === undefined || v === null) ? "—" : `${(v * 100).toFixed(1)}%`;
+    node.textContent = available ? `${(value * 100).toFixed(1)}%` : "not measurable";
+    node.classList.toggle("telem-unavailable", !available);
+    if (bright) bright.textContent = classBrightness?.[name] == null ? "brightness —" : `brightness ${classBrightness[name].toFixed(3)}`;
+    if (bar) bar.style.width = available ? `${Math.max(0, Math.min(100, value * 100))}%` : "0%";
   }
 }
 
@@ -346,11 +353,12 @@ function drawTfCurve(histogram, curve) {
     ctx.fillRect(i * step, rampY, step + 1, rampHeight);
   });
 
-  // Tick marks at the four anatomical peak centres, in that peak's actual
+  // Tick marks at the eight anatomical peak centres, in that peak's actual
   // transfer-function colour (transfer.ANATOMICAL_COLOURS) -- not the
   // telemetry tiles' --class-* accent hues, which are UI-only and would
   // contradict the colour ramp directly underneath. A dark outline keeps the
   // near-white skeleton tick visible against the cream ramp there.
+  let previousLabelX = -Infinity;
   for (const goalClass of CLASS_ORDER) {
     const x = huToX(CLASS_CENTER_HU[goalClass]);
     if (x < 0 || x > cssWidth) continue;
@@ -364,6 +372,14 @@ function drawTfCurve(histogram, curve) {
     ctx.strokeStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
     ctx.lineWidth = 1;
     ctx.stroke();
+    // Collision-aware labels: keep every tick, suppress only labels too close
+    // to the previous label on narrow canvases.
+    if (x - previousLabelX >= 42) {
+      ctx.fillStyle = "rgba(230, 235, 238, 0.85)";
+      ctx.font = "9px sans-serif";
+      ctx.fillText(CLASS_LABEL[goalClass], Math.min(x + 3, cssWidth - 42), 10);
+      previousLabelX = x;
+    }
   }
 }
 
@@ -1086,24 +1102,24 @@ const CHANNEL = {
 function classBars(values, start, channel) {
   const spec = CHANNEL[channel];
   return `<div class="compare-channel">${escapeHtml(spec.label)} per class</div>
-  <table class="table">${CLASS_ORDER.map((c) => {
+  <div class="compare-class-groups">${ANATOMY_CLASSES.map((item) => item.name).map((c) => {
     const value = values && values[c] != null ? values[c] : null;
     const from = start && start[c] != null ? start[c] : 0;
     if (value === null) {
-       return `<tr><td class="table-label">${escapeHtml(CLASS_LABEL[c])}</td>
-        <td colspan="2" class="table-value">&mdash;</td></tr>`;
+        return `<div class="compare-class-row"><span class="table-label">${escapeHtml(CLASS_LABEL[c])}</span>
+         <span class="table-value">&mdash;</span></div>`;
     }
-    return `<tr>
-       <td class="table-label">${escapeHtml(CLASS_LABEL[c])}</td>
-      <td style="width:100%">
+    return `<div class="compare-class-row">
+       <span class="table-label">${escapeHtml(CLASS_LABEL[c])}</span>
+      <span class="compare-progress">
         <div class="progress">
           <div class="progress-fill" style="width:${pct(spec.scale(value) / 100)};--progress-color:var(--class-${c})"></div>
           <div class="progress-tick" style="left:${pct(spec.scale(from) / 100)}"></div>
         </div>
-      </td>
-      <td class="table-value">${escapeHtml(spec.format(value))}</td>
-    </tr>`;
-  }).join("")}</table>`;
+      </span>
+      <span class="table-value">${escapeHtml(spec.format(value))}</span>
+    </div>`;
+  }).join("")}</div>`;
 }
 
 function armCard(name, arm, start, channel) {
