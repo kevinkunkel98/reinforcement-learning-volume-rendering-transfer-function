@@ -188,8 +188,12 @@ def parse_args(argv=None):
         parser.error("--action-mode is required for oneshot-v7")
     if args.policy_version == "oneshot-v7" and args.action_mode != "residual":
         parser.error("oneshot-v7 requires --action-mode residual")
+    if args.policy_version == "oneshot-v7" and args.reward_mode != "target":
+        parser.error("oneshot-v7 requires --reward-mode target")
     if args.policy_version == "oneshot-v6" and args.action_mode == "residual":
         parser.error("oneshot-v6 requires --action-mode absolute")
+    if args.policy_version == "oneshot-v6" and args.reward_mode == "target":
+        parser.error("oneshot-v6 requires --reward-mode attainment")
     args.action_mode = args.action_mode or "absolute"
     return args
 

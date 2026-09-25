@@ -234,6 +234,16 @@ def test_parse_args_rejects_v7_without_explicit_action_mode():
         oneshot_train.parse_args(["--policy-version", "oneshot-v7"])
 
 
+def test_parse_args_rejects_v7_without_target_reward():
+    with pytest.raises(SystemExit):
+        oneshot_train.parse_args(["--policy-version", "oneshot-v7", "--action-mode", "residual"])
+
+
+def test_parse_args_rejects_target_reward_for_v6():
+    with pytest.raises(SystemExit):
+        oneshot_train.parse_args(["--policy-version", "oneshot-v6", "--reward-mode", "target"])
+
+
 def test_short_experiment_preset_is_bounded():
     assert oneshot_train.SHORT_EXPERIMENT["timesteps"] <= 1_000
     assert oneshot_train.SHORT_EXPERIMENT["eval_episode_count"] <= 10
