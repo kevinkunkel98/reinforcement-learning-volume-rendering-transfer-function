@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from anatomy_layers import normalize_layers
 from tools.compare_runs import compare_groups, seed_average
 
 
@@ -109,3 +110,14 @@ def test_compare_refuses_incompatible_provenance_or_active_layers(tmp_path):
 
     with pytest.raises(ValueError, match="provenance"):
         compare_groups(a, b)
+
+
+def test_compare_accepts_matching_custom_active_layers(tmp_path):
+    layers = {"liver": {"opacity": 0.0}}
+    base = {"scoring_fingerprint": "a", "label_layout": "anatomy-v2",
+            "anatomy_layer_layout": "anatomy-layers-v1", "visibility_renderer": "visibility-v1",
+            "anatomy_layers": normalize_layers(layers)}
+    a = [_result_file(tmp_path, "a-custom", [0.1], provenance=base)]
+    b = [_result_file(tmp_path, "b-custom", [0.3], provenance=base)]
+
+    assert compare_groups(a, b)["n_episodes"] == 1

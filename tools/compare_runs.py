@@ -103,8 +103,10 @@ def compare_groups(a_paths: list, b_paths: list, arm: str = DEFAULT_ARM) -> dict
         if any(record is None for record in provenance_records):
             raise ValueError("result provenance is missing from one or more paired files")
         reference_provenance = provenance_records[0]
+        expected_layers = reference_provenance.get("anatomy_layers")
         for record in provenance_records[1:]:
-            report = provenance.compare(record, current=reference_provenance)
+            report = provenance.compare(record, current=reference_provenance,
+                                        expected_layers=expected_layers)
             if report["stale"]:
                 raise ValueError("result provenance is incompatible: "
                                  + "; ".join(report["reasons"]))

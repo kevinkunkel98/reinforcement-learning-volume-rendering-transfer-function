@@ -105,11 +105,12 @@ def main(argv=None):
     if os.path.exists(args.out):
         with open(args.out) as stream:
             previous = json.load(stream)
-        if previous.get("provenance") is not None:
-            report = provenance.compare(previous["provenance"], expected_layers=active_layers)
-            if report["stale"]:
-                raise ValueError("existing baseline report provenance is incompatible: "
-                                 + "; ".join(report["reasons"]))
+        if previous.get("provenance") is None:
+            raise ValueError("existing baseline report has no provenance; remove it before regeneration")
+        report = provenance.compare(previous["provenance"], expected_layers=active_layers)
+        if report["stale"]:
+            raise ValueError("existing baseline report provenance is incompatible: "
+                             + "; ".join(report["reasons"]))
 
     rows = []
     for name in args.volumes:

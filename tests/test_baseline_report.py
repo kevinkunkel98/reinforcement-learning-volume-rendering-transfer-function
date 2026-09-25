@@ -60,6 +60,18 @@ def test_baseline_report_persists_active_layer_provenance(tmp_path, monkeypatch)
     assert payload["provenance"]["anatomy_layers"]["liver"]["opacity"] == 0.0
 
 
+def test_baseline_report_rejects_existing_provenance_free_report(tmp_path, monkeypatch):
+    from tools import baseline_report
+
+    out = tmp_path / "old.json"
+    out.write_text(json.dumps({"summary": {}, "rows": []}))
+    monkeypatch.setattr(baseline_report, "run_volume", lambda *args, **kwargs: [])
+    monkeypatch.setattr(baseline_report, "_print_table", lambda summary: None)
+
+    with pytest.raises(ValueError, match="provenance"):
+        baseline_report.main(["--volumes", "stub", "--instructions", "0", "--out", str(out)])
+
+
 def _rows():
     return [
         {"volume": "v1", "kind": "relative", "baseline": "B1", "attainment": 0.5},
