@@ -60,6 +60,11 @@ START_NOISE = 0.3
 # 0.729 under the uniform draw this replaced.
 HINDSIGHT_NOISE = 0.25
 
+# Distance already contains the keep penalty for unmentioned classes. Keep
+# auxiliary drift small so target progress remains primary signal instead of
+# double-penalizing ordinary occlusion side effects.
+TARGET_DRIFT_WEIGHT = 0.1
+
 # Generous finite bound for the observation Box: every packed quantity (goal
 # components, log-vis/brightness within a handful of units, start params and
 # coverage in/near [-1, 1]) stays well inside it.
@@ -381,7 +386,7 @@ class OneShotEnv(gym.Env):
             drift += goals.KAPPA * sum(abs(value) for key, value in brightness_progress.items()
                                        if key not in mentioned)
             self._last_drift = float(drift)
-            reward -= float(drift)
+            reward -= TARGET_DRIFT_WEIGHT * float(drift)
             if useless:
                 reward -= USELESS_PENALTY
             info = self._info(attainment, useless)

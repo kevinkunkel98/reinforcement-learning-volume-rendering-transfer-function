@@ -360,10 +360,27 @@ def test_v7_target_reward_reports_progress_and_drift(monkeypatch):
     env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
                      policy_version="oneshot-v7", action_mode="residual", reward_mode="target")
     env.reset(seed=4)
+    env._instruction["targets"] = {}
+    env._instruction["targets"] = {}
     _, reward, _, _, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
     assert isinstance(reward, float)
     assert "target_progress" in info
     assert "drift" in info
+
+
+def test_v7_drift_penalty_is_auxiliary(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v7", action_mode="residual", reward_mode="target")
+    env.reset(seed=4)
+    env._instruction["targets"] = {}
+    monkeypatch.setattr(goals, "distance", lambda goal, start, current: 1.0 if current is start else 0.0)
+    monkeypatch.setattr(goals, "progress", lambda start, current:
+                        ({c: (1.0 if c == "lungs" else 0.0) for c in goals.GOAL_CLASSES},
+                         {c: 0.0 for c in goals.GOAL_CLASSES}))
+    _, reward, _, _, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
+    assert info["drift"] == 1.0
+    assert reward == pytest.approx(0.9)
 
 
 def test_v7_target_reward_drift_includes_brightness(monkeypatch):
