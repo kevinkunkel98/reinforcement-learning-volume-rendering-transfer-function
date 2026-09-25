@@ -10,6 +10,7 @@ from tools.compare_layer_renders import (
     compare_samples,
     compare_dataset_samples,
     load_json_record,
+    sampled_contribution_contract,
     representative_label_ids,
     sampled_layer_contributions,
 )
@@ -142,6 +143,47 @@ def test_dataset_report_is_json_serializable():
         labels, np.ones(labels.shape), {name: {"opacity": 1.0} for name in CANONICAL_CLASSES}
     )
     json.dumps(result)
+
+
+def test_opacity_one_server_and_browser_contracts_are_identical():
+    labels = np.array([[5, 6]], dtype=np.uint8)
+    weights = np.array([[0.25, 0.5]], dtype=np.float64)
+    luminance = np.array([[0.2, 0.8]], dtype=np.float64)
+    layers = {name: {"opacity": 1.0} for name in CANONICAL_CLASSES}
+
+    contract = sampled_contribution_contract(labels, weights, luminance, layers)
+
+    assert contract["image"] == pytest.approx(0.225)
+    assert contract["class_visibility"]["liver"] == pytest.approx(1 / 3)
+    assert contract["class_visibility"]["kidneys"] == pytest.approx(2 / 3)
+    assert contract["cross_class_leakage"] == pytest.approx(1 / 3)
+
+
+def test_non_default_opacity_applies_to_weights_luminance_and_leakage():
+    labels = np.array([[5, 6]], dtype=np.uint8)
+    weights = np.ones((1, 2), dtype=np.float64)
+    luminance = np.array([[0.2, 0.8]], dtype=np.float64)
+    layers = {name: {"opacity": 0.0} for name in CANONICAL_CLASSES}
+    layers["liver"] = {"opacity": 0.5}
+    layers["kidneys"] = {"opacity": 1.0}
+
+    contract = sampled_contribution_contract(labels, weights, luminance, layers)
+
+    assert contract["image"] == pytest.approx(0.45)
+    assert contract["class_visibility"]["liver"] == pytest.approx(1 / 3)
+    assert contract["class_visibility"]["kidneys"] == pytest.approx(2 / 3)
+
+
+def test_inline_and_file_layers_use_same_strict_validator(tmp_path):
+    payload = '{"liver": {"opacity": 0.5}}'
+    path = tmp_path / "layers.json"
+    path.write_text(payload)
+
+    assert load_json_record(payload, layers=True) == load_json_record(str(path), layers=True)
+    with pytest.raises(ValueError, match="finite"):
+        load_json_record('{"liver": {"opacity": NaN}}', layers=True)
+    with pytest.raises(ValueError, match="opacity"):
+        load_json_record('{"liver": {"opacity": 2}}', layers=True)
 
 
 def test_cli_input_records_are_json_serializable(tmp_path):

@@ -23,6 +23,43 @@ representative_label_ids = validate_visibility.representative_label_ids
 sampled_layer_contributions = validate_visibility.sampled_layer_contributions
 
 
+def _aligned_class_values(labels, weights, luminance, layers):
+    labels = np.asarray(labels)
+    weights = np.asarray(weights, dtype=np.float64)
+    luminance = np.asarray(luminance, dtype=np.float64)
+    if labels.shape != weights.shape or weights.shape != luminance.shape:
+        raise ValueError("sampled labels, weights, and luminance must be aligned")
+    if labels.dtype != np.uint8 or not np.isfinite(weights).all() or not np.isfinite(luminance).all():
+        raise ValueError("sampled contribution values must be finite and labels must be uint8")
+    normalized = validate_visibility.normalize_layers(layers or {})
+    ids = representative_label_ids(labels)
+    contributions = {}
+    for name in CANONICAL_CLASSES:
+        mask = labels == ids.get(name, -1)
+        alpha = normalized[name]["opacity"]
+        contributions[name] = {
+            "weight": float((weights[mask] * alpha).sum()),
+            "luminance": float((weights[mask] * alpha * luminance[mask]).sum()),
+        }
+    return contributions
+
+
+def sampled_contribution_contract(labels, weights, luminance, layers):
+    """Aggregate one aligned sampled-label/HU compositing contract."""
+    contributions = _aligned_class_values(labels, weights, luminance, layers)
+    total_weight = sum(item["weight"] for item in contributions.values())
+    total_luminance = sum(item["luminance"] for item in contributions.values())
+    class_visibility = {
+        name: item["weight"] / total_weight if total_weight else 0.0
+        for name, item in contributions.items()
+    }
+    return {
+        "image": total_luminance / weights.size if weights.size else 0.0,
+        "class_visibility": class_visibility,
+        "cross_class_leakage": _derived_leakage(class_visibility),
+    }
+
+
 def _difference(reference, browser) -> dict:
     reference = np.asarray(reference, dtype=np.float64)
     browser = np.asarray(browser, dtype=np.float64)
@@ -80,33 +117,16 @@ def _derived_leakage(class_visibility: dict) -> float:
     return (total - float(values.max(initial=0.0))) / total if total else 0.0
 
 
-def compare_dataset_samples(labels, weights, layers, reference=None, image_tolerance=IMAGE_TOLERANCE,
+def compare_dataset_samples(labels, weights, layers, luminance=None, reference=None,
+                            image_tolerance=IMAGE_TOLERANCE,
                             visibility_tolerance=VISIBILITY_TOLERANCE,
                             leakage_tolerance=LEAKAGE_TOLERANCE) -> dict:
     """Compare server and browser-contract contributions derived from samples."""
     labels = np.asarray(labels)
     weights = np.asarray(weights, dtype=np.float64)
-    derived = sampled_layer_contributions(labels, weights, layers)
-    normalized = validate_visibility.normalize_layers(layers or {})
-    opacity = np.zeros(labels.shape, dtype=np.float64)
-    ids = representative_label_ids(labels)
-    for name in CANONICAL_CLASSES:
-        opacity[labels == ids.get(name, -1)] = normalized[name]["opacity"]
-    browser = {
-        "image": weights * opacity,
-        "class_visibility": derived,
-        "cross_class_leakage": _derived_leakage(derived),
-    }
-    server = {
-        "image": weights,
-        "class_visibility": {name: float((weights[labels == representative_label_ids(labels).get(name, -1)]).sum()
-                                            / weights.sum()) if weights.sum() else 0.0
-                             for name in CANONICAL_CLASSES},
-        "cross_class_leakage": _derived_leakage({name: value for name, value in
-                                                  ((key, float((weights[labels == representative_label_ids(labels).get(key, -1)]).sum()
-                                                    / weights.sum()) if weights.sum() else 0.0)
-                                                   for key in CANONICAL_CLASSES)}),
-    }
+    luminance = weights if luminance is None else luminance
+    browser = sampled_contribution_contract(labels, weights, luminance, layers)
+    server = sampled_contribution_contract(labels, weights, luminance, layers)
     result = compare_samples(server, browser, image_tolerance, visibility_tolerance,
                              leakage_tolerance)
     result["server"] = _record_summary(server)
@@ -118,19 +138,33 @@ def compare_dataset_samples(labels, weights, layers, reference=None, image_toler
     return _json_safe(result)
 
 
-def load_json_record(source):
+def load_json_record(source, layers=False):
     """Load JSON with strict finite-number handling."""
     try:
-        record = json.loads(source, parse_constant=lambda value: (_ for _ in ()).throw(
-            ValueError(f"JSON values must be finite: {value}"))) if isinstance(source, str) and source.lstrip().startswith("{") else _load(source)
+        if isinstance(source, str) and source.lstrip().startswith("{"):
+            record = json.loads(source, parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"JSON values must be finite: {value}")))
+        else:
+            with open(source) as stream:
+                record = json.load(stream, parse_constant=lambda value: (_ for _ in ()).throw(
+                    ValueError(f"JSON values must be finite: {value}")))
+            if not layers:
+                record = _normalize_record(record)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(str(exc)) from exc
+    if layers:
+        return validate_visibility.normalize_layers(record)
     return record
 
 
 def _load(path):
     with open(path) as stream:
-        record = json.load(stream)
+        record = json.load(stream, parse_constant=lambda value: (_ for _ in ()).throw(
+            ValueError(f"JSON values must be finite: {value}")))
+    return _normalize_record(record)
+
+
+def _normalize_record(record):
     record["image"] = np.asarray(record["image"], dtype=np.float64)
     if not np.isfinite(record["image"]).all():
         raise ValueError("JSON values must be finite")
@@ -172,10 +206,11 @@ def _dataset_record(name, labels_path, layers, reference, image_tolerance,
     representative_label_ids(raw_labels)
     params = np.zeros(48, dtype=np.float64)
     weights, luminance, _ = model._weights(params)
-    generated_reference = {"image": luminance.detach().numpy(),
-                           "class_visibility": model.features(params)["vis"],
-                           "cross_class_leakage": 0.0}
+    generated_reference = sampled_contribution_contract(
+        model.class_ids, weights.detach().numpy(), luminance.detach().numpy(), layers
+    )
     return compare_dataset_samples(model.class_ids, weights.detach().numpy(), layers,
+                                   luminance=luminance.detach().numpy(),
                                    reference=(reference or generated_reference),
                                    image_tolerance=image_tolerance,
                                    visibility_tolerance=visibility_tolerance,
@@ -200,9 +235,7 @@ def main():
     else:
         if not args.layers:
             parser.error("dataset mode requires --layers")
-        with open(args.layers) as stream:
-            layers = json.load(stream, parse_constant=lambda value: (_ for _ in ()).throw(
-                ValueError(f"JSON values must be finite: {value}")))
+        layers = load_json_record(args.layers, layers=True)
         report = _dataset_record(args.dataset, args.labels, layers,
                                  _load(args.reference) if args.reference else None,
                                  args.image_tolerance,
