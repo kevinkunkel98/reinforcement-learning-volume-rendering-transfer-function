@@ -157,7 +157,7 @@ class VisibilityTFEnv(gym.Env):
         self._active_layers = getattr(self, "_active_layers", None)
         raw_features = goals.features(model, params, self._active_layers)
         start_agg = goals.aggregate(raw_features, self._active_layers)
-        instruction = goals.sample_instruction(volume, model, start_agg, rng)
+        instruction = goals.sample_instruction(volume, model, start_agg, rng, self._active_layers)
         start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
         self._volume = volume
@@ -170,7 +170,7 @@ class VisibilityTFEnv(gym.Env):
         self._step_count = 0
 
         obs = self._build_observation(params, start_agg)
-        info = self._info(start_distance, start_agg, goals.is_useless(raw_features))
+        info = self._info(start_distance, start_agg, goals.is_useless(raw_features, self._active_layers))
         return obs, info
 
     def step(self, action):

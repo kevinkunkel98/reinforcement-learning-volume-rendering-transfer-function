@@ -90,14 +90,15 @@ def _mentioned(instruction: dict, aspect: str) -> dict:
             if aspect in entry}
 
 
-def _start_vis(model, start_params) -> dict:
-    return goals.aggregate(model.features(start_params))["vis"]
+def _start_vis(model, start_params, active_layers=None) -> dict:
+    features = goals.features(model, start_params, active_layers)
+    return goals.aggregate(features, active_layers)["vis"]
 
 
-def _infer_level(model, goal_class: str, delta: float, start_vis: float) -> str:
+def _infer_level(model, goal_class: str, delta: float, start_vis: float, active_layers=None) -> str:
     """Which ABSOLUTE_LEVEL word produced `delta`, by inverting
     `goals._absolute_target_delta` against every candidate level."""
-    solo = sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[goal_class])
+    solo = goals.class_ceiling(model, goal_class, active_layers)
     target_vis = 10.0 ** (delta + math.log10(start_vis + goals.EPSILON)) - goals.EPSILON
     fraction = target_vis / solo if solo > 0.0 else 0.0
     return min(goals.ABSOLUTE_LEVEL, key=lambda key: abs(goals.ABSOLUTE_LEVEL[key] - fraction))
@@ -111,7 +112,7 @@ def do_nothing(model, start_params, instruction) -> np.ndarray:
     return start_params.copy()
 
 
-def current_executor(model, start_params, instruction) -> np.ndarray:
+def current_executor(model, start_params, instruction, active_layers=None) -> np.ndarray:
     """What today's command executor does with the instruction: act only on
     the peak `goals.PEAK_INDEX` gives each mentioned goal class."""
     params = start_params.copy()
@@ -134,9 +135,9 @@ def current_executor(model, start_params, instruction) -> np.ndarray:
         return params
 
     if kind == "absolute":
-        start_vis = _start_vis(model, start_params)
+        start_vis = _start_vis(model, start_params, active_layers)
         for goal_class, delta in _mentioned(instruction, "vis").items():
-            level = _infer_level(model, goal_class, delta, start_vis[goal_class])
+            level = _infer_level(model, goal_class, delta, start_vis[goal_class], active_layers)
             base = transfer.ANATOMICAL_PEAK_INDEX[goal_class] * PARAMS_PER_PEAK
             params[base + 2] = transfer._from_unit(commands.LEVEL_WORDS[level])
         return params
@@ -167,11 +168,11 @@ def _increasing_or_shown_classes(instruction: dict) -> set:
     return {c for c, entry in instruction["targets"].items() if entry.get("vis", 0.0) > 0.0}
 
 
-def occlusion_rule(model, start_params, instruction) -> np.ndarray:
+def occlusion_rule(model, start_params, instruction, active_layers=None) -> np.ndarray:
     """`current_executor`, and additionally: if any class is being increased
     or shown, strip every *other* peak's height to 0.02 -- the "hide
     everything else" heuristic a person writes by hand."""
-    params = current_executor(model, start_params, instruction)
+    params = current_executor(model, start_params, instruction, active_layers)
     shown = _increasing_or_shown_classes(instruction)
     if shown:
         for goal_class, idx in transfer.ANATOMICAL_PEAK_INDEX.items():
@@ -195,18 +196,19 @@ def random_policy(model, start_params, instruction, seed: int = 0) -> np.ndarray
     return params
 
 
-def _evaluate(model, goal, start_agg, params) -> float:
-    return goals.distance(goal, start_agg, goals.aggregate(model.features(params)))
+def _evaluate(model, goal, start_agg, params, active_layers=None) -> float:
+    features = goals.features(model, params, active_layers)
+    return goals.distance(goal, start_agg, goals.aggregate(features, active_layers))
 
 
 def hill_climb(model, start_params, instruction, evaluations: int = 200,
-               initial_step: float = 0.2) -> np.ndarray:
+               initial_step: float = 0.2, active_layers=None) -> np.ndarray:
     """Coordinate search on `goals.distance`: try +-step on each of the 12
     controllable values, keep improvements, halve the step once a full sweep
     finds none. `evaluations` bounds the number of `model.features` calls
     (one to score the start state, one per proposal after that)."""
     goal = instruction["goal"]
-    start_agg = goals.aggregate(model.features(start_params))
+    start_agg = goals.aggregate(goals.features(model, start_params, active_layers), active_layers)
     used = 1
 
     best_params = start_params.copy()
@@ -222,7 +224,7 @@ def hill_climb(model, start_params, instruction, evaluations: int = 200,
                 candidate = best_params.copy()
                 for idx in dim:
                     candidate[idx] = float(np.clip(candidate[idx] + sign * step, -1.0, 1.0))
-                candidate_distance = _evaluate(model, goal, start_agg, candidate)
+                candidate_distance = _evaluate(model, goal, start_agg, candidate, active_layers)
                 used += 1
                 if candidate_distance < best_distance:
                     best_distance = candidate_distance

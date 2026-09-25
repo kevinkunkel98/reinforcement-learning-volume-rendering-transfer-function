@@ -626,6 +626,24 @@ def test_reachability_sums_the_measured_classes_behind_a_goal_class(monkeypatch)
     assert "soft" in goals.reachable_goal_classes("ts_fake", model)
 
 
+def test_zero_opacity_makes_class_ceiling_and_reachability_zero(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _PerClassModel(_reachable_everything())
+    layers = {"lungs": {"opacity": 0.0}}
+
+    assert goals.class_ceiling(model, "lungs", layers) == pytest.approx(0.0)
+    assert "lungs" not in goals.reachable_goal_classes("ts_fake", model, layers)
+
+
+def test_active_opacity_scales_per_class_ceiling(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _PerClassModel(_reachable_everything())
+
+    assert goals.class_ceiling(model, "skeleton", {"skeleton": {"opacity": 0.25}}) == pytest.approx(0.025)
+
+
 def test_sampled_instructions_never_name_an_unreachable_class(monkeypatch):
     monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
     monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)

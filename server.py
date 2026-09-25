@@ -307,7 +307,7 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
     }
 
 
-def run_policy_arm(model, policy, instruction, start_agg, start_params):
+def run_policy_arm(model, policy, instruction, start_agg, start_params, active_layers=None):
     """Run the one-shot policy on an already-built goal.
 
     The caller owns `instruction` (`goals.goal_from_command`) and `start_agg`,
@@ -323,7 +323,7 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params):
     if policy is None:
         raise ValueError(NO_POLICY_CHECKPOINT_MESSAGE)
 
-    solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
+    solo_max_log = [math.log10(goals.class_ceiling(model, c, active_layers) + goals.EPSILON)
                      for c in goals.GOAL_CLASSES]
     controllable = [float(np.mean([start_params[i] for i in group])) for group in CONTROLLABLE]
     observation = build_observation(instruction["goal"], model.histogram, start_agg,
@@ -333,7 +333,7 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params):
     return apply_controllable(start_params, action)
 
 
-def run_search_arm(model, start_params, instruction, evaluations):
+def run_search_arm(model, start_params, instruction, evaluations, active_layers=None):
     """Run the hill-climb baseline (`rl.baselines.hill_climb`) on an
     already-built goal -- the search twin of `run_policy_arm`.
 
@@ -355,7 +355,8 @@ def run_search_arm(model, start_params, instruction, evaluations):
     Returns the new parameters. `model.features`/`model.solo_max` may raise
     `FileNotFoundError` or `KeyError` when the volume has no visibility
     cache."""
-    return hill_climb(model, start_params, instruction, evaluations=evaluations)
+    kwargs = {} if active_layers is None else {"active_layers": active_layers}
+    return hill_climb(model, start_params, instruction, evaluations=evaluations, **kwargs)
 
 
 # The two search budgets the thesis reports: B3 (cheap, 10) and B4 (thorough,
@@ -390,7 +391,7 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
 
     An arm that raises is reported as `unavailable` rather than failing the
     whole comparison -- losing one column should not end a live demo."""
-    start_agg = goals.aggregate(model.features(start_params))
+    start_agg = goals.aggregate(goals.features(model, start_params, layers), layers)
 
     # Warm every class's reachable ceiling before any stopwatch starts.
     # `model.solo_max` probes four single-peak transfer functions and memoises
@@ -418,7 +419,7 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
         return params, int((time.perf_counter() - started) * 1000)
 
     def _finish(params, evaluations, elapsed_ms):
-        final_agg = goals.aggregate(model.features(params))
+        final_agg = goals.aggregate(goals.features(model, params, layers), layers)
         if layers is None:
             image_b64, _img, _png = _render_image_b64(params, camera)
         else:
@@ -479,10 +480,12 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
                            "this instruction cannot be applied directly")}
     for name, budget in (("search_cheap", cheap), ("search_thorough", thorough)):
         arms[name] = _arm(
-            functools.partial(run_search_arm, model, start_params, instruction, budget),
+            functools.partial(run_search_arm, model, start_params, instruction, budget,
+                              **({} if layers is None else {"active_layers": layers})),
             budget, cannot_score)
     arms["policy"] = _arm(
-        functools.partial(run_policy_arm, model, policy, instruction, start_agg, start_params),
+        functools.partial(run_policy_arm, model, policy, instruction, start_agg, start_params,
+                          **({} if layers is None else {"active_layers": layers})),
         0, "no trained policy checkpoint is loaded, so this arm has no answer")
     return arms
 

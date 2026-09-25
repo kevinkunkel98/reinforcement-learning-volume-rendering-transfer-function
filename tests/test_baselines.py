@@ -41,6 +41,19 @@ class _CountingModel(_StubModel):
         return super().features(params)
 
 
+class _LayerAwareModel(_StubModel):
+    def features(self, params, active_layers=None) -> dict:
+        features = super().features(params)
+        if active_layers is not None:
+            effective_vis = dict(features["vis"])
+            for name, settings in active_layers.items():
+                effective_vis[name] *= settings["opacity"]
+            features["effective_vis"] = effective_vis
+            features["effective_bright"] = dict(features["bright"])
+            features["effective_coverage"] = sum(effective_vis.values())
+        return features
+
+
 def _start_params():
     return goals.starting_params()
 
@@ -237,6 +250,17 @@ def test_hill_climb_respects_its_evaluation_budget():
     baselines.hill_climb(model, start, instruction, evaluations=17)
 
     assert model.calls <= 17
+
+
+def test_hill_climb_passes_active_layers_to_effective_scoring():
+    model = _LayerAwareModel()
+    start = _start_params()
+    instruction = _relative_instruction("skeleton", goals.VISIBILITY_STRENGTH["strongly"])
+    layers = {"skeleton": {"opacity": 0.0}}
+
+    result = baselines.hill_climb(model, start, instruction, evaluations=3, active_layers=layers)
+
+    assert np.array_equal(result, start)
 
 
 # --- shape/bounds for every baseline --------------------------------------------

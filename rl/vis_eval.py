@@ -219,8 +219,9 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
         obs, reward, terminated, truncated, info = env.step(action)
 
         if evaluations > 0:
+            search_kwargs = {} if active_layers is None else {"active_layers": active_layers}
             refined_params = hill_climb(env._model, env._params, episode["instruction"],
-                                         evaluations=evaluations)
+                                         evaluations=evaluations, **search_kwargs)
             refined_agg = goals.aggregate(_features(env._model, refined_params, active_layers), active_layers)
             refined_attainment = env._attainment(refined_agg)
             if refined_attainment > info["attainment"]:

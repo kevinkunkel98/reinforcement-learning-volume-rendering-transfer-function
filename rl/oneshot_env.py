@@ -171,11 +171,15 @@ class OneShotEnv(gym.Env):
         additionally avoids redoing the summation/log10 work on every reset
         of an already-seen volume.
         """
-        cached = self._solo_max_log_cache.get(volume)
+        layers = getattr(self, "_active_layers", None)
+        cache_key = volume if layers is None else (volume, tuple(
+            (name, settings.get("opacity", 1.0))
+            for name, settings in layers.items()))
+        cached = self._solo_max_log_cache.get(cache_key)
         if cached is None:
-            cached = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
+            cached = [math.log10(goals.class_ceiling(model, c, layers) + goals.EPSILON)
                       for c in goals.GOAL_CLASSES]
-            self._solo_max_log_cache[volume] = cached
+            self._solo_max_log_cache[cache_key] = cached
         return cached
 
     def _sample_start_params(self, rng) -> np.ndarray:
@@ -269,7 +273,8 @@ class OneShotEnv(gym.Env):
         if rng.random() < self.hindsight_ratio:
             instruction, hindsight_action = self._sample_hindsight_goal(rng, model, start_params, start_agg)
         else:
-            instruction, hindsight_action = goals.sample_instruction(volume, model, start_agg, rng), None
+            instruction, hindsight_action = (goals.sample_instruction(
+                volume, model, start_agg, rng, self._active_layers), None)
         start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
 
         self._volume = volume
@@ -281,7 +286,7 @@ class OneShotEnv(gym.Env):
         self._hindsight_action = hindsight_action
 
         obs = self._build_observation()
-        info = self._info(self._attainment(start_agg), goals.is_useless(raw_features))
+        info = self._info(self._attainment(start_agg), goals.is_useless(raw_features, self._active_layers))
         return obs, info
 
     def step(self, action):

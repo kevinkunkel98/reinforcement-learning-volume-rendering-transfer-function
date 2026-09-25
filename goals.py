@@ -57,8 +57,12 @@ def starting_params() -> np.ndarray:
 
 def features(model, params, active_layers=None) -> dict:
     """Evaluate model features with optional active anatomy layers."""
-    return (model.features(params, active_layers) if active_layers is not None
-            else model.features(params))
+    if active_layers is None:
+        return model.features(params)
+    try:
+        return model.features(params, active_layers)
+    except TypeError:
+        return model.features(params)
 
 
 def aggregate(features: dict, active_layers=None) -> dict:
@@ -281,14 +285,17 @@ def goal_classes_for_volume(name: str) -> list:
 VISIBLE_CEILING = 0.005
 
 
-def class_ceiling(model, goal_class: str) -> float:
+def class_ceiling(model, goal_class: str, active_layers=None) -> float:
     """The most of `goal_class` any single-peak transfer function can show,
     summed over the measured classes in `MEASURED_FOR_GOAL`; canonical classes
     are one-to-one, including generic `soft`."""
-    return sum(model.solo_max(m) for m in MEASURED_FOR_GOAL[goal_class])
+    ceiling = sum(model.solo_max(m) for m in MEASURED_FOR_GOAL[goal_class])
+    if active_layers is not None:
+        ceiling *= active_layers.get(goal_class, {}).get("opacity", 1.0)
+    return ceiling
 
 
-def reachable_goal_classes(name: str, model) -> list:
+def reachable_goal_classes(name: str, model, active_layers=None) -> list:
     """`goal_classes_for_volume` narrowed to the classes a render can actually
     show on this volume (ceiling >= `VISIBLE_CEILING`).
 
@@ -297,7 +304,8 @@ def reachable_goal_classes(name: str, model) -> list:
     instructions no method can satisfy and no rater can judge -- they pollute
     preference collection and drag every held-out score toward zero equally.
     """
-    return [c for c in goal_classes_for_volume(name) if class_ceiling(model, c) >= VISIBLE_CEILING]
+    return [c for c in goal_classes_for_volume(name)
+            if class_ceiling(model, c, active_layers) >= VISIBLE_CEILING]
 
 
 def _class_word(goal_class: str, rng) -> str:
@@ -316,11 +324,11 @@ def _relative_text(goal_class: str, direction: str, strength: str, rng) -> str:
     return rng.choice(templates)
 
 
-def _absolute_target_delta(model, goal_class: str, level: str, start_vis: float) -> float:
+def _absolute_target_delta(model, goal_class: str, level: str, start_vis: float, active_layers=None) -> float:
     """The vis change an absolute-level instruction requests: `level`'s share
     of solo_max (aggregated for the goal class) as a log10 change from
     `start_vis`, so "high skeleton" means the same thing on every volume."""
-    solo = sum(model.solo_max(m) for m in MEASURED_FOR_GOAL[goal_class])
+    solo = class_ceiling(model, goal_class, active_layers)
     target_vis = ABSOLUTE_LEVEL[level] * solo
     return math.log10(target_vis + EPSILON) - math.log10(start_vis + EPSILON)
 
@@ -394,7 +402,7 @@ def _sample_brightness(classes: list, rng) -> tuple:
     return targets, _brightness_text(goal_class, direction, rng)
 
 
-def sample_instruction(name, model, start_features, rng) -> dict:
+def sample_instruction(name, model, start_features, rng, active_layers=None) -> dict:
     """One instruction: {"kind", "text", "targets", "goal"}.
 
     `targets` is the goal_vector input; `text` is the spoken form. Absolute
@@ -402,7 +410,8 @@ def sample_instruction(name, model, start_features, rng) -> dict:
     turned into a requested change from the start state, so "high skeleton"
     means the same thing on every volume.
     """
-    classes = reachable_goal_classes(name, model)
+    classes = (reachable_goal_classes(name, model, active_layers)
+               if active_layers is not None else reachable_goal_classes(name, model))
     kind = _sample_kind(rng)
     if kind == "relative":
         targets, text = _sample_relative(classes, rng)
@@ -467,11 +476,11 @@ def _goal_relative(command: dict, volume) -> dict:
     return {"kind": "relative", "text": text, "targets": targets, "goal": goal_vector(targets)}
 
 
-def _goal_absolute(command: dict, model, start_features: dict, volume) -> dict:
+def _goal_absolute(command: dict, model, start_features: dict, volume, active_layers=None) -> dict:
     goal_class = command["target"]
     _check_class_supported(goal_class, volume)
     start_vis = start_features["vis"][goal_class]
-    delta = _absolute_target_delta(model, goal_class, command["level"], start_vis)
+    delta = _absolute_target_delta(model, goal_class, command["level"], start_vis, active_layers)
     targets = {goal_class: {"vis": delta}}
     text = _absolute_command_text(goal_class, command["level"])
     return {"kind": "absolute", "text": text, "targets": targets, "goal": goal_vector(targets)}
@@ -499,7 +508,8 @@ def _goal_show_only(command: dict, volume) -> dict:
     return {"kind": "show_only", "text": text, "targets": targets, "goal": goal_vector(targets)}
 
 
-def goal_from_command(command: dict, model, start_features: dict, volume: str = None) -> dict:
+def goal_from_command(command: dict, model, start_features: dict, volume: str = None,
+                      active_layers=None) -> dict:
     """Turn a parsed command (from `commands.parse_command_rule`/`_llm`) into
     the same {"kind", "text", "targets", "goal"} shape `sample_instruction`
     produces, so downstream code cannot tell a typed instruction from a
@@ -511,12 +521,13 @@ def goal_from_command(command: dict, model, start_features: dict, volume: str = 
     does not contain, and a class the scan contains but cannot show (see
     `reachable_goal_classes` -- asking for lungs on an abdomen scan).
     """
-    goal = _goal_from_command(command, model, start_features, volume)
+    goal = _goal_from_command(command, model, start_features, volume, active_layers)
     if volume is not None:
         for goal_class, target in goal["targets"].items():
             if target.get("vis", 0.0) <= 0.0:
                 continue
-            ceiling = class_ceiling(model, goal_class)
+            ceiling = (class_ceiling(model, goal_class, active_layers)
+                       if active_layers is not None else class_ceiling(model, goal_class))
             if ceiling < VISIBLE_CEILING:
                 raise ValueError(
                     f"{goal_class!r} cannot be shown on volume {volume!r} -- the most any "
@@ -525,7 +536,7 @@ def goal_from_command(command: dict, model, start_features: dict, volume: str = 
     return goal
 
 
-def _goal_from_command(command: dict, model, start_features: dict, volume) -> dict:
+def _goal_from_command(command: dict, model, start_features: dict, volume, active_layers=None) -> dict:
     """`goal_from_command` without the reachability check, which the public
     entry point applies once to the finished targets so a compound command is
     checked as a whole."""
@@ -533,7 +544,7 @@ def _goal_from_command(command: dict, model, start_features: dict, volume) -> di
         raise ValueError(_NOT_A_GOAL.format(what="a camera command"))
 
     if "compound" in command:
-        sub_goals = [_goal_from_command(sub, model, start_features, volume)
+        sub_goals = [_goal_from_command(sub, model, start_features, volume, active_layers)
                      for sub in command["compound"]]
         targets = {}
         for sub_goal in sub_goals:
@@ -554,7 +565,7 @@ def _goal_from_command(command: dict, model, start_features: dict, volume) -> di
         return _goal_relative(command, volume)
 
     if attribute == "opacity" and direction == "set":
-        return _goal_absolute(command, model, start_features, volume)
+        return _goal_absolute(command, model, start_features, volume, active_layers)
 
     if attribute == "brightness" and direction in ("increase", "decrease"):
         return _goal_brightness(command, volume)
