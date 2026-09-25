@@ -654,7 +654,7 @@ def _stub_run(monkeypatch):
     monkeypatch.setattr(vis_eval, "BASELINES", {})
 
 
-def test_main_records_the_import_time_provenance_in_the_result_file(tmp_path, monkeypatch):
+def test_main_records_code_provenance_and_explicit_layer_absence(tmp_path, monkeypatch):
     # The incident: a job started before a scoring fix wrote its file hours
     # after the fix landed. The file must name the code it actually ran.
     _stub_run(monkeypatch)
@@ -663,8 +663,22 @@ def test_main_records_the_import_time_provenance_in_the_result_file(tmp_path, mo
     vis_eval.main(["--policy", "p.zip", "--out", str(out)])
 
     written = json.loads(out.read_text())["provenance"]
-    assert written == provenance.IMPORT_TIME_PROVENANCE
+    assert written["anatomy_layers"] is None
     assert written["scoring_fingerprint"] == provenance.IMPORT_TIME_PROVENANCE["scoring_fingerprint"]
+    assert written["anatomy_layer_layout"] == provenance.IMPORT_TIME_PROVENANCE["anatomy_layer_layout"]
+
+
+def test_main_records_non_default_evaluation_layers(tmp_path, monkeypatch):
+    _stub_run(monkeypatch)
+    layers = {"liver": {"opacity": 0.0}}
+    real_result_provenance = provenance.result_provenance
+    monkeypatch.setattr(vis_eval.provenance, "result_provenance",
+                        lambda active_layers=None: real_result_provenance(layers))
+    out = tmp_path / "eval-layers.json"
+
+    vis_eval.main(["--policy", "p.zip", "--out", str(out)])
+
+    assert json.loads(out.read_text())["provenance"]["anatomy_layers"]["liver"]["opacity"] == 0.0
 
 
 def _comparison_with(provenance_record) -> dict:

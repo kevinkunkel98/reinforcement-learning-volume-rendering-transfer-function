@@ -51,6 +51,10 @@ def test_result_provenance_overlays_active_layers_on_import_snapshot():
     assert record["timestamp"] == provenance.IMPORT_TIME_PROVENANCE["timestamp"]
 
 
+def test_result_provenance_marks_unavailable_active_layers_explicitly():
+    assert provenance.result_provenance()["anatomy_layers"] is None
+
+
 def test_fingerprint_is_read_from_disk_so_editing_a_scoring_module_changes_it(tmp_path):
     path = tmp_path / "scoring.py"
     module = _module_at(path, "def score(x):\n    return x\n")
@@ -192,6 +196,25 @@ def test_compare_flags_a_changed_anatomy_layer_layout():
 
     assert report["stale"] is True
     assert any("anatomy_layer_layout" in reason for reason in report["reasons"])
+
+
+def test_compare_ignores_runtime_layer_difference_without_expected_layers():
+    recorded = provenance.result_provenance({"liver": {"opacity": 0.0}})
+    current = provenance.result_provenance()
+
+    report = provenance.compare(recorded, current)
+
+    assert report["stale"] is False
+
+
+def test_compare_checks_runtime_layers_when_expected_layers_are_explicit():
+    recorded = provenance.result_provenance({"liver": {"opacity": 0.0}})
+    current = provenance.result_provenance()
+
+    report = provenance.compare(recorded, current, expected_layers={"liver": {"opacity": 1.0}})
+
+    assert report["stale"] is True
+    assert any("anatomy_layers" in reason for reason in report["reasons"])
 
 
 def test_compare_treats_a_result_without_provenance_as_stale():

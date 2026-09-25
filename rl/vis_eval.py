@@ -590,9 +590,13 @@ def main(argv=None):
     # table with that record in place is also what catches a scoring fix that
     # landed mid-run -- the fingerprint no longer matches the file on disk,
     # and the run says so before anyone quotes it.
+    # These evaluation episodes carry HU/policy state, not renderer layer state.
+    # Keep that absence explicit; callers with active layers can pass them to
+    # result_provenance at the writer boundary.
+    evaluation_layers = None
     result = {"policy": args.policy, "split": args.split, "episodes": args.episodes,
               "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
-               "provenance": provenance.result_provenance(),
+              "provenance": provenance.result_provenance(evaluation_layers),
               "metadata": observation_metadata(),
               "episodes_detail": episodes_detail(results, episodes),
                **compare(results, episodes=episodes)}

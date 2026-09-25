@@ -140,7 +140,8 @@ def provenance(modules=None, anatomy_layers=None) -> dict:
         "scoring_fingerprint": scoring_fingerprint(modules),
         "scoring_modules": names,
         "label_layout": CLASS_LAYOUT_VERSION,
-        "anatomy_layers": normalize_layers(anatomy_layers or {}),
+        "anatomy_layers": (normalize_layers(anatomy_layers)
+                           if anatomy_layers is not None else None),
         "anatomy_layer_layout": LAYER_LAYOUT_VERSION,
         "visibility_renderer": "visibility-v1",
         "python": sys.version,
@@ -151,7 +152,8 @@ def provenance(modules=None, anatomy_layers=None) -> dict:
 def result_provenance(anatomy_layers=None) -> dict:
     """Return import-time code identity with the run's active layer state."""
     record = dict(IMPORT_TIME_PROVENANCE)
-    record["anatomy_layers"] = normalize_layers(anatomy_layers or {})
+    record["anatomy_layers"] = (normalize_layers(anatomy_layers)
+                                 if anatomy_layers is not None else None)
     return record
 
 
@@ -168,7 +170,7 @@ def _short(value, length: int = 12) -> str:
     return "unknown" if value is None else str(value)[:length]
 
 
-def compare(recorded: dict, current: dict = None) -> dict:
+def compare(recorded: dict, current: dict = None, expected_layers=None) -> dict:
     """Check a result file's `provenance` block against the code running now.
 
     Returns `{"stale", "reasons", "recorded_dirty"}`. Stale means the numbers
@@ -207,12 +209,18 @@ def compare(recorded: dict, current: dict = None) -> dict:
         reasons.append(f"git commit changed: {_short(recorded_commit, 8)} -> "
                        f"{_short(current_commit, 8)}")
 
-    for field in ("label_layout", "anatomy_layers", "anatomy_layer_layout",
+    for field in ("label_layout", "anatomy_layer_layout",
                   "visibility_renderer"):
         recorded_value = recorded.get(field)
         current_value = current.get(field)
         if recorded_value and current_value and recorded_value != current_value:
             reasons.append(f"{field} changed: {recorded_value} -> {current_value}")
+
+    if expected_layers is not None:
+        expected = normalize_layers(expected_layers)
+        if recorded.get("anatomy_layers") != expected:
+            reasons.append("anatomy_layers changed: recorded runtime layers do not "
+                           "match expected layers")
 
     return {"stale": bool(reasons), "reasons": reasons,
             "recorded_dirty": bool(recorded.get("git_dirty"))}
