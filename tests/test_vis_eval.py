@@ -411,6 +411,32 @@ def test_run_baseline_records_none_when_the_baseline_raises(monkeypatch):
     assert results == [{"attainment": None, "kind": row["instruction"]["kind"]} for row in episodes]
 
 
+def test_run_baseline_with_active_layers_returns_scored_results(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume)
+
+    results = vis_eval.run_baseline(
+        "B0_do_nothing", episodes, model_for_volume=_model_for_volume,
+        active_layers={"liver": {"opacity": 0.0}})
+
+    assert results[0]["attainment"] == pytest.approx(0.0)
+
+
+def test_per_class_summary_marks_zero_opacity_class_unreachable(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume)
+    rows = {"policy": [{"attainment": 0.0, "kind": "relative"}]}
+
+    report = vis_eval.per_class_summary(
+        rows, episodes, model_for_volume=_model_for_volume,
+        active_layers={"lungs": {"opacity": 0.0}})
+
+    assert report["policy"]["lungs"]["reachable"] == 0
+    assert report["policy"]["lungs"]["unreachable"] == 1
+
+
 # --- wilcoxon --------------------------------------------------------------------
 
 def test_wilcoxon_matches_a_hand_computed_example():

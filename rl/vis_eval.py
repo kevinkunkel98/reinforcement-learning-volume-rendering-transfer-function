@@ -88,8 +88,14 @@ def _load_sac(path: str):
 
 
 def _features(model, params, active_layers=None):
-    return (model.features(params, active_layers) if active_layers is not None
-            else model.features(params))
+    if active_layers is None:
+        return model.features(params)
+    try:
+        return model.features(params, active_layers)
+    except TypeError as exc:
+        if "positional argument" not in str(exc):
+            raise
+        return model.features(params)
 
 
 def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict,
@@ -450,7 +456,7 @@ def per_class_summary(results: dict, episodes: list, model_for_volume=None,
                 mentioned = set()
             else:
                 supported = set(goals.goal_classes_for_volume(volume))
-                reachable = set(goals.reachable_goal_classes(volume, model))
+                reachable = set(goals.reachable_goal_classes(volume, model, active_layers))
                 mentioned = set(episode["instruction"]["targets"])
             for goal_class in goals.GOAL_CLASSES:
                 status = ("reachable" if goal_class in reachable else

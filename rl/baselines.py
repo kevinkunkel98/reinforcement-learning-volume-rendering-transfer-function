@@ -104,7 +104,7 @@ def _infer_level(model, goal_class: str, delta: float, start_vis: float, active_
     return min(goals.ABSOLUTE_LEVEL, key=lambda key: abs(goals.ABSOLUTE_LEVEL[key] - fraction))
 
 
-def do_nothing(model, start_params, instruction) -> np.ndarray:
+def do_nothing(model, start_params, instruction, active_layers=None) -> np.ndarray:
     """B0: the reference every other baseline (and any learned policy) has
     to beat. Under `goals.distance`'s KEEP_TOLERANCE, inaction scores
     attainment exactly 0 -- it is not the floor (B2 random can score below
@@ -182,7 +182,8 @@ def occlusion_rule(model, start_params, instruction, active_layers=None) -> np.n
     return params
 
 
-def random_policy(model, start_params, instruction, seed: int = 0) -> np.ndarray:
+def random_policy(model, start_params, instruction, seed: int = 0,
+                  active_layers=None) -> np.ndarray:
     """10 random +-0.1 steps on the 12 controllable values, seeded -- ignores
     the instruction and the objective entirely; the floor any policy (learned
     or heuristic) has to clear."""
@@ -237,12 +238,14 @@ def hill_climb(model, start_params, instruction, evaluations: int = 200,
     return best_params
 
 
-def hill_climb_10(model, start_params, instruction) -> np.ndarray:
-    return hill_climb(model, start_params, instruction, evaluations=10)
+def hill_climb_10(model, start_params, instruction, active_layers=None) -> np.ndarray:
+    return hill_climb(model, start_params, instruction, evaluations=10,
+                      active_layers=active_layers)
 
 
-def hill_climb_200(model, start_params, instruction) -> np.ndarray:
-    return hill_climb(model, start_params, instruction, evaluations=200)
+def hill_climb_200(model, start_params, instruction, active_layers=None) -> np.ndarray:
+    return hill_climb(model, start_params, instruction, evaluations=200,
+                      active_layers=active_layers)
 
 
 BASELINES = {
