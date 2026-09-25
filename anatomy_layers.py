@@ -37,17 +37,25 @@ def _bounded_number(value: Any, field: str) -> float:
     return value
 
 
+def _require_string_keys(value: Mapping[Any, Any], field: str) -> None:
+    if any(not isinstance(key, str) for key in value):
+        raise ValueError(f"{field} keys must be strings")
+
+
 def normalize_layers(
     value: Mapping[str, Any], available_classes: set[str] | None = None
 ) -> dict[str, dict[str, Any]]:
     """Validate layer overrides and return all canonical classes with defaults."""
     if not isinstance(value, Mapping):
         raise ValueError("anatomy_layers must be an object")
+    _require_string_keys(value, "anatomy_layers")
     unknown = set(value) - set(anatomy.CANONICAL_CLASSES)
     if unknown:
         raise ValueError(f"anatomy_layers has unknown class: {', '.join(sorted(unknown))}")
     if available_classes is not None:
         available = set(available_classes)
+        if any(not isinstance(class_name, str) for class_name in available):
+            raise ValueError("available_classes keys must be strings")
         unknown_available = available - set(anatomy.CANONICAL_CLASSES)
         if unknown_available:
             raise ValueError(
@@ -65,6 +73,7 @@ def normalize_layers(
     for class_name, settings in value.items():
         if not isinstance(settings, Mapping):
             raise ValueError(f"anatomy_layers.{class_name} must be an object")
+        _require_string_keys(settings, f"anatomy_layers.{class_name}")
         unknown_settings = set(settings) - {"opacity", "rgb"}
         if unknown_settings:
             raise ValueError(

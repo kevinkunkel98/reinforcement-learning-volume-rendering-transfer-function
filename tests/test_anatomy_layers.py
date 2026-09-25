@@ -57,6 +57,11 @@ def test_normalize_layers_rejects_unknown_class():
         anatomy_layers.normalize_layers({"pancreas": {}})
 
 
+def test_normalize_layers_rejects_non_string_class_key_with_value_error():
+    with pytest.raises(ValueError, match="keys must be strings"):
+        anatomy_layers.normalize_layers({1: {}})
+
+
 def test_normalize_layers_rejects_unavailable_class():
     with pytest.raises(ValueError, match="unsupported.*liver"):
         anatomy_layers.normalize_layers({"liver": {}}, available_classes={"skeleton"})
