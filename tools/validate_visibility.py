@@ -40,6 +40,7 @@ import render
 import totalseg
 import views
 import visibility
+from anatomy_layers import normalize_layers
 from transfer import CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, _from_unit, anatomical_params, vector_to_vtk
 
 CONTRIBUTION_FLOOR = 0.002       # luminance range below this is renderer noise
@@ -47,11 +48,42 @@ DEFAULT_THRESHOLD = 0.7          # Pearson correlation required per validated cl
 COVERAGE_THRESHOLD = 0.9         # rank agreement required for coverage
 N_TRIALS = 10
 OUT_PATH = "out/visibility_validation.json"
+IMAGE_TOLERANCE = 0.02
+VISIBILITY_TOLERANCE = 0.02
+LEAKAGE_TOLERANCE = 0.02
+REPRESENTATIVE_CLASSES = ("skeleton", "lungs", "liver", "kidneys", "spleen", "soft")
 
 
 def _label_id(class_name: str) -> int:
     """Return label-map ID for any canonical class in current layout."""
     return anatomy.CANONICAL_CLASSES.index(class_name) + 1
+
+
+def representative_label_ids(labels: np.ndarray) -> dict[str, int]:
+    """Validate label IDs and return the shared browser/server class mapping."""
+    labels = np.asarray(labels)
+    if labels.dtype != np.uint8:
+        raise ValueError("labels must be uint8")
+    present = set(np.unique(labels).tolist())
+    missing = [name for name in REPRESENTATIVE_CLASSES if _label_id(name) not in present]
+    if missing:
+        raise ValueError("representative labeled classes missing: " + ", ".join(missing))
+    return {name: _label_id(name) for name in REPRESENTATIVE_CLASSES}
+
+
+def sampled_layer_contributions(labels: np.ndarray, weights: np.ndarray, layers: dict) -> dict[str, float]:
+    """Apply browser label opacity semantics to deterministic sampled weights."""
+    labels = np.asarray(labels)
+    weights = np.asarray(weights, dtype=np.float64)
+    if labels.shape != weights.shape or labels.dtype != np.uint8:
+        raise ValueError("labels and weights must have matching uint8-shaped arrays")
+    normalized = normalize_layers(layers or {})
+    total = float(weights.sum())
+    return {
+        name: float((weights[labels == _label_id(name)] * normalized[name]["opacity"]).sum() / total)
+        if total else 0.0
+        for name in anatomy.CANONICAL_CLASSES
+    }
 
 
 def pearson(a, b) -> float:
@@ -173,6 +205,7 @@ def validate_volume(name: str, seed: int = 0, threshold: float = DEFAULT_THRESHO
 
     volume, spacing = datasets.load_dataset(name, canonical=True)
     labels = totalseg.load_labels(name)
+    representative_label_ids(labels)
     cameras = views.cameras_for_volume(volume, spacing)
     rng = np.random.default_rng(seed)
 
