@@ -29,6 +29,8 @@
   let labelValues;
   let labelMetadata;
   let activeLayers = {};
+  let rawVolumeValues;
+  let volumeMetadata;
 
   function destroyViewer() {
     if (interactor) {
@@ -48,6 +50,8 @@
     volume = undefined;
     mapper = undefined;
     imageData = undefined;
+    rawVolumeValues = undefined;
+    volumeMetadata = undefined;
   }
 
   function setStatus(message, error = false) {
@@ -107,6 +111,25 @@
     });
     if (offset !== metadata.total_bytes) throw new Error("label chunks do not cover payload");
     return metadata;
+  }
+
+  function validateLabelDimensions(metadata, volumeMetadata) {
+    if (metadata.dimensions.some((value, index) => value !== volumeMetadata.dimensions[index])) {
+      throw new Error("label dimensions do not match volume dimensions");
+    }
+    return metadata;
+  }
+
+  function applyLabelAwareMask(values, labels, metadata, volumeMetadata, layers) {
+    // label-aware masking removes anatomy from HU rendering before compositing.
+    validateLabelDimensions(metadata, volumeMetadata);
+    const masked = new Float32Array(values);
+    const classNames = ["skeleton", "lungs", "heart", "vessels", "liver", "kidneys", "spleen", "soft"];
+    for (let index = 0; index < labels.length; index += 1) {
+      const className = classNames[labels[index] - 1];
+      if (className && (layers[className]?.opacity ?? 1) <= 0) masked[index] = CENTER_RANGE[0];
+    }
+    return masked;
   }
 
   function reconstructLabels(metadata, chunks) {
@@ -234,6 +257,13 @@
     labelValues = labels;
     labelMetadata = metadata;
     activeLayers = layers || {};
+    if (rawVolumeValues && volumeMetadata && mapper) {
+      const values = labelValues && labelMetadata
+        ? applyLabelAwareMask(rawVolumeValues, labelValues, labelMetadata, volumeMetadata, activeLayers)
+        : rawVolumeValues;
+      buildImageData(volumeMetadata, values);
+      mapper.setInputData(imageData);
+    }
     // Labels are retained for the label-aware path; HU transfer remains the
     // fallback for datasets whose label transport is unavailable.
     setTransferFunction(params);
@@ -320,14 +350,17 @@
         return true;
       }
       labelStatus = "";
+      labelValues = undefined;
+      labelMetadata = undefined;
+      activeLayers = {};
       const loaded = await fetchVolume(name, loadController.signal, generation);
       if (!isCurrentLoad(generation)) return false;
       // Labels are transport-ready now; rendering remains HU-only until Task 3.
       // A missing label volume must never disable the existing volume path.
       try {
         const labels = await fetchLabelMetadata(name, loadController.signal);
+        labelMetadata = validateLabelDimensions(labels.metadata, loaded.metadata);
         labelValues = labels.labels;
-        labelMetadata = labels.metadata;
         labelStatus = "";
       } catch (labelError) {
         if (labelError.name === "AbortError") throw labelError;
@@ -354,7 +387,12 @@
         interactorBound = true;
         camera = renderer.getActiveCamera();
       }
-      buildImageData(loaded.metadata, loaded.values);
+      rawVolumeValues = loaded.values;
+      volumeMetadata = loaded.metadata;
+      const values = labelValues && labelMetadata
+        ? applyLabelAwareMask(rawVolumeValues, labelValues, labelMetadata, volumeMetadata, layers)
+        : rawVolumeValues;
+      buildImageData(loaded.metadata, values);
       mapper = vtk.Rendering.Core.vtkVolumeMapper.newInstance();
       mapper.setInputData(imageData);
       // Match render.py's server-side quality settings -- vtk.js's defaults

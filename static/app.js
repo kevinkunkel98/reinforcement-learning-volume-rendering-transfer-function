@@ -270,11 +270,13 @@ function updateLayerControls(layers, anatomyState) {
     const control = el(`layer-${name}`);
     const opacity = el(`layer-${name}-opacity`);
     const color = el(`layer-${name}-color`);
+    const status = el(`layer-${name}-status`);
     const layer = layers[name];
     if (!control || !opacity || !color || !layer) continue;
     const supported = available.has(name);
     control.classList.toggle("layer-unavailable", !supported);
     control.title = supported ? "" : "Unavailable: no anatomical label in this dataset";
+    if (status) status.textContent = supported ? "" : "label unavailable";
     opacity.disabled = !supported;
     color.disabled = !supported;
     opacity.value = layer.opacity;
@@ -290,10 +292,30 @@ async function applyLayerCommand(action, targets) {
   await sendCommandImpl(text);
 }
 
+async function updateLayerValue(name, value) {
+  const response = await fetch("/api/layers", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ class_name: name, opacity: value }),
+  });
+  if (!response.ok) throw new Error(await response.text());
+  await refresh(await response.json());
+}
+
+async function updateLayerColor(name, value) {
+  const rgb = [1, 3, 5].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255);
+  const response = await fetch("/api/layers", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ class_name: name, rgb }),
+  });
+  if (!response.ok) throw new Error(await response.text());
+  await refresh(await response.json());
+}
+
 for (const name of CLASS_ORDER) {
   el(`layer-${name}-opacity`)?.addEventListener("change", (event) => {
-    applyLayerCommand(event.target.value === "0" ? "hide" : "show", [name]);
+    updateLayerValue(name, Number(event.target.value));
   });
+  el(`layer-${name}-color`)?.addEventListener("change", (event) => updateLayerColor(name, event.target.value));
 }
 
 // The readout is per-goal-class visibility (share of the rendered image), the

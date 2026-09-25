@@ -432,6 +432,14 @@ def test_state_exposes_anatomy_availability(monkeypatch):
     assert state["anatomy"]["available_classes"] == ["heart", "liver"]
 
 
+def test_layer_update_persists_exact_opacity_and_rgb():
+    s = _fresh_session()
+    state = s.set_layer("liver", opacity=0.37, rgb=[0.1, 0.2, 0.3])
+    layer = state["current"]["anatomy_layers"]["liver"]
+    assert layer == {"opacity": 0.37, "rgb": [0.1, 0.2, 0.3]}
+    assert state["current"]["params"] == s.history[0]["params"]
+
+
 def test_render_step_includes_a_transfer_curve():
     """The histogram/curve visual guide (README, "the hard part") needs the
     opacity+colour curve sampled over the HU range on every step, computed

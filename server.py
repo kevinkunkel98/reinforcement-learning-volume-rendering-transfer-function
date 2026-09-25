@@ -662,6 +662,24 @@ class Session:
         self.save()
         return self.state()
 
+    def set_layer(self, class_name: str, *, opacity=None, rgb=None):
+        layers = normalize_layers(self.history[self.cursor].get("anatomy_layers", default_layers()))
+        if opacity is not None:
+            layers[class_name]["opacity"] = opacity
+        if rgb is not None:
+            layers[class_name]["rgb"] = rgb
+        params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
+        camera = dict(self.history[self.cursor].get("camera", DEFAULT_CAMERA))
+        step = _render_step(params, f"set {class_name} layer", {
+            "attribute": "layers", "action": "set", "target": class_name,
+            "opacity": layers[class_name]["opacity"], "rgb": layers[class_name]["rgb"]},
+            False, self.history[-1]["id"] + 1, self.session_id, camera, mode="layers",
+            layers=layers)
+        self.history = self.history[:self.cursor + 1] + [step]
+        self.cursor = len(self.history) - 1
+        self.save()
+        return self.state()
+
     def back(self):
         self.cursor = max(0, self.cursor - 1)
         self.save()
@@ -940,11 +958,27 @@ class CommandRequest(BaseModel):
     mode: str | None = None  # "exact" | "search" | "policy"; overrides `search` when given
 
 
+class LayerRequest(BaseModel):
+    class_name: str
+    opacity: float | None = Field(None, ge=0.0, le=1.0)
+    rgb: list[float] | None = None
+
+
 @app.post("/api/command")
 async def command(req: CommandRequest):
     try:
         return session.command(req.text, req.parser, req.model, req.search, req.steps, req.mode)
     except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/layers")
+async def update_layer(req: LayerRequest):
+    if req.rgb is not None and (len(req.rgb) != 3 or any(not 0 <= value <= 1 for value in req.rgb)):
+        raise HTTPException(status_code=400, detail="rgb must contain three values in [0, 1]")
+    try:
+        return session.set_layer(req.class_name, opacity=req.opacity, rgb=req.rgb)
+    except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 

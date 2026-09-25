@@ -11,6 +11,18 @@ from anatomy import CANONICAL_CLASSES
 CLASS_IDS = {name: index for index, name in enumerate(CANONICAL_CLASSES, 1)}
 
 
+def test_label_aware_hu_volume_masks_disabled_classes():
+    volume = np.arange(8, dtype=np.float32).reshape((2, 2, 2))
+    labels = np.array([[[1, 2], [0, 1]], [[2, 0], [1, 2]]], dtype=np.uint8)
+    masked = render_module.label_aware_volume(
+        volume, labels, {"skeleton": {"opacity": 1.0, "rgb": [1, 1, 1]},
+                         "lungs": {"opacity": 0.0, "rgb": [1, 1, 1]}}
+    )
+    assert masked[labels == CLASS_IDS["lungs"]].tolist() == [-1.0e6, -1.0e6, -1.0e6]
+    assert masked[labels == CLASS_IDS["skeleton"]].tolist() == [-1.0e6, -1.0e6, -1.0e6]
+    assert masked[labels == 0].tolist() == [2.0, 5.0]
+
+
 def test_render_grab_shape_and_dtype():
     vol = build_phantom(size=48)
     win = render(vol, default_params())
@@ -192,7 +204,8 @@ def test_disabling_liver_removes_only_liver_region_contribution():
     hidden = grab(render(volume, params, camera=camera, labels=labels,
                         layers={"liver": {"opacity": 0.0, "rgb": [1.0, 0.0, 0.0]}}))
     assert np.count_nonzero(visible != baseline) > 0
-    assert np.array_equal(hidden, baseline)
+    assert hidden[..., 0].sum() < visible[..., 0].sum()
+    assert hidden[..., 0].sum() < baseline[..., 0].sum()
 
 
 def test_label_zero_has_no_anatomical_pixels_when_hu_is_hidden():

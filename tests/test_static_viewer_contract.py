@@ -71,6 +71,9 @@ def test_viewer_applies_label_aware_rendering_and_keeps_hu_fallback():
     assert "setLabelAwareTransferFunction" in viewer
     assert "label-aware" in viewer
     assert "fallback" in viewer
+    assert "labelValues = undefined" in viewer
+    assert "validateLabelDimensions" in viewer
+    assert "label-aware masking" in viewer
 
 
 def test_app_exposes_editable_controls_for_all_anatomy_classes():
@@ -84,6 +87,10 @@ def test_app_exposes_editable_controls_for_all_anatomy_classes():
     assert "available_classes" in app
     assert "layer-unavailable" in app
     assert "applyLayerCommand" in app
+    assert '"/api/layers"' in app
+    assert "event.target.value" in app
+    assert "event.target.value" in app
+    assert "label unavailable" in app.lower() or "no anatomical labels" in app.lower()
     assert ".layer-control" in css
 
 

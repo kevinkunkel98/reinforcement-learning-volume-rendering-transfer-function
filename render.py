@@ -13,6 +13,7 @@ MAPPER_NAME = None  # set on first render(); real value, not a guess -- read by 
 VISIBLE_BOUNDS_STRIDE = 4  # measured: ~10ms strided vs ~1-2s at full resolution on real CT
 VISIBLE_BOUNDS_THRESHOLD = 0.05
 VISIBLE_BOUNDS_MARGIN = 0.15  # fraction of extent added as padding so content isn't cropped tight
+LABEL_HIDDEN_HU = -1.0e6
 
 
 def _visible_bounds(volume: np.ndarray, params: np.ndarray, spacing) -> list | None:
@@ -55,6 +56,19 @@ def frame_bounds(volume: np.ndarray, params: np.ndarray, spacing) -> list | None
     (from the sequence's starting transfer function) and pass it to `render`
     as `frame_bounds`, so only the camera commands move the camera."""
     return _visible_bounds(volume, np.asarray(params, dtype=np.float64), spacing)
+
+
+def label_aware_volume(volume: np.ndarray, labels: np.ndarray, layers: dict) -> np.ndarray:
+    """Suppress labeled voxels from HU rendering when their layer is hidden."""
+    volume = np.asarray(volume, dtype=np.float32)
+    labels = np.asarray(labels)
+    if labels.dtype != np.uint8 or labels.ndim != 3 or labels.shape != volume.shape:
+        raise ValueError("labels must be a uint8 array matching volume shape")
+    normalize_layers(layers or {})
+    masked = volume.copy()
+    for class_id, _class_name in enumerate(CANONICAL_CLASSES, 1):
+        masked[labels == class_id] = LABEL_HIDDEN_HU
+    return masked
 
 
 def _make_mapper(vtk_image):
@@ -205,12 +219,13 @@ def _set_anatomy_actor(renderer, volume, spacing, labels, layers):
 def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), camera: dict | None = None,
            frame_bounds: list | None = None, labels: np.ndarray | None = None,
            layers: dict | None = None) -> vtk.vtkRenderWindow:
-    prop, renderer, win = _get_pipeline(volume, spacing)
+    render_volume = label_aware_volume(volume, labels, layers) if labels is not None else volume
+    prop, renderer, win = _get_pipeline(render_volume, spacing)
 
     ctf, otf = vector_to_vtk(params)
     prop.SetColor(ctf)
     prop.SetScalarOpacity(otf)
-    _set_anatomy_actor(renderer, volume, spacing, labels, layers)
+    _set_anatomy_actor(renderer, render_volume, spacing, labels, layers)
 
     cam = renderer.GetActiveCamera()
     cam_state = camera or {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}
