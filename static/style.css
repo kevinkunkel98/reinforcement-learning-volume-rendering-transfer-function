@@ -260,6 +260,8 @@ select:focus-visible {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 #viewport {
@@ -270,20 +272,30 @@ select:focus-visible {
   min-height: 0;
   min-width: 0;
   max-width: 100%;
-  flex: 1;
+  flex: 0 0 auto;
+}
+
+#single-view {
+  display: flex;
+  width: min(100%, 900px);
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 
 #viewport-frame {
   position: relative;
   display: inline-block;
+  width: 100%;
   line-height: 0;
 }
 
 #vtk-viewer {
-  width: min(720px, 72vw);
-  height: min(620px, 68vh);
-  min-width: 320px;
-  min-height: 260px;
+  width: min(720px, 100%);
+  height: min(620px, 62vh);
+  min-width: 0;
+  min-height: 240px;
+  margin: 0 auto;
   border-radius: var(--radius);
   border: 1px solid hsl(var(--border));
   background: #000;
@@ -419,6 +431,11 @@ select:focus-visible {
   overflow: visible;
 }
 
+#layer-controls {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
 .telem-group {
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
@@ -459,7 +476,7 @@ select:focus-visible {
 
 .telem-brightness { font-size: 10px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
 .telem-unavailable { color: hsl(var(--muted-foreground)); font-size: 10px; }
-.layer-control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+.layer-control-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; padding: 10px 12px; }
 .layer-control { display: grid; grid-template-columns: 1fr auto; gap: 0.25rem; align-items: center; min-width: 0; }
 .layer-control label { font-size: 0.62rem; letter-spacing: 0.04em; }
 .layer-control span { grid-column: 1 / -1; font-size: 0.58rem; color: hsl(var(--muted-foreground)); }
@@ -1052,6 +1069,10 @@ select:focus-visible {
   #app-bar-right { width: 100%; justify-content: flex-end; gap: 8px; }
   #main { display: flex; flex-direction: column; overflow: auto; }
   #chat-panel { max-width: none; border-left: none; border-top: 1px solid hsl(var(--border)); }
+}
+
+@media (max-width: 700px) {
+  .layer-control-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 444px) {
