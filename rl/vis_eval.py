@@ -37,6 +37,7 @@ import datasets
 import goals
 import provenance
 import visibility
+from anatomy_layers import default_layers
 from rl.baselines import BASELINES, hill_climb
 from rl.oneshot_env import (OneShotEnv, load_policy_metadata, observation_metadata,
                             resolve_policy_metadata)
@@ -139,6 +140,8 @@ def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dic
     metadata = resolve_policy_metadata(policy_metadata)
     env = OneShotEnv([volume], model_for_volume=model_for_volume, **metadata)
     model = model_for_volume(volume)
+    if metadata["policy_version"] == "oneshot-v8" and active_layers is None:
+        active_layers = default_layers()
     raw_features = _features(model, start_params, active_layers)
     start_agg = goals.aggregate(raw_features, active_layers)
     start_distance = goals.distance(instruction["goal"], start_agg, start_agg)

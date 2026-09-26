@@ -172,6 +172,18 @@ def test_candidate_residual_action_mode_adds_action_to_start(monkeypatch):
     assert np.array_equal(got, expected)
 
 
+def test_v8_candidate_observation_and_action_include_layer_residuals(monkeypatch):
+    model = _make_model(monkeypatch)
+    start = goals.starting_params()
+    start_agg = goals.aggregate(model.features(start))
+    instruction = goals.sample_instruction("fake_a", model, start_agg, np.random.default_rng(0))
+    metadata = {"policy_version": "oneshot-v8", "action_mode": "residual", "reward_mode": "target"}
+
+    observation = candidates._observation_for(model, start, instruction, start_agg,
+                                              policy_metadata=metadata)
+    assert observation.shape == (105,)
+
+
 def test_anchor_items_passes_policy_metadata_to_policy_candidates(monkeypatch, tmp_path):
     model = _make_model(monkeypatch)
     seen = []

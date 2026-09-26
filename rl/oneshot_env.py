@@ -25,6 +25,7 @@ from gymnasium import spaces
 import goals
 import visibility
 from anatomy import LAYOUT_VERSION
+from anatomy_layers import default_layers
 from rl.baselines import CONTROLLABLE, apply_controllable
 
 N_GOAL_CLASSES = len(goals.GOAL_CLASSES)
@@ -32,6 +33,10 @@ OBSERVATION_SIZE = 4 * N_GOAL_CLASSES + 16 + 3 * N_GOAL_CLASSES + len(CONTROLLAB
 ACTION_SIZE = len(CONTROLLABLE)
 POLICY_VERSION = "oneshot-v6"
 V7_POLICY_VERSION = "oneshot-v7"
+V8_POLICY_VERSION = "oneshot-v8"
+LAYER_NAMES = tuple(goals.GOAL_CLASSES)
+V8_OBSERVATION_SIZE = OBSERVATION_SIZE + len(LAYER_NAMES)
+V8_ACTION_SIZE = ACTION_SIZE + len(LAYER_NAMES)
 USELESS_PENALTY = 1.0
 REWARD_CLIP = 1.0
 
@@ -81,7 +86,7 @@ def resolve_policy_metadata(metadata=None) -> dict:
               "reward_mode": "attainment"}
     if metadata:
         values.update({key: metadata[key] for key in values if key in metadata})
-    if values["policy_version"] not in (POLICY_VERSION, V7_POLICY_VERSION):
+    if values["policy_version"] not in (POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION):
         raise ValueError(f"unsupported policy version: {values['policy_version']}")
     if values["policy_version"] == POLICY_VERSION and values["action_mode"] != "absolute":
         raise ValueError("v6 only supports absolute action mode")
@@ -94,6 +99,9 @@ def resolve_policy_metadata(metadata=None) -> dict:
     if values["policy_version"] == V7_POLICY_VERSION and (
             values["action_mode"] != "residual" or values["reward_mode"] != "target"):
         raise ValueError("oneshot-v7 requires residual actions and target reward")
+    if values["policy_version"] == V8_POLICY_VERSION and (
+            values["action_mode"] != "residual" or values["reward_mode"] != "target"):
+        raise ValueError("oneshot-v8 requires residual actions and target reward")
     return values
 
 
@@ -111,19 +119,24 @@ def observation_metadata(policy_version: str = POLICY_VERSION, action_mode: str 
     resolved = resolve_policy_metadata({"policy_version": policy_version,
                                         "action_mode": action_mode,
                                         "reward_mode": reward_mode})
-    return {
+    metadata = {
         "policy_version": resolved["policy_version"],
         "anatomy_layout": LAYOUT_VERSION,
         "observation_size": OBSERVATION_SIZE,
-        "action_size": ACTION_SIZE,
+        "action_size": V8_ACTION_SIZE if resolved["policy_version"] == V8_POLICY_VERSION else ACTION_SIZE,
         "goal_classes": list(goals.GOAL_CLASSES),
         "controllable_groups": len(CONTROLLABLE),
         **({"action_mode": action_mode, "reward_mode": reward_mode}
-           if policy_version == V7_POLICY_VERSION else {}),
+           if policy_version in (V7_POLICY_VERSION, V8_POLICY_VERSION) else {}),
     }
+    if resolved["policy_version"] == V8_POLICY_VERSION:
+        metadata["observation_size"] = V8_OBSERVATION_SIZE
+        metadata["anatomy_layers"] = list(LAYER_NAMES)
+    return metadata
 
 
-def build_observation(goal, histogram, start_agg: dict, solo_max_log, controllable) -> np.ndarray:
+def build_observation(goal, histogram, start_agg: dict, solo_max_log, controllable,
+                      layer_opacity=None) -> np.ndarray:
     """One-shot observation: goal (4n) + histogram (16) + log10 visibility (n)
     + brightness (n) + log10 solo_max ceiling (n) + controllable start
     parameters + coverage (1), all at
@@ -136,6 +149,8 @@ def build_observation(goal, histogram, start_agg: dict, solo_max_log, controllab
     bright = [start_agg["bright"][c] for c in goals.GOAL_CLASSES]
     values = (list(goal) + list(histogram) + log_vis + bright
               + list(solo_max_log) + list(controllable) + [start_agg["coverage"]])
+    if layer_opacity is not None:
+        values.extend(layer_opacity)
     return np.asarray(values, dtype=np.float32)
 
 
@@ -170,18 +185,18 @@ class OneShotEnv(gym.Env):
             raise ValueError("volume_ids must not be empty")
         self.volume_ids = list(volume_ids)
         self._model_for_volume = model_for_volume
-        if policy_version not in (POLICY_VERSION, V7_POLICY_VERSION):
+        if policy_version not in (POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION):
             raise ValueError("unsupported one-shot policy version")
         if policy_version == POLICY_VERSION and action_mode != "absolute":
             raise ValueError("v6 only supports absolute action mode")
-        if policy_version == V7_POLICY_VERSION and action_mode != "residual":
-            raise ValueError("oneshot-v7 requires residual action mode")
+        if policy_version in (V7_POLICY_VERSION, V8_POLICY_VERSION) and action_mode != "residual":
+            raise ValueError(f"{policy_version} requires residual action mode")
         if action_mode not in ("absolute", "residual"):
             raise ValueError("action_mode must be absolute or residual")
         if reward_mode not in ("attainment", "target"):
             raise ValueError("reward_mode must be attainment or target")
-        if policy_version == V7_POLICY_VERSION and reward_mode != "target":
-            raise ValueError("oneshot-v7 requires target reward")
+        if policy_version in (V7_POLICY_VERSION, V8_POLICY_VERSION) and reward_mode != "target":
+            raise ValueError(f"{policy_version} requires target reward")
         if not 0.0 <= hindsight_ratio <= 1.0:
             raise ValueError("hindsight_ratio must be between 0 and 1")
         self.policy_version = policy_version
@@ -200,9 +215,11 @@ class OneShotEnv(gym.Env):
         self._model_cache = {}
         self._solo_max_log_cache = {}
 
+        observation_size = V8_OBSERVATION_SIZE if policy_version == V8_POLICY_VERSION else OBSERVATION_SIZE
+        action_size = V8_ACTION_SIZE if policy_version == V8_POLICY_VERSION else ACTION_SIZE
         self.observation_space = spaces.Box(
-            low=-OBSERVATION_BOUND, high=OBSERVATION_BOUND, shape=(OBSERVATION_SIZE,), dtype=np.float32)
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(ACTION_SIZE,), dtype=np.float32)
+            low=-OBSERVATION_BOUND, high=OBSERVATION_BOUND, shape=(observation_size,), dtype=np.float32)
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(action_size,), dtype=np.float32)
 
         self._volume = None
         self._model = None
@@ -267,8 +284,11 @@ class OneShotEnv(gym.Env):
     def _build_observation(self) -> np.ndarray:
         solo_max_log = self._solo_max_log(self._volume, self._model)
         controllable = self._controllable_values(self._start_params)
+        layer_opacity = None
+        if self.policy_version == V8_POLICY_VERSION:
+            layer_opacity = [self._active_layers[name]["opacity"] for name in LAYER_NAMES]
         return build_observation(self._instruction["goal"], self._model.histogram, self._start_agg,  # pyright: ignore[reportOptionalSubscript]
-                                  solo_max_log, controllable)
+                                   solo_max_log, controllable, layer_opacity)
 
     def _features(self, params):
         return goals.features(self._model, params, getattr(self, "_active_layers", None))
@@ -337,7 +357,10 @@ class OneShotEnv(gym.Env):
         model = self._get_model(volume)
         self._model = model
         start_params = self._sample_start_params(rng)
-        self._active_layers = getattr(self, "_active_layers", None)
+        if self.policy_version == V8_POLICY_VERSION:
+            self._active_layers = default_layers()
+        else:
+            self._active_layers = None
         raw_features = goals.features(model, start_params, self._active_layers)
         start_agg = goals.aggregate(raw_features, self._active_layers)
         if rng.random() < self.hindsight_ratio:
@@ -365,6 +388,13 @@ class OneShotEnv(gym.Env):
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
         if self.action_mode == "residual":
+            hu_action = action[:ACTION_SIZE]
+            if self.policy_version == V8_POLICY_VERSION:
+                reachable = set(goals.reachable_goal_classes(self._volume, self._model, self._active_layers))
+                for name, residual in zip(LAYER_NAMES, action[ACTION_SIZE:]):
+                    if name in reachable:
+                        self._active_layers[name]["opacity"] = float(np.clip(1.0 + residual, 0.0, 1.0))
+                action = hu_action
             action = np.asarray(self._controllable_values(self._start_params)) + action
         params = apply_controllable(self._start_params, np.clip(action, -1.0, 1.0))
         self._params = params

@@ -22,6 +22,7 @@ import goals
 import transfer
 from rl.baselines import BASELINES, CONTROLLABLE, apply_controllable
 from rl.oneshot_env import build_observation, observation_metadata, resolve_policy_metadata
+from anatomy_layers import default_layers
 
 SOURCES = ("policy", "policy", "B1_current_executor", "B3_hill_climb_10", "B5_occlusion_rule", "perturbation")
 NON_POLICY_SOURCES = tuple(source for source in dict.fromkeys(SOURCES) if source != "policy")
@@ -36,7 +37,8 @@ MAX_ATTEMPTS = 10
 PERTURBATION_NOISE = 0.3            # uniform +-, normalized parameter units, per controllable group
 
 
-def _observation_for(model, start_params: np.ndarray, instruction: dict, start_agg: dict) -> np.ndarray:
+def _observation_for(model, start_params: np.ndarray, instruction: dict, start_agg: dict,
+                     policy_metadata=None) -> np.ndarray:
     """The one-shot observation for `start_params`/`instruction` on `model`,
     via `rl.oneshot_env.build_observation` -- the single shared
     implementation of the layout `OneShotEnv` trains on, so a policy queried
@@ -44,7 +46,11 @@ def _observation_for(model, start_params: np.ndarray, instruction: dict, start_a
     solo_max_log = [math.log10(sum(model.solo_max(m) for m in goals.MEASURED_FOR_GOAL[c]) + goals.EPSILON)
                      for c in goals.GOAL_CLASSES]
     controllable = [float(np.mean([start_params[i] for i in group])) for group in CONTROLLABLE]
-    return build_observation(instruction["goal"], model.histogram, start_agg, solo_max_log, controllable)
+    layer_opacity = None
+    if policy_metadata and policy_metadata.get("policy_version") == "oneshot-v8":
+        layer_opacity = [1.0] * len(goals.GOAL_CLASSES)
+    return build_observation(instruction["goal"], model.histogram, start_agg, solo_max_log,
+                             controllable, layer_opacity)
 
 
 def _apply_action(start_params: np.ndarray, action: np.ndarray, action_mode: str = "absolute") -> np.ndarray:
@@ -54,6 +60,20 @@ def _apply_action(start_params: np.ndarray, action: np.ndarray, action_mode: str
     elif action_mode != "absolute":
         raise ValueError("action_mode must be absolute or residual")
     return apply_controllable(start_params, action)
+
+
+def _apply_policy_action(model, volume, start_params, action, policy_metadata):
+    metadata = resolve_policy_metadata(policy_metadata)
+    action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
+    layers = None
+    if metadata["policy_version"] == "oneshot-v8":
+        layers = default_layers()
+        reachable = set(goals.reachable_goal_classes(volume, model, layers))
+        for name, residual in zip(goals.GOAL_CLASSES, action[len(CONTROLLABLE):]):
+            if name in reachable:
+                layers[name]["opacity"] = float(np.clip(1.0 + residual, 0.0, 1.0))
+        action = action[:len(CONTROLLABLE)]
+    return _apply_action(start_params, action, metadata["action_mode"]), layers
 
 
 def _predict(policy, observation: np.ndarray, rng: np.random.Generator, deterministic: bool) -> np.ndarray:
@@ -87,12 +107,13 @@ def _choose_sources(rng: np.random.Generator, policy) -> tuple:
 
 def _sample_candidate(source: str, model, start_params: np.ndarray, instruction: dict,
                        start_agg: dict, rng: np.random.Generator, policy,
-                       policy_metadata=None) -> np.ndarray:
+                       policy_metadata=None, volume=None) -> np.ndarray:
     if source == "policy":
-        observation = _observation_for(model, start_params, instruction, start_agg)
+        observation = _observation_for(model, start_params, instruction, start_agg, policy_metadata)
         action = _predict(policy, observation, rng, deterministic=False)
-        return _apply_action(start_params, action,
-                             (policy_metadata or {}).get("action_mode", "absolute"))
+        params, _layers = _apply_policy_action(model, volume, start_params,
+                                               action, policy_metadata or {})
+        return params
     if source == "perturbation":
         return _perturb(start_params, rng)
     return np.asarray(BASELINES[source](model, start_params, instruction), dtype=np.float64)
@@ -127,9 +148,9 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None,
     a_params = b_params = a_agg = b_agg = None
     for _ in range(MAX_ATTEMPTS):
         a_params = _sample_candidate(a_source, model, start_params, instruction, start_agg, rng, policy,
-                                     policy_metadata)
+                                      policy_metadata, volume)
         b_params = _sample_candidate(b_source, model, start_params, instruction, start_agg, rng, policy,
-                                     policy_metadata)
+                                      policy_metadata, volume)
         a_agg = goals.aggregate(model.features(a_params))
         b_agg = goals.aggregate(model.features(b_params))
         if not _is_near_duplicate(a_agg, b_agg):

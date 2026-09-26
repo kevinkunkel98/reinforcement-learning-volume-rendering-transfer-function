@@ -8,7 +8,7 @@ import transfer
 from anatomy import CANONICAL_CLASSES
 from rl.baselines import CONTROLLABLE, apply_controllable
 from rl.oneshot_env import (ACTION_SIZE, OBSERVATION_SIZE, USELESS_PENALTY, OneShotEnv,
-                            observation_metadata)
+                            V8_ACTION_SIZE, V8_OBSERVATION_SIZE, observation_metadata)
 
 
 class _StubModel:
@@ -80,6 +80,24 @@ def test_observation_metadata_names_the_eight_class_contract():
         "goal_classes": list(goals.GOAL_CLASSES),
         "controllable_groups": 24,
     }
+
+
+def test_v8_contract_adds_layer_opacity_values():
+    metadata = observation_metadata("oneshot-v8", "residual", "target")
+
+    assert metadata["policy_version"] == "oneshot-v8"
+    assert metadata["observation_size"] == 105
+    assert metadata["action_size"] == 32
+    assert metadata["anatomy_layers"] == list(CANONICAL_CLASSES)
+
+
+def test_v8_spaces_have_layer_aware_dimensions(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v8", action_mode="residual", reward_mode="target")
+
+    assert env.observation_space.shape == (V8_OBSERVATION_SIZE,)
+    assert env.action_space.shape == (V8_ACTION_SIZE,)
 
 
 def test_observation_appends_log_solo_max_per_goal_class(monkeypatch):
@@ -332,3 +350,32 @@ def test_hindsight_goal_mentions_at_least_one_class():
     n = len(goals.GOAL_CLASSES)
     mentioned = goal[n:2 * n]
     assert mentioned.sum() >= 1.0
+
+
+def test_v8_layer_residual_changes_reachable_opacity_only(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["fake_b"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v8", action_mode="residual", reward_mode="target")
+    env.reset(seed=2)
+    action = np.zeros(V8_ACTION_SIZE, dtype=np.float32)
+    action[ACTION_SIZE:] = -0.4
+    env.step(action)
+
+    assert env._active_layers["skeleton"]["opacity"] == pytest.approx(0.6)
+    assert env._active_layers["lungs"]["opacity"] == pytest.approx(0.6)
+    assert env._active_layers["soft"]["opacity"] == pytest.approx(0.6)
+    assert env._active_layers["heart"]["opacity"] == pytest.approx(1.0)
+    assert env._active_layers["vessels"]["opacity"] == pytest.approx(1.0)
+
+
+def test_v8_layer_action_does_not_change_rgb(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v8", action_mode="residual", reward_mode="target")
+    env.reset(seed=2)
+    original = {name: layer["rgb"][:] for name, layer in env._active_layers.items()}
+    action = np.zeros(V8_ACTION_SIZE, dtype=np.float32)
+    action[ACTION_SIZE:] = 0.2
+    env.step(action)
+
+    assert {name: layer["rgb"] for name, layer in env._active_layers.items()} == original

@@ -229,6 +229,14 @@ def test_parse_args_accepts_v7_short_experiment_options():
     assert args.reward_mode == "target"
 
 
+def test_parse_args_accepts_v8_layer_policy_options():
+    args = oneshot_train.parse_args(["--policy-version", "oneshot-v8",
+                                     "--action-mode", "residual", "--reward-mode", "target"])
+    assert args.policy_version == "oneshot-v8"
+    assert args.action_mode == "residual"
+    assert args.reward_mode == "target"
+
+
 def test_parse_args_rejects_v7_without_explicit_action_mode():
     with pytest.raises(SystemExit):
         oneshot_train.parse_args(["--policy-version", "oneshot-v7"])
@@ -322,7 +330,7 @@ def test_resolver_rejects_target_reward_for_v6():
 def test_resolver_rejects_unknown_policy_version():
     from rl.oneshot_env import resolve_policy_metadata
     with pytest.raises(ValueError, match="policy version"):
-        resolve_policy_metadata({"policy_version": "oneshot-v8",
+        resolve_policy_metadata({"policy_version": "oneshot-v9",
                                  "action_mode": "absolute", "reward_mode": "attainment"})
 
 
@@ -330,6 +338,13 @@ def test_v7_environment_requires_target_reward_at_init():
     with pytest.raises(ValueError, match="target reward"):
         OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
                    policy_version="oneshot-v7", action_mode="residual",
+                   reward_mode="attainment")
+
+
+def test_v8_environment_requires_target_reward_at_init():
+    with pytest.raises(ValueError, match="target reward"):
+        OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
+                   policy_version="oneshot-v8", action_mode="residual",
                    reward_mode="attainment")
 
 
