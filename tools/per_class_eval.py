@@ -27,8 +27,8 @@ import goals
 import provenance
 import visibility
 from rl.baselines import BASELINES, hill_climb
-from rl.candidates import _apply_action, _observation_for, _predict
-from rl.oneshot_env import load_policy_metadata, observation_metadata
+from rl.candidates import _apply_action, _apply_policy_action, _observation_for, _predict
+from rl.oneshot_env import load_policy_metadata, observation_metadata, resolve_policy_metadata
 from rl.vis_eval import fixed_episodes
 
 BASELINE_EVALUATIONS = {"expanded_hill_climb": 1000}
@@ -52,13 +52,23 @@ def _score(policy, episode, model, active_layers=None) -> float:
     start_params = episode["start_params"]
     start_features = goals.features(model, start_params, active_layers)
     start_agg = goals.aggregate(start_features, active_layers)
-    observation = _observation_for(model, start_params, instruction, start_agg)
+    raw_metadata = episode.get("policy_metadata") or {}
+    metadata = (resolve_policy_metadata(raw_metadata)
+                if "policy_version" in raw_metadata else {
+                    "policy_version": "oneshot-v7" if raw_metadata.get("action_mode") == "residual" else "oneshot-v6",
+                    "action_mode": raw_metadata.get("action_mode", "absolute"),
+                    "reward_mode": "target" if raw_metadata.get("action_mode") == "residual" else "attainment"})
+    observation = _observation_for(model, start_params, instruction, start_agg, metadata)
     action = _predict(policy, observation, np.random.default_rng(0), True)
-    params = _apply_action(start_params, action,
-                           episode.get("policy_metadata", {}).get("action_mode", "absolute"))
-    final_features = goals.features(model, params, active_layers)
+    if metadata["policy_version"] == "oneshot-v8":
+        params, policy_layers = _apply_policy_action(model, episode["volume"], start_params, action, metadata)
+    else:
+        params = _apply_action(start_params, action, metadata["action_mode"])
+        policy_layers = None
+    scoring_layers = policy_layers if policy_layers is not None else active_layers
+    final_features = goals.features(model, params, scoring_layers)
     return goals.attainment(instruction["goal"], start_agg,
-                            goals.aggregate(final_features, active_layers))
+                            goals.aggregate(final_features, scoring_layers))
 
 
 def _class_row(goal_class: str, status: str, attainment):

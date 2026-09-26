@@ -37,7 +37,7 @@ import datasets
 import goals
 import provenance
 import visibility
-from anatomy_layers import default_layers
+from anatomy_layers import default_layers, normalize_layers
 from rl.baselines import BASELINES, hill_climb
 from rl.oneshot_env import (OneShotEnv, load_policy_metadata, observation_metadata,
                             resolve_policy_metadata)
@@ -74,6 +74,8 @@ def fixed_episodes(split: str, count: int, seed: int = 0,
     env_kwargs = metadata if formulation == "one_shot" else {}
     env = env_cls(list(ids), **kwargs, **env_kwargs)
     env._active_layers = active_layers
+    if formulation == "one_shot" and metadata["policy_version"] == "oneshot-v8":
+        env._configured_active_layers = active_layers or default_layers()
 
     episodes = []
     for i in range(count):
@@ -140,8 +142,8 @@ def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dic
     metadata = resolve_policy_metadata(policy_metadata)
     env = OneShotEnv([volume], model_for_volume=model_for_volume, **metadata)
     model = model_for_volume(volume)
-    if metadata["policy_version"] == "oneshot-v8" and active_layers is None:
-        active_layers = default_layers()
+    if metadata["policy_version"] == "oneshot-v8":
+        active_layers = normalize_layers(active_layers or default_layers())
     raw_features = _features(model, start_params, active_layers)
     start_agg = goals.aggregate(raw_features, active_layers)
     start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
@@ -250,10 +252,12 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
         obs, reward, terminated, truncated, info = env.step(action)
 
         if evaluations > 0:
-            search_kwargs = {} if active_layers is None else {"active_layers": active_layers}
+            search_kwargs = ({"active_layers": env._active_layers}
+                             if env._active_layers is not None else {})
             refined_params = hill_climb(env._model, env._params, episode["instruction"],
                                          evaluations=evaluations, **search_kwargs)
-            refined_agg = goals.aggregate(_features(env._model, refined_params, active_layers), active_layers)
+            refined_agg = goals.aggregate(_features(env._model, refined_params, env._active_layers),
+                                          env._active_layers)
             refined_attainment = env._attainment(refined_agg)
             if refined_attainment > info["attainment"]:
                 info = {**info, "attainment": refined_attainment}

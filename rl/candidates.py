@@ -76,6 +76,10 @@ def _apply_policy_action(model, volume, start_params, action, policy_metadata):
     return _apply_action(start_params, action, metadata["action_mode"]), layers
 
 
+def _features(model, params, layers=None):
+    return goals.features(model, params, layers)
+
+
 def _predict(policy, observation: np.ndarray, rng: np.random.Generator, deterministic: bool) -> np.ndarray:
     if hasattr(policy, "predict"):
         action, _ = policy.predict(observation, deterministic=deterministic)
@@ -107,16 +111,16 @@ def _choose_sources(rng: np.random.Generator, policy) -> tuple:
 
 def _sample_candidate(source: str, model, start_params: np.ndarray, instruction: dict,
                        start_agg: dict, rng: np.random.Generator, policy,
-                       policy_metadata=None, volume=None) -> np.ndarray:
+                        policy_metadata=None, volume=None) -> tuple:
     if source == "policy":
         observation = _observation_for(model, start_params, instruction, start_agg, policy_metadata)
         action = _predict(policy, observation, rng, deterministic=False)
         params, _layers = _apply_policy_action(model, volume, start_params,
                                                action, policy_metadata or {})
-        return params
+        return params, _layers
     if source == "perturbation":
-        return _perturb(start_params, rng)
-    return np.asarray(BASELINES[source](model, start_params, instruction), dtype=np.float64)
+        return _perturb(start_params, rng), None
+    return np.asarray(BASELINES[source](model, start_params, instruction), dtype=np.float64), None
 
 
 def _is_near_duplicate(agg_a: dict, agg_b: dict) -> bool:
@@ -139,20 +143,23 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None,
     shown to the rater."""
     policy_metadata = resolve_policy_metadata(policy_metadata)
     start_params = goals.starting_params()
-    start_agg = goals.aggregate(model.features(start_params))
-    instruction = goals.sample_instruction(volume, model, start_agg, rng)
+    start_layers = default_layers() if policy_metadata["policy_version"] == "oneshot-v8" else None
+    start_agg = goals.aggregate(_features(model, start_params, start_layers), start_layers)
+    instruction = goals.sample_instruction(volume, model, start_agg, rng, start_layers)
 
     a_source, b_source = _choose_sources(rng, policy)
 
     near_duplicate = True
     a_params = b_params = a_agg = b_agg = None
     for _ in range(MAX_ATTEMPTS):
-        a_params = _sample_candidate(a_source, model, start_params, instruction, start_agg, rng, policy,
-                                      policy_metadata, volume)
-        b_params = _sample_candidate(b_source, model, start_params, instruction, start_agg, rng, policy,
-                                      policy_metadata, volume)
-        a_agg = goals.aggregate(model.features(a_params))
-        b_agg = goals.aggregate(model.features(b_params))
+        a_params, a_layers = _sample_candidate(a_source, model, start_params, instruction, start_agg, rng, policy,
+                                                policy_metadata, volume)
+        b_params, b_layers = _sample_candidate(b_source, model, start_params, instruction, start_agg, rng, policy,
+                                                policy_metadata, volume)
+        a_raw = _features(model, a_params, a_layers)
+        b_raw = _features(model, b_params, b_layers)
+        a_agg = goals.aggregate(a_raw, a_layers)
+        b_agg = goals.aggregate(b_raw, b_layers)
         if not _is_near_duplicate(a_agg, b_agg):
             near_duplicate = False
             break
@@ -161,7 +168,7 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None,
     b_distance = goals.distance(instruction["goal"], start_agg, b_agg)
     objective_choice = "a" if a_distance <= b_distance else "b"
 
-    return {
+    result = {
         "volume": volume,
         "start_params": start_params,
         "instruction": instruction,
@@ -172,6 +179,11 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None,
         "features": {"start": start_agg, "a": a_agg, "b": b_agg},
         "metadata": observation_metadata(**policy_metadata),
     }
+    if policy_metadata["policy_version"] == "oneshot-v8":
+        result["a"]["layers"] = a_layers
+        result["b"]["layers"] = b_layers
+        result["features"]["layers"] = {"a": a_layers, "b": b_layers}
+    return result
 
 
 # --- anchor pool: a fixed set of items every rater judges --------------------
@@ -196,8 +208,10 @@ def _item_to_json(item: dict) -> dict:
             "targets": item["instruction"]["targets"],
             "goal": np.asarray(item["instruction"]["goal"], dtype=np.float64).tolist(),
         },
-        "a": {"params": np.asarray(item["a"]["params"], dtype=np.float64).tolist(), "source": item["a"]["source"]},
-        "b": {"params": np.asarray(item["b"]["params"], dtype=np.float64).tolist(), "source": item["b"]["source"]},
+        "a": {key: (np.asarray(value, dtype=np.float64).tolist() if key == "params" else value)
+              for key, value in item["a"].items()},
+        "b": {key: (np.asarray(value, dtype=np.float64).tolist() if key == "params" else value)
+              for key, value in item["b"].items()},
         "objective_choice": item["objective_choice"],
         "near_duplicate": bool(item["near_duplicate"]),
         "features": item["features"],
@@ -218,8 +232,10 @@ def _item_from_json(data: dict) -> dict:
             "targets": data["instruction"]["targets"],
             "goal": np.asarray(data["instruction"]["goal"], dtype=np.float64),
         },
-        "a": {"params": np.asarray(data["a"]["params"], dtype=np.float64), "source": data["a"]["source"]},
-        "b": {"params": np.asarray(data["b"]["params"], dtype=np.float64), "source": data["b"]["source"]},
+        "a": {key: (np.asarray(value, dtype=np.float64) if key == "params" else value)
+              for key, value in data["a"].items()},
+        "b": {key: (np.asarray(value, dtype=np.float64) if key == "params" else value)
+              for key, value in data["b"].items()},
         "objective_choice": data["objective_choice"],
         "near_duplicate": data["near_duplicate"],
         "features": data["features"],
@@ -237,9 +253,9 @@ def _finite_vector(value, length: int) -> bool:
 
 
 def _valid_features(features: dict) -> bool:
-    if not isinstance(features, dict) or set(features) != {"start", "a", "b"}:
+    if not isinstance(features, dict) or not {"start", "a", "b"} <= set(features):
         return False
-    for aggregate in features.values():
+    for aggregate in (features["start"], features["a"], features["b"]):
         if not isinstance(aggregate, dict) or set(aggregate) != {"vis", "bright", "coverage"}:
             return False
         if not isinstance(aggregate["vis"], dict) or not isinstance(aggregate["bright"], dict):
@@ -286,7 +302,7 @@ def _cache_item_is_valid(item: dict, volumes: tuple, metadata=None) -> bool:
     if not _valid_features(item["features"]):
         return False
     for candidate in (item["a"], item["b"]):
-        if not isinstance(candidate, dict) or set(candidate) != {"params", "source"}:
+        if not isinstance(candidate, dict) or not {"params", "source"} <= set(candidate):
             return False
         if not _finite_vector(candidate["params"], transfer.TOTAL_PARAMS):
             return False

@@ -1,5 +1,6 @@
 import json
 import pytest
+import numpy as np
 
 from tools.baseline_report import run_volume, summarise
 from tools.per_class_eval import _class_row, summarise_per_class
@@ -243,6 +244,26 @@ def test_per_class_eval_uses_each_policy_sidecar_contract(monkeypatch):
 
     assert [metadata["policy_version"] for _, metadata in calls] == ["oneshot-v6", "oneshot-v7"]
     assert calls[0][0][1:3] == calls[1][0][1:3]
+
+
+def test_per_class_score_applies_v8_layer_action(monkeypatch):
+    metadata = {"policy_version": "oneshot-v8", "action_mode": "residual", "reward_mode": "target"}
+    episode = {"volume": "stub", "start_params": np.zeros(48),
+               "instruction": {"targets": {"lungs": {"vis": 0.3}},
+                               "goal": np.zeros(32), "kind": "relative"},
+               "policy_metadata": metadata}
+    layers = {"lungs": {"opacity": 0.4}}
+    seen = {}
+    monkeypatch.setattr(per_class_eval, "_predict", lambda *args: np.r_[np.zeros(24), -0.5 * np.ones(8)])
+    monkeypatch.setattr(per_class_eval, "_apply_policy_action",
+                        lambda model, volume, params, action, policy: (params, seen.setdefault("layers", layers)))
+    monkeypatch.setattr(per_class_eval.goals, "features", lambda model, params, active: {})
+    monkeypatch.setattr(per_class_eval.goals, "aggregate", lambda features, active: {})
+    monkeypatch.setattr(per_class_eval.goals, "attainment", lambda goal, start, final: 0.0)
+    monkeypatch.setattr(per_class_eval, "_observation_for", lambda *args: np.zeros(105))
+
+    per_class_eval._score(object(), episode, object(), layers)
+    assert seen["layers"] is layers
 
 
 def test_baseline_uses_independent_shared_episode_set(monkeypatch):

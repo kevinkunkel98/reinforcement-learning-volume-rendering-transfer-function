@@ -197,6 +197,19 @@ def test_fixed_one_shot_episodes_carry_policy_metadata(monkeypatch):
     assert episode["policy_metadata"]["action_mode"] == "residual"
 
 
+def test_fixed_v8_episodes_preserve_explicit_layers(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    layers = {"lungs": {"opacity": 0.2}}
+    metadata = {"policy_version": "oneshot-v8", "action_mode": "residual", "reward_mode": "target"}
+    [episode] = vis_eval.fixed_episodes("val", 1, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+                                       formulation="one_shot", active_layers=layers,
+                                       policy_metadata=metadata)
+    env, _, _ = vis_eval._frozen_one_shot_env(
+        episode["volume"], episode["start_params"], episode["instruction"],
+        model_for_volume=_model_for_volume, active_layers=layers, policy_metadata=metadata)
+    assert env._active_layers["lungs"]["opacity"] == pytest.approx(0.2)
+
+
 def test_frozen_v7_one_shot_env_applies_residual_action(monkeypatch):
     _patch_totalseg(monkeypatch)
     [episode] = vis_eval.fixed_episodes(
@@ -448,6 +461,29 @@ def test_run_policy_with_refinement_never_scores_worse_than_the_proposal(monkeyp
         load_model=lambda path: policy)
 
     assert refined[0]["attainment"] == pytest.approx(proposal_attainment)
+
+
+def test_v8_refinement_passes_frozen_layers_to_search(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    layers = {"lungs": {"opacity": 0.3}}
+    metadata = {"policy_version": "oneshot-v8", "action_mode": "residual", "reward_mode": "target"}
+    episodes = vis_eval.fixed_episodes("val", 1, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+                                       formulation="one_shot", active_layers=layers,
+                                       policy_metadata=metadata)
+    seen = {}
+    monkeypatch.setattr(vis_eval, "load_policy_metadata", lambda path: metadata)
+    monkeypatch.setattr(vis_eval, "load_policy_metadata", lambda path: metadata)
+    def fake_hill_climb(model, params, instruction, **kwargs):
+        seen["layers"] = kwargs["active_layers"]
+        return params
+    monkeypatch.setattr(vis_eval, "hill_climb", fake_hill_climb)
+    action = np.zeros(32)
+    action[ACTION_SIZE + 1] = -0.7
+    vis_eval.run_policy_with_refinement(
+        "v8.zip", episodes, evaluations=1, active_layers=layers,
+        model_for_volume=_model_for_volume,
+        load_model=lambda path: _FixedActionModel(action=action))
+    assert seen["layers"]["lungs"]["opacity"] == pytest.approx(0.3)
 
 
 def test_run_policy_with_refinement_search_uses_exactly_the_budgeted_evaluations(monkeypatch):

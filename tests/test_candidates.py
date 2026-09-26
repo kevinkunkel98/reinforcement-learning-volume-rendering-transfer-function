@@ -184,6 +184,18 @@ def test_v8_candidate_observation_and_action_include_layer_residuals(monkeypatch
     assert observation.shape == (105,)
 
 
+def test_v8_candidate_preserves_layer_state_for_scoring(monkeypatch):
+    model = _make_model(monkeypatch)
+    def policy(observation, rng, deterministic):
+        return np.r_[np.zeros(len(CONTROLLABLE)), np.full(len(goals.GOAL_CLASSES), -0.5)]
+    item = sample_item("fake_a", model, np.random.default_rng(0), policy=policy,
+                       policy_metadata={"policy_version": "oneshot-v8", "action_mode": "residual",
+                                        "reward_mode": "target"})
+
+    assert item["a"]["layers"] is not None or item["b"]["layers"] is not None
+    assert "layers" in item["features"]
+
+
 def test_anchor_items_passes_policy_metadata_to_policy_candidates(monkeypatch, tmp_path):
     model = _make_model(monkeypatch)
     seen = []

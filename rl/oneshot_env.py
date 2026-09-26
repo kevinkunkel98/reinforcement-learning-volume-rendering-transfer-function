@@ -25,7 +25,7 @@ from gymnasium import spaces
 import goals
 import visibility
 from anatomy import LAYOUT_VERSION
-from anatomy_layers import default_layers
+from anatomy_layers import default_layers, normalize_layers
 from rl.baselines import CONTROLLABLE, apply_controllable
 
 N_GOAL_CLASSES = len(goals.GOAL_CLASSES)
@@ -358,7 +358,8 @@ class OneShotEnv(gym.Env):
         self._model = model
         start_params = self._sample_start_params(rng)
         if self.policy_version == V8_POLICY_VERSION:
-            self._active_layers = default_layers()
+            self._active_layers = normalize_layers(
+                getattr(self, "_configured_active_layers", default_layers()))
         else:
             self._active_layers = None
         raw_features = goals.features(model, start_params, self._active_layers)
