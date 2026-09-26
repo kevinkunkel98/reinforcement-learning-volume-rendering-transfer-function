@@ -22,7 +22,7 @@ import goals
 import transfer
 from rl.baselines import BASELINES, CONTROLLABLE, apply_controllable
 from rl.oneshot_env import build_observation, observation_metadata, resolve_policy_metadata
-from anatomy_layers import default_layers
+from anatomy_layers import default_layers, normalize_layers
 
 SOURCES = ("policy", "policy", "B1_current_executor", "B3_hill_climb_10", "B5_occlusion_rule", "perturbation")
 NON_POLICY_SOURCES = tuple(source for source in dict.fromkeys(SOURCES) if source != "policy")
@@ -62,12 +62,12 @@ def _apply_action(start_params: np.ndarray, action: np.ndarray, action_mode: str
     return apply_controllable(start_params, action)
 
 
-def _apply_policy_action(model, volume, start_params, action, policy_metadata):
+def _apply_policy_action(model, volume, start_params, action, policy_metadata, active_layers=None):
     metadata = resolve_policy_metadata(policy_metadata)
     action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
     layers = None
     if metadata["policy_version"] == "oneshot-v8":
-        layers = default_layers()
+        layers = normalize_layers(active_layers or default_layers())
         reachable = set(goals.reachable_goal_classes(volume, model, layers))
         for name, residual in zip(goals.GOAL_CLASSES, action[len(CONTROLLABLE):]):
             if name in reachable:

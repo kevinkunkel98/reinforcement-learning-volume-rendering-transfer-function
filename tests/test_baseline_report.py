@@ -256,7 +256,8 @@ def test_per_class_score_applies_v8_layer_action(monkeypatch):
     seen = {}
     monkeypatch.setattr(per_class_eval, "_predict", lambda *args: np.r_[np.zeros(24), -0.5 * np.ones(8)])
     monkeypatch.setattr(per_class_eval, "_apply_policy_action",
-                        lambda model, volume, params, action, policy: (params, seen.setdefault("layers", layers)))
+                        lambda model, volume, params, action, policy, active=None:
+                        (params, seen.setdefault("layers", active)))
     monkeypatch.setattr(per_class_eval.goals, "features", lambda model, params, active: {})
     monkeypatch.setattr(per_class_eval.goals, "aggregate", lambda features, active: {})
     monkeypatch.setattr(per_class_eval.goals, "attainment", lambda goal, start, final: 0.0)
@@ -264,6 +265,28 @@ def test_per_class_score_applies_v8_layer_action(monkeypatch):
 
     per_class_eval._score(object(), episode, object(), layers)
     assert seen["layers"] is layers
+
+
+def test_per_class_v8_score_applies_residual_to_custom_layer_base(monkeypatch):
+    metadata = {"policy_version": "oneshot-v8", "action_mode": "residual", "reward_mode": "target"}
+    episode = {"volume": "stub", "start_params": np.zeros(48),
+               "instruction": {"targets": {"lungs": {"vis": 0.3}},
+                               "goal": np.zeros(32), "kind": "relative"},
+               "policy_metadata": metadata}
+    configured = {"lungs": {"opacity": 0.4}}
+    action = np.r_[np.zeros(24), np.full(8, -0.2)]
+    seen = {}
+    monkeypatch.setattr(per_class_eval, "_predict", lambda *args: action)
+    monkeypatch.setattr(per_class_eval, "_observation_for", lambda *args: np.zeros(105))
+    monkeypatch.setattr(per_class_eval.goals, "features", lambda model, params, active: {})
+    monkeypatch.setattr(per_class_eval.goals, "aggregate", lambda features, active: {})
+    monkeypatch.setattr(per_class_eval, "_apply_policy_action",
+                        lambda model, volume, params, got_action, got_metadata, active_layers=None:
+                        (params, seen.setdefault("layers", active_layers)))
+    monkeypatch.setattr(per_class_eval.goals, "attainment", lambda goal, start, final: 0.0)
+
+    per_class_eval._score(object(), episode, object(), configured)
+    assert seen["layers"] is configured
 
 
 def test_baseline_uses_independent_shared_episode_set(monkeypatch):

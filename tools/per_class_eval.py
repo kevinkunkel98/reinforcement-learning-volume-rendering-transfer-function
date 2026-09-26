@@ -61,7 +61,8 @@ def _score(policy, episode, model, active_layers=None) -> float:
     observation = _observation_for(model, start_params, instruction, start_agg, metadata)
     action = _predict(policy, observation, np.random.default_rng(0), True)
     if metadata["policy_version"] == "oneshot-v8":
-        params, policy_layers = _apply_policy_action(model, episode["volume"], start_params, action, metadata)
+        params, policy_layers = _apply_policy_action(
+            model, episode["volume"], start_params, action, metadata, active_layers)
     else:
         params = _apply_action(start_params, action, metadata["action_mode"])
         policy_layers = None
