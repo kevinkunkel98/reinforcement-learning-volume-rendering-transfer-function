@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from phantom import build_phantom
-from transfer import default_params
+from transfer import ANATOMICAL_PEAK_INDEX, N_PEAKS, PARAMS_PER_PEAK, default_params
 import render as render_module
 import views
 from render import render, grab, features
@@ -11,67 +11,125 @@ from anatomy import CANONICAL_CLASSES
 CLASS_IDS = {name: index for index, name in enumerate(CANONICAL_CLASSES, 1)}
 
 
-def test_label_aware_hu_volume_masks_disabled_classes():
-    volume = np.arange(8, dtype=np.float32).reshape((2, 2, 2))
-    labels = np.array([[[1, 2], [0, 1]], [[2, 0], [1, 2]]], dtype=np.uint8)
-    masked = render_module.label_aware_volume(
-        volume, labels, {"skeleton": {"opacity": 1.0, "rgb": [1, 1, 1]},
-                         "lungs": {"opacity": 0.0, "rgb": [1, 1, 1]}}
-    )
-    assert masked[labels == CLASS_IDS["lungs"]].tolist() == [-1.0e6, -1.0e6, -1.0e6]
-    assert masked[labels == CLASS_IDS["skeleton"]].tolist() == [-1.0e6, -1.0e6, -1.0e6]
-    assert masked[labels == 0].tolist() == [2.0, 5.0]
+TOP_CAMERA = {"position": (0.0, 0.0, 80.0), "focal_point": (0.0, 0.0, 0.0),
+              "view_up": (0.0, 1.0, 0.0), "parallel_scale": 20.0}
 
 
-def test_labeled_layer_states_reuse_bounded_masked_volume_cache():
+def _only_peaks(*names, height=0.9):
+    """Every peak off except `names`, each at `height` (unit scale)."""
+    params = default_params().copy()
+    for i in range(N_PEAKS):
+        params[i * PARAMS_PER_PEAK + 2] = -1.0
+    for name in names:
+        params[ANATOMICAL_PEAK_INDEX[name] * PARAMS_PER_PEAK + 2] = 2.0 * height - 1.0
+    return params
+
+
+def _liver_kidney_volume(hu=50.0, n=20):
+    volume = np.full((n, n, n), hu, dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[: n // 2, :, :] = CLASS_IDS["liver"]
+    labels[n // 2:, :, :] = CLASS_IDS["kidneys"]
+    return volume, labels
+
+
+def _halves(image):
+    """Summed brightness of the image's left and right column halves."""
+    gray = image.astype(np.float64).sum(axis=2)
+    middle = gray.shape[1] // 2
+    return gray[:, :middle].sum(), gray[:, middle:].sum()
+
+
+def test_label_scoped_volume_puts_each_label_in_its_own_band():
+    render_module.clear_pipeline_cache()
+    volume = np.full((6, 6, 6), 40.0, dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[3:] = CLASS_IDS["liver"]
+    banded = render_module.label_scoped_volume(volume, labels)
+    lo = render_module.CENTER_RANGE[0]
+    band = render_module.LABEL_BAND
+
+    assert banded[labels == 0] == pytest.approx(40.0 - lo, abs=1.0)
+    assert banded[labels == CLASS_IDS["liver"]] == pytest.approx(
+        40.0 - lo + CLASS_IDS["liver"] * band, abs=1.0)
+
+
+def test_label_scoped_volume_is_cached_independent_of_layers():
     render_module.clear_pipeline_cache()
     volume = np.arange(27, dtype=np.float32).reshape((3, 3, 3))
     labels = np.ones(volume.shape, dtype=np.uint8)
-    visible = {"skeleton": {"opacity": 1.0, "rgb": [1, 1, 1]}}
-    hidden = {"skeleton": {"opacity": 0.0, "rgb": [1, 1, 1]}}
 
-    first = render_module.label_aware_volume(volume, labels, visible)
-    second = render_module.label_aware_volume(volume, labels, hidden)
-    again = render_module.label_aware_volume(volume, labels, visible)
+    first = render_module.label_scoped_volume(volume, labels)
+    again = render_module.label_scoped_volume(volume, labels)
 
     assert first is again
-    assert first is not second
     assert len(render_module._MASKED_VOLUME_CACHE) <= render_module.MASKED_VOLUME_CACHE_SIZE
 
 
-def test_switching_cached_labeled_volumes_keeps_one_anatomy_actor_each():
+def test_equal_hu_organs_are_shaded_by_their_own_peak():
     render_module.clear_pipeline_cache()
-    params = default_params()
-    layers = {"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]}}
+    volume, labels = _liver_kidney_volume()
+    # Centred on the volume, so the liver and kidney halves fall on opposite
+    # image halves.
+    camera = {**TOP_CAMERA, "position": (9.5, 9.5, 80.0), "focal_point": (9.5, 9.5, 9.5)}
+    liver = _halves(grab(render(volume, _only_peaks("liver"), camera=camera, labels=labels)))
+    kidneys = _halves(grab(render(volume, _only_peaks("kidneys"), camera=camera, labels=labels)))
+
+    # Each peak lights one half, and the two light opposite halves.
+    assert max(liver) > 20 * max(min(liver), 1.0)
+    assert max(kidneys) > 20 * max(min(kidneys), 1.0)
+    assert np.argmax(liver) != np.argmax(kidneys)
+
+
+def test_layer_opacity_scales_its_class():
+    render_module.clear_pipeline_cache()
+    volume, labels = _liver_kidney_volume()
+    params = _only_peaks("liver", "kidneys")
+    visible = grab(render(volume, params, camera=TOP_CAMERA, labels=labels))
+    hidden = grab(render(volume, params, camera=TOP_CAMERA, labels=labels,
+                         layers={"liver": {"opacity": 0.0, "rgb": [1.0, 0.0, 0.0]}}))
+
+    assert hidden.sum() < visible.sum()
+    assert hidden.sum() > 0
+
+
+def test_unlabelled_voxels_ignore_organ_peaks():
+    render_module.clear_pipeline_cache()
+    volume = np.full((12, 12, 12), 50.0, dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    organ = grab(render(volume, _only_peaks("liver"), camera=TOP_CAMERA, labels=labels))
+    soft = grab(render(volume, _only_peaks("soft"), camera=TOP_CAMERA, labels=labels))
+
+    assert organ.sum() == 0
+    assert soft.sum() > 0
+
+
+def test_labelled_pipeline_holds_a_single_volume():
+    render_module.clear_pipeline_cache()
     volumes = [np.full((12, 12, 12), value, dtype=np.float32) for value in (10.0, 20.0)]
     labels = [np.full(volume.shape, CLASS_IDS["liver"], dtype=np.uint8) for volume in volumes]
 
-    render(volumes[0], params, labels=labels[0], layers=layers)
-    first_entry = next(iter(render_module._PIPELINE_CACHE.values()))
-    first_renderer = first_entry[1]
-    render(volumes[1], params, labels=labels[1], layers=layers)
-    render(volumes[0], params, labels=labels[0], layers=layers)
+    for index in (0, 1, 0):
+        render(volumes[index], default_params(), labels=labels[index])
 
     assert len(render_module._PIPELINE_CACHE) == 2
     for entry in render_module._PIPELINE_CACHE.values():
-        assert entry[1].GetVolumes().GetNumberOfItems() == 2
-    assert first_renderer.GetVolumes().GetNumberOfItems() == 2
+        assert entry[1].GetVolumes().GetNumberOfItems() == 1
 
 
 def test_clear_pipeline_cache_releases_labeled_pipeline():
     render_module.clear_pipeline_cache()
     volume = np.full((12, 12, 12), 10.0, dtype=np.float32)
     labels = np.full(volume.shape, CLASS_IDS["liver"], dtype=np.uint8)
-    layers = {"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]}}
 
-    render(volume, default_params(), labels=labels, layers=layers)
+    render(volume, default_params(), labels=labels)
     assert render_module._PIPELINE_CACHE
 
     render_module.clear_pipeline_cache()
 
     assert not render_module._PIPELINE_CACHE
     assert not render_module._MASKED_VOLUME_CACHE
-    render(volume, default_params(), labels=labels, layers=layers)
+    render(volume, default_params(), labels=labels)
 
 
 def test_render_grab_shape_and_dtype():
@@ -201,94 +259,11 @@ def test_same_camera_dict_renders_the_same_viewpoint_every_time():
         assert np.allclose(first, again)
 
 
-def test_equal_hu_labels_render_independently_without_label_leakage():
-    volume = np.full((20, 20, 20), 100.0, dtype=np.float32)
-    labels = np.zeros(volume.shape, dtype=np.uint8)
-    labels[:10, :, :] = CLASS_IDS["liver"]
-    labels[10:, :, :] = CLASS_IDS["kidneys"]
-    params = default_params()
-    camera = {"position": (0.0, 0.0, 80.0), "focal_point": (0.0, 0.0, 0.0),
-              "view_up": (0.0, 1.0, 0.0), "parallel_scale": 20.0}
-
-    liver = {"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]},
-             "kidneys": {"opacity": 0.0, "rgb": [0.0, 1.0, 0.0]}}
-    kidneys = {"liver": {"opacity": 0.0, "rgb": [1.0, 0.0, 0.0]},
-               "kidneys": {"opacity": 1.0, "rgb": [0.0, 1.0, 0.0]}}
-
-    liver_img = grab(render(volume, params, camera=camera, labels=labels, layers=liver))
-    kidney_img = grab(render(volume, params, camera=camera, labels=labels, layers=kidneys))
-
-    assert liver_img[..., 0].sum() > liver_img[..., 1].sum()
-    assert kidney_img[..., 1].sum() > kidney_img[..., 0].sum()
-
-
-def test_label_zero_is_background_and_labels_are_nearest_sampled():
-    volume = np.full((12, 12, 12), 100.0, dtype=np.float32)
-    labels = np.zeros(volume.shape, dtype=np.uint8)
-    labels[2:10, 2:10, 2:10] = CLASS_IDS["liver"]
-    params = default_params()
-    layers = {"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]}}
-
-    image = grab(render(volume, params, labels=labels, layers=layers))
-    assert image[..., 0].sum() > image[..., 1].sum()
-
-
 def test_invalid_anatomical_layers_are_rejected():
     volume = np.zeros((8, 8, 8), dtype=np.float32)
     labels = np.zeros(volume.shape, dtype=np.uint8)
     with pytest.raises(ValueError, match="anatomy_layers"):
         render(volume, default_params(), labels=labels, layers={"unknown": {}})
-
-
-def test_disabling_liver_removes_only_liver_region_contribution():
-    volume = np.zeros((20, 20, 20), dtype=np.float32)
-    labels = np.zeros(volume.shape, dtype=np.uint8)
-    labels[:10, :, :] = CLASS_IDS["liver"]
-    params = default_params()
-    for peak in range(4):
-        params[peak * 6 + 2] = -0.98
-    camera = {"position": (0.0, 0.0, 80.0), "focal_point": (0.0, 0.0, 0.0),
-              "view_up": (0.0, 1.0, 0.0), "parallel_scale": 20.0}
-    baseline = grab(render(volume, params, camera=camera))
-    visible = grab(render(volume, params, camera=camera, labels=labels,
-                          layers={"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]}}))
-    hidden = grab(render(volume, params, camera=camera, labels=labels,
-                        layers={"liver": {"opacity": 0.0, "rgb": [1.0, 0.0, 0.0]}}))
-    assert np.count_nonzero(visible != baseline) > 0
-    assert hidden[..., 0].sum() < visible[..., 0].sum()
-    assert hidden[..., 0].sum() < baseline[..., 0].sum()
-
-
-def test_label_zero_has_no_anatomical_pixels_when_hu_is_hidden():
-    volume = np.zeros((12, 12, 12), dtype=np.float32)
-    labels = np.zeros(volume.shape, dtype=np.uint8)
-    params = default_params()
-    for peak in range(4):
-        params[peak * 6 + 2] = -0.98
-    baseline = grab(render(volume, params))
-    image = grab(render(volume, params, labels=labels,
-                        layers={"liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]}}))
-    assert np.array_equal(image, baseline)
-
-
-def test_nearest_labels_do_not_mix_anatomical_class_colors():
-    volume = np.zeros((20, 20, 20), dtype=np.float32)
-    labels = np.zeros(volume.shape, dtype=np.uint8)
-    labels[:10, :, :] = CLASS_IDS["liver"]
-    labels[10:, :, :] = CLASS_IDS["kidneys"]
-    params = default_params()
-    for peak in range(4):
-        params[peak * 6 + 2] = -0.98
-    liver = grab(render(volume, params, labels=np.where(labels == CLASS_IDS["liver"], labels, 0), layers={
-        "liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]},
-        "kidneys": {"opacity": 1.0, "rgb": [0.0, 1.0, 0.0]},
-    }))
-    kidneys = grab(render(volume, params, labels=np.where(labels == CLASS_IDS["kidneys"], labels, 0), layers={
-        "liver": {"opacity": 1.0, "rgb": [1.0, 0.0, 0.0]},
-        "kidneys": {"opacity": 1.0, "rgb": [0.0, 1.0, 0.0]},
-    }))
-    assert liver[..., 0].sum() > liver[..., 1].sum()
-    assert kidneys[..., 1].sum() > kidneys[..., 0].sum()
 
 
 def test_labels_none_matches_legacy_hu_only_output():

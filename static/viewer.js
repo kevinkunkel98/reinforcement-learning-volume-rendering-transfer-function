@@ -6,6 +6,12 @@
   const TOTAL_PARAMS = 48;
   const PARAMS_PER_PEAK = 6;
   const N_PEAKS = TOTAL_PARAMS / PARAMS_PER_PEAK;
+  // Mirrors transfer.CANONICAL_PEAK_ORDER, transfer.UNLABELLED_PEAKS and
+  // render.LABEL_BAND: labelled HU is packed into one band per label so a
+  // single 1D transfer function can shade each class by its own peak.
+  const PEAK_ORDER = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"];
+  const UNLABELLED_PEAKS = ["skeleton", "lungs", "soft"];
+  const LABEL_BAND = 4096;
   const viewerEl = document.getElementById("vtk-viewer");
   const statusEl = document.getElementById("viewer-status");
   const errorEl = document.getElementById("viewer-error");
@@ -18,9 +24,6 @@
   let volume;
   let mapper;
   let imageData;
-  let labelImageData;
-  let labelMapper;
-  let labelVolume;
   let camera;
   let datasetName;
   let transferFunction;
@@ -54,9 +57,6 @@
     volume = undefined;
     mapper = undefined;
     imageData = undefined;
-    labelImageData = undefined;
-    labelMapper = undefined;
-    labelVolume = undefined;
     rawVolumeValues = undefined;
     volumeMetadata = undefined;
   }
@@ -127,14 +127,16 @@
     return metadata;
   }
 
-  function maskLabeledHuValues(values, labels, metadata, volumeMetadata) {
-    // label-aware masking removes anatomy from HU rendering before compositing.
+  function bandLabeledHuValues(values, labels, metadata, volumeMetadata) {
+    // label-aware banding: each voxel's HU moves into its label's band, the
+    // browser twin of render.label_scoped_volume.
     validateLabelDimensions(metadata, volumeMetadata);
-    const masked = new Float32Array(values);
+    const banded = new Float32Array(values.length);
     for (let index = 0; index < labels.length; index += 1) {
-      if (labels[index] > 0) masked[index] = CENTER_RANGE[0];
+      const hu = Math.max(CENTER_RANGE[0], Math.min(CENTER_RANGE[1], values[index]));
+      banded[index] = hu - CENTER_RANGE[0] + labels[index] * LABEL_BAND;
     }
-    return masked;
+    return banded;
   }
 
   const CLASS_IDS = {
@@ -145,55 +147,6 @@
 
   function hasLabels() {
     return labelValues instanceof Uint8Array && labelMetadata !== undefined;
-  }
-
-  function buildLabelImageData(metadata, values) {
-    labelImageData = vtk.Common.DataModel.vtkImageData.newInstance();
-    labelImageData.setDimensions(...metadata.dimensions);
-    labelImageData.setSpacing(...metadata.spacing);
-    labelImageData.getPointData().setScalars(vtk.Common.Core.vtkDataArray.newInstance({
-      name: "AnatomicalLabels", values, numberOfComponents: 1,
-    }));
-    return labelImageData;
-  }
-
-  function removeLabelVolume() {
-    if (labelVolume && renderer) renderer.removeVolume(labelVolume);
-    labelVolume = undefined;
-    labelMapper = undefined;
-    labelImageData = undefined;
-  }
-
-  function setLabelTransferFunction(layers = {}) {
-    if (!labelVolume) return;
-    const color = vtk.Rendering.Core.vtkColorTransferFunction.newInstance();
-    const opacity = vtk.Common.DataModel.vtkPiecewiseFunction.newInstance();
-    color.addRGBPoint(0, 0, 0, 0);
-    opacity.addPoint(0, 0);
-    for (const className of CLASS_ORDER) {
-      const classId = CLASS_IDS[className];
-      const settings = layers[className] || { rgb: [1, 1, 1], opacity: 1 };
-      color.addRGBPoint(classId, ...settings.rgb);
-      opacity.addPoint(classId, settings.opacity);
-    }
-    labelVolume.getProperty().setRGBTransferFunction(0, color);
-    labelVolume.getProperty().setScalarOpacity(0, opacity);
-    renderWindow.render();
-  }
-
-  function buildLabelVolume(metadata, values, layers) {
-    removeLabelVolume();
-    buildLabelImageData(metadata, values);
-    labelMapper = vtk.Rendering.Core.vtkVolumeMapper.newInstance();
-    labelMapper.setInputData(labelImageData);
-    labelMapper.setAutoAdjustSampleDistances(false);
-    labelMapper.setSampleDistance(Math.min(...metadata.spacing) / 2.0);
-    labelVolume = vtk.Rendering.Core.vtkVolume.newInstance();
-    labelVolume.setMapper(labelMapper);
-    labelVolume.getProperty().setInterpolationTypeToNearest();
-    labelVolume.getProperty().setShade(false);
-    renderer.addVolume(labelVolume);
-    setLabelTransferFunction(layers);
   }
 
   function reconstructLabels(metadata, chunks) {
@@ -287,6 +240,23 @@
     };
   }
 
+  function blendPeaks(params, hu, peakNames, scale = 1) {
+    let alpha = 0;
+    let weight = 1e-6;
+    const rgb = [0, 0, 0];
+    for (const name of peakNames) {
+      const peak = internalPeak(params, PEAK_ORDER.indexOf(name));
+      const contribution = peak.height * Math.exp(-0.5 * ((hu - peak.center) / peak.width) ** 2);
+      alpha += contribution;
+      weight += contribution;
+      peak.rgb.forEach((value, channel) => { rgb[channel] += contribution * value; });
+    }
+    return {
+      alpha: Math.max(0, Math.min(1, alpha)) * scale,
+      rgb: rgb.map((value) => Math.max(0, Math.min(1, value / weight))),
+    };
+  }
+
   function setTransferFunction(params) {
     if (!Array.isArray(params) && !(params instanceof Float32Array) && !(params instanceof Float64Array)) {
       throw new Error("transfer function must be an array");
@@ -294,27 +264,32 @@
     if (params.length !== TOTAL_PARAMS) throw new Error(`transfer function must contain ${TOTAL_PARAMS} values`);
     const color = vtk.Rendering.Core.vtkColorTransferFunction.newInstance();
     const opacity = vtk.Common.DataModel.vtkPiecewiseFunction.newInstance();
-    for (let i = 0; i < 256; i += 1) {
-      const hu = CENTER_RANGE[0] + i / 255 * (CENTER_RANGE[1] - CENTER_RANGE[0]);
-      let alpha = 0;
-      const rgb = [0, 0, 0];
-      let weight = 1e-6;
-      for (let peakIndex = 0; peakIndex < N_PEAKS; peakIndex += 1) {
-        const peak = internalPeak(params, peakIndex);
-        const className = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"][peakIndex];
-        const layerOpacity = hasLabels() ? 1 : (activeLayers[className]?.opacity ?? 1);
-        const contribution = peak.height * layerOpacity * Math.exp(-0.5 * ((hu - peak.center) / peak.width) ** 2);
-        alpha += contribution;
-        weight += contribution;
-        peak.rgb.forEach((value, channel) => { rgb[channel] += contribution * value; });
+    // Label-scoped rows (transfer.label_scoped_tables): row 0 unlabelled,
+    // row id for CLASS_ORDER[id - 1], shaded by that class's peak alone and
+    // scaled by its layer opacity. Without labels: one shared HU row.
+    const rows = hasLabels()
+      ? [{ peaks: UNLABELLED_PEAKS, scale: 1 }].concat(CLASS_ORDER.map((className) => (
+        { peaks: [className], scale: activeLayers[className]?.opacity ?? 1 })))
+      : [{ peaks: PEAK_ORDER, scale: 1 }];
+    rows.forEach((row, rowIndex) => {
+      for (let i = 0; i < 256; i += 1) {
+        const hu = CENTER_RANGE[0] + i / 255 * (CENTER_RANGE[1] - CENTER_RANGE[0]);
+        const sample = blendPeaks(params, hu, row.peaks, row.scale);
+        const x = hasLabels() ? rowIndex * LABEL_BAND + hu - CENTER_RANGE[0] : hu;
+        color.addRGBPoint(x, ...sample.rgb);
+        opacity.addPoint(x, sample.alpha);
       }
-      color.addRGBPoint(hu, ...rgb.map((value) => Math.max(0, Math.min(1, value / weight))));
-      opacity.addPoint(hu, Math.max(0, Math.min(1, alpha)));
-    }
+    });
     transferFunction = params.slice();
     volume.getProperty().setRGBTransferFunction(0, color);
     volume.getProperty().setScalarOpacity(0, opacity);
     renderWindow.render();
+  }
+
+  function applyLabelInterpolation() {
+    // Interpolating between two label bands lands in a third class's band.
+    if (hasLabels()) volume.getProperty().setInterpolationTypeToNearest();
+    else volume.getProperty().setInterpolationTypeToLinear();
   }
 
   function setLabelAwareTransferFunction(params, labels, metadata, layers = {}) {
@@ -323,14 +298,14 @@
     activeLayers = layers || {};
     if (rawVolumeValues && volumeMetadata && mapper) {
       const values = hasLabels()
-        ? maskLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
+        ? bandLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
         : rawVolumeValues;
       buildImageData(volumeMetadata, values);
       mapper.setInputData(imageData);
+      applyLabelInterpolation();
     }
-    // Labels are retained for the label-aware path; HU transfer remains the
-    // fallback for datasets whose label transport is unavailable.
-    if (hasLabels()) setLabelTransferFunction(activeLayers);
+    // HU-only transfer remains the fallback for datasets whose label
+    // transport is unavailable.
     setTransferFunction(params);
   }
 
@@ -420,7 +395,6 @@
       labelMetadata = undefined;
       activeLayers = {};
       anatomyAvailability = availability;
-      removeLabelVolume();
       const loaded = await fetchVolume(name, loadController.signal, generation);
       if (!isCurrentLoad(generation)) return false;
       // Labels are transport-ready now; rendering remains HU-only until Task 3.
@@ -463,7 +437,7 @@
       rawVolumeValues = loaded.values;
       volumeMetadata = loaded.metadata;
       const values = hasLabels()
-        ? maskLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
+        ? bandLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
         : rawVolumeValues;
       buildImageData(loaded.metadata, values);
       mapper = vtk.Rendering.Core.vtkVolumeMapper.newInstance();
@@ -482,7 +456,6 @@
       volume.getProperty().setSpecular(0.2);
       renderer.removeAllVolumes();
       renderer.addVolume(volume);
-      if (hasLabels()) buildLabelVolume(loaded.metadata, labelValues, layers);
       renderer.resetCamera();
       setCamera(cameraState);
       setLabelAwareTransferFunction(params, labelValues, labelMetadata, layers);

@@ -5,7 +5,7 @@ import vtk
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy  # pyright: ignore[reportMissingImports]
 from anatomy import CANONICAL_CLASSES
 from anatomy_layers import normalize_layers
-from transfer import N_PEAKS, peak_internal, vector_to_vtk
+from transfer import CENTER_RANGE, N_PEAKS, label_scoped_tables, peak_internal, vector_to_vtk
 
 WIDTH, HEIGHT = 1024, 800
 _MAPPER_ANNOUNCED = False
@@ -14,7 +14,11 @@ MAPPER_NAME = None  # set on first render(); real value, not a guess -- read by 
 VISIBLE_BOUNDS_STRIDE = 4  # measured: ~10ms strided vs ~1-2s at full resolution on real CT
 VISIBLE_BOUNDS_THRESHOLD = 0.05
 VISIBLE_BOUNDS_MARGIN = 0.15  # fraction of extent added as padding so content isn't cropped tight
-LABEL_HIDDEN_HU = -1.0e6
+# Label-scoped rendering packs (label row, HU) into one scalar: label row r
+# occupies [r * LABEL_BAND, r * LABEL_BAND + CENTER_RANGE span], so a single
+# 1D VTK transfer function can hold one lookup per label row. The band must
+# exceed the 3050 HU span so rows never overlap.
+LABEL_BAND = 4096.0
 MASKED_VOLUME_CACHE_SIZE = 8
 _MASKED_VOLUME_CACHE = collections.OrderedDict()
 
@@ -61,27 +65,65 @@ def frame_bounds(volume: np.ndarray, params: np.ndarray, spacing) -> list | None
     return _visible_bounds(volume, np.asarray(params, dtype=np.float64), spacing)
 
 
-def label_aware_volume(volume: np.ndarray, labels: np.ndarray, layers: dict) -> np.ndarray:
-    """Suppress labeled voxels from HU rendering when their layer is hidden."""
+def _smoothed(volume: np.ndarray, spacing=(1.0, 1.0, 1.0)) -> np.ndarray:
+    """`volume` through the same Gaussian smooth `_get_pipeline` applies to
+    unlabelled renders (see the comment there)."""
+    image = vtk.vtkImageData()
+    image.SetDimensions(*volume.shape)
+    image.SetSpacing(*spacing)
+    image.GetPointData().SetScalars(numpy_to_vtk(
+        np.ascontiguousarray(volume.ravel(order="F")), deep=True, array_type=vtk.VTK_FLOAT))
+    smoother = vtk.vtkImageGaussianSmooth()
+    smoother.SetInputData(image)
+    smoother.SetStandardDeviations(1.0, 1.0, 1.0)
+    smoother.SetRadiusFactors(2.0, 2.0, 2.0)
+    smoother.Update()
+    flat = vtk_to_numpy(smoother.GetOutput().GetPointData().GetScalars())
+    return flat.reshape(volume.shape, order="F").astype(np.float32)
+
+
+def label_scoped_volume(volume: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    """Smoothed HU re-based into its label's band (LABEL_BAND), so
+    `label_scoped_vtk` can shade each labelled class by its own peak -- the
+    same label-scoped transfer function `visibility` measures. Smoothing
+    happens on HU, before banding: smoothing the banded scalar would blend
+    label rows into each other."""
     volume = np.asarray(volume, dtype=np.float32)
     labels = np.asarray(labels)
     if labels.dtype != np.uint8 or labels.ndim != 3 or labels.shape != volume.shape:
         raise ValueError("labels must be a uint8 array matching volume shape")
-    normalized = normalize_layers(layers or {})
-    layer_state = tuple((name, settings["opacity"]) for name, settings in normalized.items())
-    key = (id(volume), id(labels), layer_state)
+    key = (id(volume), id(labels))
     cached = _MASKED_VOLUME_CACHE.get(key)
     if cached is not None and cached[0] is volume and cached[1] is labels:
         _MASKED_VOLUME_CACHE.move_to_end(key)
         return cached[2]
-    masked = volume.copy()
-    for class_id, _class_name in enumerate(CANONICAL_CLASSES, 1):
-        masked[labels == class_id] = LABEL_HIDDEN_HU
-    _MASKED_VOLUME_CACHE[key] = (volume, labels, masked)
+    lo, hi = CENTER_RANGE
+    banded = (np.clip(_smoothed(volume), lo, hi) - lo
+              + labels.astype(np.float32) * LABEL_BAND).astype(np.float32)
+    _MASKED_VOLUME_CACHE[key] = (volume, labels, banded)
     _MASKED_VOLUME_CACHE.move_to_end(key)
     while len(_MASKED_VOLUME_CACHE) > MASKED_VOLUME_CACHE_SIZE:
         _MASKED_VOLUME_CACHE.popitem(last=False)
-    return masked
+    return banded
+
+
+def label_scoped_vtk(params: np.ndarray, layers: dict | None = None, n: int = 256):
+    """(color, opacity) VTK functions over `label_scoped_volume`'s bands: row 0
+    (unlabelled) and one row per canonical class, each class row scaled by
+    that layer's opacity."""
+    normalized = normalize_layers(layers or {})
+    lo, _ = CENTER_RANGE
+    hu = np.linspace(*CENTER_RANGE, n)
+    ctf = vtk.vtkColorTransferFunction()
+    otf = vtk.vtkPiecewiseFunction()
+    rows = label_scoped_tables(np.asarray(params, dtype=np.float64), hu, CANONICAL_CLASSES)
+    for row, (opacity, rgb) in enumerate(rows):
+        scale = 1.0 if row == 0 else normalized[CANONICAL_CLASSES[row - 1]]["opacity"]
+        offset = row * LABEL_BAND - lo
+        for i in range(n):
+            ctf.AddRGBPoint(float(hu[i] + offset), *[float(v) for v in rgb[i]])
+            otf.AddPoint(float(hu[i] + offset), float(opacity[i] * scale))
+    return ctf, otf
 
 
 def clear_pipeline_cache() -> None:
@@ -123,7 +165,7 @@ PIPELINE_CACHE_SIZE = 4
 _PIPELINE_CACHE = collections.OrderedDict()  # key -> (prop, renderer, win, actor)
 
 
-def _get_pipeline(volume: np.ndarray, spacing, pipeline_key=None):
+def _get_pipeline(volume: np.ndarray, spacing, pipeline_key=None, labelled: bool = False):
     """Build (or reuse) the offscreen render pipeline for `volume`.
 
     Every vtkRenderWindow.Render() call re-binds a native offscreen GL
@@ -166,16 +208,23 @@ def _get_pipeline(volume: np.ndarray, spacing, pipeline_key=None):
     # the synthetic phantom (96^3, ~2ms) and ~115ms on real CT (512x512x139).
     # Done once per volume here, not per render, since it doesn't depend on
     # the transfer function.
-    smoother = vtk.vtkImageGaussianSmooth()
-    smoother.SetInputData(image)
-    smoother.SetStandardDeviations(1.0, 1.0, 1.0)
-    smoother.SetRadiusFactors(2.0, 2.0, 2.0)
-    smoother.Update()
-    image = smoother.GetOutput()
+    # A labelled volume arrives already smoothed and banded
+    # (label_scoped_volume); it must be sampled nearest, since interpolating
+    # between two label bands lands in a third class's band.
+    if not labelled:
+        smoother = vtk.vtkImageGaussianSmooth()
+        smoother.SetInputData(image)
+        smoother.SetStandardDeviations(1.0, 1.0, 1.0)
+        smoother.SetRadiusFactors(2.0, 2.0, 2.0)
+        smoother.Update()
+        image = smoother.GetOutput()
 
     prop = vtk.vtkVolumeProperty()
     prop.ShadeOn()
-    prop.SetInterpolationTypeToLinear()
+    if labelled:
+        prop.SetInterpolationTypeToNearest()
+    else:
+        prop.SetInterpolationTypeToLinear()
 
     mapper = _make_mapper(image)
     # This render is offscreen batch rendering, not an interactive loop --
@@ -206,56 +255,21 @@ def _get_pipeline(volume: np.ndarray, spacing, pipeline_key=None):
     return prop, renderer, win, None
 
 
-def _set_anatomy_actor(renderer, volume, spacing, labels, layers, actor=None):
-    normalized = normalize_layers(layers or {})
-    if actor is not None:
-        renderer.RemoveViewProp(actor)
-    if labels is None:
-        return None
-    labels = np.asarray(labels)
-    if labels.dtype != np.uint8 or labels.ndim != 3 or labels.shape != volume.shape:
-        raise ValueError("labels must be a uint8 array matching volume shape")
-    image = vtk.vtkImageData()
-    image.SetDimensions(*labels.shape)
-    image.SetSpacing(*spacing)
-    image.GetPointData().SetScalars(
-        numpy_to_vtk(np.ascontiguousarray(labels.ravel(order="F")), deep=True,
-                     array_type=vtk.VTK_UNSIGNED_CHAR)
-    )
-
-    color = vtk.vtkColorTransferFunction()
-    opacity = vtk.vtkPiecewiseFunction()
-    opacity.AddPoint(0.0, 0.0)
-    for class_id, class_name in enumerate(CANONICAL_CLASSES, 1):
-        settings = normalized[class_name]
-        # Integer labels plus nearest interpolation prevent cross-class mixing.
-        color.AddRGBPoint(float(class_id), *settings["rgb"])
-        opacity.AddPoint(float(class_id), settings["opacity"])
-    prop = vtk.vtkVolumeProperty()
-    prop.SetColor(color)
-    prop.SetScalarOpacity(opacity)
-    prop.SetInterpolationTypeToNearest()
-    prop.ShadeOff()
-    actor = vtk.vtkVolume()
-    actor.SetMapper(_make_mapper(image))
-    actor.SetProperty(prop)
-    renderer.AddVolume(actor)
-    return actor
-
-
 def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), camera: dict | None = None,
            frame_bounds: list | None = None, labels: np.ndarray | None = None,
            layers: dict | None = None) -> vtk.vtkRenderWindow:
-    render_volume = label_aware_volume(volume, labels, layers) if labels is not None else volume
+    labelled = labels is not None
+    if labelled:
+        # Validate layers before any VTK work, so a bad request fails fast.
+        normalize_layers(layers or {})
+    render_volume = label_scoped_volume(volume, labels) if labelled else volume
     pipeline_key = ((id(volume), volume.shape, id(labels), labels.shape)
-                    if labels is not None else id(volume))
-    prop, renderer, win, actor = _get_pipeline(render_volume, spacing, pipeline_key)
+                    if labelled else id(volume))
+    prop, renderer, win, _ = _get_pipeline(render_volume, spacing, pipeline_key, labelled)
 
-    ctf, otf = vector_to_vtk(params)
+    ctf, otf = label_scoped_vtk(params, layers) if labelled else vector_to_vtk(params)
     prop.SetColor(ctf)
     prop.SetScalarOpacity(otf)
-    actor = _set_anatomy_actor(renderer, render_volume, spacing, labels, layers, actor)
-    _PIPELINE_CACHE[(pipeline_key, tuple(spacing))] = (prop, renderer, win, actor)
 
     cam = renderer.GetActiveCamera()
     cam_state = camera or {"azimuth": 30.0, "elevation": 20.0, "zoom": 1.0}

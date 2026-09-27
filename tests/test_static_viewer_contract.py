@@ -73,35 +73,32 @@ def test_viewer_applies_label_aware_rendering_and_keeps_hu_fallback():
     assert "fallback" in viewer
     assert "labelValues = undefined" in viewer
     assert "validateLabelDimensions" in viewer
-    assert "label-aware masking" in viewer
+    assert "label-aware banding" in viewer
 
 
-def test_viewer_builds_nearest_label_actor_with_layer_transfer_functions():
+def test_viewer_shades_each_label_band_by_its_own_peak():
     viewer = read("viewer.js")
-    assert "labelImageData" in viewer
-    assert "labelMapper" in viewer
-    assert "labelVolume" in viewer
-    assert "buildLabelImageData" in viewer
-    assert "vtkDataArray.newInstance" in viewer
+    # Must match render.py / transfer.py, or the browser shows a different
+    # picture than the one the policy was scored on.
+    assert "LABEL_BAND = 4096" in viewer
+    assert 'UNLABELLED_PEAKS = ["skeleton", "lungs", "soft"]' in viewer
+    assert 'PEAK_ORDER = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"]' in viewer
+    assert "bandLabeledHuValues" in viewer
+    assert "rowIndex * LABEL_BAND" in viewer
+    assert "peaks: [className]" in viewer
+    assert "activeLayers[className]?.opacity" in viewer
+    assert "setInterpolationTypeToNearest" in viewer
     assert "vtkPiecewiseFunction.newInstance" in viewer
     assert "vtkColorTransferFunction.newInstance" in viewer
-    assert "setInterpolationTypeToNearest" in viewer
     assert "CLASS_IDS" in viewer
-    assert "setLabelTransferFunction" in viewer
-    assert "class_id" in viewer or "classId" in viewer
-    assert "settings.rgb" in viewer
-    assert "settings.opacity" in viewer
 
 
-def test_viewer_masks_hu_actor_only_when_labels_are_active_and_clears_label_actor():
+def test_viewer_has_no_separate_flat_label_actor():
     viewer = read("viewer.js")
     assert "hasLabels" in viewer
-    assert "maskLabeledHuValues" in viewer
-    assert "removeLabelVolume" in viewer
-    assert "labelImageData = undefined" in viewer
-    assert "labelVolume = undefined" in viewer
+    assert "labelVolume" not in viewer
+    assert "maskLabeledHuValues" not in viewer
     assert "setScalarOpacity" in viewer
-    assert "activeLayers" in viewer
 
 
 def test_viewer_uses_state_availability_before_fetching_labels():
