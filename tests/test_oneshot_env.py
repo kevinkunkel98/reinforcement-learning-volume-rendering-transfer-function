@@ -367,6 +367,49 @@ def test_hindsight_oracle_beats_a_random_action_by_a_clear_margin():
     assert np.median(oracle_scores) > np.median(random_scores) + 0.5
 
 
+
+def test_residual_hindsight_policy_action_reproduces_the_oracle():
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0, policy_version="oneshot-v9",
+                     action_mode="residual", reward_mode="target")
+    for seed in range(5):
+        env.reset(seed=seed)
+        residual = env.hindsight_policy_action()
+        start = np.asarray(env._controllable_values(env._start_params))
+        assert residual.shape == (ACTION_SIZE,)
+        np.testing.assert_allclose(start + residual, env.hindsight_action(), atol=1e-6)
+        _obs, reward, _done, _truncated, info = env.step(residual)
+        assert info["goal_source"] == "hindsight"
+
+
+def test_hindsight_policy_action_is_none_for_instructions():
+    env = OneShotEnv(["synthetic"], hindsight_ratio=0.0)
+    env.reset(seed=0)
+    assert env.hindsight_policy_action() is None
+
+
+def test_brightness_hindsight_changes_one_colour_group_and_asks_for_its_effect():
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0, hindsight_brightness_share=1.0)
+    for seed in range(5):
+        env.reset(seed=seed)
+        (goal_class, target), = env._instruction["targets"].items()
+        assert set(target) == {"bright"}
+        start = np.asarray(env._controllable_values(env._start_params))
+        changed = np.flatnonzero(np.abs(env.hindsight_action() - start) > 1e-9)
+        assert len(changed) == 1
+        assert len(CONTROLLABLE[changed[0]]) == 3   # the (r, g, b) group
+
+        target_agg = goals.aggregate(env._model.features(
+            apply_controllable(env._start_params, env.hindsight_action())))
+        measured = target_agg["bright"][goal_class] - env._start_agg["bright"][goal_class]
+        assert target["bright"] == pytest.approx(measured)
+
+
+def test_brightness_share_zero_keeps_visibility_hindsight():
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
+    for seed in range(5):
+        env.reset(seed=seed)
+        assert all(set(t) == {"vis"} for t in env._instruction["targets"].values())
+
 def test_hindsight_ratio_zero_keeps_sampling_instructions():
     env = OneShotEnv(["synthetic"], hindsight_ratio=0.0)
     _obs, info = env.reset(seed=0)

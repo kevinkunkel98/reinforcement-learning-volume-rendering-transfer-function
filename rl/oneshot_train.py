@@ -28,6 +28,7 @@ from stable_baselines3.common.logger import configure
 
 import datasets
 import goals
+from rl import pretrain
 from rl.oneshot_env import OneShotEnv, observation_metadata
 
 VALIDATION_EPISODES = 40
@@ -119,11 +120,17 @@ def _eval_row(timesteps: int, summary: dict) -> dict:
 
 def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
                   train_env=None, eval_env=None, eval_episode_count: int = VALIDATION_EPISODES,
-                  env_kwargs=None) -> dict:
+                  env_kwargs=None, pretrain_data=None, pretrain_epochs: int = 30,
+                  pretrain_info=None) -> dict:
     """Train SAC on `train_env` (default: the training split), evaluating on
     `eval_env` (default: the validation split) every `eval_interval` steps.
     Returns the run directory's paths and the logged rows, for tests and the
-    CLI alike."""
+    CLI alike.
+
+    With `pretrain_data` (`rl.pretrain.collect_hindsight`'s output), the
+    actor is first fit to the hindsight oracle actions and the same
+    transitions are added to the replay buffer; an evaluation row at
+    timestep 0 then records what the warm start alone achieves."""
     ensure_run_dir(out)
     env_kwargs = {} if env_kwargs is None else dict(env_kwargs)
     train_env = train_env if train_env is not None else build_env(**env_kwargs)
@@ -137,6 +144,11 @@ def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
     best_path = os.path.join(out, BEST_NAME)
     metadata = {**observation_metadata(train_env.policy_version, train_env.action_mode,
                                         train_env.reward_mode), "seed": seed, "timesteps": timesteps}
+    if pretrain_data is not None:
+        report = pretrain.pretrain_actor(model, pretrain_data, epochs=pretrain_epochs, seed=seed)
+        pretrain.prefill_replay_buffer(model, pretrain_data)
+        metadata["pretrain"] = {**(pretrain_info or {}), **report}
+        print(f"[oneshot_train] pretrained actor: {report}")
     with open(os.path.join(out, METADATA_NAME), "w") as stream:
         json.dump(metadata, stream, indent=2)
 
@@ -146,6 +158,16 @@ def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
     with open(eval_path, "w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=CSV_FIELDS)
         writer.writeheader()
+        if pretrain_data is not None:
+            summary = summarize_eval(evaluate_policy_on(episodes, model))
+            row = _eval_row(0, summary)
+            writer.writerow(row)
+            stream.flush()
+            rows.append(row)
+            model.save(os.path.join(out, CHECKPOINT_NAME.format(timesteps=0)))
+            if summary["median_attainment"] is not None:
+                best_attainment = summary["median_attainment"]
+                model.save(best_path)
         while done < timesteps:
             chunk = min(eval_interval, timesteps - done)
             model.learn(total_timesteps=chunk, reset_num_timesteps=(done == 0))
@@ -181,8 +203,17 @@ def parse_args(argv=None):
     parser.add_argument("--action-mode", choices=("absolute", "residual"), default=None)
     parser.add_argument("--hindsight-ratio", type=float, default=0.0)
     parser.add_argument("--balance-classes", action="store_true")
+    parser.add_argument("--hindsight-brightness", type=float, default=0.0,
+                        help="share of hindsight episodes whose goal is a brightness change")
     parser.add_argument("--reward-mode", choices=("attainment", "target"), default="attainment")
     parser.add_argument("--short", action="store_true", help="use the short smoke experiment preset")
+    parser.add_argument("--pretrain-data", type=str, default=None,
+                        help="hindsight dataset (.npz); collected and saved here first if missing")
+    parser.add_argument("--pretrain-episodes", type=int, default=4000)
+    parser.add_argument("--pretrain-epochs", type=int, default=30)
+    parser.add_argument("--pretrain-workers", type=int, default=6)
+    parser.add_argument("--eval-episodes", type=int, default=None,
+                        help=f"validation episodes per evaluation (default {VALIDATION_EPISODES})")
     args = parser.parse_args(argv)
     if args.policy_version in ("oneshot-v7", "oneshot-v8", "oneshot-v9") and args.action_mode is None:
         parser.error(f"--action-mode is required for {args.policy_version}")
@@ -198,19 +229,48 @@ def parse_args(argv=None):
     return args
 
 
+def load_or_collect_pretrain(args) -> tuple:
+    """(dataset, provenance) for --pretrain-data: loaded when the file exists
+    and matches this run's contract, else collected on the training split
+    and saved there."""
+    contract = {"policy_version": args.policy_version, "action_mode": args.action_mode,
+                "reward_mode": args.reward_mode}
+    expected = {**observation_metadata(**contract), "episodes": args.pretrain_episodes,
+                "seed": args.seed, "split": "train",
+                "hindsight_brightness_share": args.hindsight_brightness}
+    if os.path.exists(args.pretrain_data):
+        data, stored = pretrain.load_dataset(args.pretrain_data)
+        # Datasets collected before brightness hindsight existed had none.
+        stored.setdefault("hindsight_brightness_share", 0.0)
+        mismatched = {key for key in expected if stored.get(key) != expected[key]}
+        if mismatched:
+            raise ValueError(f"{args.pretrain_data} does not match this run: {sorted(mismatched)}")
+    else:
+        data = pretrain.collect_hindsight(datasets.volumes_for_split("train"),
+                                          {**contract, "hindsight_brightness_share": args.hindsight_brightness},
+                                          args.pretrain_episodes, args.seed, args.pretrain_workers)
+        pretrain.save_dataset(data, args.pretrain_data, expected)
+    return data, {"data": args.pretrain_data, "episodes": args.pretrain_episodes}
+
+
 def main(argv=None):
     args = parse_args(argv)
     out = args.out or DEFAULT_OUT_TEMPLATE.format(seed=args.seed)
     timesteps = SHORT_EXPERIMENT["timesteps"] if args.short else args.timesteps
     eval_interval = SHORT_EXPERIMENT["eval_interval"] if args.short else args.eval_interval
+    pretrain_data, pretrain_info = (load_or_collect_pretrain(args)
+                                    if args.pretrain_data else (None, None))
     result = run_training(out=out, timesteps=timesteps, seed=args.seed, eval_interval=eval_interval,
-                          eval_episode_count=(SHORT_EXPERIMENT["eval_episode_count"]
-                                               if args.short else VALIDATION_EPISODES),
+                          eval_episode_count=(SHORT_EXPERIMENT["eval_episode_count"] if args.short
+                                              else args.eval_episodes or VALIDATION_EPISODES),
                           env_kwargs={"policy_version": args.policy_version,
                                       "action_mode": args.action_mode,
                                       "hindsight_ratio": args.hindsight_ratio,
                                       "balance_classes": args.balance_classes,
-                                      "reward_mode": args.reward_mode})
+                                      "hindsight_brightness_share": args.hindsight_brightness,
+                                      "reward_mode": args.reward_mode},
+                          pretrain_data=pretrain_data, pretrain_epochs=args.pretrain_epochs,
+                          pretrain_info=pretrain_info)
     print(f"\n[oneshot_train] wrote {result['eval_progress_path']} and {result['best_path']}")
 
 

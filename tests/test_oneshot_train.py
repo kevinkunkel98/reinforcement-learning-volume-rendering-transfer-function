@@ -412,3 +412,34 @@ def test_v7_target_reward_drift_includes_brightness(monkeypatch):
                           "heart": 0.0, "liver": 0.0, "kidneys": 0.0, "spleen": 0.0}))
     env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
     assert env._last_drift > 0.0
+
+
+def test_pretrained_run_logs_a_timestep_zero_row_and_records_the_fit(monkeypatch, tmp_path):
+    _patch_totalseg(monkeypatch)
+    train_env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel())
+    eval_env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel())
+    rng = np.random.default_rng(0)
+    data = {"obs": rng.normal(size=(32, 97)).astype(np.float32),
+            "actions": rng.uniform(-0.2, 0.2, size=(32, 24)).astype(np.float32),
+            "rewards": np.zeros(32, dtype=np.float32)}
+
+    result = oneshot_train.run_training(
+        out=str(tmp_path / "pretrained"), timesteps=100, seed=0, eval_interval=100,
+        train_env=train_env, eval_env=eval_env, eval_episode_count=3,
+        pretrain_data=data, pretrain_epochs=2, pretrain_info={"data": "x.npz"})
+
+    assert [row["timesteps"] for row in result["rows"]] == [0, 100]
+    assert result["metadata"]["pretrain"]["data"] == "x.npz"
+    assert "val_mse" in result["metadata"]["pretrain"]
+
+
+def test_cli_rejects_a_pretrain_dataset_for_another_contract(tmp_path):
+    from rl import pretrain
+    path = tmp_path / "hindsight.npz"
+    data = {"obs": np.zeros((1, 97), np.float32), "actions": np.zeros((1, 24), np.float32),
+            "rewards": np.zeros(1, np.float32)}
+    pretrain.save_dataset(data, str(path), {"policy_version": "oneshot-v7"})
+    args = oneshot_train.parse_args(["--policy-version", "oneshot-v9", "--action-mode", "residual",
+                                     "--reward-mode", "target", "--pretrain-data", str(path)])
+    with pytest.raises(ValueError, match="does not match"):
+        oneshot_train.load_or_collect_pretrain(args)

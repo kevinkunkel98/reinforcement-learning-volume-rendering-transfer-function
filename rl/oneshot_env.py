@@ -72,6 +72,16 @@ START_NOISE = 0.3
 # 0.729 under the uniform draw this replaced.
 HINDSIGHT_NOISE = 0.25
 
+# Brightness hindsight: move one visible class's colour group by up to this
+# much (normalized units, so up to 0.4 in unit brightness -- the "strongly"
+# end of goals.BRIGHTNESS_STRENGTH) and nothing else, so the demonstrated
+# action changes that class's brightness without charging keep drift.
+HINDSIGHT_BRIGHTNESS_NOISE = 0.8
+HINDSIGHT_BRIGHTNESS_MIN_DELTA = 0.05
+# Brightness is only measured on visible tissue (visibility.features reports
+# 0 below 1e-4), so a class needs this much visibility to be demonstrable.
+HINDSIGHT_BRIGHTNESS_MIN_VIS = 1e-3
+
 # Distance already contains the keep penalty for unmentioned classes. Keep
 # auxiliary drift small so target progress remains primary signal instead of
 # double-penalizing ordinary occlusion side effects.
@@ -192,7 +202,7 @@ class OneShotEnv(gym.Env):
     def __init__(self, volume_ids, model_for_volume=visibility.for_volume,
                  hindsight_ratio: float = 0.0, policy_version: str = POLICY_VERSION,
                  action_mode: str = "absolute", reward_mode: str = "attainment",
-                 balance_classes: bool = False):
+                 balance_classes: bool = False, hindsight_brightness_share: float = 0.0):
         super().__init__()
         if not volume_ids:
             raise ValueError("volume_ids must not be empty")
@@ -212,6 +222,11 @@ class OneShotEnv(gym.Env):
             raise ValueError(f"{policy_version} requires target reward")
         if not 0.0 <= hindsight_ratio <= 1.0:
             raise ValueError("hindsight_ratio must be between 0 and 1")
+        if not 0.0 <= hindsight_brightness_share <= 1.0:
+            raise ValueError("hindsight_brightness_share must be between 0 and 1")
+        # Share of hindsight episodes whose goal is a brightness change
+        # (`_sample_hindsight_brightness`) rather than a visibility change.
+        self.hindsight_brightness_share = float(hindsight_brightness_share)
         self.policy_version = policy_version
         self.action_mode = action_mode
         self.reward_mode = reward_mode
@@ -324,8 +339,51 @@ class OneShotEnv(gym.Env):
         episode came from an instruction. Test and distillation hook."""
         return None if self._hindsight_action is None else self._hindsight_action.copy()
 
+    def hindsight_policy_action(self):
+        """The hindsight oracle in the policy's own action space: the absolute
+        controllable values for "absolute" mode, their offset from the start
+        state for "residual" mode (layer actions, v8 only, left at 0 -- no
+        change). None for an instruction episode. The supervised target for
+        `rl.pretrain`."""
+        if self._hindsight_action is None:
+            return None
+        action = self._hindsight_action.copy()
+        if self.action_mode == "residual":
+            action = action - np.asarray(self._controllable_values(self._start_params))
+        if self.policy_version == V8_POLICY_VERSION:
+            action = np.concatenate([action, np.zeros(len(LAYER_NAMES))])
+        return action.astype(np.float32)
+
+    def _sample_hindsight_brightness(self, rng, start_params, start_agg):
+        """(instruction-shaped dict, action) for a brightness goal on one
+        visible class, or None when no class is visible enough."""
+        visible = [c for c in goals.GOAL_CLASSES
+                   if start_agg["vis"][c] >= HINDSIGHT_BRIGHTNESS_MIN_VIS]
+        if not visible:
+            return None
+        start_controllable = np.asarray(self._controllable_values(start_params))
+        for _ in range(self.HINDSIGHT_MAX_TRIES):
+            goal_class = str(rng.choice(visible))
+            base = goals.PEAK_INDEX[goal_class] * transfer.PARAMS_PER_PEAK
+            group = CONTROLLABLE.index((base + 3, base + 4, base + 5))
+            action = start_controllable.copy()
+            action[group] = np.clip(action[group] + rng.uniform(-HINDSIGHT_BRIGHTNESS_NOISE,
+                                                                HINDSIGHT_BRIGHTNESS_NOISE), -1.0, 1.0)
+            target_agg = goals.aggregate(self._features(apply_controllable(start_params, action)),
+                                         self._active_layers)
+            delta = target_agg["bright"][goal_class] - start_agg["bright"][goal_class]
+            if abs(delta) >= HINDSIGHT_BRIGHTNESS_MIN_DELTA:
+                targets = {goal_class: {"bright": float(delta)}}
+                return ({"kind": "hindsight", "text": None, "targets": targets,
+                         "goal": goals.goal_vector(targets)}, action)
+        return None
+
     def _sample_hindsight_goal(self, rng, model, start_params, start_agg):
         """(instruction-shaped dict, action) from a reachable target."""
+        if self.hindsight_brightness_share and rng.random() < self.hindsight_brightness_share:
+            sampled = self._sample_hindsight_brightness(rng, start_params, start_agg)
+            if sampled is not None:
+                return sampled
         start_controllable = np.asarray(self._controllable_values(start_params))
         for _ in range(self.HINDSIGHT_MAX_TRIES):
             noise = rng.uniform(-HINDSIGHT_NOISE, HINDSIGHT_NOISE, size=len(CONTROLLABLE))
