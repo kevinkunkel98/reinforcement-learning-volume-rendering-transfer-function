@@ -79,6 +79,16 @@ def transfer_tables(params: np.ndarray):
     return opacity.astype(np.float32), (rgb @ LUMINANCE).astype(np.float32)
 
 
+def label_transfer_tables(params: np.ndarray, mode: str = transfer.DEFAULT_TRANSFER_MODE):
+    """(opacity, luminance), each (1 + len(CLASSES), LUT_SIZE): row 0 for
+    unlabelled samples, row i + 1 for CLASSES[i] (`transfer.label_scoped_tables`)."""
+    rows = transfer.label_scoped_tables(np.asarray(params, dtype=np.float64), lut_values(),
+                                        CLASSES, mode)
+    opacity = np.stack([row[0] for row in rows]).astype(np.float32)
+    luminance = np.stack([row[1] @ LUMINANCE for row in rows]).astype(np.float32)
+    return opacity, luminance
+
+
 def _sample_cubes(volume, spacing, directions, n, labels=None):
     """Resample the volume (and, if given, a label volume) into one cube per
     view; axis 0 runs front to back. Returns (hu_cubes, step_mm, label_cubes
@@ -143,6 +153,7 @@ class VisibilityModel:
         self._labels = torch.from_numpy(self.class_ids.astype(np.int32) - 1)
         self._rays = int(self.indices.shape[0] * self.indices.shape[2] * self.indices.shape[3])
         self._solo_max = {}
+        self._label_index_cache = None
 
     @property
     def n_views(self) -> int:
@@ -162,11 +173,19 @@ class VisibilityModel:
         return cls(quantize(cubes), step, histogram, class_ids, label_source,
                    volume_id, spacing, label_identity)
 
-    def _weights(self, params, layers=None):
+    def _label_index(self):
+        """Flat index into `label_transfer_tables`' rows: each sample's LUT
+        index offset by its label row (0 for unlabelled)."""
+        if self._label_index_cache is None:
+            self._label_index_cache = ((self._labels.long() + 1) * LUT_SIZE
+                                       + self.indices.long())
+        return self._label_index_cache
+
+    def _weights(self, params, layers=None, transfer_mode=transfer.DEFAULT_TRANSFER_MODE):
         """(contribution per sample, luminance per sample, accumulated opacity per ray)."""
-        opacity_table, luminance_table = transfer_tables(params)
-        index = self.indices.long()
-        alpha = torch.from_numpy(opacity_table)[index]
+        opacity_table, luminance_table = label_transfer_tables(params, transfer_mode)
+        index = self._label_index()
+        alpha = torch.from_numpy(opacity_table.reshape(-1))[index]
         alpha = 1.0 - (1.0 - alpha) ** (self.step_mm / 1.0)
         if layers is not None:
             normalized = normalize_layers(layers)
@@ -178,13 +197,14 @@ class VisibilityModel:
                     layer_opacity,
                 )
             alpha = alpha * layer_opacity
-        luminance = torch.from_numpy(luminance_table)[index]
+        luminance = torch.from_numpy(luminance_table.reshape(-1))[index]
         transparency = 1.0 - alpha
         ones = torch.ones_like(transparency[:, :1])
         before = torch.cat([ones, torch.cumprod(transparency, dim=1)[:, :-1]], dim=1)
         return before * alpha, luminance, 1.0 - transparency.prod(dim=1)
 
-    def features(self, params, layers=None) -> dict:
+    def features(self, params, layers=None,
+                 transfer_mode=transfer.DEFAULT_TRANSFER_MODE) -> dict:
         """{"vis": {class: float, "other": float}, "bright": {class: float}, "coverage": float}.
 
         "other" is voxels the label volume (or the intensity fallback)
@@ -196,8 +216,8 @@ class VisibilityModel:
         satisfy "show only X" by rendering an opaque wall of unclassified
         material instead of X (see goals.py's OTHER keep term)."""
         layers = normalize_layers(layers or {})
-        weights, luminance, accumulated = self._weights(params)
-        effective_weights, _, effective_accumulated = self._weights(params, layers)
+        weights, luminance, accumulated = self._weights(params, transfer_mode=transfer_mode)
+        effective_weights, _, effective_accumulated = self._weights(params, layers, transfer_mode)
         vis, bright = {}, {}
         effective_vis, effective_bright = {}, {}
         for index, name in enumerate(CLASSES):

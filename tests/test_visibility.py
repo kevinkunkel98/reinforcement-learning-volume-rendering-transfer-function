@@ -43,6 +43,20 @@ def _single_peak_params(center_hu, height=0.9, width_hu=80.0, peak=0):
     return params
 
 
+def _peaks_at(center_hu, names, height=0.9, width_hu=80.0):
+    """Every peak off except `names`' own peaks, moved to `center_hu`: under
+    the label-scoped transfer function a labelled voxel only sees its own
+    class's peak, so a test that lights class X must move X's peak."""
+    params = default_params().copy()
+    for i in range(N_PEAKS):
+        params[i * PARAMS_PER_PEAK + 2] = -1.0
+    for name in names:
+        single = _single_peak_params(center_hu, height, width_hu, ANATOMICAL_PEAK_INDEX[name])
+        base = ANATOMICAL_PEAK_INDEX[name] * PARAMS_PER_PEAK
+        params[base: base + 3] = single[base: base + 3]
+    return params
+
+
 def _model(volume, spacing=(2.0, 2.0, 2.0), **kwargs):
     return visibility.VisibilityModel.from_volume(volume, spacing, **kwargs)
 
@@ -183,7 +197,7 @@ def test_classes_come_from_the_label_volume():
     volume = _core_volume(core_hu=900.0, shell_hu=50.0)
     labels = _core_labels("soft")
     model = visibility.VisibilityModel.from_volume(volume, (2.0, 2.0, 2.0), labels=labels)
-    vis = model.features(_params([0.0, 0.0, 0.0, 0.9]))["vis"]
+    vis = model.features(_peaks_at(900.0, ("soft",)))["vis"]
     assert vis["soft"] > 0.0
     assert vis["skeleton"] == pytest.approx(0.0, abs=1e-6)
 
@@ -200,15 +214,15 @@ def test_label_source_is_reported():
 def test_intensity_fallback_maps_to_the_same_class_names():
     bone_model = _model(_slab_volume(-1000.0, 900.0))
     assert bone_model.label_source == "intensity"
-    assert bone_model.features(_single_peak_params(900.0))["vis"]["skeleton"] > 0.0
+    assert bone_model.features(_peaks_at(900.0, ("skeleton",)))["vis"]["skeleton"] > 0.0
 
     lung_model = _model(_slab_volume(-1000.0, -800.0))
-    assert lung_model.features(_single_peak_params(-800.0))["vis"]["lungs"] > 0.0
+    assert lung_model.features(_peaks_at(-800.0, ("lungs",)))["vis"]["lungs"] > 0.0
 
 
 def test_intensity_fallback_leaves_muscle_and_vessels_empty():
     model = _model(_slab_volume(-1000.0, 900.0))
-    features = model.features(_single_peak_params(900.0))
+    features = model.features(_peaks_at(900.0, ("skeleton", "vessels")))
     assert features["vis"]["skeleton"] > 0.0
     assert features["vis"]["vessels"] == pytest.approx(0.0, abs=1e-6)
 
@@ -222,7 +236,7 @@ def test_visibility_classes_use_shared_anatomy_registry():
 
 def test_intensity_fallback_only_populates_sensible_classes():
     model = _model(_slab_volume(-1000.0, 50.0))
-    features = model.features(_single_peak_params(50.0))
+    features = model.features(_peaks_at(50.0, visibility.CLASSES))
     assert features["vis"]["soft"] > 0.0
     for name in ("heart", "vessels", "liver", "kidneys", "spleen"):
         assert features["vis"][name] == pytest.approx(0.0, abs=1e-6)
@@ -248,7 +262,7 @@ def test_features_report_hu_and_effective_layer_contributions_separately():
     labels = np.zeros(volume.shape, dtype=np.uint8)
     labels[:, : volume.shape[1] // 2, :] = visibility.CLASSES.index("liver") + 1
     model = _model(volume, labels=labels)
-    params = _single_peak_params(900.0)
+    params = _peaks_at(900.0, ("liver",))
 
     features = model.features(params, {"liver": {"opacity": 0.0}})
 
@@ -265,7 +279,7 @@ def test_layer_isolation_metrics_measure_target_and_cross_class_leakage():
     labels[:, volume.shape[1] // 2 :, :] = visibility.CLASSES.index("kidneys") + 1
     model = _model(volume, labels=labels)
 
-    metrics = model.layer_metrics(_single_peak_params(900.0), "liver")
+    metrics = model.layer_metrics(_peaks_at(900.0, ("liver", "kidneys")), "liver")
 
     assert metrics["target_contribution"] > 0.0
     assert metrics["isolation"] == pytest.approx(1.0)
@@ -419,3 +433,66 @@ def test_solo_max_still_finds_bone():
     model = _model(volume, labels=labels)
 
     assert model.solo_max("skeleton") > 0.1
+
+
+def _organ_pair_model(hu=50.0, n=24):
+    """Uniform soft-tissue HU split into a liver half and a kidneys half: the
+    two classes a 1D HU transfer function cannot tell apart."""
+    volume = np.full((n, n, n), hu, dtype=np.float32)
+    labels = np.zeros(volume.shape, dtype=np.uint8)
+    labels[:, :, : n // 2] = visibility.CLASSES.index("liver") + 1
+    labels[:, :, n // 2:] = visibility.CLASSES.index("kidneys") + 1
+    return _model(volume, labels=labels)
+
+
+def _only_peak(name, height=0.9):
+    params = default_params().copy()
+    for i in range(N_PEAKS):
+        params[i * PARAMS_PER_PEAK + 2] = -1.0
+    params[ANATOMICAL_PEAK_INDEX[name] * PARAMS_PER_PEAK + 2] = 2.0 * height - 1.0
+    return params
+
+
+def test_label_scoped_peak_only_lights_its_own_class():
+    model = _organ_pair_model()
+    vis = model.features(_only_peak("liver"))["vis"]
+    assert vis["liver"] > 0.1
+    assert vis["kidneys"] == pytest.approx(0.0, abs=1e-6)
+
+    vis = model.features(_only_peak("kidneys"))["vis"]
+    assert vis["kidneys"] > 0.1
+    assert vis["liver"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_global_transfer_mode_keeps_the_shared_hu_lookup():
+    model = _organ_pair_model()
+    vis = model.features(_only_peak("liver"), transfer_mode="global")["vis"]
+    assert vis["liver"] > 0.1
+    assert vis["kidneys"] > 0.1
+
+
+def test_unlabeled_voxels_ignore_organ_peaks():
+    n = 24
+    volume = np.full((n, n, n), 50.0, dtype=np.float32)
+    model = _model(volume, labels=np.zeros(volume.shape, dtype=np.uint8))
+    assert model.features(_only_peak("soft"))["vis"]["other"] > 0.1
+    for name in ("liver", "heart", "kidneys", "spleen"):
+        assert model.features(_only_peak(name))["vis"]["other"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_label_scoped_brightness_follows_own_peak_colour():
+    model = _organ_pair_model()
+    params = _only_peak("liver")
+    params[ANATOMICAL_PEAK_INDEX["kidneys"] * PARAMS_PER_PEAK + 2] = 0.8
+    liver = ANATOMICAL_PEAK_INDEX["liver"] * PARAMS_PER_PEAK
+    kidneys = ANATOMICAL_PEAK_INDEX["kidneys"] * PARAMS_PER_PEAK
+    params[liver + 3: liver + 6] = 1.0
+    params[kidneys + 3: kidneys + 6] = -0.8
+    bright = model.features(params)["bright"]
+    assert bright["liver"] > 0.9
+    assert bright["kidneys"] < 0.2
+
+
+def test_unknown_transfer_mode_is_rejected():
+    with pytest.raises(ValueError):
+        _organ_pair_model().features(_only_peak("liver"), transfer_mode="bogus")

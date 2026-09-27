@@ -1,7 +1,7 @@
 """48-float transfer-function vector <-> VTK objects, opacity_mass metric."""
 import numpy as np
 import vtk
-from anatomy import CANONICAL_PEAK_ORDER
+from anatomy import CANONICAL_CLASSES, CANONICAL_PEAK_ORDER
 
 N_PEAKS = len(CANONICAL_PEAK_ORDER)
 PARAMS_PER_PEAK = 6  # center, width, height, r, g, b
@@ -140,12 +140,13 @@ def default_params() -> np.ndarray:
     return anatomical_params()
 
 
-def _opacity_and_color_at(params: np.ndarray, hu: np.ndarray):
-    """Combined opacity (clipped [0,1]) and blended RGB at each HU sample."""
+def _opacity_and_color_at(params: np.ndarray, hu: np.ndarray, peaks=None):
+    """Combined opacity (clipped [0,1]) and blended RGB at each HU sample,
+    summed over `peaks` (default: every peak)."""
     total_opacity = np.zeros_like(hu, dtype=np.float64)
     weighted_rgb = np.zeros((hu.shape[0], 3), dtype=np.float64)
     weight_sum = np.full_like(hu, 1e-6, dtype=np.float64)
-    for i in range(N_PEAKS):
+    for i in (range(N_PEAKS) if peaks is None else peaks):
         p = peak_internal(params, i)
         gauss = np.exp(-0.5 * ((hu - p["center"]) / p["width"]) ** 2)
         contrib = p["height"] * gauss
@@ -157,6 +158,42 @@ def _opacity_and_color_at(params: np.ndarray, hu: np.ndarray):
     rgb = weighted_rgb / weight_sum[:, None]
     rgb = np.clip(rgb, 0.0, 1.0)
     return total_opacity, rgb
+
+
+# How a transfer function reaches labelled voxels. "label_scoped": a voxel
+# segmented as class c is shaded by c's own peak alone, so peaks that share a
+# Hounsfield range (soft 40, kidneys 45, heart 50, spleen 55, liver 65 HU) no
+# longer light each other's organs. Unlabelled voxels see only the peaks HU
+# alone can identify (UNLABELLED_PEAKS); letting them see the organ peaks too
+# meant raising "liver" also lit the unsegmented soft tissue in front of it.
+# On 60 validation episodes that version reached hill-climb median +0.293 and
+# treated 13 organ goals as reachable; this one +0.342 with 45.
+# "global": one shared HU lookup for every voxel, the pre-v9 behaviour.
+TRANSFER_MODES = ("label_scoped", "global")
+UNLABELLED_PEAKS = ("skeleton", "lungs", "soft")
+DEFAULT_TRANSFER_MODE = "label_scoped"
+
+
+def check_transfer_mode(mode: str) -> str:
+    if mode not in TRANSFER_MODES:
+        raise ValueError(f"unknown transfer mode: {mode!r}")
+    return mode
+
+
+def label_scoped_tables(params: np.ndarray, hu: np.ndarray, classes=CANONICAL_CLASSES,
+                        mode: str = DEFAULT_TRANSFER_MODE) -> list:
+    """(opacity, rgb) per label row: row 0 for unlabelled voxels, row i + 1
+    for `classes[i]`. "label_scoped": row 0 sums UNLABELLED_PEAKS, a class row
+    is that class's own peak. "global": every row sums every peak."""
+    check_transfer_mode(mode)
+    if mode == "global":
+        shared = _opacity_and_color_at(params, hu)
+        return [shared] * (len(classes) + 1)
+    unlabelled = tuple(ANATOMICAL_PEAK_INDEX[name] for name in UNLABELLED_PEAKS)
+    rows = [_opacity_and_color_at(params, hu, unlabelled)]
+    for name in classes:
+        rows.append(_opacity_and_color_at(params, hu, (ANATOMICAL_PEAK_INDEX[name],)))
+    return rows
 
 
 def opacity_mass(params: np.ndarray, hu_lo: float, hu_hi: float, n: int = 256) -> float:
