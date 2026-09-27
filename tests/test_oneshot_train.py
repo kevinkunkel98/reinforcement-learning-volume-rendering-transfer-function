@@ -330,7 +330,7 @@ def test_resolver_rejects_target_reward_for_v6():
 def test_resolver_rejects_unknown_policy_version():
     from rl.oneshot_env import resolve_policy_metadata
     with pytest.raises(ValueError, match="policy version"):
-        resolve_policy_metadata({"policy_version": "oneshot-v9",
+        resolve_policy_metadata({"policy_version": "oneshot-v99",
                                  "action_mode": "absolute", "reward_mode": "attainment"})
 
 

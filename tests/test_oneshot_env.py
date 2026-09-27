@@ -100,6 +100,43 @@ def test_v8_spaces_have_layer_aware_dimensions(monkeypatch):
     assert env.action_space.shape == (V8_ACTION_SIZE,)
 
 
+
+def test_v9_contract_records_the_label_scoped_transfer_mode():
+    metadata = observation_metadata("oneshot-v9", "residual", "target")
+
+    assert metadata["policy_version"] == "oneshot-v9"
+    assert metadata["observation_size"] == OBSERVATION_SIZE
+    assert metadata["action_size"] == ACTION_SIZE
+    assert metadata["transfer_mode"] == "label_scoped"
+    assert "anatomy_layers" not in metadata
+
+
+def test_v9_spaces_have_no_layer_dimensions(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v9", action_mode="residual", reward_mode="target")
+    obs, _ = env.reset(seed=0)
+
+    assert env.observation_space.shape == (OBSERVATION_SIZE,)
+    assert env.action_space.shape == (ACTION_SIZE,)
+    assert obs.shape == (OBSERVATION_SIZE,)
+    _, _, terminated, _, info = env.step(np.zeros(ACTION_SIZE))
+    assert terminated and info["policy_version"] == "oneshot-v9"
+
+
+def test_v9_requires_residual_target_contract(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    with pytest.raises(ValueError):
+        OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                   policy_version="oneshot-v9", action_mode="absolute", reward_mode="target")
+
+
+def test_v9_metadata_rejects_a_different_transfer_mode():
+    from rl.oneshot_env import resolve_policy_metadata
+    with pytest.raises(ValueError, match="transfer mode"):
+        resolve_policy_metadata({"policy_version": "oneshot-v9", "action_mode": "residual",
+                                 "reward_mode": "target", "transfer_mode": "global"})
+
 def test_observation_appends_log_solo_max_per_goal_class(monkeypatch):
     env = _make_env(monkeypatch, volume_ids=("fake_a",))
     obs, info = env.reset(seed=0)

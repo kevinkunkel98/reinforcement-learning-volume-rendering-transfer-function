@@ -177,18 +177,18 @@ def parse_args(argv=None):
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--eval-interval", type=int, default=10_000)
     parser.add_argument("--out", type=str, default=None)
-    parser.add_argument("--policy-version", choices=("oneshot-v6", "oneshot-v7", "oneshot-v8"), default="oneshot-v6")
+    parser.add_argument("--policy-version", choices=("oneshot-v6", "oneshot-v7", "oneshot-v8", "oneshot-v9"), default="oneshot-v6")
     parser.add_argument("--action-mode", choices=("absolute", "residual"), default=None)
     parser.add_argument("--hindsight-ratio", type=float, default=0.0)
     parser.add_argument("--balance-classes", action="store_true")
     parser.add_argument("--reward-mode", choices=("attainment", "target"), default="attainment")
     parser.add_argument("--short", action="store_true", help="use the short smoke experiment preset")
     args = parser.parse_args(argv)
-    if args.policy_version in ("oneshot-v7", "oneshot-v8") and args.action_mode is None:
+    if args.policy_version in ("oneshot-v7", "oneshot-v8", "oneshot-v9") and args.action_mode is None:
         parser.error(f"--action-mode is required for {args.policy_version}")
-    if args.policy_version in ("oneshot-v7", "oneshot-v8") and args.action_mode != "residual":
+    if args.policy_version in ("oneshot-v7", "oneshot-v8", "oneshot-v9") and args.action_mode != "residual":
         parser.error(f"{args.policy_version} requires --action-mode residual")
-    if args.policy_version in ("oneshot-v7", "oneshot-v8") and args.reward_mode != "target":
+    if args.policy_version in ("oneshot-v7", "oneshot-v8", "oneshot-v9") and args.reward_mode != "target":
         parser.error(f"{args.policy_version} requires --reward-mode target")
     if args.policy_version == "oneshot-v6" and args.action_mode == "residual":
         parser.error("oneshot-v6 requires --action-mode absolute")

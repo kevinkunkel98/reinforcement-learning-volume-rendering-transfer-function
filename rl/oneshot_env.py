@@ -23,6 +23,7 @@ import numpy as np
 from gymnasium import spaces
 
 import goals
+import transfer
 import visibility
 from anatomy import LAYOUT_VERSION
 from anatomy_layers import default_layers, normalize_layers
@@ -34,6 +35,12 @@ ACTION_SIZE = len(CONTROLLABLE)
 POLICY_VERSION = "oneshot-v6"
 V7_POLICY_VERSION = "oneshot-v7"
 V8_POLICY_VERSION = "oneshot-v8"
+# v9: v7's residual/target contract on the label-scoped transfer function
+# (transfer.DEFAULT_TRANSFER_MODE) -- each organ's peak shades only voxels
+# segmented as that organ, so no layer-opacity actions are needed.
+V9_POLICY_VERSION = "oneshot-v9"
+RESIDUAL_POLICY_VERSIONS = (V7_POLICY_VERSION, V8_POLICY_VERSION, V9_POLICY_VERSION)
+POLICY_VERSIONS = (POLICY_VERSION,) + RESIDUAL_POLICY_VERSIONS
 LAYER_NAMES = tuple(goals.GOAL_CLASSES)
 V8_OBSERVATION_SIZE = OBSERVATION_SIZE + len(LAYER_NAMES)
 V8_ACTION_SIZE = ACTION_SIZE + len(LAYER_NAMES)
@@ -86,8 +93,12 @@ def resolve_policy_metadata(metadata=None) -> dict:
               "reward_mode": "attainment"}
     if metadata:
         values.update({key: metadata[key] for key in values if key in metadata})
-    if values["policy_version"] not in (POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION):
+    if values["policy_version"] not in POLICY_VERSIONS:
         raise ValueError(f"unsupported policy version: {values['policy_version']}")
+    if values["policy_version"] == V9_POLICY_VERSION and metadata and \
+            metadata.get("transfer_mode", transfer.DEFAULT_TRANSFER_MODE) != transfer.DEFAULT_TRANSFER_MODE:
+        raise ValueError(f"oneshot-v9 checkpoint uses transfer mode {metadata['transfer_mode']!r}, "
+                         f"this build evaluates {transfer.DEFAULT_TRANSFER_MODE!r}")
     if values["policy_version"] == POLICY_VERSION and values["action_mode"] != "absolute":
         raise ValueError("v6 only supports absolute action mode")
     if values["policy_version"] == POLICY_VERSION and values["reward_mode"] != "attainment":
@@ -99,9 +110,9 @@ def resolve_policy_metadata(metadata=None) -> dict:
     if values["policy_version"] == V7_POLICY_VERSION and (
             values["action_mode"] != "residual" or values["reward_mode"] != "target"):
         raise ValueError("oneshot-v7 requires residual actions and target reward")
-    if values["policy_version"] == V8_POLICY_VERSION and (
+    if values["policy_version"] in (V8_POLICY_VERSION, V9_POLICY_VERSION) and (
             values["action_mode"] != "residual" or values["reward_mode"] != "target"):
-        raise ValueError("oneshot-v8 requires residual actions and target reward")
+        raise ValueError(f"{values['policy_version']} requires residual actions and target reward")
     return values
 
 
@@ -127,8 +138,10 @@ def observation_metadata(policy_version: str = POLICY_VERSION, action_mode: str 
         "goal_classes": list(goals.GOAL_CLASSES),
         "controllable_groups": len(CONTROLLABLE),
         **({"action_mode": action_mode, "reward_mode": reward_mode}
-           if policy_version in (V7_POLICY_VERSION, V8_POLICY_VERSION) else {}),
+           if policy_version in RESIDUAL_POLICY_VERSIONS else {}),
     }
+    if resolved["policy_version"] == V9_POLICY_VERSION:
+        metadata["transfer_mode"] = transfer.DEFAULT_TRANSFER_MODE
     if resolved["policy_version"] == V8_POLICY_VERSION:
         metadata["observation_size"] = V8_OBSERVATION_SIZE
         metadata["anatomy_layers"] = list(LAYER_NAMES)
@@ -185,17 +198,17 @@ class OneShotEnv(gym.Env):
             raise ValueError("volume_ids must not be empty")
         self.volume_ids = list(volume_ids)
         self._model_for_volume = model_for_volume
-        if policy_version not in (POLICY_VERSION, V7_POLICY_VERSION, V8_POLICY_VERSION):
+        if policy_version not in POLICY_VERSIONS:
             raise ValueError("unsupported one-shot policy version")
         if policy_version == POLICY_VERSION and action_mode != "absolute":
             raise ValueError("v6 only supports absolute action mode")
-        if policy_version in (V7_POLICY_VERSION, V8_POLICY_VERSION) and action_mode != "residual":
+        if policy_version in RESIDUAL_POLICY_VERSIONS and action_mode != "residual":
             raise ValueError(f"{policy_version} requires residual action mode")
         if action_mode not in ("absolute", "residual"):
             raise ValueError("action_mode must be absolute or residual")
         if reward_mode not in ("attainment", "target"):
             raise ValueError("reward_mode must be attainment or target")
-        if policy_version in (V7_POLICY_VERSION, V8_POLICY_VERSION) and reward_mode != "target":
+        if policy_version in RESIDUAL_POLICY_VERSIONS and reward_mode != "target":
             raise ValueError(f"{policy_version} requires target reward")
         if not 0.0 <= hindsight_ratio <= 1.0:
             raise ValueError("hindsight_ratio must be between 0 and 1")
@@ -302,7 +315,7 @@ class OneShotEnv(gym.Env):
         info = {"attainment": attainment, "kind": self._instruction["kind"],  # pyright: ignore[reportOptionalSubscript]
                 "volume": self._volume, "text": self._instruction["text"], "useless": useless,  # pyright: ignore[reportOptionalSubscript]
                 "goal_source": "hindsight" if self._hindsight_action is not None else "instruction"}
-        if self.policy_version == V7_POLICY_VERSION:
+        if self.policy_version in (V7_POLICY_VERSION, V9_POLICY_VERSION):
             info["policy_version"] = self.policy_version
         return info
 
