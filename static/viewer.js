@@ -359,6 +359,9 @@
   }
 
   function setCamera(value) {
+    // In XR the headset pose drives the view, and resetCamera() (used for
+    // legacy camera values) would also reset vtk.js's physical scale.
+    if (inXR()) return;
     if (!camera || !value) return;
     if (sameCameraRequest(value)) return;
     lastRequestedCamera = JSON.parse(JSON.stringify(value));
@@ -369,6 +372,55 @@
     if (appliedCameraState.focal_point) camera.setFocalPoint(...appliedCameraState.focal_point);
     if (appliedCameraState.view_up) camera.setViewUp(...appliedCameraState.view_up);
     if (appliedCameraState.zoom) camera.setParallelScale(cameraBaseScale / appliedCameraState.zoom);
+    renderWindow.render();
+  }
+
+  // Saved flat-viewer settings while an immersive session is running.
+  let xrSaved = null;
+
+  function inXR() {
+    return xrSaved !== null;
+  }
+
+  // Enters VR with a session the caller requested (it needs the click's user
+  // activation, and requesting it there makes rejection catchable -- vtk.js's
+  // own startXR() swallows it inside a promise).
+  async function enterXR(session) {
+    if (!openGLRenderWindow || !mapper || !volumeMetadata) throw new Error("no local volume loaded");
+    xrSaved = {
+      style: interactor.getInteractorStyle(),
+      sampleDistance: mapper.getSampleDistance(),
+      camera: fromRendererCamera(),
+      background: renderer.getBackground().slice(),
+    };
+    // vtk.js's trackball style binds the right trigger/trackpad to a camera
+    // "fly" in XR, which would fight push-to-talk; the base style has no 3D
+    // button handlers at all.
+    interactor.setInteractorStyle(vtk.Rendering.Core.vtkInteractorStyle.newInstance());
+    mapper.setSampleDistance(window.xrLogic.xrSampleDistance(volumeMetadata.spacing));
+    // Keep the orientation the user was looking at in the flat viewer.
+    camera.setPhysicalViewUp(...camera.getViewUp());
+    camera.setPhysicalViewNorth(...camera.getDirectionOfProjection());
+    try {
+      await openGLRenderWindow.enterXR(session);
+    } catch (error) {
+      await exitXR();
+      throw error;
+    }
+  }
+
+  async function exitXR() {
+    if (!xrSaved) return;
+    const saved = xrSaved;
+    await openGLRenderWindow.stopXR();
+    xrSaved = null;
+    interactor.setInteractorStyle(saved.style);
+    mapper.setSampleDistance(saved.sampleDistance);
+    renderer.setBackground(...saved.background);
+    camera.setPosition(...saved.camera.position);
+    camera.setFocalPoint(...saved.camera.focal_point);
+    camera.setViewUp(...saved.camera.view_up);
+    renderer.resetCameraClippingRange();
     renderWindow.render();
   }
 
@@ -472,5 +524,16 @@
     }
   }
 
-  window.volumeViewer = { load, setTransferFunction, setLabelAwareTransferFunction, getCamera, setCamera, render: () => renderWindow?.render(), get dataset() { return datasetName; }, get transferFunction() { return transferFunction; } };
+  window.volumeViewer = {
+    load, setTransferFunction, setLabelAwareTransferFunction, getCamera, setCamera,
+    // The XR frame loop renders on its own; a flat render() mid-session would
+    // draw into the XR-sized canvas for nothing.
+    render: () => { if (!inXR()) renderWindow?.render(); },
+    enterXR, exitXR, inXR,
+    getRenderer: () => renderer,
+    getVolumeBounds: () => volume?.getBounds(),
+    getCameraAxes: () => (camera ? { up: camera.getViewUp().slice(), dop: camera.getDirectionOfProjection().slice() } : null),
+    get dataset() { return datasetName; },
+    get transferFunction() { return transferFunction; },
+  };
 })();
