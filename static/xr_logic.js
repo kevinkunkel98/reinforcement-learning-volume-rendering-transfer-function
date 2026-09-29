@@ -144,8 +144,25 @@
     };
   }
 
+  // vtk.js 25's enterXR() does `new XRWebGLLayer(session, get3DContext())`,
+  // but get3DContext() returns the GL context wrapped in a state-caching
+  // Proxy, which the browser's WebIDL check rejects. While `task` runs,
+  // swap in a constructor that substitutes the raw context; only the layer
+  // sees it, so vtk's cached GL state stays in sync.
+  async function withXRLayerContext(root, context, task) {
+    const NativeLayer = root.XRWebGLLayer;
+    root.XRWebGLLayer = function XRWebGLLayer(session, _proxied, init) {
+      return new NativeLayer(session, context, init);
+    };
+    try {
+      return await task();
+    } finally {
+      root.XRWebGLLayer = NativeLayer;
+    }
+  }
+
   return {
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
-    summarizeStep, hudPlacement,
+    summarizeStep, hudPlacement, withXRLayerContext,
   };
 });

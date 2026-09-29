@@ -657,6 +657,7 @@ window.appControls = {
   stopRecording,
   back: () => navigate("/api/back"),
   forward: () => navigate("/api/forward"),
+  notify: (message) => showToast(message, "destructive"),
 };
 
 // ---------- toolbar: toggle groups + single toggle ----------
@@ -776,13 +777,27 @@ function stopWaveform() {
   waveformBars.forEach((bar) => { bar.style.height = "4px"; });
 }
 
+// getUserMedia can take a noticeable moment (especially on a headset); a
+// push-to-talk release during that window must cancel the recording rather
+// than be dropped and leave the mic open.
+let micStarting = false;
+let stopRequested = false;
+
 async function startRecording() {
-  if (mediaRecorder && mediaRecorder.state === "recording") return;
+  if (micStarting || (mediaRecorder && mediaRecorder.state === "recording")) return;
+  micStarting = true;
+  stopRequested = false;
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
     showToast("Microphone access denied or unavailable", "destructive");
+    return;
+  } finally {
+    micStarting = false;
+  }
+  if (stopRequested) {
+    stream.getTracks().forEach((t) => t.stop());
     return;
   }
   mediaRecorder = new MediaRecorder(stream);
@@ -828,6 +843,7 @@ async function startRecording() {
 
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.stop();
+  else if (micStarting) stopRequested = true;
 }
 
 micBtn.addEventListener("click", () => {

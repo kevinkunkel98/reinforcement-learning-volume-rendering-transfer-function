@@ -15,15 +15,20 @@
   let busy = false;
   let hud = null; // { canvas, ctx, texture, actor }
   let flatBackground = null;
-  const mapper = logic.createControllerMapper({
-    startRecording: () => {
-      if (!hudState.voice) return pulseAll(0.6, 60, 2);
-      window.appControls.startRecording();
-    },
-    stopRecording: () => window.appControls.stopRecording(),
-    back: () => window.appControls.back(),
-    forward: () => window.appControls.forward(),
-  });
+  let entering = false;
+  let mapper = null; // fresh per session, so a trigger held at exit can't carry over
+
+  function createMapper() {
+    return logic.createControllerMapper({
+      startRecording: () => {
+        if (!hudState.voice) return pulseAll(0.6, 60, 2);
+        window.appControls.startRecording();
+      },
+      stopRecording: () => window.appControls.stopRecording(),
+      back: () => window.appControls.back(),
+      forward: () => window.appControls.forward(),
+    });
+  }
 
   // ---------- haptics ----------
 
@@ -152,9 +157,14 @@
   async function onSessionEnd() {
     if (hudState.status === "recording") window.appControls.stopRecording();
     session = null;
+    mapper = null;
     removeHud();
-    await window.volumeViewer.exitXR();
     button.textContent = "Enter VR";
+    try {
+      await window.volumeViewer.exitXR();
+    } catch (err) {
+      window.appControls.notify(`Leaving VR failed: ${err.message}`);
+    }
   }
 
   async function micAvailable() {
@@ -168,6 +178,17 @@
   }
 
   async function enter() {
+    entering = true;
+    button.disabled = true;
+    try {
+      await startSession();
+    } finally {
+      entering = false;
+      button.disabled = false;
+    }
+  }
+
+  async function startSession() {
     // The mic prompt cannot be shown inside an immersive session: ask first.
     const voice = await micAvailable();
     let xrSession;
@@ -175,18 +196,29 @@
       xrSession = await navigator.xr.requestSession("immersive-vr");
     } catch (err) {
       // A slow permission prompt can use up the click's user activation.
-      showMessage(`Could not start VR (${err.name}). Tap Enter VR again.`);
+      window.appControls.notify(`Could not start VR (${err.name}). Tap Enter VR again.`);
       return;
     }
+    // The session can end (system button, headset taken off) while vtk.js is
+    // still setting up; listen from the start so that isn't missed.
+    let endedEarly = false;
+    const markEnded = () => { endedEarly = true; };
+    xrSession.addEventListener("end", markEnded, { once: true });
     try {
       await window.volumeViewer.enterXR(xrSession);
     } catch (err) {
       xrSession.end().catch(() => {});
-      showMessage(`Could not start VR: ${err.message}`);
+      window.appControls.notify(`Could not start VR: ${err.message}`);
+      return;
+    }
+    xrSession.removeEventListener("end", markEnded);
+    if (endedEarly) {
+      await window.volumeViewer.exitXR();
       return;
     }
     session = xrSession;
     session.addEventListener("end", onSessionEnd, { once: true });
+    mapper = createMapper();
     flatBackground = window.volumeViewer.getRenderer().getBackground().slice();
     hudState = logic.HUD_INITIAL;
     if (!voice) hudState = logic.hudReduce(hudState, { type: "voice-unavailable" });
@@ -195,15 +227,10 @@
     session.requestAnimationFrame(onXRFrame);
   }
 
-  function showMessage(text) {
-    const errorEl = document.getElementById("viewer-error");
-    errorEl.textContent = text;
-    errorEl.hidden = false;
-    setTimeout(() => { errorEl.hidden = true; }, 6000);
-  }
-
   button.addEventListener("click", () => {
-    if (session) session.end();
+    if (entering) return;
+    // end() rejects if the session already died without an "end" event.
+    if (session) session.end().catch(() => onSessionEnd());
     else enter();
   });
 

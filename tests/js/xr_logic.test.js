@@ -168,3 +168,35 @@ test("hudPlacement puts a viewer-facing panel above the volume", () => {
   close(p.point1, [width / 2, r * 1.05, r * 0.5]);
   close(p.point2, [-width / 2, r * 1.05 + height, r * 0.5]);
 });
+
+// vtk.js 25 passes its Proxy-wrapped GL context to `new XRWebGLLayer(...)`,
+// which browsers reject ("parameter 2 is not of type WebGLRenderingContext").
+function fakeRoot() {
+  const created = [];
+  class NativeLayer {
+    constructor(session, context, init) {
+      created.push({ session, context, init });
+      this.native = true;
+    }
+  }
+  return { root: { XRWebGLLayer: NativeLayer }, NativeLayer, created };
+}
+
+test("withXRLayerContext hands XRWebGLLayer the raw context", async () => {
+  const { root, NativeLayer, created } = fakeRoot();
+  const raw = { raw: true };
+  const proxied = { proxied: true };
+  const layer = await xr.withXRLayerContext(root, raw, async () =>
+    new root.XRWebGLLayer("session", proxied, { antialias: false }));
+  assert.deepEqual(created, [{ session: "session", context: raw, init: { antialias: false } }]);
+  assert.ok(layer instanceof NativeLayer);
+  assert.equal(root.XRWebGLLayer, NativeLayer);
+});
+
+test("withXRLayerContext restores XRWebGLLayer when the task throws", async () => {
+  const { root, NativeLayer } = fakeRoot();
+  await assert.rejects(
+    xr.withXRLayerContext(root, {}, async () => { throw new Error("boom"); }),
+    /boom/);
+  assert.equal(root.XRWebGLLayer, NativeLayer);
+});

@@ -283,7 +283,9 @@
     transferFunction = params.slice();
     volume.getProperty().setRGBTransferFunction(0, color);
     volume.getProperty().setScalarOpacity(0, opacity);
-    renderWindow.render();
+    // In XR, vtk.js's frame loop picks the new function up on its next frame;
+    // a render() here would ray-march into the bound XR framebuffer for nothing.
+    if (!inXR()) renderWindow.render();
   }
 
   function applyLabelInterpolation() {
@@ -402,7 +404,18 @@
     camera.setPhysicalViewUp(...camera.getViewUp());
     camera.setPhysicalViewNorth(...camera.getDirectionOfProjection());
     try {
-      await openGLRenderWindow.enterXR(session);
+      // vtk.js requests the reference space without awaiting it, and its
+      // frame loop calls frame.getPose(grip, space) before re-arming -- a
+      // null (first entry) or stale (re-entry) space throws there and stops
+      // rendering for good. Resolve it up front; set() with noWarning writes
+      // the model field, which has no setter.
+      const space = await session.requestReferenceSpace("local");
+      openGLRenderWindow.set({ xrReferenceSpace: space }, true);
+      // getContext() on the same canvas returns the existing (unproxied) context.
+      const rawContext = openGLRenderWindow.getCanvas()
+        .getContext(openGLRenderWindow.getWebgl2() ? "webgl2" : "webgl");
+      await window.xrLogic.withXRLayerContext(window, rawContext,
+        () => openGLRenderWindow.enterXR(session));
     } catch (error) {
       await exitXR();
       throw error;
@@ -412,16 +425,22 @@
   async function exitXR() {
     if (!xrSaved) return;
     const saved = xrSaved;
-    await openGLRenderWindow.stopXR();
-    xrSaved = null;
-    interactor.setInteractorStyle(saved.style);
-    mapper.setSampleDistance(saved.sampleDistance);
-    renderer.setBackground(...saved.background);
-    camera.setPosition(...saved.camera.position);
-    camera.setFocalPoint(...saved.camera.focal_point);
-    camera.setViewUp(...saved.camera.view_up);
-    renderer.resetCameraClippingRange();
-    renderWindow.render();
+    try {
+      await openGLRenderWindow.stopXR();
+    } finally {
+      // Restore the flat viewer even if stopXR() fails (e.g. context lost),
+      // or inXR() would suppress flat rendering until a reload.
+      openGLRenderWindow.set({ xrReferenceSpace: null }, true);
+      xrSaved = null;
+      interactor.setInteractorStyle(saved.style);
+      mapper.setSampleDistance(saved.sampleDistance);
+      renderer.setBackground(...saved.background);
+      camera.setPosition(...saved.camera.position);
+      camera.setFocalPoint(...saved.camera.focal_point);
+      camera.setViewUp(...saved.camera.view_up);
+      renderer.resetCameraClippingRange();
+      renderWindow.render();
+    }
   }
 
   async function load(name, params, cameraState, layers = {}, availability = null) {
