@@ -324,6 +324,9 @@ select:focus-visible {
 #viewer-error[hidden],
 #current-image[hidden] { display: none; }
 
+/* .btn's display: inline-flex would otherwise override the hidden attribute. */
+#enter-vr-btn[hidden] { display: none; }
+
 #current-image {
   max-width: 100%;
   max-height: 78vh;
