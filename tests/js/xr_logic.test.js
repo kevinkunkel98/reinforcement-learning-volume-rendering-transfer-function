@@ -200,3 +200,22 @@ test("withXRLayerContext restores XRWebGLLayer when the task throws", async () =
     /boom/);
   assert.equal(root.XRWebGLLayer, NativeLayer);
 });
+
+// vtk.js maps world -> physical (metres) as R((w + translation) / scale), with
+// R taking the camera's physicalViewNorth to the viewer's forward direction.
+test("xrPlacement puts the volume centre at the given distance along north", () => {
+  const bounds = [0, 390, 0, 390, 0, 347.5];
+  const north = [0, 1, 0];
+  const { scale, translation } = xr.xrPlacement(bounds, north, 0.3, 0.9);
+  const radius = Math.hypot(390, 390, 347.5) / 2;
+  assert.ok(Math.abs(scale - radius / 0.3) < 1e-9);
+  const center = [195, 195, 173.75];
+  const physical = center.map((c, i) => (c + translation[i]) / scale);
+  [0, 0.9, 0].forEach((v, i) => assert.ok(Math.abs(physical[i] - v) < 1e-9, `${physical}`));
+});
+
+test("xrPlacement normalizes north", () => {
+  const a = xr.xrPlacement([-1, 1, -1, 1, -1, 1], [0, 0, -2], 0.5, 1);
+  const b = xr.xrPlacement([-1, 1, -1, 1, -1, 1], [0, 0, -1], 0.5, 1);
+  assert.deepEqual(a, b);
+});

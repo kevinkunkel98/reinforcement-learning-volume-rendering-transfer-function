@@ -144,6 +144,23 @@
     };
   }
 
+  // Camera physicalScale/physicalTranslation that show the volume with a
+  // bounding-sphere radius of `radiusM` metres, centred `distanceM` metres
+  // along `north` (the viewer's forward). vtk.js maps world -> physical as
+  // R((w + translation) / scale). Its own resetXRScene() default makes the
+  // radius 1 m at 0.7 m -- the viewer starts inside the volume -- and pushes
+  // along world z regardless of which way the view faces.
+  function xrPlacement(bounds, north, radiusM, distanceM) {
+    const center = [0, 2, 4].map((i) => (bounds[i] + bounds[i + 1]) / 2);
+    const radius = Math.hypot(...[0, 2, 4].map((i) => bounds[i + 1] - bounds[i])) / 2;
+    const scale = radius / radiusM;
+    const n = normalize(north);
+    return {
+      scale,
+      translation: center.map((c, i) => -c + n[i] * distanceM * scale),
+    };
+  }
+
   // vtk.js 25's enterXR() does `new XRWebGLLayer(session, get3DContext())`,
   // but get3DContext() returns the GL context wrapped in a state-caching
   // Proxy, which the browser's WebIDL check rejects. While `task` runs,
@@ -163,6 +180,6 @@
 
   return {
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
-    summarizeStep, hudPlacement, withXRLayerContext,
+    summarizeStep, hudPlacement, withXRLayerContext, xrPlacement,
   };
 });

@@ -379,6 +379,10 @@
 
   // Saved flat-viewer settings while an immersive session is running.
   let xrSaved = null;
+  // Bounding-sphere radius and distance of the volume in VR, in metres. A
+  // ~39 cm-wide chest CT has a ~33 cm bounding radius, so this is about life-size.
+  const XR_RADIUS_M = 0.3;
+  const XR_DISTANCE_M = 0.9;
 
   function inXR() {
     return xrSaved !== null;
@@ -416,6 +420,13 @@
         .getContext(openGLRenderWindow.getWebgl2() ? "webgl2" : "webgl");
       await window.xrLogic.withXRLayerContext(window, rawContext,
         () => openGLRenderWindow.enterXR(session));
+      // Replace vtk's resetXRScene() placement (viewer inside a 1 m-radius
+      // volume): life-size-ish, in front along the direction the flat view faced.
+      const place = window.xrLogic.xrPlacement(volume.getBounds(), camera.getPhysicalViewNorth(),
+        XR_RADIUS_M, XR_DISTANCE_M);
+      camera.setPhysicalScale(place.scale);
+      camera.setPhysicalTranslation(...place.translation);
+      camera.setClippingRange(0.1 * place.scale, 100 * place.scale);
     } catch (error) {
       await exitXR();
       throw error;
@@ -551,7 +562,14 @@
     enterXR, exitXR, inXR,
     getRenderer: () => renderer,
     getVolumeBounds: () => volume?.getBounds(),
-    getCameraAxes: () => (camera ? { up: camera.getViewUp().slice(), dop: camera.getDirectionOfProjection().slice() } : null),
+    // In XR the camera's own axes follow the head every frame; the physical
+    // up/north are the fixed room axes the volume was placed along.
+    getCameraAxes: () => {
+      if (!camera) return null;
+      return inXR()
+        ? { up: camera.getPhysicalViewUp().slice(), dop: camera.getPhysicalViewNorth().slice() }
+        : { up: camera.getViewUp().slice(), dop: camera.getDirectionOfProjection().slice() };
+    },
     get dataset() { return datasetName; },
     get transferFunction() { return transferFunction; },
   };

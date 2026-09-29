@@ -16,6 +16,9 @@
   let hud = null; // { canvas, ctx, texture, actor }
   let flatBackground = null;
   let entering = false;
+  let fps = null;
+  let frames = 0;
+  let fpsSince = null;
   let mapper = null; // fresh per session, so a trigger held at exit can't carry over
 
   function createMapper() {
@@ -76,6 +79,11 @@
     ctx.fillStyle = "#71717a";
     ctx.font = "34px system-ui, sans-serif";
     ctx.fillText(wrapLine(ctx, footer, max), pad, 300);
+    if (fps !== null) {
+      ctx.textAlign = "right";
+      ctx.fillText(`${fps} fps`, HUD_W - pad, 300);
+      ctx.textAlign = "left";
+    }
     hud.texture.modified();
   }
 
@@ -146,6 +154,16 @@
   function onXRFrame(time, frame) {
     if (!session) return;
     session.requestAnimationFrame(onXRFrame);
+    // Frame rate on the panel, refreshed once a second (a redraw re-uploads
+    // the panel texture, so not every frame).
+    frames += 1;
+    if (fpsSince === null) fpsSince = time;
+    if (time - fpsSince >= 1000) {
+      fps = Math.round((frames * 1000) / (time - fpsSince));
+      frames = 0;
+      fpsSince = time;
+      drawHud();
+    }
     const sources = [];
     for (const source of frame.session.inputSources) {
       if (!source.gamepad) continue;
@@ -219,6 +237,9 @@
     session = xrSession;
     session.addEventListener("end", onSessionEnd, { once: true });
     mapper = createMapper();
+    fps = null;
+    frames = 0;
+    fpsSince = null;
     flatBackground = window.volumeViewer.getRenderer().getBackground().slice();
     hudState = logic.HUD_INITIAL;
     if (!voice) hudState = logic.hudReduce(hudState, { type: "voice-unavailable" });
