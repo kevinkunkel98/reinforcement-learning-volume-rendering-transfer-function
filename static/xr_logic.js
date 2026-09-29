@@ -165,11 +165,13 @@
   // but get3DContext() returns the GL context wrapped in a state-caching
   // Proxy, which the browser's WebIDL check rejects. While `task` runs,
   // swap in a constructor that substitutes the raw context; only the layer
-  // sees it, so vtk's cached GL state stays in sync.
-  async function withXRLayerContext(root, context, task) {
+  // sees it, so vtk's cached GL state stays in sync. `initOverrides` are
+  // merged into the layer's init dict (vtk passes none), e.g. a lower
+  // framebufferScaleFactor.
+  async function withXRLayerContext(root, context, task, initOverrides = {}) {
     const NativeLayer = root.XRWebGLLayer;
     root.XRWebGLLayer = function XRWebGLLayer(session, _proxied, init) {
-      return new NativeLayer(session, context, init);
+      return new NativeLayer(session, context, { ...init, ...initOverrides });
     };
     try {
       return await task();

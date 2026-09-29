@@ -219,3 +219,11 @@ test("xrPlacement normalizes north", () => {
   const b = xr.xrPlacement([-1, 1, -1, 1, -1, 1], [0, 0, -1], 0.5, 1);
   assert.deepEqual(a, b);
 });
+
+test("withXRLayerContext merges layer init overrides over vtk's init", async () => {
+  const { root, created } = fakeRoot();
+  await xr.withXRLayerContext(root, {}, async () =>
+    new root.XRWebGLLayer("s", {}, { antialias: true, framebufferScaleFactor: 1 }),
+  { framebufferScaleFactor: 0.5 });
+  assert.deepEqual(created[0].init, { antialias: true, framebufferScaleFactor: 0.5 });
+});

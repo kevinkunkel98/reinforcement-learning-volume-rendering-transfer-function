@@ -383,6 +383,10 @@
   // ~39 cm-wide chest CT has a ~33 cm bounding radius, so this is about life-size.
   const XR_RADIUS_M = 0.3;
   const XR_DISTANCE_M = 0.9;
+  // Per-eye render resolution relative to the headset's default. Ray-march
+  // cost scales with pixel count, so 0.5 renders a quarter of the pixels.
+  // Tunable on the device with ?xrscale=0.35 etc.
+  const XR_FRAMEBUFFER_SCALE = Number(new URLSearchParams(window.location.search).get("xrscale")) || 0.5;
 
   function inXR() {
     return xrSaved !== null;
@@ -419,7 +423,8 @@
       const rawContext = openGLRenderWindow.getCanvas()
         .getContext(openGLRenderWindow.getWebgl2() ? "webgl2" : "webgl");
       await window.xrLogic.withXRLayerContext(window, rawContext,
-        () => openGLRenderWindow.enterXR(session));
+        () => openGLRenderWindow.enterXR(session),
+        { framebufferScaleFactor: XR_FRAMEBUFFER_SCALE });
       // Replace vtk's resetXRScene() placement (viewer inside a 1 m-radius
       // volume): life-size-ish, in front along the direction the flat view faced.
       const place = window.xrLogic.xrPlacement(volume.getBounds(), camera.getPhysicalViewNorth(),
