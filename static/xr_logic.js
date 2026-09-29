@@ -47,5 +47,72 @@
     };
   }
 
-  return { xrSampleDistance, createControllerMapper };
+  const HUD_INITIAL = Object.freeze({
+    status: "idle", // idle | recording | transcribing | applying | error
+    voice: true,
+    transcript: "",
+    summary: "",
+    dataset: "",
+    error: "",
+  });
+
+  // Folds app/xr events into what the VR status panel shows. Returns the same
+  // object for events it ignores so callers can skip redraws cheaply.
+  function hudReduce(state, event) {
+    switch (event.type) {
+      case "recording":
+        return event.active
+          ? { ...state, status: "recording", error: "" }
+          : state;
+      case "transcribing":
+        return { ...state, status: "transcribing" };
+      case "transcript":
+        return { ...state, status: "applying", transcript: event.text };
+      case "busy":
+        if (event.busy) {
+          return state.status === "idle" ? { ...state, status: "applying" } : state;
+        }
+        return state.status === "applying" || state.status === "transcribing"
+          ? { ...state, status: "idle" }
+          : state;
+      case "applied":
+        return { ...state, summary: event.summary, dataset: event.dataset || state.dataset };
+      case "error":
+        return { ...state, status: "error", error: event.message };
+      case "voice-unavailable":
+        return { ...state, voice: false };
+      default:
+        return state;
+    }
+  }
+
+  function hudLines(state) {
+    const idle = state.voice ? "Hold trigger to talk" : "Voice unavailable — A/X back · B/Y forward";
+    const head = {
+      idle,
+      recording: "● Recording…",
+      transcribing: "Transcribing…",
+      applying: "Applying…",
+      error: `⚠ ${state.error}`,
+    }[state.status];
+    const footer = [state.dataset, "A/X back · B/Y forward"].filter(Boolean).join(" · ");
+    return [head, state.transcript ? `“${state.transcript}”` : "", state.summary, footer];
+  }
+
+  // One-line version of app.js's appendReply, for the VR panel.
+  function summarizeStep(step, before, classOrder, classLabel, methodSaid) {
+    const parts = [methodSaid[step.mode] || methodSaid.exact];
+    if (step.message) parts.push(step.message);
+    const now = step.class_visibility || {};
+    const moved = classOrder.filter((c) => before && before[c] != null && now[c] != null
+      && Math.abs(now[c] - before[c]) >= 0.0001);
+    if (moved.length) {
+      parts.push(moved.map((c) => `${classLabel[c]} ${(before[c] * 100).toFixed(1)}→${(now[c] * 100).toFixed(1)}%`).join(", "));
+    } else if (!step.message) {
+      parts.push("nothing moved measurably");
+    }
+    return parts.join(" · ");
+  }
+
+  return { xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines, summarizeStep };
 });

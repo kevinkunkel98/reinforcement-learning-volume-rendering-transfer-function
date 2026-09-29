@@ -78,3 +78,80 @@ test("short button arrays are treated as unpressed", () => {
   mapper.update([{ handedness: "right", pressed: [false] }], false);
   assert.deepEqual(calls, ["start", "stop"]);
 });
+
+function run(events) {
+  return events.reduce((s, e) => xr.hudReduce(s, e), xr.HUD_INITIAL);
+}
+
+test("hud walks through a voice command", () => {
+  let s = run([{ type: "recording", active: true }]);
+  assert.equal(xr.hudLines(s)[0], "● Recording…");
+  s = run([
+    { type: "recording", active: true },
+    { type: "recording", active: false },
+    { type: "transcribing" },
+    { type: "busy", busy: true },
+  ]);
+  assert.equal(xr.hudLines(s)[0], "Transcribing…");
+  s = xr.hudReduce(s, { type: "transcript", text: "show the lungs" });
+  assert.equal(xr.hudLines(s)[0], "Applying…");
+  assert.equal(xr.hudLines(s)[1], "“show the lungs”");
+  s = xr.hudReduce(s, { type: "applied", summary: "the policy answered", dataset: "ct_chest" });
+  s = xr.hudReduce(s, { type: "busy", busy: false });
+  assert.deepEqual(xr.hudLines(s), [
+    "Hold trigger to talk",
+    "“show the lungs”",
+    "the policy answered",
+    "ct_chest · A/X back · B/Y forward",
+  ]);
+});
+
+test("errors stick until the next recording", () => {
+  let s = run([{ type: "error", message: "Could not parse that" }, { type: "busy", busy: false }]);
+  assert.equal(xr.hudLines(s)[0], "⚠ Could not parse that");
+  s = xr.hudReduce(s, { type: "recording", active: true });
+  assert.equal(xr.hudLines(s)[0], "● Recording…");
+});
+
+test("busy from back/forward shows applying, then idle", () => {
+  let s = run([{ type: "busy", busy: true }]);
+  assert.equal(xr.hudLines(s)[0], "Applying…");
+  s = xr.hudReduce(s, { type: "busy", busy: false });
+  assert.equal(xr.hudLines(s)[0], "Hold trigger to talk");
+});
+
+test("voice unavailable replaces the idle prompt", () => {
+  const s = run([{ type: "voice-unavailable" }]);
+  assert.equal(xr.hudLines(s)[0], "Voice unavailable — A/X back · B/Y forward");
+});
+
+test("hudReduce ignores unknown events and never mutates", () => {
+  const before = xr.HUD_INITIAL;
+  const after = xr.hudReduce(before, { type: "nope" });
+  assert.equal(after, before);
+  xr.hudReduce(before, { type: "recording", active: true });
+  assert.equal(before.status, "idle");
+});
+
+const CLASSES = ["lungs", "skeleton"];
+const LABELS = { lungs: "Lungs", skeleton: "Skeleton" };
+const SAID = { policy: "the policy answered", exact: "applied directly" };
+
+test("summarizeStep lists classes that moved", () => {
+  const text = xr.summarizeStep(
+    { mode: "policy", class_visibility: { lungs: 0.5, skeleton: 0.2 } },
+    { lungs: 0.1, skeleton: 0.2 }, CLASSES, LABELS, SAID);
+  assert.equal(text, "the policy answered · Lungs 10.0→50.0%");
+});
+
+test("summarizeStep keeps the server message and falls back to exact", () => {
+  const text = xr.summarizeStep(
+    { mode: "weird", message: "no match", class_visibility: {} }, null, CLASSES, LABELS, SAID);
+  assert.equal(text, "applied directly · no match");
+});
+
+test("summarizeStep says when nothing moved", () => {
+  const text = xr.summarizeStep(
+    { mode: "exact", class_visibility: { lungs: 0.1 } }, { lungs: 0.1 }, CLASSES, LABELS, SAID);
+  assert.equal(text, "applied directly · nothing moved measurably");
+});
