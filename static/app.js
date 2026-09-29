@@ -115,11 +115,19 @@ const sendBtn = el("send-btn");
 const loadingOverlay = el("loading-overlay");
 let loadingCount = 0;
 
+// Status events for listeners outside this file (static/xr.js's VR panel,
+// which cannot see toasts or the chat thread while in an immersive session).
+function emitAppEvent(type, detail = {}) {
+  window.dispatchEvent(new CustomEvent(`app:${type}`, { detail }));
+}
+
 function setLoading(loading) {
+  const wasActive = loadingCount > 0;
   loadingCount = Math.max(0, loadingCount + (loading ? 1 : -1));
   const active = loadingCount > 0;
   loadingOverlay.hidden = !active;
   loadingOverlay.setAttribute("aria-busy", String(active));
+  if (active !== wasActive) emitAppEvent("busy", { busy: active });
 }
 
 async function withLoading(task) {
@@ -588,6 +596,10 @@ async function sendCommandImpl(text) {
   await postSceneTransition(data);
   appendMessage(data.current);
   appendReply(data.current, before);
+  emitAppEvent("applied", {
+    summary: window.xrLogic.summarizeStep(data.current, before, CLASS_ORDER, CLASS_LABEL, METHOD_SAID),
+    dataset: state.dataset,
+  });
 }
 
 function autoResize() {
@@ -629,11 +641,23 @@ async function navigateImpl(path) {
     carried_forward: true,
     parent_step_id: previous?.current?.id ?? null,
   });
+  emitAppEvent("applied", {
+    summary: path.endsWith("/back") ? "stepped back" : "stepped forward",
+    dataset: state.dataset,
+  });
 }
 
 el("back-btn").addEventListener("click", () => navigate("/api/back"));
 el("forward-btn").addEventListener("click", () => navigate("/api/forward"));
 el("reset-btn").addEventListener("click", () => sendCommand("reset"));
+
+// Driven by controller buttons in static/xr.js.
+window.appControls = {
+  startRecording,
+  stopRecording,
+  back: () => navigate("/api/back"),
+  forward: () => navigate("/api/forward"),
+};
 
 // ---------- toolbar: toggle groups + single toggle ----------
 
@@ -770,17 +794,26 @@ async function startRecording() {
     micIcon.style.display = "";
     stopWaveform();
     stream.getTracks().forEach((t) => t.stop());
+    emitAppEvent("recording", { active: false });
 
     const blob = new Blob(chunks, { type: "audio/webm" });
     const form = new FormData();
     form.append("audio", blob, "clip.webm");
     micBtn.disabled = true;
+    emitAppEvent("transcribing");
     try {
       await withLoading(async () => {
         const r = await fetch("/api/transcribe", { method: "POST", body: form });
         const data = await r.json();
-        if (data.text) sendCommand(data.text);
+        if (data.text) {
+          emitAppEvent("transcript", { text: data.text });
+          await sendCommand(data.text);
+        } else {
+          emitAppEvent("error", { message: "No speech recognised" });
+        }
       });
+    } catch (err) {
+      showToast(`Voice command failed: ${err.message}`, "destructive");
     } finally {
       micBtn.disabled = false;
     }
@@ -790,6 +823,7 @@ async function startRecording() {
   micIcon.style.display = "none";
   micWaveform.hidden = false;
   startWaveform(stream);
+  emitAppEvent("recording", { active: true });
 }
 
 function stopRecording() {
@@ -1057,6 +1091,7 @@ const toastViewport = el("toast-viewport");
 const TOAST_DURATION_MS = 5000;
 
 function showToast(message, variant = "default") {
+  if (variant === "destructive") emitAppEvent("error", { message });
   const toast = document.createElement("div");
   toast.className = `toast toast-${variant}`;
   toast.setAttribute("role", variant === "destructive" ? "alert" : "status");
