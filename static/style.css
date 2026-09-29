@@ -253,7 +253,11 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* Centred with auto margins (below), not justify-content: center, which
+     pushes overflowing content above the scroll origin where it can't be
+     scrolled to -- on short windows (e.g. a headset browser) the viewer's
+     top was cut off under the app bar. */
+  justify-content: flex-start;
   background: hsl(var(--background));
   padding: 18px;
   gap: 14px;
@@ -263,6 +267,11 @@ select:focus-visible {
   overflow-y: auto;
   overflow-x: hidden;
 }
+
+/* Auto margins centre the content when it fits and collapse to 0 when it
+   overflows, so the top always stays reachable. */
+#image-panel > :first-child { margin-top: auto; }
+#image-panel > :last-child { margin-bottom: auto; }
 
 #viewport {
   display: flex;
