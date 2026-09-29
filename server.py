@@ -1151,7 +1151,13 @@ if __name__ == "__main__":
                      help="a real CT/MRI dataset name (see datasets.DATASETS), or 'synthetic' "
                           "-- already applied above; listed here only for --help")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--host", default="127.0.0.1",
+                     help="0.0.0.0 to reach the UI from another device on the LAN (e.g. a headset)")
+    # Mic capture and WebXR need a secure context, which off-localhost means HTTPS.
+    ap.add_argument("--ssl-certfile", help="TLS certificate (e.g. from mkcert) to serve over HTTPS")
+    ap.add_argument("--ssl-keyfile", help="TLS private key matching --ssl-certfile")
     args = ap.parse_args()
 
     print(f"[server] dataset: {_dataset_name}")
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port,
+                ssl_certfile=args.ssl_certfile, ssl_keyfile=args.ssl_keyfile)
