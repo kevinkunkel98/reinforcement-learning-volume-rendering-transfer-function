@@ -155,3 +155,16 @@ test("summarizeStep says when nothing moved", () => {
     { mode: "exact", class_visibility: { lungs: 0.1 } }, { lungs: 0.1 }, CLASSES, LABELS, SAID);
   assert.equal(text, "applied directly · nothing moved measurably");
 });
+
+test("hudPlacement puts a viewer-facing panel above the volume", () => {
+  // Unit cube-ish volume centred at origin, looking down -z with +y up.
+  const p = xr.hudPlacement([-1, 1, -1, 1, -1, 1], [0, 1, 0], [0, 0, -1], 1024 / 384);
+  const r = Math.sqrt(3);
+  const width = 2 * r * 0.8;
+  const height = width * 384 / 1024;
+  const close = (a, b) => a.forEach((v, i) => assert.ok(Math.abs(v - b[i]) < 1e-9, `${a} vs ${b}`));
+  // right = dop x up = (0,0,-1) x (0,1,0) = (1,0,0)
+  close(p.origin, [-width / 2, r * 1.05, r * 0.5]);
+  close(p.point1, [width / 2, r * 1.05, r * 0.5]);
+  close(p.point2, [-width / 2, r * 1.05 + height, r * 0.5]);
+});

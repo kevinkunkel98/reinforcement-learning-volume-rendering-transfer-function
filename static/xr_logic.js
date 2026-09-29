@@ -114,5 +114,38 @@
     return parts.join(" · ");
   }
 
-  return { xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines, summarizeStep };
+  function cross(a, b) {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  }
+
+  function normalize(v) {
+    const n = Math.hypot(...v);
+    return v.map((x) => x / n);
+  }
+
+  // vtkPlaneSource corners (origin, point1 = +width, point2 = +height) for a
+  // status panel floating above `bounds`, facing back along `dop`.
+  function hudPlacement(bounds, up, dop, aspect) {
+    const center = [0, 2, 4].map((i) => (bounds[i] + bounds[i + 1]) / 2);
+    const radius = Math.hypot(...[0, 2, 4].map((i) => bounds[i + 1] - bounds[i])) / 2;
+    const u = normalize(up);
+    const d = normalize(dop);
+    const right = normalize(cross(d, u));
+    const width = 2 * radius * 0.8;
+    const height = width / aspect;
+    const add = (a, b, s) => a.map((x, i) => x + b[i] * s);
+    let base = add(center, u, radius * 1.05);
+    base = add(base, d, -radius * 0.5);
+    const origin = add(base, right, -width / 2);
+    return {
+      origin,
+      point1: add(origin, right, width),
+      point2: add(origin, u, height),
+    };
+  }
+
+  return {
+    xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
+    summarizeStep, hudPlacement,
+  };
 });
