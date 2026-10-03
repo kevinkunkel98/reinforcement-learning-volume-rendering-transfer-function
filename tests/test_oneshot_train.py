@@ -398,6 +398,29 @@ def test_v7_drift_penalty_is_auxiliary(monkeypatch):
     assert reward == pytest.approx(0.9)
 
 
+def test_v7_target_reward_is_normalized_by_start_distance(monkeypatch):
+    """A brightness-sized goal (small start_distance) and a show-only-sized
+    goal (large start_distance) must score a given fractional progress and a
+    given fractional drift identically -- the bug this guards against is an
+    unnormalized reward where the same absolute drift is nearly free against
+    a large start_distance but wipes out a small one."""
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v7", action_mode="residual", reward_mode="target")
+    env.reset(seed=4)
+    env._instruction["targets"] = {}
+    monkeypatch.setattr(goals, "distance", lambda goal, start, current: 2.0 if current is start else 0.5)
+    monkeypatch.setattr(goals, "progress", lambda start, current:
+                        ({c: (0.4 if c == "lungs" else 0.0) for c in goals.GOAL_CLASSES},
+                         {c: 0.0 for c in goals.GOAL_CLASSES}))
+    _, reward, _, _, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
+    assert info["drift"] == pytest.approx(0.4)
+    # progress fraction = (2.0 - 0.5) / 2.0 = 0.75; drift penalty is the same
+    # fraction of start_distance as in test_v7_drift_penalty_is_auxiliary
+    # (there start_distance == 1.0, so the bug was invisible).
+    assert reward == pytest.approx(0.75 - 0.1 * 0.4 / 2.0)
+
+
 def test_v7_target_reward_drift_includes_brightness(monkeypatch):
     _patch_totalseg(monkeypatch)
     env = OneShotEnv(["stub_a"], model_for_volume=lambda name: _StubModel(),

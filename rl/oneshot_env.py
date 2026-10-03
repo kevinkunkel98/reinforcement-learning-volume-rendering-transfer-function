@@ -480,7 +480,14 @@ class OneShotEnv(gym.Env):
         if self.reward_mode == "target":
             start_distance = goals.distance(self._instruction["goal"], self._start_agg, self._start_agg)
             final_distance = goals.distance(self._instruction["goal"], self._start_agg, final_agg)
-            reward = float(np.clip(start_distance - final_distance, -REWARD_CLIP, REWARD_CLIP))
+            # Fraction of start_distance closed, i.e. exactly `attainment`
+            # (goals.attainment divides the same two distances) -- unlike the
+            # raw (start_distance - final_distance) this used to be, it is on
+            # a comparable scale for a brightness goal (start_distance ~0.3)
+            # and a show_only goal (start_distance ~6): both can reach +1 for
+            # a perfect solve, instead of brightness being squeezed toward 0
+            # by the clip while show_only saturates it almost for free.
+            target_progress = (start_distance - final_distance) / start_distance
             mentioned = set(self._instruction["targets"])
             visibility_progress, brightness_progress = goals.progress(self._start_agg, final_agg)
             drift = sum(abs(value) for key, value in visibility_progress.items()
@@ -488,11 +495,15 @@ class OneShotEnv(gym.Env):
             drift += goals.KAPPA * sum(abs(value) for key, value in brightness_progress.items()
                                        if key not in mentioned)
             self._last_drift = float(drift)
-            reward -= TARGET_DRIFT_WEIGHT * float(drift)
+            # Same start_distance denominator as target_progress, so a given
+            # fraction of the goal's own budget spent on collateral drift
+            # costs the same whether the goal itself was easy or hard.
+            reward = target_progress - TARGET_DRIFT_WEIGHT * float(drift) / start_distance
+            reward = float(np.clip(reward, -REWARD_CLIP, REWARD_CLIP))
             if useless:
                 reward -= USELESS_PENALTY
             info = self._info(attainment, useless)
-            info.update({"target_progress": start_distance - final_distance, "drift": drift})
+            info.update({"target_progress": target_progress, "drift": drift})
         else:
             reward = float(np.clip(attainment, -REWARD_CLIP, REWARD_CLIP)) - (USELESS_PENALTY if useless else 0.0)
             info = self._info(attainment, useless)
