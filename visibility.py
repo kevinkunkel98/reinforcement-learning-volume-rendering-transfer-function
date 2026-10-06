@@ -181,27 +181,46 @@ class VisibilityModel:
                                        + self.indices.long())
         return self._label_index_cache
 
-    def _weights(self, params, layers=None, transfer_mode=transfer.DEFAULT_TRANSFER_MODE):
-        """(contribution per sample, luminance per sample, accumulated opacity per ray)."""
+    def _alpha_luminance(self, params, transfer_mode):
+        """(alpha per sample, luminance per sample), before any layer mask --
+        the layer-independent half of the old `_weights`: LUT build, index
+        lookup, and the `(1 - alpha) ** step_mm` term. The expensive part,
+        so callers that need both a plain and a layer-masked composite
+        (`features`) compute this once and branch after, instead of paying
+        for it twice."""
         opacity_table, luminance_table = label_transfer_tables(params, transfer_mode)
         index = self._label_index()
         alpha = torch.from_numpy(opacity_table.reshape(-1))[index]
         alpha = 1.0 - (1.0 - alpha) ** (self.step_mm / 1.0)
-        if layers is not None:
-            normalized = normalize_layers(layers)
-            layer_opacity = torch.ones_like(alpha)
-            for class_index, name in enumerate(CLASSES):
-                layer_opacity = torch.where(
-                    self._labels == class_index,
-                    layer_opacity.new_tensor(normalized[name]["opacity"]),
-                    layer_opacity,
-                )
-            alpha = alpha * layer_opacity
         luminance = torch.from_numpy(luminance_table.reshape(-1))[index]
+        return alpha, luminance
+
+    def _layer_mask(self, alpha, layers):
+        """Per-sample layer-opacity multiplier for `layers` (already
+        normalized). `alpha` is only used for its shape/dtype/device."""
+        layer_opacity = torch.ones_like(alpha)
+        for class_index, name in enumerate(CLASSES):
+            layer_opacity = torch.where(
+                self._labels == class_index,
+                layer_opacity.new_tensor(layers[name]["opacity"]),
+                layer_opacity,
+            )
+        return layer_opacity
+
+    def _composite(self, alpha):
+        """(contribution per sample, accumulated opacity per ray) from alpha."""
         transparency = 1.0 - alpha
         ones = torch.ones_like(transparency[:, :1])
         before = torch.cat([ones, torch.cumprod(transparency, dim=1)[:, :-1]], dim=1)
-        return before * alpha, luminance, 1.0 - transparency.prod(dim=1)
+        return before * alpha, 1.0 - transparency.prod(dim=1)
+
+    def _weights(self, params, layers=None, transfer_mode=transfer.DEFAULT_TRANSFER_MODE):
+        """(contribution per sample, luminance per sample, accumulated opacity per ray)."""
+        alpha, luminance = self._alpha_luminance(params, transfer_mode)
+        if layers is not None:
+            alpha = alpha * self._layer_mask(alpha, normalize_layers(layers))
+        weights, accumulated = self._composite(alpha)
+        return weights, luminance, accumulated
 
     def features(self, params, layers=None,
                  transfer_mode=transfer.DEFAULT_TRANSFER_MODE) -> dict:
@@ -235,6 +254,8 @@ class VisibilityModel:
             )
         other_masked = torch.where(self._labels == -1, weights, torch.zeros(()))
         vis["other"] = float(other_masked.sum()) / self._rays
+        bright["other"] = (float((other_masked * luminance).sum() / other_masked.sum())
+                          if vis["other"] > 1e-4 else 0.0)
         effective_vis["other"] = vis["other"]
         effective_bright["other"] = bright.get("other", 0.0)
         coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
