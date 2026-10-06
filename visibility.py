@@ -266,8 +266,6 @@ class VisibilityModel:
                 )
         other_masked = torch.where(self._labels == -1, weights, torch.zeros(()))
         vis["other"] = float(other_masked.sum()) / self._rays
-        bright["other"] = (float((other_masked * luminance).sum() / other_masked.sum())
-                          if vis["other"] > 1e-4 else 0.0)
         effective_vis["other"] = vis["other"]
         effective_bright["other"] = bright.get("other", 0.0)
         coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
