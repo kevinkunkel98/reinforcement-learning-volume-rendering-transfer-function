@@ -30,7 +30,7 @@ Reference: `docs/superpowers/specs/2026-10-06-visibility-features-throughput-des
 - Modify: `visibility.py:184-245` (`_weights`, `features`)
 - Test: `tests/test_visibility.py`
 
-- [ ] **Step 1: Add a regression test pinning "effective equals plain when no layers are given"**
+- [x] **Step 1: Add a regression test pinning "effective equals plain when no layers are given"**
 
 Add to `tests/test_visibility.py`, right after `test_explicit_layer_opacity_populates_effective_fields` (currently ending at line 148):
 
@@ -54,18 +54,18 @@ def test_no_layers_effective_fields_equal_plain_fields():
     assert result["effective_coverage"] == pytest.approx(result["coverage"])
 ```
 
-- [ ] **Step 2: Run it to confirm it already passes**
+- [x] **Step 2: Run it to confirm it already passes**
 
 Run: `.venv/bin/python -m pytest tests/test_visibility.py::test_no_layers_effective_fields_equal_plain_fields -v`
 Expected: PASS (today's code already computes an equal value the slow way —
 this test pins that invariant before the refactor changes *how* it's
 computed, not *what* the result is).
 
-- [ ] **Step 3: Read the current `_weights`/`features` code**
+- [x] **Step 3: Read the current `_weights`/`features` code**
 
 Re-read `visibility.py:184-245` to have the exact current text in front of you (the `Edit` tool requires an exact match).
 
-- [ ] **Step 4: Replace `_weights` with three smaller methods, in `visibility.py`**
+- [x] **Step 4: Replace `_weights` with three smaller methods, in `visibility.py`**
 
 Replace:
 
@@ -140,19 +140,19 @@ with:
 
 `_weights` keeps its exact old signature and return shape, so `per_view_visibility` (its only other caller, further down in this file) needs no change.
 
-- [ ] **Step 5: Run the full visibility test file to confirm nothing broke**
+- [x] **Step 5: Run the full visibility test file to confirm nothing broke**
 
 Run: `.venv/bin/python -m pytest tests/test_visibility.py -v`
 Expected: PASS (all tests, including the new one from Step 1)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add visibility.py tests/test_visibility.py
 git commit -m "refactor(visibility): split _weights into alpha/layer-mask/composite"
 ```
 
-- [ ] **Step 7: Rewrite `features()` to stop computing "effective" twice when no layers are given**
+- [x] **Step 7: Rewrite `features()` to stop computing "effective" twice when no layers are given**
 
 Read the current `features` method again (it did not change in Step 4, so it is still exactly as it was). Replace:
 
@@ -257,7 +257,7 @@ with:
                 "coverage": coverage, "effective_coverage": effective_coverage}
 ```
 
-- [ ] **Step 8: Run the full visibility test file again**
+- [x] **Step 8: Run the full visibility test file again**
 
 Run: `.venv/bin/python -m pytest tests/test_visibility.py -v`
 Expected: PASS, all tests including `test_no_layers_effective_fields_equal_plain_fields`,
@@ -267,13 +267,13 @@ Expected: PASS, all tests including `test_no_layers_effective_fields_equal_plain
 `test_layer_isolation_metrics_measure_target_and_cross_class_leakage`, and the
 determinism check `assert model.features(params) == model.features(params)`.
 
-- [ ] **Step 9: Run the full project test suite**
+- [x] **Step 9: Run the full project test suite**
 
 Run: `.venv/bin/python -m pytest tests/ -x -q`
 Expected: PASS (no regressions anywhere that touches `visibility.features`,
 e.g. `tests/test_goals.py`, `tests/test_oneshot_env.py`, `tests/test_oneshot_train.py`)
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add visibility.py
@@ -288,7 +288,7 @@ git commit -m "perf(visibility): compute features() effective fields only when l
 - Modify: `visibility.py` (new method, placed right after `features`)
 - Test: `tests/test_visibility.py`
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Add to `tests/test_visibility.py`, after `test_no_layers_effective_fields_equal_plain_fields`:
 
@@ -306,12 +306,12 @@ def test_vis_only_matches_features_effective_vis_with_layers():
     assert model.vis_only(params, layers) == model.features(params, layers)["effective_vis"]
 ```
 
-- [ ] **Step 2: Run it to confirm it fails (the method doesn't exist yet)**
+- [x] **Step 2: Run it to confirm it fails (the method doesn't exist yet)**
 
 Run: `.venv/bin/python -m pytest tests/test_visibility.py::test_vis_only_matches_features_vis_without_layers -v`
 Expected: FAIL with `AttributeError: 'VisibilityModel' object has no attribute 'vis_only'`
 
-- [ ] **Step 3: Implement `vis_only`, in `visibility.py` right after `features`**
+- [x] **Step 3: Implement `vis_only`, in `visibility.py` right after `features`**
 
 ```python
     def vis_only(self, params, layers=None,
@@ -332,12 +332,12 @@ Expected: FAIL with `AttributeError: 'VisibilityModel' object has no attribute '
         return vis
 ```
 
-- [ ] **Step 4: Run the tests again to confirm they pass**
+- [x] **Step 4: Run the tests again to confirm they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_visibility.py -v`
 Expected: PASS, all tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add visibility.py tests/test_visibility.py
@@ -352,7 +352,7 @@ git commit -m "perf(visibility): add vis_only(), a cheap visibility-only feature
 - Modify: `goals.py:68-100` (`aggregate`)
 - Test: `tests/test_goals.py`
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 Add to `tests/test_goals.py`, right after `test_aggregate_keeps_promoted_organs_out_of_soft` (ends at line 96):
 
@@ -384,16 +384,16 @@ def test_vis_falls_back_to_features_without_vis_only():
     assert goals.vis(Model(), "params") == {"skeleton": 0.4}
 ```
 
-- [ ] **Step 2: Run them to confirm they fail**
+- [x] **Step 2: Run them to confirm they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_goals.py::test_aggregate_vis_matches_aggregate_vis_field tests/test_goals.py::test_vis_dispatches_to_vis_only_when_available tests/test_goals.py::test_vis_falls_back_to_features_without_vis_only -v`
 Expected: FAIL — `AttributeError: module 'goals' has no attribute 'aggregate_vis'` (and then, once that's added, `has no attribute 'vis'`)
 
-- [ ] **Step 3: Read the current `aggregate` function**
+- [x] **Step 3: Read the current `aggregate` function**
 
 Re-read `goals.py:68-100` for the exact current text.
 
-- [ ] **Step 4: Extract the shared vis logic and add `aggregate_vis`, in `goals.py`**
+- [x] **Step 4: Extract the shared vis logic and add `aggregate_vis`, in `goals.py`**
 
 Replace:
 
@@ -508,18 +508,18 @@ def vis(model, params, active_layers=None) -> dict:
         return model.vis_only(params)
 ```
 
-- [ ] **Step 5: Run the new tests**
+- [x] **Step 5: Run the new tests**
 
 Run: `.venv/bin/python -m pytest tests/test_goals.py -v`
 Expected: PASS, all tests (including every existing `aggregate` test —
 `_aggregate_vis`/`_goal_sources` must reproduce the exact old inline logic)
 
-- [ ] **Step 6: Run the full project test suite**
+- [x] **Step 6: Run the full project test suite**
 
 Run: `.venv/bin/python -m pytest tests/ -x -q`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add goals.py tests/test_goals.py
@@ -535,7 +535,7 @@ git commit -m "perf(goals): add aggregate_vis/vis, a cheap vis-only path alongsi
 - Modify: `rl/oneshot_env.py:381-421` (`_sample_hindsight_goal`)
 - Test: `tests/test_oneshot_env.py`
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Add to `tests/test_oneshot_env.py`, right after `test_hindsight_goal_mentions_at_least_one_class` (the file's last test):
 
@@ -556,18 +556,18 @@ def test_hindsight_goal_deltas_match_full_features_path():
                 - math.log10(env._start_agg["vis"][goal_class] + goals.EPSILON))
 ```
 
-- [ ] **Step 2: Run it to confirm it already passes (behavioral pin, not a new feature yet)**
+- [x] **Step 2: Run it to confirm it already passes (behavioral pin, not a new feature yet)**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_env.py::test_hindsight_goal_deltas_match_full_features_path -v`
 Expected: PASS (today's `_sample_hindsight_goal` already computes exactly
 this via the slow path — this test pins the *result*, which Step 4 below
 must keep producing from the fast path)
 
-- [ ] **Step 3: Read the current code**
+- [x] **Step 3: Read the current code**
 
 Re-read `rl/oneshot_env.py:321-322` and `rl/oneshot_env.py:381-421` for the exact current text.
 
-- [ ] **Step 4: Add `self._vis()`, right after `self._features()` in `rl/oneshot_env.py`**
+- [x] **Step 4: Add `self._vis()`, right after `self._features()` in `rl/oneshot_env.py`**
 
 Replace:
 
@@ -586,7 +586,7 @@ with:
         return goals.vis(self._model, params, getattr(self, "_active_layers", None))
 ```
 
-- [ ] **Step 5: Use it in `_sample_hindsight_goal`, in `rl/oneshot_env.py`**
+- [x] **Step 5: Use it in `_sample_hindsight_goal`, in `rl/oneshot_env.py`**
 
 Replace:
 
@@ -612,7 +612,7 @@ with:
                 target_vis = target_vis_agg[goal_class]
 ```
 
-- [ ] **Step 6: Run the new test and the full hindsight test block**
+- [x] **Step 6: Run the new test and the full hindsight test block**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_env.py -v -k hindsight`
 Expected: PASS, all hindsight tests, including:
@@ -621,12 +621,12 @@ Expected: PASS, all hindsight tests, including:
 - `test_hindsight_goal_mentions_at_least_one_class`
 - `test_hindsight_goal_deltas_match_full_features_path` (new)
 
-- [ ] **Step 7: Run the full project test suite**
+- [x] **Step 7: Run the full project test suite**
 
 Run: `.venv/bin/python -m pytest tests/ -x -q`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add rl/oneshot_env.py tests/test_oneshot_env.py
@@ -642,7 +642,7 @@ git commit -m "perf(rl): use the cheap vis-only path in the hindsight visibility
   design and reports the new numbers in the PR/commit, per the spec's
   Testing section.
 
-- [ ] **Step 1: Re-run the same profiling script from the design phase**
+- [x] **Step 1: Re-run the same profiling script from the design phase**
 
 The script lives at
 `/private/tmp/claude-501/-Users-macbook-Documents-Dev-Uni-reinforcement-learning-volume-rendering-transfer-function/2360da7c-4ab3-4ebf-8bca-c0c26beaad9b/scratchpad/profile_hindsight.py`
@@ -687,7 +687,7 @@ print(f"hindsight_ratio=1.0: {N / t_hindsight:.1f} resets/s ({1000 * t_hindsight
 
 Run: `.venv/bin/python /private/tmp/claude-501/-Users-macbook-Documents-Dev-Uni-reinforcement-learning-volume-rendering-transfer-function/2360da7c-4ab3-4ebf-8bca-c0c26beaad9b/scratchpad/profile_hindsight.py`
 
-- [ ] **Step 2: Compare against the "before" numbers**
+- [x] **Step 2: Compare against the "before" numbers**
 
 Before (recorded in the spec): `hindsight_ratio=0.0` → 16.4 resets/s (61.1
 ms/reset); `hindsight_ratio=1.0` → 9.6 resets/s (103.6 ms/reset). Report the
@@ -695,7 +695,7 @@ new numbers next to these — expect roughly a 1.5–2x improvement on both,
 since Task 1 removes the dominant redundant computation from every
 `features()` call regardless of hindsight.
 
-- [ ] **Step 3: Decide on Approach C (deferred in the spec)**
+- [x] **Step 3: Decide on Approach C (deferred in the spec)**
 
 If the new `hindsight_ratio=1.0` number is still far below
 `hindsight_ratio=0.0` (i.e. the retry loop itself, not just each
@@ -706,8 +706,23 @@ few hundred resets). Only if that average is high (several, not ~1) does
 batching the retry loop (Approach C in the spec) become worth the added
 risk — open a new spec for it at that point rather than extending this one.
 
-- [ ] **Step 4: Report the numbers to the user**
+- [x] **Step 4: Report the numbers to the user**
 
 No commit for this task — it's a measurement, not a code change. State the
 before/after resets/s for both configs, and whether Approach C now looks
 warranted per Step 3.
+
+**Results (measured after Tasks 1-4, on `ts_s0357`, M1 Pro):**
+
+| config                 | before (resets/s) | after (resets/s) | speedup |
+|------------------------|-------------------:|------------------:|--------:|
+| `hindsight_ratio=0.0`  |               16.4 |              53.4 |   3.26x |
+| `hindsight_ratio=1.0`  |                9.6 |              31.6 |   3.29x |
+
+Both configs improved ~3.3x, exceeding the 1.5-2x estimate. `_vis`/`vis_only`
+is called exactly once per reset on average under `hindsight_ratio=1.0` (30
+calls for 30 resets in a repeat profiling run) — the retry loop is still not
+the bottleneck, confirming **Approach C remains unwarranted**; the win came
+entirely from Task 1's redundant-computation removal (which also lifted the
+`hindsight_ratio=0.0` baseline) plus Task 2-4's cheaper per-reset vis-only
+path.
