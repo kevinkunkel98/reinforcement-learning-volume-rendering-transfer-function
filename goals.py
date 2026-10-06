@@ -65,6 +65,27 @@ def features(model, params, active_layers=None) -> dict:
         return model.features(params)
 
 
+def _goal_sources(goal_class: str, source_vis: dict) -> tuple:
+    """Measured-class keys backing one goal class, in `source_vis`. Read old
+    synthetic feature fixtures while canonical models use only registry
+    names: legacy `organs`+`muscle` are read as generic `soft`, never
+    promoted, when the canonical `soft` key itself is absent."""
+    if goal_class == "soft" and "soft" not in source_vis:
+        return ("organs", "muscle")
+    return MEASURED_FOR_GOAL[goal_class]
+
+
+def _aggregate_vis(source_vis: dict) -> dict:
+    """Measured-class vis -> goal-class vis. Shared by `aggregate` (which
+    also needs `bright`/`coverage`) and `aggregate_vis` (which doesn't)."""
+    vis = {goal_class: sum(source_vis.get(m, 0.0) for m in _goal_sources(goal_class, source_vis))
+           for goal_class in GOAL_CLASSES}
+    # Not a goal class -- no instruction ever names it -- but distance() still
+    # needs it to tell "hidden" apart from "hidden behind unlabeled material".
+    vis["other"] = source_vis.get("other", 0.0)
+    return vis
+
+
 def aggregate(features: dict, active_layers=None) -> dict:
     """Measured classes -> goal classes.
 
@@ -76,28 +97,44 @@ def aggregate(features: dict, active_layers=None) -> dict:
     source_vis = features.get("effective_vis", features["vis"]) if active_layers is not None else features["vis"]
     source_bright = (features.get("effective_bright", features["bright"])
                      if active_layers is not None else features["bright"])
-    vis, bright = {}, {}
+    vis = _aggregate_vis(source_vis)
+    bright = {}
     for goal_class in GOAL_CLASSES:
-        measured = MEASURED_FOR_GOAL[goal_class]
-        # Read old synthetic feature fixtures while canonical models use only
-        # registry names. Legacy organs/muscle remain soft, never promoted.
-        if goal_class == "soft" and "soft" not in source_vis:
-            sources = ("organs", "muscle")
-        else:
-            sources = measured
-        total_vis = sum(source_vis.get(m, 0.0) for m in sources)
-        vis[goal_class] = total_vis
+        sources = _goal_sources(goal_class, source_vis)
+        total_vis = vis[goal_class]
         if total_vis > 0.0:
             bright[goal_class] = (sum(source_vis.get(m, 0.0) * source_bright.get(m, 0.0)
                                    for m in sources) / total_vis)
         else:
             bright[goal_class] = 0.0
-    # Not a goal class -- no instruction ever names it -- but distance() still
-    # needs it to tell "hidden" apart from "hidden behind unlabeled material".
-    vis["other"] = source_vis.get("other", 0.0)
     coverage = (features.get("effective_coverage", features["coverage"])
                 if active_layers is not None else features["coverage"])
     return {"vis": vis, "bright": bright, "coverage": coverage}
+
+
+def aggregate_vis(vis: dict) -> dict:
+    """Like `aggregate`, but for a vis-only measured-class dict such as
+    `visibility.VisibilityModel.vis_only`'s output: no `bright`/`coverage`,
+    for callers that never read them (the hindsight visibility search loop
+    in `rl.oneshot_env`)."""
+    return _aggregate_vis(vis)
+
+
+def vis(model, params, active_layers=None) -> dict:
+    """Per-class visibility only, via the model's cheap `vis_only` when it
+    has one (the real `VisibilityModel`); a model without it (test stubs)
+    falls back to `features()`, exactly mirroring `aggregate`'s own
+    plain-vs-effective selection so the fallback can never disagree with
+    what `aggregate(features(...))` would have picked."""
+    if not hasattr(model, "vis_only"):
+        raw = features(model, params, active_layers)
+        return raw.get("effective_vis", raw["vis"]) if active_layers is not None else raw["vis"]
+    if active_layers is None:
+        return model.vis_only(params)
+    try:
+        return model.vis_only(params, active_layers)
+    except TypeError:
+        return model.vis_only(params)
 
 
 def goal_vector(targets: dict) -> np.ndarray:

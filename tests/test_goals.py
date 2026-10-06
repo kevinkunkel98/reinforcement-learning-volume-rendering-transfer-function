@@ -96,6 +96,33 @@ def test_aggregate_keeps_promoted_organs_out_of_soft():
     assert aggregated["vis"]["heart"] == pytest.approx(0.2)
 
 
+def test_aggregate_vis_matches_aggregate_vis_field():
+    features = _features(skeleton=(0.3, 0.9), organs=(0.2, 0.4), muscle=(0.6, 0.8), other=0.1)
+    assert goals.aggregate_vis(features["vis"]) == goals.aggregate(features)["vis"]
+
+
+def test_vis_dispatches_to_vis_only_when_available():
+    class Model:
+        def __init__(self):
+            self.calls = []
+
+        def vis_only(self, params, *args):
+            self.calls.append(args)
+            return {"skeleton": 0.3, "other": 0.0}
+
+    model = Model()
+    assert goals.vis(model, "params") == {"skeleton": 0.3, "other": 0.0}
+    assert model.calls == [()]
+
+
+def test_vis_falls_back_to_features_without_vis_only():
+    class Model:
+        def features(self, params):
+            return {"vis": {"skeleton": 0.4}, "bright": {"skeleton": 0.1}, "coverage": 0.2}
+
+    assert goals.vis(Model(), "params") == {"skeleton": 0.4}
+
+
 def test_aggregate_uses_effective_features_for_explicit_layers():
     features = _features(organs=(0.8, 0.4), muscle=(0.2, 0.6))
     features["effective_vis"] = dict(features["vis"])
