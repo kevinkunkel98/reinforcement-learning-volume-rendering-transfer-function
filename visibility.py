@@ -276,6 +276,23 @@ class VisibilityModel:
                 "effective_class_contribution": dict(effective_vis),
                 "coverage": coverage, "effective_coverage": effective_coverage}
 
+    def vis_only(self, params, layers=None,
+                 transfer_mode=transfer.DEFAULT_TRANSFER_MODE) -> dict:
+        """Per-class vis only (`{class: float, "other": float}`) -- skips
+        the luminance lookup, `bright`, and `coverage` that `features()`
+        also computes. For search loops that only ever compare visibility,
+        e.g. the hindsight goal sampler in `rl.oneshot_env`."""
+        alpha, _ = self._alpha_luminance(params, transfer_mode)
+        if layers is not None:
+            alpha = alpha * self._layer_mask(alpha, normalize_layers(layers))
+        weights, _ = self._composite(alpha)
+        vis = {}
+        for index, name in enumerate(CLASSES):
+            masked = torch.where(self._labels == index, weights, torch.zeros(()))
+            vis[name] = float(masked.sum()) / self._rays
+        vis["other"] = float(torch.where(self._labels == -1, weights, torch.zeros(())).sum()) / self._rays
+        return vis
+
     def layer_metrics(self, params, target: str, layers=None) -> dict:
         """Report target isolation and cross-class leakage for one layer."""
         if target not in CLASSES:

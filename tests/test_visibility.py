@@ -167,6 +167,19 @@ def test_no_layers_effective_fields_equal_plain_fields():
     assert result["effective_coverage"] == pytest.approx(result["coverage"])
 
 
+def test_vis_only_matches_features_vis_without_layers():
+    model = _model(_slab_volume(-1000.0, 900.0))
+    params = _params([0.0, 0.9, 0.0, 0.9])
+    assert model.vis_only(params) == model.features(params)["vis"]
+
+
+def test_vis_only_matches_features_effective_vis_with_layers():
+    model = _model(_slab_volume(-1000.0, 900.0))
+    params = _params([0.0, 0.0, 0.0, 0.9])
+    layers = {"skeleton": {"opacity": 0.0}}
+    assert model.vis_only(params, layers) == model.features(params, layers)["effective_vis"]
+
+
 def test_hidden_foreground_reveals_background_in_effective_visibility():
     n = 24
     volume = _slab_volume(50.0, 900.0, n=n)
