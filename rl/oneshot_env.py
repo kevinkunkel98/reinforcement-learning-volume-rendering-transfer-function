@@ -321,6 +321,9 @@ class OneShotEnv(gym.Env):
     def _features(self, params):
         return goals.features(self._model, params, getattr(self, "_active_layers", None))
 
+    def _vis(self, params):
+        return goals.vis(self._model, params, getattr(self, "_active_layers", None))
+
     def _attainment(self, agg: dict) -> float:
         if self._start_distance <= _ATTAINMENT_FLOOR:
             return 0.0
@@ -389,12 +392,12 @@ class OneShotEnv(gym.Env):
             noise = rng.uniform(-HINDSIGHT_NOISE, HINDSIGHT_NOISE, size=len(CONTROLLABLE))
             action = np.clip(start_controllable + noise, -1.0, 1.0)
             target_params = apply_controllable(start_params, action)
-            target_agg = goals.aggregate(self._features(target_params), self._active_layers)
+            target_vis_agg = goals.aggregate_vis(self._vis(target_params))
 
             deltas = {}
             for goal_class in goals.GOAL_CLASSES:
                 start_vis = start_agg["vis"][goal_class]
-                target_vis = target_agg["vis"][goal_class]
+                target_vis = target_vis_agg[goal_class]
                 # Same convention as goals.progress, so the goal the policy is
                 # handed and the change the reward measures are one quantity.
                 deltas[goal_class] = math.log10(target_vis + goals.EPSILON) \

@@ -432,6 +432,22 @@ def test_hindsight_goal_mentions_at_least_one_class():
     assert mentioned.sum() >= 1.0
 
 
+def test_hindsight_goal_deltas_match_full_features_path():
+    """The hindsight visibility search loop now reads `_vis()` (the cheap
+    vis_only path) instead of `_features()` + `goals.aggregate()` -- this
+    pins that both paths produce the identical goal for the same seed, i.e.
+    the fast path is not just faster but exactly equivalent."""
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
+    for seed in range(10):
+        env.reset(seed=seed)
+        target_params = apply_controllable(env._start_params, env.hindsight_action())
+        via_features = goals.aggregate(env._model.features(target_params), env._active_layers)
+        for goal_class, target in env._instruction["targets"].items():
+            assert target["vis"] == pytest.approx(
+                math.log10(via_features["vis"][goal_class] + goals.EPSILON)
+                - math.log10(env._start_agg["vis"][goal_class] + goals.EPSILON))
+
+
 def test_v8_layer_residual_changes_reachable_opacity_only(monkeypatch):
     _patch_totalseg(monkeypatch)
     env = OneShotEnv(["fake_b"], model_for_volume=lambda name: _StubModel(),
