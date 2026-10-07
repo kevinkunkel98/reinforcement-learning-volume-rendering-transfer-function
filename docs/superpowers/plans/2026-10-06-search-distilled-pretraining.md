@@ -629,7 +629,7 @@ git commit -m "feat(rl): mix hill_climb-distilled data into oneshot_train's warm
 **Files:**
 - Modify: `docs/rl-training-setup.typ`
 
-- [ ] **Step 1: Add the new flags to the "Supervised warm start" section**
+- [x] **Step 1: Add the new flags to the "Supervised warm start" section**
 
 Read `docs/rl-training-setup.typ`'s `== Supervised warm start (`rl/pretrain.py`)` section. After its existing paragraph ending "...only the random warm-up.", add a new paragraph:
 
@@ -646,12 +646,12 @@ collection costs roughly 2.7 s/episode, hence the lower default episode
 count (`--search-pretrain-episodes`, default 1000 vs. hindsight's 4000).
 ```
 
-- [ ] **Step 2: Compile to confirm no syntax errors**
+- [x] **Step 2: Compile to confirm no syntax errors**
 
 Run: `typst compile docs/rl-training-setup.typ /tmp/rl-training-setup-check.pdf`
 Expected: exits 0, no errors. Then `rm /tmp/rl-training-setup-check.pdf`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/rl-training-setup.typ
