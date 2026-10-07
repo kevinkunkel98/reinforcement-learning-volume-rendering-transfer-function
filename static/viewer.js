@@ -38,6 +38,18 @@
   let rawVolumeValues;
   let volumeMetadata;
   let anatomyAvailability;
+  // True on a VR-capable (e.g. headset) browser, resolved once at load. Used
+  // to pick a mobile-GPU-appropriate sampling policy -- the fixed, fine
+  // sample distance below is tuned for a desktop GPU to match render.py's
+  // reference screenshots, and is far too slow on a standalone headset's
+  // mobile GPU, even for the flat (non-XR) page.
+  let isXRCapableDevice = false;
+  // A browser without navigator.xr at all (e.g. desktop Safari/Firefox)
+  // makes the optional-chained call below evaluate to undefined rather than
+  // a promise -- fall back to one so `.then` is always safe to call.
+  const xrCapabilityCheck = (navigator.xr?.isSessionSupported?.("immersive-vr") ?? Promise.resolve(false))
+    .then((supported) => { isXRCapableDevice = supported; })
+    .catch(() => {});
 
   function destroyViewer() {
     if (interactor) {
@@ -400,6 +412,7 @@
     xrSaved = {
       style: interactor.getInteractorStyle(),
       sampleDistance: mapper.getSampleDistance(),
+      shade: volume.getProperty().getShade(),
       camera: fromRendererCamera(),
       background: renderer.getBackground().slice(),
     };
@@ -408,6 +421,11 @@
     // button handlers at all.
     interactor.setInteractorStyle(vtk.Rendering.Core.vtkInteractorStyle.newInstance());
     mapper.setSampleDistance(window.xrLogic.xrSampleDistance(volumeMetadata.spacing));
+    // Per-sample gradient-lit shading roughly doubles ray-march cost and
+    // stereo rendering already doubles it again (one pass per eye) -- drop
+    // it in VR, where spatial understanding matters more than lighting
+    // fidelity against the (2D, desktop, shaded) reference screenshots.
+    volume.getProperty().setShade(false);
     // Keep the orientation the user was looking at in the flat viewer.
     camera.setPhysicalViewUp(...camera.getViewUp());
     camera.setPhysicalViewNorth(...camera.getDirectionOfProjection());
@@ -450,6 +468,7 @@
       xrSaved = null;
       interactor.setInteractorStyle(saved.style);
       mapper.setSampleDistance(saved.sampleDistance);
+      volume.getProperty().setShade(saved.shade);
       renderer.setBackground(...saved.background);
       camera.setPosition(...saved.camera.position);
       camera.setFocalPoint(...saved.camera.focal_point);
@@ -500,6 +519,7 @@
           }
         }
       }
+      await xrCapabilityCheck;
       datasetName = name;
       if (!renderer) {
         openGLRenderWindow = vtk.Rendering.OpenGL.vtkRenderWindow.newInstance();
@@ -520,6 +540,16 @@
         interactor.bindEvents(viewerEl);
         interactorBound = true;
         camera = renderer.getActiveCamera();
+        if (isXRCapableDevice) {
+          // vtk.js's auto-adjust logic (enabled below) coarsens sampling to
+          // hit this interactor-level target. The defaults (~15 fps moving,
+          // near-zero i.e. "take as long as you like" once still) assume a
+          // desktop GPU with a human occasionally letting go of the mouse --
+          // a headset is always "moving" (head tracking) and needs a real
+          // frame-rate target the whole time, both on the flat page and in VR.
+          interactor.setDesiredUpdateRate(60);
+          interactor.setStillUpdateRate(60);
+        }
       }
       rawVolumeValues = loaded.values;
       volumeMetadata = loaded.metadata;
@@ -532,7 +562,12 @@
       // Match render.py's server-side quality settings -- vtk.js's defaults
       // (no shading, auto-adjusted/coarser sampling) are what made this
       // viewer look flat and "hologram"-like next to the reference PNGs.
-      mapper.setAutoAdjustSampleDistances(false);
+      // On a VR-capable device's mobile GPU, that fixed fine sampling is
+      // far too slow (observed 2-5 fps, even on this flat page) -- auto-
+      // adjust lets vtk.js coarsen it dynamically to hit the update rate
+      // set above instead, falling back toward this same quality target
+      // whenever the GPU can sustain it.
+      mapper.setAutoAdjustSampleDistances(isXRCapableDevice);
       mapper.setSampleDistance(Math.min(...loaded.metadata.spacing) / 2.0);
       volume = vtk.Rendering.Core.vtkVolume.newInstance();
       volume.setMapper(mapper);
