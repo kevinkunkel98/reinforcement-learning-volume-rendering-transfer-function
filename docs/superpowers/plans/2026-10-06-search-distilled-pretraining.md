@@ -168,7 +168,7 @@ git commit -m "feat(rl): add OneShotEnv.search_policy_action, a hill_climb teach
 - Modify: `rl/pretrain.py` (new seed helper + collection functions, alongside the hindsight ones)
 - Test: `tests/test_pretrain.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/test_pretrain.py`, right after `test_collected_reward_is_the_oracle_reward` (ends at line 39, immediately before `test_save_and_load_round_trip`):
 
@@ -206,16 +206,16 @@ def test_collected_search_reward_is_the_search_reward():
         assert data["rewards"][index] == pytest.approx(reward)
 ```
 
-- [ ] **Step 2: Run them to confirm they fail**
+- [x] **Step 2: Run them to confirm they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_pretrain.py::test_collect_search_returns_aligned_samples tests/test_pretrain.py::test_collect_search_is_deterministic_and_independent_of_workers tests/test_pretrain.py::test_collected_search_reward_is_the_search_reward -v`
 Expected: FAIL with `AttributeError: module 'rl.pretrain' has no attribute 'collect_search'` (and, once that's added, `has no attribute 'search_episode_seed'`)
 
-- [ ] **Step 3: Read the current code**
+- [x] **Step 3: Read the current code**
 
 Re-read `rl/pretrain.py` in full (it's short, ~133 lines) for the exact current text around `episode_seed`, `_collect_chunk`, and `collect_hindsight`.
 
-- [ ] **Step 4: Add the seed helper and collection functions, in `rl/pretrain.py`**
+- [x] **Step 4: Add the seed helper and collection functions, in `rl/pretrain.py`**
 
 Replace:
 
@@ -356,17 +356,17 @@ def collect_search(volume_ids, contract: dict, count: int, evaluations: int = 20
             "rewards": np.asarray([row[3] for row in rows], dtype=np.float32)}
 ```
 
-- [ ] **Step 5: Run the tests to confirm they pass**
+- [x] **Step 5: Run the tests to confirm they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_pretrain.py -v`
 Expected: PASS, all tests (existing hindsight tests plus the three new ones)
 
-- [ ] **Step 6: Run the full project test suite**
+- [x] **Step 6: Run the full project test suite**
 
 Run: `.venv/bin/python -m pytest tests/ -x -q`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rl/pretrain.py tests/test_pretrain.py
