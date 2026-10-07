@@ -30,7 +30,7 @@ Reference: `docs/superpowers/specs/2026-10-06-search-distilled-pretraining-desig
 - Modify: `rl/oneshot_env.py:30` (import), `rl/oneshot_env.py:345-358` (new method after `hindsight_policy_action`)
 - Test: `tests/test_oneshot_env.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/test_oneshot_env.py`, right after `test_hindsight_goal_deltas_match_full_features_path` (ends at line 449, immediately before `test_v8_layer_residual_changes_reachable_opacity_only`):
 
@@ -62,16 +62,16 @@ def test_search_policy_action_beats_a_random_action_by_a_clear_margin():
     assert np.median(search_scores) > np.median(random_scores) + 0.5
 ```
 
-- [ ] **Step 2: Run them to confirm they fail**
+- [x] **Step 2: Run them to confirm they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_env.py::test_search_policy_action_is_none_for_hindsight_episodes tests/test_oneshot_env.py::test_search_policy_action_beats_a_random_action_by_a_clear_margin -v`
 Expected: FAIL with `AttributeError: 'OneShotEnv' object has no attribute 'search_policy_action'`
 
-- [ ] **Step 3: Read the current code**
+- [x] **Step 3: Read the current code**
 
 Re-read `rl/oneshot_env.py:30` and `rl/oneshot_env.py:340-358` for the exact current text (the `Edit` tool requires an exact match).
 
-- [ ] **Step 4: Import `hill_climb`, in `rl/oneshot_env.py`**
+- [x] **Step 4: Import `hill_climb`, in `rl/oneshot_env.py`**
 
 Replace:
 
@@ -85,7 +85,7 @@ with:
 from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
 ```
 
-- [ ] **Step 5: Add `search_policy_action`, right after `hindsight_policy_action` in `rl/oneshot_env.py`**
+- [x] **Step 5: Add `search_policy_action`, right after `hindsight_policy_action` in `rl/oneshot_env.py`**
 
 Replace:
 
@@ -143,17 +143,17 @@ with:
         return action.astype(np.float32)
 ```
 
-- [ ] **Step 6: Run the tests to confirm they pass**
+- [x] **Step 6: Run the tests to confirm they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_env.py -v -k "search_policy_action or hindsight"`
 Expected: PASS, all hindsight tests and both new search tests.
 
-- [ ] **Step 7: Run the full project test suite**
+- [x] **Step 7: Run the full project test suite**
 
 Run: `.venv/bin/python -m pytest tests/ -x -q`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add rl/oneshot_env.py tests/test_oneshot_env.py
