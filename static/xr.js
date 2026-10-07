@@ -84,6 +84,16 @@
       ctx.fillText(`${fps} fps`, HUD_W - pad, 300);
       ctx.textAlign = "left";
     }
+    // Debug line: real numbers from this exact session, so a "laggy" report
+    // comes with the actual sample distance/auto-adjust/shade state rather
+    // than needing a follow-up question.
+    const diag = window.volumeViewer.getXRDiagnostics();
+    ctx.fillStyle = "#52525b";
+    ctx.font = "26px monospace";
+    ctx.fillText(
+      `xr=${diag.xrCapable} auto=${diag.autoAdjust} sd=${diag.sampleDistance?.toFixed(2)} `
+      + `shade=${diag.shade} dim=${diag.dimensions?.join("x")}`,
+      pad, 340);
     hud.texture.modified();
   }
 

@@ -612,5 +612,14 @@
     },
     get dataset() { return datasetName; },
     get transferFunction() { return transferFunction; },
+    // Surfaced on the in-VR HUD (xr.js) so a headset test reports real
+    // numbers on its own screen instead of a subjective "laggy".
+    getXRDiagnostics: () => ({
+      xrCapable: isXRCapableDevice,
+      sampleDistance: mapper?.getSampleDistance(),
+      autoAdjust: mapper?.getAutoAdjustSampleDistances(),
+      shade: volume?.getProperty().getShade(),
+      dimensions: volumeMetadata?.dimensions,
+    }),
   };
 })();
