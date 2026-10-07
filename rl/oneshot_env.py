@@ -27,7 +27,7 @@ import transfer
 import visibility
 from anatomy import LAYOUT_VERSION
 from anatomy_layers import default_layers, normalize_layers
-from rl.baselines import CONTROLLABLE, apply_controllable
+from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
 
 N_GOAL_CLASSES = len(goals.GOAL_CLASSES)
 OBSERVATION_SIZE = 4 * N_GOAL_CLASSES + 16 + 3 * N_GOAL_CLASSES + len(CONTROLLABLE) + 1
@@ -351,6 +351,24 @@ class OneShotEnv(gym.Env):
         if self._hindsight_action is None:
             return None
         action = self._hindsight_action.copy()
+        if self.action_mode == "residual":
+            action = action - np.asarray(self._controllable_values(self._start_params))
+        if self.policy_version == V8_POLICY_VERSION:
+            action = np.concatenate([action, np.zeros(len(LAYER_NAMES))])
+        return action.astype(np.float32)
+
+    def search_policy_action(self, evaluations: int = 200, initial_step: float = 0.2):
+        """A `hill_climb` search solution for this episode's real instruction,
+        in the policy's own action space -- same encoding as
+        `hindsight_policy_action`. None for a hindsight episode (which
+        already has a free oracle action; see `hindsight_policy_action`).
+        The supervised target for a search-distilled `rl.pretrain` run."""
+        if self._hindsight_action is not None:
+            return None
+        target_params = hill_climb(self._model, self._start_params, self._instruction,
+                                   evaluations=evaluations, initial_step=initial_step,
+                                   active_layers=getattr(self, "_active_layers", None))
+        action = np.asarray(self._controllable_values(target_params))
         if self.action_mode == "residual":
             action = action - np.asarray(self._controllable_values(self._start_params))
         if self.policy_version == V8_POLICY_VERSION:

@@ -448,6 +448,33 @@ def test_hindsight_goal_deltas_match_full_features_path():
                 - math.log10(env._start_agg["vis"][goal_class] + goals.EPSILON))
 
 
+def test_search_policy_action_is_none_for_hindsight_episodes():
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
+    env.reset(seed=0)
+    assert env.search_policy_action() is None
+
+
+def test_search_policy_action_beats_a_random_action_by_a_clear_margin():
+    # Mirrors test_hindsight_oracle_beats_a_random_action_by_a_clear_margin:
+    # a margin at the median, not a fixed threshold, so the test keeps
+    # meaning if the keep penalty (and so absolute attainment) moves.
+    # evaluations=50, not the 200 production default, so the suite stays fast.
+    env = OneShotEnv(["synthetic"], hindsight_ratio=0.0)
+    noise = np.random.default_rng(0)
+    search_scores, random_scores = [], []
+    for seed in range(10):
+        env.reset(seed=seed)
+        action = env.search_policy_action(evaluations=50)
+        _obs, _reward, _done, _truncated, info = env.step(action)
+        search_scores.append(info["attainment"])
+
+        env.reset(seed=seed)   # the same episode, a different action
+        _obs, _reward, _done, _truncated, info = env.step(noise.uniform(-1.0, 1.0, ACTION_SIZE))
+        random_scores.append(info["attainment"])
+
+    assert np.median(search_scores) > np.median(random_scores) + 0.5
+
+
 def test_v8_layer_residual_changes_reachable_opacity_only(monkeypatch):
     _patch_totalseg(monkeypatch)
     env = OneShotEnv(["fake_b"], model_for_volume=lambda name: _StubModel(),
