@@ -39,6 +39,39 @@ def test_collected_reward_is_the_oracle_reward():
         assert data["rewards"][index] == pytest.approx(reward)
 
 
+def test_collect_search_returns_aligned_samples():
+    data = pretrain.collect_search(["synthetic"], V9, count=4, evaluations=20, seed=0)
+
+    assert data["obs"].shape == (4, OBSERVATION_SIZE)
+    assert data["actions"].shape == (4, ACTION_SIZE)
+    assert data["rewards"].shape == (4,)
+    assert np.all(np.abs(data["actions"]) <= 1.0)
+
+
+def test_collect_search_is_deterministic_and_independent_of_workers():
+    # Inherits the same potential full-suite-only flakiness as
+    # test_collect_is_deterministic_and_independent_of_workers (see that
+    # test and docs/superpowers/specs/2026-10-06-search-distilled-pretraining-design.md
+    # -- torch.set_num_threads(1) only reliably constrains intra-op
+    # parallelism before the process has done other torch work, which the
+    # workers=1 path can't guarantee inside a shared test-suite process).
+    # Pre-existing risk, not something to paper over here.
+    one = pretrain.collect_search(["synthetic"], V9, count=4, evaluations=20, seed=3, workers=1)
+    again = pretrain.collect_search(["synthetic"], V9, count=4, evaluations=20, seed=3, workers=2)
+
+    for key in ("obs", "actions", "rewards"):
+        np.testing.assert_allclose(one[key], again[key])
+
+
+def test_collected_search_reward_is_the_search_reward():
+    data = pretrain.collect_search(["synthetic"], V9, count=3, evaluations=20, seed=5)
+    env = _env(hindsight_ratio=0.0)
+    for index in range(3):
+        env.reset(seed=pretrain.search_episode_seed(5, index))
+        _obs, reward, *_ = env.step(env.search_policy_action(evaluations=20))
+        assert data["rewards"][index] == pytest.approx(reward)
+
+
 def test_save_and_load_round_trip(tmp_path):
     data = pretrain.collect_hindsight(["synthetic"], V9, count=2, seed=0)
     path = tmp_path / "hindsight.npz"

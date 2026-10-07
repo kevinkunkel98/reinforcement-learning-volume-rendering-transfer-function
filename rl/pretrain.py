@@ -31,6 +31,10 @@ from rl.oneshot_env import OneShotEnv
 # (`rl.oneshot_train.VALIDATION_SEED_BASE`, 10_000 + i) seeds.
 PRETRAIN_SEED_BASE = 1_000_000
 SEED_STRIDE = 100_000
+# Its own seed space, far from PRETRAIN_SEED_BASE: a search-distilled run
+# collected under the same --seed as a hindsight run must not reuse the
+# exact same rng draws (same volume/start noise) before the two diverge.
+SEARCH_SEED_BASE = 2_000_000
 # atanh(0.97) ~ 2.1: targets at the edge of [-1, 1] would ask the squashed
 # actor for an unbounded pre-tanh mean.
 TARGET_CLIP = 0.97
@@ -38,6 +42,10 @@ TARGET_CLIP = 0.97
 
 def episode_seed(seed: int, index: int) -> int:
     return PRETRAIN_SEED_BASE + seed * SEED_STRIDE + index
+
+
+def search_episode_seed(seed: int, index: int) -> int:
+    return SEARCH_SEED_BASE + seed * SEED_STRIDE + index
 
 
 def _collect_chunk(job) -> list:
@@ -48,6 +56,19 @@ def _collect_chunk(job) -> list:
     for index in indices:
         obs, _ = env.reset(seed=episode_seed(seed, index))
         action = env.hindsight_policy_action()
+        _obs, reward, *_ = env.step(action)
+        rows.append((index, obs, action, float(reward)))
+    return rows
+
+
+def _collect_search_chunk(job) -> list:
+    volume_ids, contract, evaluations, seed, indices = job
+    torch.set_num_threads(1)
+    env = OneShotEnv(list(volume_ids), hindsight_ratio=0.0, **contract)
+    rows = []
+    for index in indices:
+        obs, _ = env.reset(seed=search_episode_seed(seed, index))
+        action = env.search_policy_action(evaluations=evaluations)
         _obs, reward, *_ = env.step(action)
         rows.append((index, obs, action, float(reward)))
     return rows
@@ -67,6 +88,26 @@ def collect_hindsight(volume_ids, contract: dict, count: int, seed: int = 0,
     else:
         with multiprocessing.get_context("spawn").Pool(len(jobs)) as pool:
             rows = [row for chunk in pool.map(_collect_chunk, jobs) for row in chunk]
+    rows.sort(key=lambda row: row[0])
+    return {"obs": np.stack([row[1] for row in rows]).astype(np.float32),
+            "actions": np.stack([row[2] for row in rows]).astype(np.float32),
+            "rewards": np.asarray([row[3] for row in rows], dtype=np.float32)}
+
+
+def collect_search(volume_ids, contract: dict, count: int, evaluations: int = 200,
+                   seed: int = 0, workers: int = 1) -> dict:
+    """Like `collect_hindsight`, but the teacher is a `hill_climb` search
+    solution for a real sampled instruction (`hindsight_ratio=0.0`), not a
+    reachable hindsight target. `evaluations` is `hill_climb`'s per-episode
+    search budget."""
+    indices = list(range(count))
+    chunks = [indices[i::workers] for i in range(workers)] if workers > 1 else [indices]
+    jobs = [(tuple(volume_ids), dict(contract), evaluations, seed, chunk) for chunk in chunks if chunk]
+    if len(jobs) == 1:
+        rows = _collect_search_chunk(jobs[0])
+    else:
+        with multiprocessing.get_context("spawn").Pool(len(jobs)) as pool:
+            rows = [row for chunk in pool.map(_collect_search_chunk, jobs) for row in chunk]
     rows.sort(key=lambda row: row[0])
     return {"obs": np.stack([row[1] for row in rows]).astype(np.float32),
             "actions": np.stack([row[2] for row in rows]).astype(np.float32),
