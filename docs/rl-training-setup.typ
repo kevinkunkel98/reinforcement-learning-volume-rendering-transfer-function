@@ -168,6 +168,17 @@ With `--pretrain-data`, hindsight episodes are collected up front
   to the replay buffer, so the critic's first updates see good actions
   rather than only the random warm-up.
 
+A second teacher source, `--search-pretrain-data`, collects `hill_climb`
+solutions on real sampled instructions instead of hindsight targets
+(`rl.pretrain.collect_search`, `OneShotEnv.search_policy_action`) --
+`docs/STATUS.md`'s "distil search into the policy". When both
+`--pretrain-data` and `--search-pretrain-data` are given, the two datasets
+are concatenated (`oneshot_train.merge_datasets`) before the single
+`pretrain_actor`/`prefill_replay_buffer` pass. `--search-evaluations`
+(default 200) sets `hill_climb`'s per-episode budget; at that budget,
+collection costs roughly 2.7 s/episode, hence the lower default episode
+count (`--search-pretrain-episodes`, default 1000 vs. hindsight's 4000).
+
 An eval row at timestep 0 records what the warm start alone achieves,
 against `val_mse`/`zero_mse` in `metadata.json` (if `val_mse` isn't clearly
 below "always predict zero", the fit learned nothing).
