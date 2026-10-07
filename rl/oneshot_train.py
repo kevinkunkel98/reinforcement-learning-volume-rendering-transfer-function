@@ -212,6 +212,12 @@ def parse_args(argv=None):
     parser.add_argument("--pretrain-episodes", type=int, default=4000)
     parser.add_argument("--pretrain-epochs", type=int, default=30)
     parser.add_argument("--pretrain-workers", type=int, default=6)
+    parser.add_argument("--search-pretrain-data", type=str, default=None,
+                        help="hill-climb search dataset (.npz); collected and saved here first if "
+                             "missing, mixed in with --pretrain-data when both are given")
+    parser.add_argument("--search-pretrain-episodes", type=int, default=1000)
+    parser.add_argument("--search-evaluations", type=int, default=200,
+                        help="hill_climb search budget per collected episode")
     parser.add_argument("--eval-episodes", type=int, default=None,
                         help=f"validation episodes per evaluation (default {VALIDATION_EPISODES})")
     args = parser.parse_args(argv)
@@ -253,13 +259,57 @@ def load_or_collect_pretrain(args) -> tuple:
     return data, {"data": args.pretrain_data, "episodes": args.pretrain_episodes}
 
 
+def load_or_collect_search_pretrain(args) -> tuple:
+    """(dataset, provenance) for --search-pretrain-data: loaded when the file
+    exists and matches this run's contract, else collected on the training
+    split (hill_climb solutions to real instructions) and saved there.
+    Reuses --pretrain-workers for parallelism -- the two collection passes
+    never run at the same time, so a separate worker-count flag would only
+    add CLI surface without adding anything to configure."""
+    contract = {"policy_version": args.policy_version, "action_mode": args.action_mode,
+                "reward_mode": args.reward_mode}
+    expected = {**observation_metadata(**contract), "episodes": args.search_pretrain_episodes,
+                "seed": args.seed, "split": "train", "evaluations": args.search_evaluations}
+    if os.path.exists(args.search_pretrain_data):
+        data, stored = pretrain.load_dataset(args.search_pretrain_data)
+        mismatched = {key for key in expected if stored.get(key) != expected[key]}
+        if mismatched:
+            raise ValueError(f"{args.search_pretrain_data} does not match this run: {sorted(mismatched)}")
+    else:
+        data = pretrain.collect_search(datasets.volumes_for_split("train"), contract,
+                                       args.search_pretrain_episodes, args.search_evaluations,
+                                       args.seed, args.pretrain_workers)
+        pretrain.save_dataset(data, args.search_pretrain_data, expected)
+    return data, {"data": args.search_pretrain_data, "episodes": args.search_pretrain_episodes}
+
+
+def merge_datasets(*datasets_: dict) -> dict:
+    """Concatenate `{"obs", "actions", "rewards"}` dicts into one, in order
+    -- e.g. hindsight and search-distilled pretrain data, so `main()` can
+    hand `run_training` a single combined `pretrain_data`. `pretrain_actor`/
+    `prefill_replay_buffer` don't need to know a dataset came from more than
+    one source."""
+    return {key: np.concatenate([data[key] for data in datasets_]) for key in ("obs", "actions", "rewards")}
+
+
 def main(argv=None):
     args = parse_args(argv)
     out = args.out or DEFAULT_OUT_TEMPLATE.format(seed=args.seed)
     timesteps = SHORT_EXPERIMENT["timesteps"] if args.short else args.timesteps
     eval_interval = SHORT_EXPERIMENT["eval_interval"] if args.short else args.eval_interval
-    pretrain_data, pretrain_info = (load_or_collect_pretrain(args)
-                                    if args.pretrain_data else (None, None))
+    pretrain_sources = []
+    if args.pretrain_data:
+        pretrain_sources.append(load_or_collect_pretrain(args))
+    if args.search_pretrain_data:
+        pretrain_sources.append(load_or_collect_search_pretrain(args))
+    if not pretrain_sources:
+        pretrain_data, pretrain_info = None, None
+    elif len(pretrain_sources) == 1:
+        pretrain_data, pretrain_info = pretrain_sources[0]
+    else:
+        source_data, source_info = zip(*pretrain_sources)
+        pretrain_data = merge_datasets(*source_data)
+        pretrain_info = {"sources": list(source_info)}
     result = run_training(out=out, timesteps=timesteps, seed=args.seed, eval_interval=eval_interval,
                           eval_episode_count=(SHORT_EXPERIMENT["eval_episode_count"] if args.short
                                               else args.eval_episodes or VALIDATION_EPISODES),

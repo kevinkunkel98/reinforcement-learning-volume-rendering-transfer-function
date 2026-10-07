@@ -466,3 +466,58 @@ def test_cli_rejects_a_pretrain_dataset_for_another_contract(tmp_path):
                                      "--reward-mode", "target", "--pretrain-data", str(path)])
     with pytest.raises(ValueError, match="does not match"):
         oneshot_train.load_or_collect_pretrain(args)
+
+
+def test_cli_rejects_a_search_pretrain_dataset_for_another_contract(tmp_path):
+    from rl import pretrain
+    path = tmp_path / "search.npz"
+    data = {"obs": np.zeros((1, 97), np.float32), "actions": np.zeros((1, 24), np.float32),
+            "rewards": np.zeros(1, np.float32)}
+    pretrain.save_dataset(data, str(path), {"policy_version": "oneshot-v7"})
+    args = oneshot_train.parse_args(["--policy-version", "oneshot-v9", "--action-mode", "residual",
+                                     "--reward-mode", "target", "--search-pretrain-data", str(path)])
+    with pytest.raises(ValueError, match="does not match"):
+        oneshot_train.load_or_collect_search_pretrain(args)
+
+
+def test_merge_datasets_concatenates_in_order():
+    a = {"obs": np.zeros((2, 3), np.float32), "actions": np.ones((2, 1), np.float32),
+         "rewards": np.array([1.0, 2.0], dtype=np.float32)}
+    b = {"obs": np.ones((3, 3), np.float32), "actions": np.zeros((3, 1), np.float32),
+         "rewards": np.array([3.0, 4.0, 5.0], dtype=np.float32)}
+
+    merged = oneshot_train.merge_datasets(a, b)
+
+    assert merged["obs"].shape == (5, 3)
+    assert merged["actions"].shape == (5, 1)
+    assert list(merged["rewards"]) == [1.0, 2.0, 3.0, 4.0, 5.0]
+
+
+def test_main_mixes_both_pretrain_sources_into_one_combined_dataset(monkeypatch, tmp_path):
+    hindsight_data = {"obs": np.full((2, 97), 1.0, dtype=np.float32),
+                      "actions": np.full((2, 24), 1.0, dtype=np.float32),
+                      "rewards": np.full(2, 1.0, dtype=np.float32)}
+    search_data = {"obs": np.full((3, 97), 2.0, dtype=np.float32),
+                  "actions": np.full((3, 24), 2.0, dtype=np.float32),
+                  "rewards": np.full(3, 2.0, dtype=np.float32)}
+    hindsight_info = {"data": "hindsight.npz", "episodes": 2}
+    search_info = {"data": "search.npz", "episodes": 3}
+    monkeypatch.setattr(oneshot_train, "load_or_collect_pretrain",
+                        lambda args: (hindsight_data, hindsight_info))
+    monkeypatch.setattr(oneshot_train, "load_or_collect_search_pretrain",
+                        lambda args: (search_data, search_info))
+    captured = {}
+    monkeypatch.setattr(oneshot_train, "run_training",
+                        lambda **kwargs: captured.update(kwargs) or {
+                            "eval_progress_path": "eval.csv", "best_path": "best.zip"})
+
+    oneshot_train.main(["--pretrain-data", "hindsight.npz", "--search-pretrain-data", "search.npz",
+                        "--out", str(tmp_path / "run")])
+
+    merged = captured["pretrain_data"]
+    assert merged["obs"].shape == (5, 97)
+    # Each source's rows are recognizable by their constant fill value, and
+    # hindsight rows come first -- the same order `main()` appended them in.
+    assert list(merged["rewards"]) == [1.0, 1.0, 2.0, 2.0, 2.0]
+    assert list(merged["obs"][:, 0]) == [1.0, 1.0, 2.0, 2.0, 2.0]
+    assert captured["pretrain_info"] == {"sources": [hindsight_info, search_info]}
