@@ -1,4 +1,4 @@
-# Search-Distilled Pretraining: Results (seed 0, 150k steps)
+# Search-Distilled Pretraining: Results (seeds 0-2, 150k steps)
 
 ## Purpose
 
@@ -117,31 +117,56 @@ rerun on seeds 1 and 2 (each with its own freshly collected
 `hindsight_v9_bright_seed{1,2}.npz` and `search_v9_seed{1,2}.npz`, per this
 project's own note that pretrain datasets are tied to their seed).
 
-| metric | E3 seed0 | E3 seed1 | E3 seed2 |
-|---|---|---|---|
-| median_attainment | +0.179 | +0.143 | TBD |
-| absolute | +0.176 | +0.187 | TBD |
-| relative | -0.068 | -0.102 | TBD |
-| compound | +0.088 | +0.039 | TBD |
-| show_only | +0.096 | +0.055 | TBD |
-| brightness | +0.246 | +0.219 | TBD |
+| metric | E3 seed0 | E3 seed1 | E3 seed2 | **median-of-3** |
+|---|---|---|---|---|
+| median_attainment | +0.179 | +0.143 | +0.153 | **+0.153** |
+| absolute | +0.176 | +0.187 | +0.073 | +0.176 |
+| relative | -0.068 | -0.102 | -0.064 | -0.068 |
+| compound | +0.088 | +0.039 | +0.080 | +0.080 |
+| show_only | +0.096 | +0.055 | +0.061 | +0.061 |
+| brightness | +0.246 | +0.219 | -0.010 | **+0.219** |
+| share_positive | 0.718 | 0.708 | 0.677 | 0.708 |
 
-Seed 1 confirms the pattern closely: every metric has the same sign as seed
-0, and brightness in particular stays strongly positive (+0.219), the
-headline result of this experiment. Magnitudes on compound/show_only are
-somewhat weaker than seed 0 but still clearly positive. No metric flipped
-sign between the two seeds so far.
+(`median_attainment`/`share_positive` here are each seed's own mean of its
+last 3 validation evals (steps 130k/140k/150k); `median-of-3` is the median
+across the three seeds' values, matching this project's own convention
+"attainment is the median of the three seeds' medians".)
 
-**TBD -- fill in once `out/rl_v4/e3_v9_searchmix_bright_150k_seed2` finishes,
-then finalize the decision.**
+All three seeds agree in sign and rough magnitude on every metric except
+brightness, where seed 2 lands near-neutral (-0.010) instead of strongly
+positive (seeds 0/1: +0.246/+0.219). Taking the median across seeds (the
+project's own robustness convention, chosen specifically because it is not
+swayed by a single outlier seed) still gives **+0.219** for brightness --
+seed 2 being an outlier doesn't erase the result, but it does mean "always
+turns brightness strongly positive" is not (yet) true on every seed, only on
+2 of 3, with the third neutral rather than a regression.
+
+Decision-gate check against this project's own bar ("worth a thesis claim:
+held-out median > 0 with share improved > 50% across 3 seeds"): median
+attainment is positive on **all three seeds individually** (+0.179/+0.143/
++0.153) and share improved is **67.7-71.8%** on all three, comfortably above
+50%. The gate is satisfied, on validation-split data (see caveat below).
+
+Note on run conditions: seed 2 trained partly through a battery-brownout
+incident (laptop hit ~1-2% charge, triggering hardware-level CPU throttling,
+fps dropped from ~20 to ~3 for a stretch before recovering once back on AC
+power). This only affected wall-clock speed, not the number of gradient
+steps or the env/seed sequence -- SAC's step count and RNG draws are
+unaffected by throttling -- so it should not explain seed 2's weaker
+brightness number; more likely this is genuine seed-to-seed variance on a
+96-episode brightness sample size.
 
 ## Decision
 
 **Adopt the full recipe** -- hindsight pretraining (4000 ep) + brightness
 hindsight (`--hindsight-brightness 0.1`, both at pretrain time and
 continuously during the 150k RL steps) + search-distilled pretraining (1000
-ep @ 200 evaluations) -- as the new best-known configuration for `oneshot-v9`,
-pending seed 2's confirmation above.
+ep @ 200 evaluations) -- as the new best-known configuration for `oneshot-v9`.
+It passes this project's own 3-seed decision gate on overall median
+attainment and share improved, and the median-of-3 brightness number is a
+large, clear improvement over both the no-pretrain control and (especially)
+hindsight-only pretraining, though not yet a universal per-seed win on that
+one instruction kind specifically.
 
 Still open before this is a thesis-ready claim: a held-out *test*-split
 evaluation (`rl.vis_eval` + `tools.per_class_eval`, per this project's own
