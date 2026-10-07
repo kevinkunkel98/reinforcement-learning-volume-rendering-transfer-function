@@ -381,7 +381,7 @@ git commit -m "feat(rl): add pretrain.collect_search, a hill_climb-distilled tea
 - Modify: `rl/oneshot_train.py` (new CLI flags, `load_or_collect_search_pretrain`, `merge_datasets`, `main()`)
 - Test: `tests/test_oneshot_train.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/test_oneshot_train.py`, right after `test_cli_rejects_a_pretrain_dataset_for_another_contract` (the file's last test, ends at line 468):
 
@@ -411,16 +411,16 @@ def test_merge_datasets_concatenates_in_order():
     assert list(merged["rewards"]) == [1.0, 2.0, 3.0, 4.0, 5.0]
 ```
 
-- [ ] **Step 2: Run them to confirm they fail**
+- [x] **Step 2: Run them to confirm they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_train.py::test_cli_rejects_a_search_pretrain_dataset_for_another_contract tests/test_oneshot_train.py::test_merge_datasets_concatenates_in_order -v`
 Expected: FAIL with `error: unrecognized arguments: --search-pretrain-data ...` (argparse) and, once that's fixed, `AttributeError: module 'rl.oneshot_train' has no attribute 'merge_datasets'`
 
-- [ ] **Step 3: Read the current code**
+- [x] **Step 3: Read the current code**
 
 Re-read `rl/oneshot_train.py:196-278` for the exact current text (the `Edit` tool requires an exact match).
 
-- [ ] **Step 4: Add the three new CLI flags, in `rl/oneshot_train.py`**
+- [x] **Step 4: Add the three new CLI flags, in `rl/oneshot_train.py`**
 
 Replace:
 
@@ -448,7 +448,7 @@ with:
                         help="hill_climb search budget per collected episode")
 ```
 
-- [ ] **Step 5: Add `load_or_collect_search_pretrain` and `merge_datasets`, in `rl/oneshot_train.py`**
+- [x] **Step 5: Add `load_or_collect_search_pretrain` and `merge_datasets`, in `rl/oneshot_train.py`**
 
 Replace:
 
@@ -539,7 +539,7 @@ def merge_datasets(*datasets_: dict) -> dict:
 
 (The parameter is named `datasets_` with a trailing underscore to avoid shadowing the `datasets` module already imported at the top of this file.)
 
-- [ ] **Step 6: Wire both sources into `main()`, in `rl/oneshot_train.py`**
+- [x] **Step 6: Wire both sources into `main()`, in `rl/oneshot_train.py`**
 
 Replace:
 
@@ -605,17 +605,17 @@ keeps its exact old `pretrain_info` shape (`{"data": ..., "episodes": ...}`)
 -- `{"sources": [...]}` only appears when both flags are given, a new
 capability nothing old depends on.
 
-- [ ] **Step 7: Run the new tests**
+- [x] **Step 7: Run the new tests**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_train.py -v`
 Expected: PASS, all tests (existing pretrain-dataset tests plus the two new ones)
 
-- [ ] **Step 8: Run the full project test suite**
+- [x] **Step 8: Run the full project test suite**
 
 Run: `.venv/bin/python -m pytest tests/ -x -q`
 Expected: PASS
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add rl/oneshot_train.py tests/test_oneshot_train.py
