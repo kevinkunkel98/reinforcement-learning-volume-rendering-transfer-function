@@ -109,14 +109,41 @@ best-in-class absolute/relative (E2: +0.193/-0.052 vs. E3: +0.176/-0.068),
 while E2 itself collapses on brightness (-5.204). No other configuration
 comes close to this combination.
 
+## Multi-seed confirmation of E3
+
+Per this project's own decision gate ("worth a thesis claim: held-out
+median > 0 with share improved > 50% across 3 seeds"), the E3 recipe was
+rerun on seeds 1 and 2 (each with its own freshly collected
+`hindsight_v9_bright_seed{1,2}.npz` and `search_v9_seed{1,2}.npz`, per this
+project's own note that pretrain datasets are tied to their seed).
+
+| metric | E3 seed0 | E3 seed1 | E3 seed2 |
+|---|---|---|---|
+| median_attainment | +0.179 | +0.143 | TBD |
+| absolute | +0.176 | +0.187 | TBD |
+| relative | -0.068 | -0.102 | TBD |
+| compound | +0.088 | +0.039 | TBD |
+| show_only | +0.096 | +0.055 | TBD |
+| brightness | +0.246 | +0.219 | TBD |
+
+Seed 1 confirms the pattern closely: every metric has the same sign as seed
+0, and brightness in particular stays strongly positive (+0.219), the
+headline result of this experiment. Magnitudes on compound/show_only are
+somewhat weaker than seed 0 but still clearly positive. No metric flipped
+sign between the two seeds so far.
+
+**TBD -- fill in once `out/rl_v4/e3_v9_searchmix_bright_150k_seed2` finishes,
+then finalize the decision.**
+
 ## Decision
 
 **Adopt the full recipe** -- hindsight pretraining (4000 ep) + brightness
 hindsight (`--hindsight-brightness 0.1`, both at pretrain time and
 continuously during the 150k RL steps) + search-distilled pretraining (1000
-ep @ 200 evaluations) -- as the new best-known configuration for `oneshot-v9`.
+ep @ 200 evaluations) -- as the new best-known configuration for `oneshot-v9`,
+pending seed 2's confirmation above.
 
-This is one seed. Per this project's own decision gate ("worth a thesis
-claim: held-out median > 0 with share improved > 50% across 3 seeds"),
-**seeds 1 and 2 of the E3 recipe are queued next** to confirm this isn't a
-single-seed artifact before treating it as a result.
+Still open before this is a thesis-ready claim: a held-out *test*-split
+evaluation (`rl.vis_eval` + `tools.per_class_eval`, per this project's own
+evaluation protocol) has not yet been run for any of these configs -- only
+validation-split `eval_progress.csv` numbers are compared here.
