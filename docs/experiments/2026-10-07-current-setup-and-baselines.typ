@@ -40,6 +40,66 @@ segmented as class $c$ is shaded only by $c$'s own peak, so the eight goal
 classes (skeleton, lungs, heart, vessels, liver, kidneys, spleen, soft) no
 longer fight over the same HU range. Observation size 97, action size 24.
 
+= Experiment design
+
+== The question
+
+Does a second kind of imitation data (search-distilled examples) actually
+make the policy better -- and if so, why? Everything below exists only to
+answer that one question cleanly.
+
+== One variable at a time
+
+Running only the final recipe and reporting a good number would prove
+nothing: if five things changed at once and the score went up, there is no
+way to tell which of the five did it, or whether it was noise. The
+discipline instead is to change *exactly one ingredient* per step, freeze
+everything else, and measure. Any difference observed is then attributable
+to that one ingredient, because nothing else moved.
+
+== The staircase
+
+#table(
+  columns: (auto, 1fr),
+  stroke: 0.5pt + luma(200),
+  table.header[*Step*][*Isolates*],
+  [E1 $arrow.r$ E2], [Does hindsight pretraining help at all, over nothing?],
+  [E2 $arrow.r$ E2+search], [What does search-distilled data add, on top of hindsight (unchanged)?],
+  [E2+search $arrow.r$ E3], [Does continuous brightness anchoring fix what the previous step
+    exposed, without undoing its gains?],
+)
+
+E3 was not planned from day one -- it exists only because the E1/E2/E2+search
+comparison surfaced a problem worth fixing. That is the point of running the
+staircase instead of jumping straight to a guessed-at final recipe.
+
+== The brightness blind spot, and why per-kind scoring caught it
+
+A single blended score would have made E2 look like a clean win over E1.
+Breaking the score down *per instruction kind* (absolute, relative,
+brightness, ...) is what exposed that E2 was dramatically worse at
+brightness specifically than even doing nothing -- invisible in the average,
+obvious in the breakdown.
+
+#note(title: "Why", color: navy)[None of the 4000 hindsight demonstrations
+are brightness-type, so the actor is fit hard to four topics and never once
+shown the fifth -- and nothing during RL training brings brightness back in,
+since hindsight-generated training episodes are the same four topics. Like
+cramming four of five exam topics: the four get very good, and the fifth
+quietly atrophies rather than staying neutral. E3's fix is to keep a trickle
+of brightness examples flowing throughout training, the same continuous
+reinforcement the other four topics already get.]
+
+== Why three seeds
+
+SAC's outcome is not deterministic -- a different random seed can land
+noticeably differently even with the exact same recipe, so one good run
+could just be a lucky draw. The fix is this project's own standing bar:
+rerun the winning recipe on three seeds and require the *median* result
+(not any single run) to clear median attainment $>$ 0 with share improved
+$>$ 50%. E3 was only called a result once seeds 1 and 2 agreed with seed 0,
+not after seed 0 alone.
+
 = Training baselines
 
 All four runs: 150k timesteps, `--hindsight-ratio 0.25 --balance-classes`,
