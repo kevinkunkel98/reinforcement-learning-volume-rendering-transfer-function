@@ -32,7 +32,7 @@ Reference: `docs/superpowers/specs/2026-10-09-show-only-hindsight-design.md`
   `_sample_hindsight_goal`)
 - Test: `tests/test_oneshot_env.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/test_oneshot_env.py`, right after
 `test_brightness_share_zero_keeps_visibility_hindsight` (ends at line 411,
@@ -87,12 +87,12 @@ def test_show_only_share_zero_keeps_visibility_hindsight():
         assert len(env._instruction["targets"]) <= 2
 ```
 
-- [ ] **Step 2: Run them to confirm they fail**
+- [x] **Step 2: Run them to confirm they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_env.py::test_hindsight_show_only_targets_every_class_with_correct_signs tests/test_oneshot_env.py::test_hindsight_show_only_action_matches_measured_deltas tests/test_oneshot_env.py::test_show_only_share_zero_keeps_visibility_hindsight -v`
 Expected: FAIL with `TypeError: OneShotEnv.__init__() got an unexpected keyword argument 'hindsight_show_only_share'`
 
-- [ ] **Step 3: Read the current code**
+- [x] **Step 3: Read the current code**
 
 Re-read `rl/oneshot_env.py:78-85` (brightness constants),
 `rl/oneshot_env.py:191-229` (constructor), and `rl/oneshot_env.py:378-407`
@@ -100,7 +100,7 @@ Re-read `rl/oneshot_env.py:78-85` (brightness constants),
 current text -- the `Edit` tool requires an exact match, and this plan's
 line numbers may have drifted slightly since this plan was written.
 
-- [ ] **Step 4: Add the show-only hindsight constants, in `rl/oneshot_env.py`**
+- [x] **Step 4: Add the show-only hindsight constants, in `rl/oneshot_env.py`**
 
 Replace:
 
@@ -135,7 +135,7 @@ HINDSIGHT_SHOW_ONLY_PUSH_RANGE = (0.4, 1.2)
 HINDSIGHT_SHOW_ONLY_MIN_DELTA = 0.05
 ```
 
-- [ ] **Step 5: Add the constructor param and validation, in `rl/oneshot_env.py`**
+- [x] **Step 5: Add the constructor param and validation, in `rl/oneshot_env.py`**
 
 Replace:
 
@@ -181,7 +181,7 @@ with:
         self.hindsight_show_only_share = float(hindsight_show_only_share)
 ```
 
-- [ ] **Step 6: Add `_sample_hindsight_show_only` and wire it in, in `rl/oneshot_env.py`**
+- [x] **Step 6: Add `_sample_hindsight_show_only` and wire it in, in `rl/oneshot_env.py`**
 
 Replace:
 
@@ -242,12 +242,12 @@ with:
         start_controllable = np.asarray(self._controllable_values(start_params))
 ```
 
-- [ ] **Step 7: Run the tests to confirm they pass**
+- [x] **Step 7: Run the tests to confirm they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_env.py -v -k "show_only or hindsight or brightness"`
 Expected: PASS, all hindsight/brightness tests and the three new show-only tests.
 
-- [ ] **Step 8: Run the full project test suite**
+- [x] **Step 8: Run the full project test suite**
 
 Run: `.venv/bin/python -m pytest tests/ -x -q`
 Expected: PASS. Note: `tests/test_pretrain.py::test_collect_is_deterministic_and_independent_of_workers` (and its search-collection sibling) have known, pre-existing, full-suite-only flakiness from torch intra-op threading nondeterminism, unrelated to this change (see
@@ -256,7 +256,7 @@ ONLY those fail with a ~1e-7-scale floating point mismatch, rerun in
 isolation to confirm they pass alone and treat that as the known flake, not
 a bug. Any other failure is real and must be fixed.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add rl/oneshot_env.py tests/test_oneshot_env.py
