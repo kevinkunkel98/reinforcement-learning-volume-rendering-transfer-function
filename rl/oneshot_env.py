@@ -94,6 +94,15 @@ HINDSIGHT_BRIGHTNESS_MIN_VIS = 1e-3
 # realistic.
 HINDSIGHT_SHOW_ONLY_PUSH_RANGE = (0.4, 1.2)
 HINDSIGHT_SHOW_ONLY_MIN_DELTA = 0.05
+# Requiring every shown class *and* every hidden class to clear its own
+# threshold in the same try is a harder simultaneous condition than
+# brightness's single one-sided check on one freely-re-picked class --
+# measured at ~1.1-1.2% fallback-to-None on fake_a/_StubModel over 2000
+# seeds against the shared HINDSIGHT_MAX_TRIES=20 (mean 2.48 tries to
+# succeed, long tail), vs. 0% for brightness under the same budget. A
+# dedicated, larger budget keeps that fallback rate low without touching
+# brightness's or the generic sampler's own tuning.
+HINDSIGHT_SHOW_ONLY_MAX_TRIES = 50
 
 # Distance already contains the keep penalty for unmentioned classes. Keep
 # auxiliary drift small so target progress remains primary signal instead of
@@ -426,7 +435,7 @@ class OneShotEnv(gym.Env):
         shape."""
         n = min(int(rng.integers(1, 3)), len(goals.GOAL_CLASSES))
         start_controllable = np.asarray(self._controllable_values(start_params))
-        for _ in range(self.HINDSIGHT_MAX_TRIES):
+        for _ in range(HINDSIGHT_SHOW_ONLY_MAX_TRIES):
             shown = set(rng.choice(goals.GOAL_CLASSES, size=n, replace=False))
             hidden = set(goals.GOAL_CLASSES) - shown
             action = start_controllable.copy()
