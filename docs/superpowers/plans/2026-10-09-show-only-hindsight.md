@@ -408,7 +408,7 @@ git commit -m "feat(rl): wire --hindsight-show-only through training and pretrai
 **Files:**
 - Modify: `docs/rl-training-setup.typ`
 
-- [ ] **Step 1: Add the new flag to the "Hindsight episodes" section**
+- [x] **Step 1: Add the new flag to the "Hindsight episodes" section**
 
 Read `docs/rl-training-setup.typ`'s `== Hindsight episodes` section. After
 its existing sentence ending "...since brightness instructions are
@@ -422,12 +422,12 @@ real-instruction shape -- the only hindsight kind with an explicit target
 on every class (`OneShotEnv._sample_hindsight_show_only`).
 ```
 
-- [ ] **Step 2: Compile to confirm no syntax errors**
+- [x] **Step 2: Compile to confirm no syntax errors**
 
 Run: `typst compile docs/rl-training-setup.typ /tmp/rl-training-setup-check.pdf`
 Expected: exits 0, no errors. Then `rm /tmp/rl-training-setup-check.pdf`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/rl-training-setup.typ
