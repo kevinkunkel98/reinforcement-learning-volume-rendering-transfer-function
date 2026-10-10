@@ -40,7 +40,14 @@ immediately before `test_hindsight_ratio_zero_keeps_sampling_instructions`):
 
 ```python
 def test_hindsight_show_only_targets_every_class_with_correct_signs():
-    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0, hindsight_show_only_share=1.0)
+    # "synthetic" can't be used here: it uses visibility.py's intensity-only
+    # fallback, under which heart/vessels/liver/kidneys/spleen read exactly
+    # 0.0 visibility regardless of any TF parameter (the fallback can't
+    # identify them), so a test requiring all 8 classes to get a meaningful
+    # target could never pass against it. fake_a + _StubModel (already used
+    # by ~20 other tests in this file) has full 8-class coverage instead.
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     hindsight_ratio=1.0, hindsight_show_only_share=1.0)
     for seed in range(5):
         env.reset(seed=seed)
         targets = env._instruction["targets"]
@@ -57,7 +64,8 @@ def test_hindsight_show_only_action_matches_measured_deltas():
     # generalized to every class instead of just the mentioned ones: the
     # goal this hindsight kind hands the policy is exactly what the action
     # that produced it actually measured, for every single class.
-    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0, hindsight_show_only_share=1.0)
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     hindsight_ratio=1.0, hindsight_show_only_share=1.0)
     for seed in range(5):
         env.reset(seed=seed)
         targets = env._instruction["targets"]
@@ -113,15 +121,17 @@ HINDSIGHT_BRIGHTNESS_MIN_DELTA = 0.05
 # 0 below 1e-4), so a class needs this much visibility to be demonstrable.
 HINDSIGHT_BRIGHTNESS_MIN_VIS = 1e-3
 
-# Show-only hindsight: push 1-2 classes' height toward a random high value
-# and every other class's height toward a random low value -- randomized
-# rather than a fixed snap to the literal extremes, since overlapping
-# anatomy means a literal 0/1 separation isn't always reachable or
-# realistic (goals._sample_show_only's real-instruction counterpart uses a
-# fixed HIDE_STRENGTH target, but that's a goal, not an action; the action
-# that reaches it varies by volume).
-HINDSIGHT_SHOW_ONLY_HIGH_RANGE = (0.3, 1.0)
-HINDSIGHT_SHOW_ONLY_LOW_RANGE = (-1.0, -0.3)
+# Show-only hindsight: push 1-2 classes' height *up from wherever it
+# already is* and every other class's height *down from wherever it
+# already is* -- a relative nudge, mirroring brightness's own pattern, not
+# an absolute snap to a fixed region. An absolute region can't work here:
+# transfer.ANATOMICAL_HEIGHTS ranges from 0.05 (lungs) to 0.60 (skeleton),
+# so any single fixed "low" region sits above most classes' own starting
+# height, which would push a "hidden" class brighter instead of dimmer.
+# Randomized magnitude, not a fixed snap to one offset, since overlapping
+# anatomy means a literal full separation isn't always reachable or
+# realistic.
+HINDSIGHT_SHOW_ONLY_PUSH_RANGE = (0.4, 1.2)
 HINDSIGHT_SHOW_ONLY_MIN_DELTA = 0.05
 ```
 
@@ -198,19 +208,22 @@ with:
         start_controllable = np.asarray(self._controllable_values(start_params))
         for _ in range(self.HINDSIGHT_MAX_TRIES):
             shown = set(rng.choice(goals.GOAL_CLASSES, size=n, replace=False))
+            hidden = set(goals.GOAL_CLASSES) - shown
             action = start_controllable.copy()
             for goal_class in goals.GOAL_CLASSES:
                 base = goals.PEAK_INDEX[goal_class] * transfer.PARAMS_PER_PEAK
                 group = CONTROLLABLE.index((base + 2,))
-                low, high = (HINDSIGHT_SHOW_ONLY_HIGH_RANGE if goal_class in shown
-                            else HINDSIGHT_SHOW_ONLY_LOW_RANGE)
-                action[group] = rng.uniform(low, high)
+                sign = 1.0 if goal_class in shown else -1.0
+                push = rng.uniform(*HINDSIGHT_SHOW_ONLY_PUSH_RANGE)
+                action[group] = np.clip(action[group] + sign * push, -1.0, 1.0)
             target_agg = goals.aggregate(self._features(apply_controllable(start_params, action)),
                                          self._active_layers)
             deltas = {c: math.log10(target_agg["vis"][c] + goals.EPSILON)
                          - math.log10(start_agg["vis"][c] + goals.EPSILON)
                       for c in goals.GOAL_CLASSES}
-            if min(deltas[c] for c in shown) >= HINDSIGHT_SHOW_ONLY_MIN_DELTA:
+            shown_ok = min(deltas[c] for c in shown) >= HINDSIGHT_SHOW_ONLY_MIN_DELTA
+            hidden_ok = max(deltas[c] for c in hidden) <= -HINDSIGHT_SHOW_ONLY_MIN_DELTA
+            if shown_ok and hidden_ok:
                 targets = {c: {"vis": deltas[c]} for c in goals.GOAL_CLASSES}
                 return ({"kind": "hindsight", "text": None, "targets": targets,
                          "goal": goals.goal_vector(targets)}, action)
