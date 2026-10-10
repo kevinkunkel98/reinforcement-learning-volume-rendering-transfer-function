@@ -229,6 +229,14 @@ def test_parse_args_accepts_v7_short_experiment_options():
     assert args.reward_mode == "target"
 
 
+def test_parse_args_accepts_hindsight_show_only_option():
+    args = oneshot_train.parse_args([])
+    assert args.hindsight_show_only == pytest.approx(0.0)
+
+    args = oneshot_train.parse_args(["--hindsight-show-only", "0.1"])
+    assert args.hindsight_show_only == pytest.approx(0.1)
+
+
 def test_parse_args_accepts_v8_layer_policy_options():
     args = oneshot_train.parse_args(["--policy-version", "oneshot-v8",
                                      "--action-mode", "residual", "--reward-mode", "target"])

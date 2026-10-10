@@ -205,6 +205,8 @@ def parse_args(argv=None):
     parser.add_argument("--balance-classes", action="store_true")
     parser.add_argument("--hindsight-brightness", type=float, default=0.0,
                         help="share of hindsight episodes whose goal is a brightness change")
+    parser.add_argument("--hindsight-show-only", type=float, default=0.0,
+                        help="share of hindsight episodes whose goal is a show-only change")
     parser.add_argument("--reward-mode", choices=("attainment", "target"), default="attainment")
     parser.add_argument("--short", action="store_true", help="use the short smoke experiment preset")
     parser.add_argument("--pretrain-data", type=str, default=None,
@@ -243,17 +245,20 @@ def load_or_collect_pretrain(args) -> tuple:
                 "reward_mode": args.reward_mode}
     expected = {**observation_metadata(**contract), "episodes": args.pretrain_episodes,
                 "seed": args.seed, "split": "train",
-                "hindsight_brightness_share": args.hindsight_brightness}
+                "hindsight_brightness_share": args.hindsight_brightness,
+                "hindsight_show_only_share": args.hindsight_show_only}
     if os.path.exists(args.pretrain_data):
         data, stored = pretrain.load_dataset(args.pretrain_data)
-        # Datasets collected before brightness hindsight existed had none.
+        # Datasets collected before brightness/show-only hindsight existed had none.
         stored.setdefault("hindsight_brightness_share", 0.0)
+        stored.setdefault("hindsight_show_only_share", 0.0)
         mismatched = {key for key in expected if stored.get(key) != expected[key]}
         if mismatched:
             raise ValueError(f"{args.pretrain_data} does not match this run: {sorted(mismatched)}")
     else:
         data = pretrain.collect_hindsight(datasets.volumes_for_split("train"),
-                                          {**contract, "hindsight_brightness_share": args.hindsight_brightness},
+                                          {**contract, "hindsight_brightness_share": args.hindsight_brightness,
+                                           "hindsight_show_only_share": args.hindsight_show_only},
                                           args.pretrain_episodes, args.seed, args.pretrain_workers)
         pretrain.save_dataset(data, args.pretrain_data, expected)
     return data, {"data": args.pretrain_data, "episodes": args.pretrain_episodes}
@@ -318,6 +323,7 @@ def main(argv=None):
                                       "hindsight_ratio": args.hindsight_ratio,
                                       "balance_classes": args.balance_classes,
                                       "hindsight_brightness_share": args.hindsight_brightness,
+                                      "hindsight_show_only_share": args.hindsight_show_only,
                                       "reward_mode": args.reward_mode},
                           pretrain_data=pretrain_data, pretrain_epochs=args.pretrain_epochs,
                           pretrain_info=pretrain_info)
