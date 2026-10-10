@@ -410,6 +410,55 @@ def test_brightness_share_zero_keeps_visibility_hindsight():
         env.reset(seed=seed)
         assert all(set(t) == {"vis"} for t in env._instruction["targets"].values())
 
+
+def test_hindsight_show_only_targets_every_class_with_correct_signs():
+    # "synthetic" can't be used here: it uses visibility.py's intensity-only
+    # fallback, under which heart/vessels/liver/kidneys/spleen read exactly
+    # 0.0 visibility regardless of any TF parameter (the fallback can't
+    # identify them), so a test requiring all 8 classes to get a meaningful
+    # target could never pass against it. fake_a + _StubModel (already used
+    # by ~20 other tests in this file) has full 8-class coverage instead.
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     hindsight_ratio=1.0, hindsight_show_only_share=1.0)
+    for seed in range(5):
+        env.reset(seed=seed)
+        targets = env._instruction["targets"]
+        assert set(targets) == set(goals.GOAL_CLASSES)
+        assert all(set(t) == {"vis"} for t in targets.values())
+        shown = {c for c, t in targets.items() if t["vis"] > 0}
+        hidden = {c for c, t in targets.items() if t["vis"] < 0}
+        assert 1 <= len(shown) <= 2
+        assert shown | hidden == set(goals.GOAL_CLASSES)
+
+
+def test_hindsight_show_only_action_matches_measured_deltas():
+    # Same invariant as test_hindsight_goal_is_exactly_what_the_target_achieved,
+    # generalized to every class instead of just the mentioned ones: the
+    # goal this hindsight kind hands the policy is exactly what the action
+    # that produced it actually measured, for every single class.
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     hindsight_ratio=1.0, hindsight_show_only_share=1.0)
+    for seed in range(5):
+        env.reset(seed=seed)
+        targets = env._instruction["targets"]
+        target_agg = goals.aggregate(env._model.features(
+            apply_controllable(env._start_params, env.hindsight_action())))
+        for goal_class in goals.GOAL_CLASSES:
+            measured = (math.log10(target_agg["vis"][goal_class] + goals.EPSILON)
+                        - math.log10(env._start_agg["vis"][goal_class] + goals.EPSILON))
+            assert targets[goal_class]["vis"] == pytest.approx(measured, abs=1e-9)
+
+
+def test_show_only_share_zero_keeps_visibility_hindsight():
+    env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
+    for seed in range(5):
+        env.reset(seed=seed)
+        # The generic sampler only ever mentions 1-2 classes; show_only
+        # mentions all 8. share=0.0 (the default) must never produce the
+        # show_only shape.
+        assert len(env._instruction["targets"]) <= 2
+
+
 def test_hindsight_ratio_zero_keeps_sampling_instructions():
     env = OneShotEnv(["synthetic"], hindsight_ratio=0.0)
     _obs, info = env.reset(seed=0)
