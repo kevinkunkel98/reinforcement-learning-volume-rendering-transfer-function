@@ -124,6 +124,11 @@ always has a demonstrated solution (`OneShotEnv.hindsight_policy_action()`).
 A further share (`--hindsight-brightness`) make that demonstration a
 brightness-only change on one visible class, since brightness instructions
 are otherwise the weakest-supervised kind.
+A further share (`--hindsight-show-only`) make that demonstration a
+show-only change: 1--2 classes pushed toward high visibility, every other
+canonical class toward low, mirroring `goals._sample_show_only`'s
+real-instruction shape -- the only hindsight kind with an explicit target
+on every class (`OneShotEnv._sample_hindsight_show_only`).
 
 = Policy versions
 
