@@ -272,7 +272,7 @@ git commit -m "feat(rl): add show_only-shaped hindsight demonstrations"
   contract, live-training `env_kwargs`)
 - Test: `tests/test_oneshot_train.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/test_oneshot_train.py`, right after
 `test_parse_args_accepts_v7_short_experiment_options` (ends at line 229,
@@ -287,16 +287,16 @@ def test_parse_args_accepts_hindsight_show_only_option():
     assert args.hindsight_show_only == pytest.approx(0.1)
 ```
 
-- [ ] **Step 2: Run it to confirm it fails**
+- [x] **Step 2: Run it to confirm it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_train.py::test_parse_args_accepts_hindsight_show_only_option -v`
 Expected: FAIL with `AttributeError: 'Namespace' object has no attribute 'hindsight_show_only'`
 
-- [ ] **Step 3: Read the current code**
+- [x] **Step 3: Read the current code**
 
 Re-read `rl/oneshot_train.py:196-324` for the exact current text.
 
-- [ ] **Step 4: Add the CLI flag, in `rl/oneshot_train.py`**
+- [x] **Step 4: Add the CLI flag, in `rl/oneshot_train.py`**
 
 Replace:
 
@@ -314,7 +314,7 @@ with:
                         help="share of hindsight episodes whose goal is a show-only change")
 ```
 
-- [ ] **Step 5: Thread it through pretrain collection, in `rl/oneshot_train.py`**
+- [x] **Step 5: Thread it through pretrain collection, in `rl/oneshot_train.py`**
 
 Replace:
 
@@ -359,7 +359,7 @@ with:
         pretrain.save_dataset(data, args.pretrain_data, expected)
 ```
 
-- [ ] **Step 6: Thread it through live-training `env_kwargs`, in `rl/oneshot_train.py`**
+- [x] **Step 6: Thread it through live-training `env_kwargs`, in `rl/oneshot_train.py`**
 
 Replace:
 
@@ -384,17 +384,17 @@ with:
                                       "reward_mode": args.reward_mode},
 ```
 
-- [ ] **Step 7: Run the test to confirm it passes**
+- [x] **Step 7: Run the test to confirm it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_train.py -v -k "hindsight or parse_args"`
 Expected: PASS, all existing parse_args/hindsight tests and the new one.
 
-- [ ] **Step 8: Run the full project test suite**
+- [x] **Step 8: Run the full project test suite**
 
 Run: `.venv/bin/python -m pytest tests/ -x -q`
 Expected: PASS (same known-flake caveat as Task 1 Step 8).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add rl/oneshot_train.py tests/test_oneshot_train.py
