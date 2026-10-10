@@ -68,17 +68,25 @@ start_params, start_agg)`**, same return shape and placement convention as
 1. Pick `n = int(rng.integers(1, 3))` shown classes (mirrors
    `_sample_show_only`'s own distribution) via `rng.choice(GOAL_CLASSES,
    size=n, replace=False)`.
-2. Build one action from `start_controllable`: for each shown class's
-   *height* group (`CONTROLLABLE.index((base + 2,))` where `base =
+2. Build one action from `start_controllable`: for *every* canonical
+   class's *height* group (`CONTROLLABLE.index((base + 2,))` where `base =
    goals.PEAK_INDEX[goal_class] * transfer.PARAMS_PER_PEAK` -- the same
    indexing brightness already uses for its own group, just the height
-   index instead of the colour one), set it to a random value drawn from a
-   high range (e.g. `rng.uniform(HINDSIGHT_SHOW_ONLY_HIGH_LOW,
-   HINDSIGHT_SHOW_ONLY_HIGH_HIGH)`, both near +1.0); for every *other*
-   class's height group, set it to a random value drawn from a low range
-   (near -1.0). Randomized, not a fixed snap to the literal extremes --
-   real anatomy overlaps, so a policy trained on one exact knob position
-   would learn a narrower pattern than the task actually has.
+   index instead of the colour one), push it **relative to its own current
+   value** by a randomized amount -- up for shown classes, down for every
+   other class (`np.clip(start_controllable[group] +/- rng.uniform(*
+   HINDSIGHT_SHOW_ONLY_PUSH_RANGE), -1.0, 1.0)`) -- mirroring
+   `_sample_hindsight_brightness`'s own relative-nudge pattern, not an
+   absolute snap to a fixed region. This matters: an *absolute* "low"
+   region (e.g. real height 0-0.35) is not safely below every class's
+   actual starting height -- `transfer.ANATOMICAL_HEIGHTS` ranges from
+   0.05 (lungs) to 0.60 (skeleton), so a fixed absolute low region sits
+   *above* most classes' own baseline, which would push a "hidden" class
+   brighter instead of dimmer. A relative push is directionally correct
+   regardless of where each class's height actually starts. Randomized
+   magnitude, not a fixed snap to the literal extremes, for the same
+   reason as before -- real anatomy overlaps, so one exact knob position
+   would teach a narrower pattern than the task has.
 3. Apply the action, measure the real resulting `vis` for *every* canonical
    class via `goals.aggregate(self._features(apply_controllable(start_params,
    action)), self._active_layers)` (mirrors brightness's `target_agg`
@@ -88,12 +96,18 @@ start_params, start_agg)`**, same return shape and placement convention as
    `log10(target + eps) - log10(start + eps)` convention already used
    throughout the file, for every class -- this explicit-target-on-every-
    class shape is the entire point.
-5. Retry up to `HINDSIGHT_MAX_TRIES` (the existing shared constant) if the
-   shown classes' resulting change doesn't clear a minimum delta
-   (`HINDSIGHT_SHOW_ONLY_MIN_DELTA`, same role as
-   `HINDSIGHT_BRIGHTNESS_MIN_DELTA`) -- guards against picking a class with
-   ~0 reachable ceiling on this particular volume, which would produce a
-   degenerate, no-op training example.
+5. Retry up to `HINDSIGHT_MAX_TRIES` (the existing shared constant) unless
+   **both** sides clear a minimum delta: every shown class's measured
+   change `>= HINDSIGHT_SHOW_ONLY_MIN_DELTA`, *and* every hidden class's
+   measured change `<= -HINDSIGHT_SHOW_ONLY_MIN_DELTA` (same role as
+   `HINDSIGHT_BRIGHTNESS_MIN_DELTA`, checked on both sides, not just the
+   shown one -- checking only the shown side was the bug the relative-push
+   fix above closes, but validating the actual measured outcome on both
+   sides is what actually guarantees it, the same "trust the measurement,
+   not the construction" principle the whole hindsight system already
+   runs on). Guards against picking a class with ~0 reachable ceiling (or
+   an action that clipped to a no-op) on this particular volume, which
+   would produce a degenerate, incorrectly-signed training example.
 6. Return `None` if no try clears the threshold (same failure contract as
    `_sample_hindsight_brightness`); the caller already handles `None` by
    falling through.
@@ -141,6 +155,16 @@ seeds) before claiming it fixed, the same way brightness's fix was
 validated rather than assumed.
 
 ## Testing
+
+Use the `"fake_a"` + `model_for_volume=lambda name: _StubModel()` fixture
+(already used by ~20 other tests in this file), not `"synthetic"` --
+`"synthetic"` uses `visibility.py`'s intensity-only fallback, under which
+`heart`/`vessels`/`liver`/`kidneys`/`spleen` read exactly 0.0 visibility
+regardless of any transfer-function parameter (the fallback cannot identify
+them), so a test asserting every one of the 8 classes gets a meaningful
+explicit target can never pass against it. Production training never hits
+this: `datasets.volumes_for_split` only returns real TotalSegmentator
+subjects with full labels.
 
 Mirror the existing brightness hindsight tests in `tests/test_oneshot_env.py`:
 
