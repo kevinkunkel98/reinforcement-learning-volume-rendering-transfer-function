@@ -173,10 +173,10 @@ def progress(start: dict, current: dict) -> tuple:
     return c, b
 
 
-def distance(goal: np.ndarray, start: dict, current: dict) -> float:
+def distance(goal: np.ndarray, start: dict, current: dict, weights: dict = None) -> float:
     """How far a state is from the goal.
 
-    sum m*|c - d| + KAPPA*sum n*|b - e|
+    sum m*w*|c - d| + KAPPA*sum n*w*|b - e|
       + LAMBDA_KEEP*sum (1-m)*max(0, |c| - KEEP_TOLERANCE)
       + LAMBDA_KEEP*KAPPA*sum (1-n)*max(0, |b| - KEEP_TOLERANCE)
 
@@ -186,6 +186,13 @@ def distance(goal: np.ndarray, start: dict, current: dict) -> float:
     all makes leaving the transfer function untouched score better than
     acting on the instruction. KEEP_TOLERANCE gives that small, unavoidable
     side effect for free and only penalises drift beyond it.
+
+    `weights` (goal_class -> multiplier, default None = every class 1.0) only
+    ever scales a *mentioned* class's own term -- it has no effect on a class
+    the goal doesn't mention, whose treatment is entirely the keep-tolerance
+    branch above. This is how `show_only` gives its shown-class group and
+    hidden-class group equal total weight despite one side having far fewer
+    classes than the other (see `show_only_weights`).
     """
     c, b = progress(start, current)
     n_classes = len(GOAL_CLASSES)
@@ -193,7 +200,8 @@ def distance(goal: np.ndarray, start: dict, current: dict) -> float:
         goal[2 * n_classes:3 * n_classes], goal[3 * n_classes:4 * n_classes]
     total = 0.0
     for i, goal_class in enumerate(GOAL_CLASSES):
-        total += m[i] * abs(c[goal_class] - d[i]) + KAPPA * n[i] * abs(b[goal_class] - e[i])
+        w = 1.0 if weights is None else weights.get(goal_class, 1.0)
+        total += m[i] * w * abs(c[goal_class] - d[i]) + KAPPA * n[i] * w * abs(b[goal_class] - e[i])
         total += LAMBDA_KEEP * (1.0 - m[i]) * max(0.0, abs(c[goal_class]) - KEEP_TOLERANCE)
         total += LAMBDA_KEEP * KAPPA * (1.0 - n[i]) * max(0.0, abs(b[goal_class]) - KEEP_TOLERANCE)
     # "other" (unlabeled tissue) can never be named by an instruction, so it is
@@ -205,16 +213,16 @@ def distance(goal: np.ndarray, start: dict, current: dict) -> float:
     return float(total)
 
 
-def scoring(goal, start_features, final_features, active_layers=None) -> float:
+def scoring(goal, start_features, final_features, active_layers=None, weights: dict = None) -> float:
     """Score final model features against start features using effective layers."""
     start = aggregate(start_features, active_layers)
     final = aggregate(final_features, active_layers)
-    return attainment(goal, start, final)
+    return attainment(goal, start, final, weights=weights)
 
 
-def attainment(goal, start, final, active_layers=None) -> float:
+def attainment(goal, start, final, active_layers=None, weights: dict = None) -> float:
     """1 - distance(final) / distance(start); 1 = goal reached, < 0 = worse."""
-    return 1.0 - distance(goal, start, final) / distance(goal, start, start)
+    return 1.0 - distance(goal, start, final, weights=weights) / distance(goal, start, start, weights=weights)
 
 
 def is_useless(features: dict, active_layers=None) -> bool:

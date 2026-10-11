@@ -255,6 +255,63 @@ def test_distance_penalises_hiding_behind_unlabeled_material():
     assert d_gamed > d_clean
 
 
+def test_distance_applies_weights_to_mentioned_class_terms():
+    start = _aggregated(skeleton=0.01, lungs=0.05)
+    goal = goals.goal_vector({"skeleton": {"vis": 0.3}, "lungs": {"vis": -0.3}})
+    new_skeleton = 10 ** (0.3 + math.log10(0.01 + goals.EPSILON)) - goals.EPSILON
+    # Give skeleton 0 error (goal met exactly) and lungs a known nonzero error
+    # (goal unmet) so only lungs' weight shows up in the total.
+    current = _aggregated(skeleton=new_skeleton, lungs=0.05)
+    c_lungs_err = abs(0.0 - (-0.3))  # lungs stayed put: c=0, d=-0.3
+
+    unweighted = goals.distance(goal, start, current)
+    weighted = goals.distance(goal, start, current, weights={"skeleton": 1.0, "lungs": 0.5})
+
+    assert unweighted == pytest.approx(c_lungs_err)
+    assert weighted == pytest.approx(0.5 * c_lungs_err)
+
+
+def test_distance_weights_default_to_one_for_classes_missing_from_the_dict():
+    start = _aggregated(skeleton=0.01)
+    goal = goals.goal_vector({"skeleton": {"vis": 0.3}})
+    current = _aggregated(skeleton=0.01)  # no progress -> full error
+
+    without_weights = goals.distance(goal, start, current)
+    with_partial_weights = goals.distance(goal, start, current, weights={"lungs": 0.5})
+
+    assert with_partial_weights == pytest.approx(without_weights)
+
+
+def test_distance_weights_do_not_affect_unmentioned_keep_tolerance():
+    """A weight entry for a class that the goal never mentions must not
+    disturb its keep-tolerance treatment -- weights only ever scale the
+    mentioned-class term, never substitute for the mentioned flag."""
+    start = _aggregated(skeleton=0.01, lungs=0.05)
+    goal = goals.goal_vector({"skeleton": {"vis": 0.3}})
+    new_skeleton = 10 ** (0.3 + math.log10(0.01 + goals.EPSILON)) - goals.EPSILON
+    with_drift = _aggregated(skeleton=new_skeleton, lungs=0.08)
+
+    without_weights = goals.distance(goal, start, with_drift)
+    # lungs is unmentioned (m[i]=0 for lungs); a weight entry for it must be ignored.
+    with_weights = goals.distance(goal, start, with_drift, weights={"lungs": 0.1})
+
+    assert with_weights == pytest.approx(without_weights)
+
+
+def test_attainment_accepts_weights_and_forwards_them():
+    start = _aggregated(skeleton=0.01, lungs=0.05)
+    goal = goals.goal_vector({"skeleton": {"vis": 0.3}, "lungs": {"vis": -0.3}})
+    current = _aggregated(skeleton=0.01, lungs=0.05)  # no progress on either
+    weights = {"skeleton": 1.0, "lungs": 0.5}
+
+    expected = 1.0 - goals.distance(goal, start, current, weights=weights) / \
+        goals.distance(goal, start, start, weights=weights)
+    assert goals.attainment(goal, start, current, weights=weights) == pytest.approx(expected)
+    # Omitting weights must reproduce today's unweighted behavior exactly.
+    assert goals.attainment(goal, start, current) == pytest.approx(
+        1.0 - goals.distance(goal, start, current) / goals.distance(goal, start, start))
+
+
 def test_attainment_is_one_when_reached_and_negative_when_worse():
     start = _aggregated(skeleton=0.01)
     goal = goals.goal_vector({"skeleton": {"vis": 0.3}})
