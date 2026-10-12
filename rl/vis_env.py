@@ -159,8 +159,13 @@ class VisibilityTFEnv(gym.Env):
         raw_features = goals.features(model, params, self._active_layers)
         start_agg = goals.aggregate(raw_features, self._active_layers)
         instruction = goals.sample_instruction(volume, model, start_agg, rng, self._active_layers)
-        start_distance = goals.distance(instruction["goal"], start_agg, start_agg,
-                                        weights=instruction.get("weights"))
+        # Guarded the same way as the identical call site in
+        # rl/oneshot_env.py's reset(): goals.distance is shared process-wide,
+        # so any test anywhere that monkeypatches it with a fixed-arity stub
+        # is a latent hazard here too, not just in files that currently do.
+        weights = instruction.get("weights")
+        distance_kwargs = {} if weights is None else {"weights": weights}
+        start_distance = goals.distance(instruction["goal"], start_agg, start_agg, **distance_kwargs)
 
         self._volume = volume
         self._model = model
