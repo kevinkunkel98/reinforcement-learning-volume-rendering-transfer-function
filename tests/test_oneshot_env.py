@@ -449,6 +449,17 @@ def test_hindsight_show_only_action_matches_measured_deltas():
             assert targets[goal_class]["vis"] == pytest.approx(measured, abs=1e-9)
 
 
+def test_hindsight_show_only_targets_carry_group_balanced_weights():
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     hindsight_ratio=1.0, hindsight_show_only_share=1.0)
+    for seed in range(5):
+        env.reset(seed=seed)
+        targets = env._instruction["targets"]
+        shown = {c for c, t in targets.items() if t["vis"] > 0}
+        expected = goals.show_only_weights(shown, goals.GOAL_CLASSES)
+        assert env._instruction["weights"] == expected
+
+
 def test_show_only_share_zero_keeps_visibility_hindsight():
     env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
     for seed in range(5):
@@ -470,6 +481,35 @@ def test_hindsight_episodes_report_their_source():
     env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
     _obs, info = env.reset(seed=0)
     assert info["goal_source"] == "hindsight"
+
+
+def test_show_only_reward_reflects_group_balanced_weights(monkeypatch):
+    """A show_only episode's reward (reward_mode="target") must use the same
+    group-balanced weights as the instruction's own "weights" field -- not
+    just carry the field around unused."""
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v9", action_mode="residual", reward_mode="target")
+    env.reset(seed=0)
+    # Force a known show_only instruction directly, bypassing sampling, so
+    # the expected reward can be hand-computed.
+    shown = {"skeleton"}
+    targets = {c: {"vis": goals.HIDE_STRENGTH if c in shown else -goals.HIDE_STRENGTH}
+               for c in goals.GOAL_CLASSES}
+    weights = goals.show_only_weights(shown, goals.GOAL_CLASSES)
+    env._instruction = {"kind": "show_only", "text": "test", "targets": targets,
+                        "goal": goals.goal_vector(targets), "weights": weights}
+    env._start_distance = goals.distance(env._instruction["goal"], env._start_agg,
+                                         env._start_agg, weights=weights)
+
+    action = np.zeros(ACTION_SIZE, dtype=np.float64)  # no-op residual action
+    _obs, reward, _term, _trunc, info = env.step(action)
+
+    final_agg = env._start_agg  # no-op action -> final state equals start state
+    expected_distance = goals.distance(env._instruction["goal"], env._start_agg,
+                                       final_agg, weights=weights)
+    expected_progress = (env._start_distance - expected_distance) / env._start_distance
+    assert info["target_progress"] == pytest.approx(expected_progress)
 
 
 def test_hindsight_goal_mentions_at_least_one_class():

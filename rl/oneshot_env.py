@@ -355,7 +355,8 @@ class OneShotEnv(gym.Env):
     def _attainment(self, agg: dict) -> float:
         if self._start_distance <= _ATTAINMENT_FLOOR:
             return 0.0
-        return goals.attainment(self._instruction["goal"], self._start_agg, agg)  # pyright: ignore[reportOptionalSubscript]
+        return goals.attainment(self._instruction["goal"], self._start_agg, agg,  # pyright: ignore[reportOptionalSubscript]
+                                weights=self._instruction.get("weights"))  # pyright: ignore[reportOptionalSubscript]
 
     def _info(self, attainment: float, useless: bool) -> dict:
         info = {"attainment": attainment, "kind": self._instruction["kind"],  # pyright: ignore[reportOptionalSubscript]
@@ -454,8 +455,9 @@ class OneShotEnv(gym.Env):
             hidden_ok = max(deltas[c] for c in hidden) <= -HINDSIGHT_SHOW_ONLY_MIN_DELTA
             if shown_ok and hidden_ok:
                 targets = {c: {"vis": deltas[c]} for c in goals.GOAL_CLASSES}
+                weights = goals.show_only_weights(shown, goals.GOAL_CLASSES)
                 return ({"kind": "hindsight", "text": None, "targets": targets,
-                         "goal": goals.goal_vector(targets)}, action)
+                         "goal": goals.goal_vector(targets), "weights": weights}, action)
         return None
 
     def _sample_hindsight_goal(self, rng, model, start_params, start_agg):
@@ -527,7 +529,13 @@ class OneShotEnv(gym.Env):
                 self._class_counts, self.balance_classes), None)
             for goal_class in instruction["targets"]:
                 self._class_counts[goal_class] = self._class_counts.get(goal_class, 0) + 1
-        start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
+        # Omitting the `weights` kwarg entirely when it's None (rather than
+        # always passing `weights=None`) matters: some tests monkeypatch
+        # `goals.distance` with a fixed-arity stub lacking a `weights`
+        # parameter, and an unconditional `weights=` keyword would break
+        # every one of them even when no actual weighting is in play.
+        distance_kwargs = {} if instruction.get("weights") is None else {"weights": instruction["weights"]}
+        start_distance = goals.distance(instruction["goal"], start_agg, start_agg, **distance_kwargs)
 
         self._volume = volume
         self._start_params = start_params
@@ -562,8 +570,14 @@ class OneShotEnv(gym.Env):
                    if active_layers is not None else goals.is_useless(raw_features))
         attainment = self._attainment(final_agg)
         if self.reward_mode == "target":
-            start_distance = goals.distance(self._instruction["goal"], self._start_agg, self._start_agg)
-            final_distance = goals.distance(self._instruction["goal"], self._start_agg, final_agg)
+            weights = self._instruction.get("weights")  # pyright: ignore[reportOptionalSubscript]
+            # Same fixed-arity-stub concern as reset()'s start_distance above:
+            # omit the kwarg entirely when there is no weighting to apply.
+            distance_kwargs = {} if weights is None else {"weights": weights}
+            start_distance = goals.distance(self._instruction["goal"], self._start_agg,  # pyright: ignore[reportOptionalSubscript]
+                                            self._start_agg, **distance_kwargs)
+            final_distance = goals.distance(self._instruction["goal"], self._start_agg,  # pyright: ignore[reportOptionalSubscript]
+                                            final_agg, **distance_kwargs)
             # Fraction of start_distance closed, i.e. exactly `attainment`
             # (goals.attainment divides the same two distances) -- unlike the
             # raw (start_distance - final_distance) this used to be, it is on
