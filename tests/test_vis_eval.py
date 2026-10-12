@@ -535,6 +535,31 @@ def test_attainment_or_zero_applies_weights():
     assert weighted != pytest.approx(unweighted)
 
 
+def test_frozen_one_shot_env_start_distance_applies_weights(monkeypatch):
+    """Direct regression test for `_frozen_one_shot_env`'s weighted
+    `start_distance` line -- the pre-existing replay tests in this file don't
+    happen to exercise a `show_only` instruction with real weights on their
+    fixed seeds, so this constructs one directly."""
+    _patch_totalseg(monkeypatch)
+    start_params = goals.starting_params()
+    model = _model_for_volume("stub_a")
+    start_agg = goals.aggregate(model.features(start_params))
+    shown = {"skeleton"}
+    targets = {c: {"vis": goals.HIDE_STRENGTH if c in shown else -goals.HIDE_STRENGTH}
+               for c in goals.GOAL_CLASSES}
+    weights = goals.show_only_weights(shown, goals.GOAL_CLASSES)
+    instruction = {"kind": "show_only", "text": "test", "targets": targets,
+                   "goal": goals.goal_vector(targets), "weights": weights}
+
+    env, _obs, _info = vis_eval._frozen_one_shot_env(
+        "stub_a", start_params, instruction, model_for_volume=_model_for_volume)
+
+    expected = goals.distance(instruction["goal"], start_agg, start_agg, weights=weights)
+    unweighted = goals.distance(instruction["goal"], start_agg, start_agg)
+    assert expected != pytest.approx(unweighted)  # sanity: this instruction's weights really matter
+    assert env._start_distance == pytest.approx(expected)
+
+
 # --- run_baseline -----------------------------------------------------------------
 
 def test_run_baseline_do_nothing_scores_zero(monkeypatch):

@@ -117,6 +117,11 @@ def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict
     model = model_for_volume(volume)
     raw_features = _features(model, start_params, active_layers)
     start_agg = goals.aggregate(raw_features, active_layers)
+    # Weighting this is currently inert for the reported attainment value:
+    # VisibilityTFEnv._attainment only reads start_distance for its floor
+    # check and calls goals.attainment unweighted -- weighting that call too
+    # is a separate, not-yet-landed task. Kept here anyway for consistency
+    # and so the floor check itself is weight-aware already.
     start_distance = goals.distance(instruction["goal"], start_agg, start_agg,
                                     weights=instruction.get("weights"))
 
