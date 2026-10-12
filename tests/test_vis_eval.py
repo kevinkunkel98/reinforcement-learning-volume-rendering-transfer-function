@@ -512,6 +512,29 @@ def test_run_policy_with_refinement_search_uses_exactly_the_budgeted_evaluations
     assert five.calls - zero.calls == 5 + 1
 
 
+def test_attainment_or_zero_applies_weights():
+    # NOTE: the plan's literal `final = {"vis": dict(start["vis"]), ...}` makes
+    # final bit-identical to start, which pins distance(final) == distance(start)
+    # (same formula, same inputs) regardless of weights -- attainment is always
+    # exactly 0 either way, so that version of this test cannot distinguish
+    # weighted from unweighted (verified: it fails after a correct
+    # implementation, not just before). `final` here makes some (but not
+    # complete) progress on skeleton while leaving lungs untouched, so the two
+    # classes' errors -- and therefore their weights -- actually show up in
+    # the result.
+    start = {"vis": {c: 0.0 for c in goals.GOAL_CLASSES}, "bright": {c: 0.0 for c in goals.GOAL_CLASSES}}
+    start["vis"]["skeleton"] = 0.01
+    final = {"vis": dict(start["vis"]), "bright": dict(start["bright"])}
+    final["vis"]["skeleton"] = 0.05
+    goal = goals.goal_vector({"skeleton": {"vis": 0.3}, "lungs": {"vis": -0.3}})
+    weights = {"skeleton": 1.0, "lungs": 0.5}
+
+    unweighted = vis_eval._attainment_or_zero(goal, start, final)
+    weighted = vis_eval._attainment_or_zero(goal, start, final, weights=weights)
+
+    assert weighted != pytest.approx(unweighted)
+
+
 # --- run_baseline -----------------------------------------------------------------
 
 def test_run_baseline_do_nothing_scores_zero(monkeypatch):

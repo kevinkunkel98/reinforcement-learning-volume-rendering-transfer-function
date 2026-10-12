@@ -117,7 +117,8 @@ def _frozen_episode_env(volume: str, start_params: np.ndarray, instruction: dict
     model = model_for_volume(volume)
     raw_features = _features(model, start_params, active_layers)
     start_agg = goals.aggregate(raw_features, active_layers)
-    start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
+    start_distance = goals.distance(instruction["goal"], start_agg, start_agg,
+                                    weights=instruction.get("weights"))
 
     env._volume = volume
     env._model = model
@@ -146,7 +147,8 @@ def _frozen_one_shot_env(volume: str, start_params: np.ndarray, instruction: dic
         active_layers = normalize_layers(active_layers or default_layers())
     raw_features = _features(model, start_params, active_layers)
     start_agg = goals.aggregate(raw_features, active_layers)
-    start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
+    start_distance = goals.distance(instruction["goal"], start_agg, start_agg,
+                                    weights=instruction.get("weights"))
 
     env._volume = volume
     env._model = model
@@ -266,15 +268,15 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
     return results
 
 
-def _attainment_or_zero(goal, start_agg: dict, final_agg: dict) -> float:
+def _attainment_or_zero(goal, start_agg: dict, final_agg: dict, weights: dict = None) -> float:
     # Same floor as VisibilityTFEnv._attainment: when the start state
     # already meets the goal, distance(start) is ~0 and attainment's ratio
     # is meaningless -- report 0 instead of dividing by ~0, so the policy
     # and the baselines are floored identically.
-    start_distance = goals.distance(goal, start_agg, start_agg)
+    start_distance = goals.distance(goal, start_agg, start_agg, weights=weights)
     if start_distance <= _ATTAINMENT_FLOOR:
         return 0.0
-    return goals.attainment(goal, start_agg, final_agg)
+    return goals.attainment(goal, start_agg, final_agg, weights=weights)
 
 
 def run_baseline(name: str, episodes: list, model_for_volume=None, active_layers=None) -> list:
@@ -297,7 +299,8 @@ def run_baseline(name: str, episodes: list, model_for_volume=None, active_layers
                 final_params = baseline_fn(model, episode["start_params"], instruction,
                                            active_layers=active_layers)
             final_agg = goals.aggregate(_features(model, final_params, active_layers), active_layers)
-            attainment = _attainment_or_zero(instruction["goal"], start_agg, final_agg)
+            attainment = _attainment_or_zero(instruction["goal"], start_agg, final_agg,
+                                             weights=instruction.get("weights"))
         except Exception:
             attainment = None
         results.append({"attainment": attainment, "kind": instruction["kind"]})
