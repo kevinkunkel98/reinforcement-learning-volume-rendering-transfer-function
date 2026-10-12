@@ -67,7 +67,8 @@ def pick_episodes(episodes: list, policy, per_kind: int = 1) -> list:
         action, _ = policy.predict(obs, deterministic=True)
         final = apply_controllable(start, np.clip(action, -1.0, 1.0))
         attainment = goals.attainment(episode["instruction"]["goal"], start_agg,
-                                       goals.aggregate(model.features(final)))
+                                       goals.aggregate(model.features(final)),
+                                       weights=episode["instruction"].get("weights"))
         scored.append((attainment, episode, final))
 
     chosen = []

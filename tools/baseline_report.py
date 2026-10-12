@@ -24,14 +24,14 @@ from rl.baselines import BASELINES
 OUT_PATH = "out/baseline_report.json"
 
 
-def _attainment_or_none(goal, start_agg, final_agg):
+def _attainment_or_none(goal, start_agg, final_agg, weights=None):
     """None when the start state already meets the goal (distance(start) is
     ~0): attainment's denominator would be zero, and the row has nothing to
     say about whether a baseline moved the needle."""
-    start_distance = goals.distance(goal, start_agg, start_agg)
+    start_distance = goals.distance(goal, start_agg, start_agg, weights=weights)
     if start_distance <= 1e-9:
         return None
-    return goals.attainment(goal, start_agg, final_agg)
+    return goals.attainment(goal, start_agg, final_agg, weights=weights)
 
 
 def run_volume(name: str, n_instructions: int, seed: int = 0, active_layers=None) -> list:
@@ -49,7 +49,11 @@ def run_volume(name: str, n_instructions: int, seed: int = 0, active_layers=None
                                        active_layers=active_layers)
             final_features = goals.features(model, final_params, active_layers)
             final_agg = goals.aggregate(final_features, active_layers)
-            attainment = _attainment_or_none(instruction["goal"], start_agg, final_agg)
+            # Guarded: a test monkeypatches _attainment_or_none itself with a
+            # fixed-arity stub that takes no keyword arguments at all.
+            weights = instruction.get("weights")
+            kwargs = {} if weights is None else {"weights": weights}
+            attainment = _attainment_or_none(instruction["goal"], start_agg, final_agg, **kwargs)
             rows.append({"volume": name, "kind": instruction["kind"],
                          "baseline": baseline_name, "attainment": attainment})
     return rows

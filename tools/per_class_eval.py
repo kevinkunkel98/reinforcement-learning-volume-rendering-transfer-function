@@ -68,8 +68,12 @@ def _score(policy, episode, model, active_layers=None) -> float:
         policy_layers = None
     scoring_layers = policy_layers if policy_layers is not None else active_layers
     final_features = goals.features(model, params, scoring_layers)
+    # Guarded: some tests monkeypatch goals.attainment with a fixed-arity
+    # stub (lambda goal, start, final: ...) that takes no keyword arguments.
+    weights = instruction.get("weights")
+    kwargs = {} if weights is None else {"weights": weights}
     return goals.attainment(instruction["goal"], start_agg,
-                            goals.aggregate(final_features, scoring_layers))
+                            goals.aggregate(final_features, scoring_layers), **kwargs)
 
 
 def _class_row(goal_class: str, status: str, attainment):
@@ -202,7 +206,8 @@ def main(active_layers=None, argv=None):
                                        active_layers=active_layers)
             start_agg = goals.aggregate(goals.features(model, episode["start_params"], active_layers), active_layers)
             final_agg = goals.aggregate(goals.features(model, final_params, active_layers), active_layers)
-            attainment = goals.attainment(episode["instruction"]["goal"], start_agg, final_agg)
+            attainment = goals.attainment(episode["instruction"]["goal"], start_agg, final_agg,
+                                          weights=episode["instruction"].get("weights"))
             overall.append(attainment)
             rows.extend(_baseline_class_rows(episode, model, active_layers, attainment))
         results[name] = {"overall_median": statistics.median(overall),
