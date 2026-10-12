@@ -217,12 +217,19 @@ def scoring(goal, start_features, final_features, active_layers=None, weights: d
     """Score final model features against start features using effective layers."""
     start = aggregate(start_features, active_layers)
     final = aggregate(final_features, active_layers)
-    return attainment(goal, start, final, weights=weights)
+    kwargs = {} if weights is None else {"weights": weights}
+    return attainment(goal, start, final, **kwargs)
 
 
 def attainment(goal, start, final, active_layers=None, weights: dict = None) -> float:
     """1 - distance(final) / distance(start); 1 = goal reached, < 0 = worse."""
-    return 1.0 - distance(goal, start, final, weights=weights) / distance(goal, start, start, weights=weights)
+    # Omitting the `weights` kwarg entirely when it's None (rather than always
+    # passing `weights=None`) matters: several tests monkeypatch `distance`
+    # with a fixed-arity stub lacking a `weights` parameter, and this function
+    # calling it with an unconditional `weights=` keyword would break every
+    # one of them even though no actual weighting is happening.
+    kwargs = {} if weights is None else {"weights": weights}
+    return 1.0 - distance(goal, start, final, **kwargs) / distance(goal, start, start, **kwargs)
 
 
 def is_useless(features: dict, active_layers=None) -> bool:
