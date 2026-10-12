@@ -1253,6 +1253,34 @@ def test_sweep_arms_handles_absolute_instructions(ts_session, monkeypatch):
     assert result["arms"]["policy"]["n"] == 2
 
 
+def test_sweep_arms_scores_show_only_with_group_balanced_weights(ts_session, monkeypatch):
+    """`compare_arms` has its own dedicated show_only/weights coverage; this
+    is the equivalent for `sweep_arms`'s own `_score` closure, which has no
+    other test checking a hand-computed weighted value against a real arm."""
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    monkeypatch.setattr(goals, "_sample_kind", lambda rng: "show_only")
+    policy = policy_stub()
+
+    result = server.sweep_arms(model, policy, server._dataset_name, params, episodes=1, seed=0)
+    assert result["kinds"] == ["show_only"]
+
+    # sweep_arms samples with np.random.default_rng(seed) and draws exactly
+    # one instruction per episode -- reproducing that draw here gives the
+    # exact same instruction its internal _score closure used.
+    start_agg = goals.aggregate(model.features(params))
+    rng = np.random.default_rng(0)
+    instruction = goals.sample_instruction(server._dataset_name, model, start_agg, rng)
+    assert "weights" in instruction  # sanity: this really is show_only-shaped
+
+    policy_params = server.run_policy_arm(model, policy, instruction, start_agg, params)
+    expected = goals.attainment(instruction["goal"], start_agg,
+                                goals.aggregate(model.features(policy_params)),
+                                weights=instruction["weights"])
+    assert result["arms"]["policy"]["median"] == pytest.approx(expected)
+
+
 # --- the /api/compare route ---------------------------------------------------
 
 def test_compare_route_leaves_session_history_untouched(ts_session, monkeypatch):

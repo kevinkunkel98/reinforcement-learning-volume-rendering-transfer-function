@@ -164,6 +164,8 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None,
             near_duplicate = False
             break
 
+    # Bare keyword: no test in this file monkeypatches goals.distance with a
+    # fixed-arity stub, so there's no risk an unconditional weights= breaks.
     weights = instruction.get("weights")
     a_distance = goals.distance(instruction["goal"], start_agg, a_agg, weights=weights)
     b_distance = goals.distance(instruction["goal"], start_agg, b_agg, weights=weights)

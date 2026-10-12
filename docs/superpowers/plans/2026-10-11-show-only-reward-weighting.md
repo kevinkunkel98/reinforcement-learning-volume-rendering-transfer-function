@@ -742,7 +742,7 @@ git commit -m "feat(rl): apply show_only's group-balanced weights in VisibilityT
 - Modify: `rl/candidates.py:167-168`, `server.py:452`, `server.py:551-552`
 - Test: `tests/test_candidates.py`, `tests/test_server.py`
 
-- [ ] **Step 1: Write the failing tests, and fix one existing test that this change will otherwise break**
+- [x] **Step 1: Write the failing tests, and fix one existing test that this change will otherwise break**
 
 `tests/test_candidates.py:114-124`'s existing `test_objective_choice_matches_the_lower_distance` samples a random instruction per seed (via `sample_item` -> `goals.sample_instruction`) and independently recomputes `a_distance`/`b_distance` *without* weights to check against `item["objective_choice"]`. Once this task makes `objective_choice` use `instruction.get("weights")`, any seed that happens to sample a `show_only` instruction (~15% of kinds) will disagree with this test's unweighted recomputation. Fix it to thread weights through, matching what the implementation will do:
 
@@ -816,12 +816,12 @@ def test_compare_arms_scores_show_only_with_group_balanced_weights(ts_session):
         assert arm["attainment"] == pytest.approx(expected), name
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_candidates.py tests/test_server.py -k "weight or objective_choice" -v`
 Expected: `test_objective_choice_uses_show_only_weights_not_flat_distance` PASSes already (it only exercises `goals.distance`, already implemented); `test_compare_arms_scores_show_only_with_group_balanced_weights` FAILs against unmodified `server.py` (its `arm["attainment"]` was computed without weights); `test_objective_choice_matches_the_lower_distance` continues to pass for now (its fix anticipates Step 3's change, so it won't fail until *after* Step 3 if you skip the fix -- apply the fix in this step regardless, so the suite stays green through Step 3).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `rl/candidates.py`, change the objective-choice comparison (currently lines 167-168):
 
@@ -847,12 +847,12 @@ Change `sweep_arms`'s `_score` closure (currently lines 550-552):
                 weights=instruction.get("weights")))
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_candidates.py tests/test_server.py -v`
 Expected: all PASS, including every pre-existing test in both files.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rl/candidates.py server.py tests/test_candidates.py tests/test_server.py

@@ -556,6 +556,9 @@ def sweep_arms(model, policy, volume, start_params, episodes=SWEEP_EPISODES, see
         kinds.append(instruction["kind"])
 
         def _score(params):
+            # Bare keyword, unlike compare_arms's _finish above: no test
+            # monkeypatches goals.attainment through this closure, so there's
+            # no fixed-arity stub to break.
             return float(goals.attainment(
                 instruction["goal"], start_agg, goals.aggregate(model.features(params)),
                 weights=instruction.get("weights")))
