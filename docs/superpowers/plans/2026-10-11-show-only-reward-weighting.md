@@ -18,7 +18,7 @@
 - Modify: `goals.py:176-217` (`distance`, `scoring`, `attainment`)
 - Test: `tests/test_goals.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add after `test_distance_penalises_hiding_behind_unlabeled_material` (around line 260, before `test_attainment_is_one_when_reached_and_negative_when_worse`) in `tests/test_goals.py`:
 
@@ -80,12 +80,12 @@ def test_attainment_accepts_weights_and_forwards_them():
         1.0 - goals.distance(goal, start, current) / goals.distance(goal, start, start))
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_goals.py -k "weights" -v`
 Expected: FAIL with `TypeError: distance() got an unexpected keyword argument 'weights'` (and similarly for `attainment`).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `goals.py`, replace the `distance` function (currently lines 176-205):
 
@@ -142,12 +142,12 @@ def attainment(goal, start, final, active_layers=None, weights: dict = None) -> 
     return 1.0 - distance(goal, start, final, weights=weights) / distance(goal, start, start, weights=weights)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_goals.py -v`
 Expected: all PASS, including the 4 new tests and every pre-existing test in the file unchanged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add goals.py tests/test_goals.py
@@ -162,7 +162,7 @@ git commit -m "feat(goals): accept an optional per-class weights multiplier in d
 - Modify: `goals.py:422-434` (`_sample_show_only`), `goals.py:554-564` (`_goal_show_only`)
 - Test: `tests/test_goals.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add directly after `EPSILON`/`KAPPA`/etc. constant block usage is irrelevant here -- add these new tests right after `test_show_only_hides_the_other_classes` (around line 409) in `tests/test_goals.py`:
 
@@ -220,12 +220,12 @@ def test_goal_from_command_show_only_carries_group_balanced_weights(monkeypatch)
     assert result["weights"] == expected
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_goals.py -k "show_only_weights or group_balanced" -v`
 Expected: FAIL -- `AttributeError: module 'goals' has no attribute 'show_only_weights'`, and `KeyError: 'weights'` once that's fixed but the construction sites aren't wired yet.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `goals.py`, add the new helper directly above `_sample_show_only` (currently line 422):
 
@@ -319,12 +319,12 @@ def _goal_show_only(command: dict, volume) -> dict:
 
 (`_goal_relative`, `_goal_absolute`, `_goal_brightness` and every other `_goal_*` function are unchanged -- they never set `"weights"`.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_goals.py -v`
 Expected: all PASS, including every pre-existing test (in particular `test_every_sampled_instruction_has_text_and_a_goal_vector` and `test_sampling_is_deterministic_for_a_seed`, which iterate over every kind including `show_only` and must still pass unchanged).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add goals.py tests/test_goals.py
@@ -339,7 +339,7 @@ git commit -m "feat(goals): attach group-balanced weights to show_only instructi
 - Modify: `rl/oneshot_env.py:355-358` (`_attainment`), `rl/oneshot_env.py:430-459` (`_sample_hindsight_show_only`), `rl/oneshot_env.py:530` (`reset`), `rl/oneshot_env.py:564-566` (`step`)
 - Test: `tests/test_oneshot_env.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add after `test_hindsight_show_only_action_matches_measured_deltas` (around line 450) in `tests/test_oneshot_env.py`:
 
@@ -387,12 +387,12 @@ def test_show_only_reward_reflects_group_balanced_weights(monkeypatch):
     assert info["target_progress"] == pytest.approx(expected_progress)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_env.py -k "group_balanced" -v`
 Expected: FAIL -- `KeyError: 'weights'` on the first test (hindsight sampler doesn't set it yet); the second test currently passes by coincidence only if weights don't change the no-op case's distance ratio, so verify it fails once weights legitimately change a nonzero case -- if it passes before Step 3, that means the no-op/all-zero-progress case doesn't exercise the weighting; re-check against a nonzero-progress action before proceeding. (A no-op residual action keeps `final_agg == start_agg`, so both numerator and denominator distances are evaluated at identical input, meaning this specific test's main value is confirming `weights` is threaded into both calls without a `TypeError`/`KeyError`, not that the ratio changed -- that's covered by Task 1's `distance` tests. Keep it as a plumbing check.)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `rl/oneshot_env.py`, change `_attainment` (currently lines 355-358):
 
@@ -434,12 +434,12 @@ Change `step`'s `reward_mode == "target"` branch (currently lines 564-566):
 
 (The `drift` calculation just below stays unchanged -- `drift` only ever sums over classes `not in mentioned`, and `mentioned = set(self._instruction["targets"])` is already all 8 classes for `show_only`, so `drift` is always 0 for this kind regardless of weights, exactly as before this change.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_oneshot_env.py -v`
 Expected: all PASS, including every pre-existing test in the file.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rl/oneshot_env.py tests/test_oneshot_env.py
@@ -454,7 +454,7 @@ git commit -m "feat(rl): apply show_only's group-balanced weights to OneShotEnv'
 - Modify: `rl/baselines.py:200-240` (`_evaluate`, `hill_climb`)
 - Test: `tests/test_baselines.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `tests/test_baselines.py`, update the existing `_show_only_instruction` helper (currently lines 78-82) to carry weights, matching production instructions:
 
@@ -506,12 +506,12 @@ def test_evaluate_applies_weights():
     assert weighted != pytest.approx(unweighted)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_baselines.py -k "weights" -v`
 Expected: FAIL -- `TypeError: _evaluate() got an unexpected keyword argument 'weights'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `rl/baselines.py`, change `_evaluate` and `hill_climb` (currently lines 200-240):
 
@@ -561,12 +561,12 @@ def hill_climb(model, start_params, instruction, evaluations: int = 200,
     return best_params
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_baselines.py -v`
 Expected: all PASS, including every pre-existing test in the file.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rl/baselines.py tests/test_baselines.py
@@ -581,7 +581,7 @@ git commit -m "feat(rl): apply show_only's group-balanced weights to hill_climb'
 - Modify: `rl/vis_eval.py:110-163` (`_frozen_episode_env`, `_frozen_one_shot_env`), `rl/vis_eval.py:269-277` (`_attainment_or_zero`)
 - Test: `tests/test_vis_eval.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add this self-contained unit test anywhere in `tests/test_vis_eval.py` (it exercises `_attainment_or_zero` directly as a pure function, independent of that file's episode/env fixtures):
 
@@ -599,12 +599,12 @@ def test_attainment_or_zero_applies_weights():
     assert weighted != pytest.approx(unweighted)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_vis_eval.py -k "attainment_or_zero_applies_weights" -v`
 Expected: FAIL -- `TypeError: _attainment_or_zero() got an unexpected keyword argument 'weights'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `rl/vis_eval.py`, change `_attainment_or_zero` (currently lines 269-277):
 
@@ -643,12 +643,12 @@ Change `_frozen_one_shot_env`'s `start_distance` line (currently line 149) ident
 
 (Both functions already store `env._instruction = instruction` and compute `env._start_distance`/observations from `OneShotEnv`/`VisibilityTFEnv`'s own `_attainment`, which Tasks 3 and 6 make weights-aware via `self._instruction.get("weights")` -- so only the one direct `goals.distance` call in each of these two functions needs updating here; everything downstream of it already gets weights through the env's own methods.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_vis_eval.py -v`
 Expected: all PASS, including every pre-existing test in the file.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rl/vis_eval.py tests/test_vis_eval.py
@@ -663,7 +663,7 @@ git commit -m "feat(rl): apply show_only's group-balanced weights in vis_eval sc
 - Modify: `rl/vis_env.py:140-143` (`_attainment`), `rl/vis_env.py:161` (`reset`), `rl/vis_env.py:188` (`step`)
 - Test: `tests/test_vis_env.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/test_vis_env.py` already has a `_make_env(monkeypatch, volume_ids=...)` helper and a `_StubModel` with full 8-class coverage (`MEASURED = {name: name for name in CANONICAL_CLASSES}`). Add this test using that helper:
 
@@ -691,12 +691,12 @@ def test_show_only_attainment_reflects_group_balanced_weights(monkeypatch):
     assert env._attainment(agg) == pytest.approx(expected)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_vis_env.py -k "show_only" -v`
 Expected: FAIL (new test not yet passing against unmodified code -- `_attainment` ignores `"weights"` until Step 3).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `rl/vis_env.py`, change `_attainment` (currently lines 140-143):
 
@@ -722,12 +722,12 @@ Change `step`'s `distance` line (currently line 188):
                                   weights=self._instruction.get("weights"))  # pyright: ignore[reportOptionalSubscript]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_vis_env.py -v`
 Expected: all PASS, including every pre-existing test in the file.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rl/vis_env.py tests/test_vis_env.py

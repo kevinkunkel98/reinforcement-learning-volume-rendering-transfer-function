@@ -318,3 +318,53 @@ def test_show_only_attainment_reflects_group_balanced_weights(monkeypatch):
             agg["vis"][c] = 0.0
     expected = goals.attainment(env._instruction["goal"], env._start_agg, agg, weights=weights)
     assert env._attainment(agg) == pytest.approx(expected)
+
+
+def test_reset_applies_weights_to_start_distance_for_a_sampled_show_only_instruction(monkeypatch):
+    """The test above exercises `_attainment` by hand-setting `env._instruction`
+    after `reset()` already ran, so `reset()`'s own weighted `goals.distance`
+    call is only exercised incidentally by other, unweighted-instruction
+    tests. This drives `reset()` itself with a real sampled show_only
+    instruction, via a monkeypatched `goals.sample_instruction`."""
+    _patch_totalseg(monkeypatch)
+    shown = {"skeleton"}
+    targets = {c: {"vis": goals.HIDE_STRENGTH if c in shown else -goals.HIDE_STRENGTH}
+               for c in goals.GOAL_CLASSES}
+    weights = goals.show_only_weights(shown, goals.GOAL_CLASSES)
+    sampled = {"kind": "show_only", "text": "test", "targets": targets,
+              "goal": goals.goal_vector(targets), "weights": weights}
+    monkeypatch.setattr(vis_env.goals, "sample_instruction", lambda *a, **k: sampled)
+
+    env = VisibilityTFEnv(["fake_a"], model_for_volume=lambda name: _StubModel())
+    env.reset(seed=0)
+
+    expected = goals.distance(sampled["goal"], env._start_agg, env._start_agg, weights=weights)
+    unweighted = goals.distance(sampled["goal"], env._start_agg, env._start_agg)
+    assert expected != pytest.approx(unweighted)  # sanity: this instruction's weights really matter
+    assert env._start_distance == pytest.approx(expected)
+
+
+def test_step_applies_weights_to_distance_for_a_show_only_instruction(monkeypatch):
+    """Same gap, for `step()`'s own weighted `goals.distance` call -- forces a
+    real nonzero action so the weighted and unweighted outcomes genuinely
+    diverge, rather than checking plumbing that would pass either way."""
+    env = _make_env(monkeypatch, volume_ids=("fake_a",))
+    env.reset(seed=0)
+    shown = {"skeleton"}
+    targets = {c: {"vis": goals.HIDE_STRENGTH if c in shown else -goals.HIDE_STRENGTH}
+               for c in goals.GOAL_CLASSES}
+    weights = goals.show_only_weights(shown, goals.GOAL_CLASSES)
+    env._instruction = {"kind": "show_only", "text": "test", "targets": targets,
+                        "goal": goals.goal_vector(targets), "weights": weights}
+    env._start_distance = goals.distance(env._instruction["goal"], env._start_agg,
+                                         env._start_agg, weights=weights)
+
+    action = np.full(ACTION_SIZE, 0.5, dtype=np.float32)
+    _obs, _reward, _term, _trunc, info = env.step(action)
+
+    final_agg = goals.aggregate(env._model.features(env._params))
+    weighted_distance = goals.distance(env._instruction["goal"], env._start_agg, final_agg, weights=weights)
+    unweighted_distance = goals.distance(env._instruction["goal"], env._start_agg, final_agg)
+    assert weighted_distance != pytest.approx(unweighted_distance)  # sanity: action really matters here
+
+    assert info["distance"] == pytest.approx(weighted_distance)
