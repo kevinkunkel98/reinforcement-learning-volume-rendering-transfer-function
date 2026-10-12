@@ -865,15 +865,15 @@ git commit -m "feat: apply show_only's group-balanced weights in candidate compa
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Run the complete test suite**
+- [x] **Step 1: Run the complete test suite**
 
 Run: `.venv/bin/python -m pytest -q`
 Expected: every test passes (same pass count as the pre-change baseline plus the new tests added in Tasks 1-7; 0 failures, 0 errors). If the suite has a `slow`-marked subset normally excluded, also run: `.venv/bin/python -m pytest -q -m slow` if that marker exists in this project (check `pytest.ini`/`pyproject.toml` for a `slow` marker definition first).
 
-- [ ] **Step 2: Grep for any remaining unweighted show_only-relevant call site**
+- [x] **Step 2: Grep for any remaining unweighted show_only-relevant call site**
 
 Run: `grep -rn "goals\.distance(\|goals\.attainment(\|goals\.scoring(" --include="*.py" . | grep -v "/tests/\|def distance\|def attainment\|def scoring\|\.worktrees"`
 
 Expected: every remaining line already passes `weights=` (either `weights=instruction.get("weights")`, `weights=weights`, or an explicit test value) -- confirms no call site was missed per the spec's table. If any line lacks a `weights=` argument and its surrounding function has an `instruction` (or already-extracted `weights`) in scope, that is a gap Task 7 or an earlier task should have covered -- fix it and re-run Step 1.
 
-- [ ] **Step 3: No commit needed for this task** (verification only; if Step 2 finds a gap, fix it as a new commit and re-run Step 1).
+- [x] **Step 3: No commit needed for this task** (verification only; if Step 2 finds a gap, fix it as a new commit and re-run Step 1).
