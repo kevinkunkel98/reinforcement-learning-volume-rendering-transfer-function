@@ -293,3 +293,28 @@ def test_sampled_instruction_only_targets_supported_classes(monkeypatch):
         obs, info = env.reset(seed=seed)
         supported = set(goals.goal_classes_for_volume(info["volume"]))
         assert set(env._instruction["targets"].keys()) <= supported
+
+
+# --- show_only weighting applied to attainment -------------------------------
+
+def test_show_only_attainment_reflects_group_balanced_weights(monkeypatch):
+    env = _make_env(monkeypatch, volume_ids=("fake_a",))
+    env.reset(seed=0)
+    shown = {"skeleton"}
+    targets = {c: {"vis": goals.HIDE_STRENGTH if c in shown else -goals.HIDE_STRENGTH}
+               for c in goals.GOAL_CLASSES}
+    weights = goals.show_only_weights(shown, goals.GOAL_CLASSES)
+    env._instruction = {"kind": "show_only", "text": "test", "targets": targets,
+                        "goal": goals.goal_vector(targets), "weights": weights}
+    env._start_distance = goals.distance(env._instruction["goal"], env._start_agg,
+                                         env._start_agg, weights=weights)
+    # skeleton (shown) makes no progress; every hidden class is perfectly
+    # suppressed -- unweighted scoring lets the many suppressed hidden
+    # classes swamp the one unmet shown class; weighted scoring must not.
+    agg = {"vis": dict(env._start_agg["vis"]), "bright": dict(env._start_agg["bright"]),
+           "coverage": env._start_agg["coverage"]}
+    for c in goals.GOAL_CLASSES:
+        if c not in shown:
+            agg["vis"][c] = 0.0
+    expected = goals.attainment(env._instruction["goal"], env._start_agg, agg, weights=weights)
+    assert env._attainment(agg) == pytest.approx(expected)

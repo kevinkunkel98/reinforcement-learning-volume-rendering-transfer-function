@@ -140,7 +140,8 @@ class VisibilityTFEnv(gym.Env):
     def _attainment(self, agg: dict) -> float:
         if self._start_distance <= _ATTAINMENT_FLOOR:
             return 0.0
-        return goals.attainment(self._instruction["goal"], self._start_agg, agg)  # pyright: ignore[reportOptionalSubscript]
+        return goals.attainment(self._instruction["goal"], self._start_agg, agg,  # pyright: ignore[reportOptionalSubscript]
+                                weights=self._instruction.get("weights"))  # pyright: ignore[reportOptionalSubscript]
 
     def _info(self, distance: float, agg: dict, useless: bool) -> dict:
         return {"attainment": self._attainment(agg), "distance": distance,
@@ -158,7 +159,8 @@ class VisibilityTFEnv(gym.Env):
         raw_features = goals.features(model, params, self._active_layers)
         start_agg = goals.aggregate(raw_features, self._active_layers)
         instruction = goals.sample_instruction(volume, model, start_agg, rng, self._active_layers)
-        start_distance = goals.distance(instruction["goal"], start_agg, start_agg)
+        start_distance = goals.distance(instruction["goal"], start_agg, start_agg,
+                                        weights=instruction.get("weights"))
 
         self._volume = volume
         self._model = model
@@ -185,7 +187,9 @@ class VisibilityTFEnv(gym.Env):
         raw_features = self._features(params)
         active_layers = getattr(self, "_active_layers", None)
         agg = goals.aggregate(raw_features, active_layers)
-        distance = goals.distance(self._instruction["goal"], self._start_agg, agg)  # pyright: ignore[reportOptionalSubscript]
+        weights = self._instruction.get("weights")  # pyright: ignore[reportOptionalSubscript]
+        kwargs = {} if weights is None else {"weights": weights}
+        distance = goals.distance(self._instruction["goal"], self._start_agg, agg, **kwargs)  # pyright: ignore[reportOptionalSubscript]
         useless = (goals.is_useless(raw_features, active_layers)
                    if active_layers is not None else goals.is_useless(raw_features))
         denom = max(self._start_distance, DISTANCE_FLOOR)
