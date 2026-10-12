@@ -512,6 +512,51 @@ def test_show_only_reward_reflects_group_balanced_weights(monkeypatch):
     assert info["target_progress"] == pytest.approx(expected_progress)
 
 
+def test_show_only_reward_is_weight_sensitive_not_just_plumbed(monkeypatch):
+    """The test above uses a true no-op action, so `final_agg == start_agg`
+    and the weighted/unweighted computations collapse to the same value --
+    it checks the plumbing doesn't crash, but not that weighting actually
+    changes the reward. This test uses a real action (every hidden class
+    suppressed, the shown class left untouched) so the two differ, and
+    confirms `step()`'s reward tracks the *weighted* value, not the
+    unweighted one."""
+    _patch_totalseg(monkeypatch)
+    env = OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+                     policy_version="oneshot-v9", action_mode="residual", reward_mode="target")
+    env.reset(seed=0)
+    shown = {"skeleton"}
+    targets = {c: {"vis": goals.HIDE_STRENGTH if c in shown else -goals.HIDE_STRENGTH}
+               for c in goals.GOAL_CLASSES}
+    weights = goals.show_only_weights(shown, goals.GOAL_CLASSES)
+    env._instruction = {"kind": "show_only", "text": "test", "targets": targets,
+                        "goal": goals.goal_vector(targets), "weights": weights}
+    env._start_distance = goals.distance(env._instruction["goal"], env._start_agg,
+                                         env._start_agg, weights=weights)
+
+    start_controllable = np.asarray(env._controllable_values(env._start_params))
+    action = np.zeros(ACTION_SIZE, dtype=np.float64)
+    for goal_class in goals.GOAL_CLASSES:
+        if goal_class in shown:
+            continue
+        base = goals.PEAK_INDEX[goal_class] * transfer.PARAMS_PER_PEAK
+        group = CONTROLLABLE.index((base + 2,))
+        action[group] = -start_controllable[group]  # drive this hidden class's height to 0
+
+    _obs, _reward, _term, _trunc, info = env.step(action)
+
+    final_params = apply_controllable(env._start_params, np.clip(start_controllable + action, -1.0, 1.0))
+    final_agg = goals.aggregate(env._features(final_params), env._active_layers)
+    weighted_distance = goals.distance(env._instruction["goal"], env._start_agg, final_agg, weights=weights)
+    unweighted_distance = goals.distance(env._instruction["goal"], env._start_agg, final_agg)
+    # Sanity check: this action must actually make the weighted and
+    # unweighted computations disagree, or the assertion below would pass
+    # trivially regardless of which one step() actually uses.
+    assert weighted_distance != pytest.approx(unweighted_distance)
+
+    expected_progress = (env._start_distance - weighted_distance) / env._start_distance
+    assert info["target_progress"] == pytest.approx(expected_progress)
+
+
 def test_hindsight_goal_mentions_at_least_one_class():
     env = OneShotEnv(["synthetic"], hindsight_ratio=1.0)
     env.reset(seed=1)
