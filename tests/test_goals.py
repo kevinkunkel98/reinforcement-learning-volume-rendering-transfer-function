@@ -487,6 +487,21 @@ def test_show_only_weights_with_two_shown_classes():
         assert weights[c] == pytest.approx(1.0 / 6)
 
 
+def test_show_only_weights_handles_an_empty_hidden_group():
+    # Naming every available class as "shown" (e.g. only 2 classes are
+    # reachable on this volume/active_layers config, and both are named)
+    # leaves nothing to hide -- must not divide by zero.
+    classes = ["skeleton", "lungs"]
+    weights = goals.show_only_weights({"skeleton", "lungs"}, classes)
+    assert weights == {"skeleton": pytest.approx(0.5), "lungs": pytest.approx(0.5)}
+
+
+def test_show_only_weights_handles_an_empty_shown_group():
+    classes = ["skeleton", "lungs"]
+    weights = goals.show_only_weights(set(), classes)
+    assert weights == {"skeleton": pytest.approx(0.5), "lungs": pytest.approx(0.5)}
+
+
 def test_sampled_show_only_instruction_carries_group_balanced_weights(monkeypatch):
     monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
     monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
@@ -524,6 +539,10 @@ def test_every_sampled_instruction_has_text_and_a_goal_vector(monkeypatch):
         assert instruction["goal"].shape == (32,)
         n = len(goals.GOAL_CLASSES)
         assert instruction["goal"][n:2*n].sum() + instruction["goal"][3*n:4*n].sum() > 0.0
+        if instruction["kind"] == "show_only":
+            assert "weights" in instruction
+        else:
+            assert "weights" not in instruction
 
 
 def test_sampling_is_deterministic_for_a_seed(monkeypatch):
@@ -605,6 +624,16 @@ def test_goal_from_command_absolute_level_matches_absolute_target_delta(monkeypa
     assert result["kind"] == "absolute"
     expected = goals._absolute_target_delta(model, "vessels", "high", 0.05)
     assert result["targets"]["vessels"]["vis"] == pytest.approx(expected)
+    assert "weights" not in result
+
+
+def test_goal_from_command_relative_does_not_carry_weights(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.05)
+    cmd = {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "strongly"}
+    result = goals.goal_from_command(cmd, model, start, volume="fake")
+    assert "weights" not in result
 
 
 def test_goal_from_command_show_only_hides_the_rest(monkeypatch):

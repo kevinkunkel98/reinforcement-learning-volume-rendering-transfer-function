@@ -439,11 +439,23 @@ def show_only_weights(shown: set, classes) -> dict:
     regardless of how many classes are in each -- 1/n_shown per shown class,
     1/n_hidden per hidden class. Without this, `distance`'s flat per-class
     weighting lets a show_only goal's 6-7 hidden classes outweigh its 1-2
-    shown ones purely by having more terms."""
+    shown ones purely by having more terms.
+
+    Either group can be empty: `classes` is `reachable_goal_classes`/
+    `goal_classes_for_volume`, narrowed by `active_layers` or a volume's own
+    label coverage, and can shrink to as few as 1-2 classes -- in which case
+    naming all of them as "shown" leaves nothing to hide (`_sample_show_only`
+    and `_goal_show_only` both produce exactly this `targets` shape when
+    `shown == classes`: every class at +HIDE_STRENGTH, none at -HIDE_STRENGTH).
+    An empty group's weights are simply omitted rather than divided by zero.
+    """
     shown = set(shown)
     hidden = [c for c in classes if c not in shown]
-    weights = {c: 1.0 / len(shown) for c in shown}
-    weights.update({c: 1.0 / len(hidden) for c in hidden})
+    weights = {}
+    if shown:
+        weights.update({c: 1.0 / len(shown) for c in shown})
+    if hidden:
+        weights.update({c: 1.0 / len(hidden) for c in hidden})
     return weights
 
 
