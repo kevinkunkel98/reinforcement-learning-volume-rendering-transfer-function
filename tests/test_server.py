@@ -972,6 +972,26 @@ def test_compare_arms_scores_every_arm_against_the_shared_start(ts_session):
         assert arm["attainment"] == pytest.approx(expected), name
 
 
+def test_compare_arms_scores_show_only_with_group_balanced_weights(ts_session):
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    camera = dict(s.history[s.cursor]["camera"])
+    start_agg = goals.aggregate(model.features(params))
+    cmd, _ = server.parse_command_with_meta("show only bone", parser="rule")
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+    assert "weights" in instruction  # sanity: this command really is show_only-shaped
+
+    arms = server.compare_arms(model, policy_stub(), cmd, instruction, params, camera, cheap=4)
+
+    for name, arm in arms.items():
+        replayed = np.array(arm["params"], dtype=np.float64)
+        expected = goals.attainment(instruction["goal"], start_agg,
+                                    goals.aggregate(model.features(replayed)),
+                                    weights=instruction["weights"])
+        assert arm["attainment"] == pytest.approx(expected), name
+
+
 def test_compare_arms_marks_an_arm_that_did_not_move(ts_session, monkeypatch):
     """An arm returning its own input is not an arm agreeing with the start --
     it is an arm that did not move, and the panel must not read those the same.

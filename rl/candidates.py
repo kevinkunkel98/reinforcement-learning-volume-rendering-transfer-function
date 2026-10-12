@@ -164,8 +164,9 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None,
             near_duplicate = False
             break
 
-    a_distance = goals.distance(instruction["goal"], start_agg, a_agg)
-    b_distance = goals.distance(instruction["goal"], start_agg, b_agg)
+    weights = instruction.get("weights")
+    a_distance = goals.distance(instruction["goal"], start_agg, a_agg, weights=weights)
+    b_distance = goals.distance(instruction["goal"], start_agg, b_agg, weights=weights)
     objective_choice = "a" if a_distance <= b_distance else "b"
 
     result = {

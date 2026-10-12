@@ -118,10 +118,42 @@ def test_objective_choice_matches_the_lower_distance(monkeypatch):
         start_agg = goals.aggregate(model.features(item["start_params"]))
         a_agg = goals.aggregate(model.features(item["a"]["params"]))
         b_agg = goals.aggregate(model.features(item["b"]["params"]))
-        a_distance = goals.distance(item["instruction"]["goal"], start_agg, a_agg)
-        b_distance = goals.distance(item["instruction"]["goal"], start_agg, b_agg)
+        weights = item["instruction"].get("weights")
+        a_distance = goals.distance(item["instruction"]["goal"], start_agg, a_agg, weights=weights)
+        b_distance = goals.distance(item["instruction"]["goal"], start_agg, b_agg, weights=weights)
         expected = "a" if a_distance <= b_distance else "b"
         assert item["objective_choice"] == expected
+
+
+def test_objective_choice_uses_show_only_weights_not_flat_distance(monkeypatch):
+    """Construct a case where the unweighted and weighted comparisons
+    disagree: arm A is perfect on the single shown class but makes no
+    progress on any hidden class; arm B is the reverse (perfect on every
+    hidden class, no progress on the shown one). Flat per-class weighting
+    picks B (6 improved hidden terms beat 1 improved shown term); weighted
+    scoring must pick A instead."""
+    shown = {"skeleton"}
+    classes = list(goals.GOAL_CLASSES)
+    targets = {c: {"vis": goals.HIDE_STRENGTH if c in shown else -goals.HIDE_STRENGTH} for c in classes}
+    weights = goals.show_only_weights(shown, classes)
+    instruction = {"kind": "show_only", "text": "test", "targets": targets,
+                   "goal": goals.goal_vector(targets), "weights": weights}
+
+    start_agg = {"vis": {c: 0.05 for c in classes}, "bright": {c: 0.0 for c in classes}}
+    a_agg = {"vis": {**start_agg["vis"], "skeleton": 0.5}, "bright": start_agg["bright"]}  # shown fixed, hidden untouched
+    # Hidden classes want a *decrease* (target -HIDE_STRENGTH), so "fixed" means
+    # dropped by the same order of magnitude arm A raised the shown class by --
+    # 0.005, not 0.5 (which would be a 10x increase, moving hidden classes
+    # further from their goal, not closer).
+    b_agg = {"vis": {c: (0.005 if c != "skeleton" else 0.05) for c in classes}, "bright": start_agg["bright"]}  # hidden fixed, shown untouched
+
+    weighted_a = goals.distance(instruction["goal"], start_agg, a_agg, weights=weights)
+    weighted_b = goals.distance(instruction["goal"], start_agg, b_agg, weights=weights)
+    unweighted_a = goals.distance(instruction["goal"], start_agg, a_agg)
+    unweighted_b = goals.distance(instruction["goal"], start_agg, b_agg)
+
+    assert weighted_a < weighted_b   # weighted scoring favors fixing the shown class
+    assert unweighted_b < unweighted_a  # flat scoring favors fixing the many hidden classes instead
 
 
 # --- determinism ------------------------------------------------------

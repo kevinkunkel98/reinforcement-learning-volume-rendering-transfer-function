@@ -449,7 +449,15 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
             "effective_class_contribution": _class_effective_contribution(
                 params, layers or default_layers()),
             "class_brightness": _class_brightness(params),
-            "attainment": float(goals.attainment(instruction["goal"], start_agg, final_agg)),
+            # `weights` is passed via **kwargs, not a bare keyword: at least one
+            # test (test_compare_arms_includes_anatomy_layers_in_each_arm)
+            # monkeypatches `server.goals.attainment` with a fixed-arity stub
+            # (`lambda *args: 0.0`) that takes no keyword arguments at all, and
+            # an unconditional `weights=` would break it even for an
+            # instruction with no "weights" key.
+            "attainment": float(goals.attainment(
+                instruction["goal"], start_agg, final_agg,
+                **({} if instruction.get("weights") is None else {"weights": instruction["weights"]}))),
             # An arm that returned its own input is not an arm that *agrees*
             # with the start -- it is an arm that did not move, and rendered
             # side by side those two read identically (same image, same
@@ -549,7 +557,8 @@ def sweep_arms(model, policy, volume, start_params, episodes=SWEEP_EPISODES, see
 
         def _score(params):
             return float(goals.attainment(
-                instruction["goal"], start_agg, goals.aggregate(model.features(params))))
+                instruction["goal"], start_agg, goals.aggregate(model.features(params)),
+                weights=instruction.get("weights")))
 
         # `apply_command` takes a *parsed* command, not an instruction, so the
         # sampled text goes through the same parser the viewer uses. That keeps
