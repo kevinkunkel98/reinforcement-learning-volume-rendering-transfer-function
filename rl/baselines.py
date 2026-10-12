@@ -197,9 +197,9 @@ def random_policy(model, start_params, instruction, seed: int = 0,
     return params
 
 
-def _evaluate(model, goal, start_agg, params, active_layers=None) -> float:
+def _evaluate(model, goal, start_agg, params, active_layers=None, weights: dict = None) -> float:
     features = goals.features(model, params, active_layers)
-    return goals.distance(goal, start_agg, goals.aggregate(features, active_layers))
+    return goals.distance(goal, start_agg, goals.aggregate(features, active_layers), weights=weights)
 
 
 def hill_climb(model, start_params, instruction, evaluations: int = 200,
@@ -207,13 +207,17 @@ def hill_climb(model, start_params, instruction, evaluations: int = 200,
     """Coordinate search on `goals.distance`: try +-step on each of the 12
     controllable values, keep improvements, halve the step once a full sweep
     finds none. `evaluations` bounds the number of `model.features` calls
-    (one to score the start state, one per proposal after that)."""
+    (one to score the start state, one per proposal after that). Applies
+    `instruction`'s own `weights` (set for show_only; None otherwise) so this
+    search optimizes the identical objective the RL policy is trained and
+    judged on."""
     goal = instruction["goal"]
+    weights = instruction.get("weights")
     start_agg = goals.aggregate(goals.features(model, start_params, active_layers), active_layers)
     used = 1
 
     best_params = start_params.copy()
-    best_distance = goals.distance(goal, start_agg, start_agg)
+    best_distance = goals.distance(goal, start_agg, start_agg, weights=weights)
     step = initial_step
 
     while used < evaluations and step > 1e-3:
@@ -225,7 +229,7 @@ def hill_climb(model, start_params, instruction, evaluations: int = 200,
                 candidate = best_params.copy()
                 for idx in dim:
                     candidate[idx] = float(np.clip(candidate[idx] + sign * step, -1.0, 1.0))
-                candidate_distance = _evaluate(model, goal, start_agg, candidate, active_layers)
+                candidate_distance = _evaluate(model, goal, start_agg, candidate, active_layers, weights=weights)
                 used += 1
                 if candidate_distance < best_distance:
                     best_distance = candidate_distance

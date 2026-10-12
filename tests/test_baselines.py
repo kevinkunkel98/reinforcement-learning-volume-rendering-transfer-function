@@ -79,7 +79,9 @@ def _show_only_instruction(shown: list) -> dict:
     targets = {}
     for goal_class in goals.GOAL_CLASSES:
         targets[goal_class] = {"vis": goals.HIDE_STRENGTH if goal_class in shown else -goals.HIDE_STRENGTH}
-    return {"kind": "show_only", "text": "test", "targets": targets, "goal": goals.goal_vector(targets)}
+    weights = goals.show_only_weights(set(shown), goals.GOAL_CLASSES)
+    return {"kind": "show_only", "text": "test", "targets": targets, "goal": goals.goal_vector(targets),
+            "weights": weights}
 
 
 def _absolute_instruction(model, start_params, goal_class: str, level: str) -> dict:
@@ -261,6 +263,41 @@ def test_hill_climb_passes_active_layers_to_effective_scoring():
     result = baselines.hill_climb(model, start, instruction, evaluations=3, active_layers=layers)
 
     assert np.array_equal(result, start)
+
+
+def test_hill_climb_applies_show_only_weights_to_its_own_objective():
+    """hill_climb must search against the *same* weighted objective the RL
+    policy is trained and judged on for show_only -- otherwise the search
+    teacher used for distillation targets a different goal than the policy."""
+    model = _StubModel()
+    start = _start_params()
+    instruction = _show_only_instruction(["skeleton"])
+    start_agg = goals.aggregate(model.features(start))
+
+    result = baselines.hill_climb(model, start, instruction, evaluations=80)
+
+    unweighted_after = goals.distance(instruction["goal"], start_agg, goals.aggregate(model.features(result)))
+    weighted_after = goals.distance(instruction["goal"], start_agg, goals.aggregate(model.features(result)),
+                                    weights=instruction["weights"])
+    unweighted_before = goals.distance(instruction["goal"], start_agg, start_agg)
+    weighted_before = goals.distance(instruction["goal"], start_agg, start_agg, weights=instruction["weights"])
+    # The search must have actually reduced the *weighted* distance (what it
+    # optimizes), not just coincidentally reduced the unweighted one.
+    assert weighted_after <= weighted_before
+    assert unweighted_after <= unweighted_before
+
+
+def test_evaluate_applies_weights():
+    model = _StubModel()
+    start = _start_params()
+    instruction = _show_only_instruction(["skeleton"])
+    start_agg = goals.aggregate(model.features(start))
+
+    unweighted = baselines._evaluate(model, instruction["goal"], start_agg, start)
+    weighted = baselines._evaluate(model, instruction["goal"], start_agg, start,
+                                   weights=instruction["weights"])
+
+    assert weighted != pytest.approx(unweighted)
 
 
 # --- shape/bounds for every baseline --------------------------------------------
