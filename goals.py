@@ -427,6 +427,19 @@ def _sample_compound(classes: list, rng, preferred=None) -> tuple:
     return targets, ", ".join(phrases)
 
 
+def show_only_weights(shown: set, classes) -> dict:
+    """Equal total weight for the shown group and the hidden group,
+    regardless of how many classes are in each -- 1/n_shown per shown class,
+    1/n_hidden per hidden class. Without this, `distance`'s flat per-class
+    weighting lets a show_only goal's 6-7 hidden classes outweigh its 1-2
+    shown ones purely by having more terms."""
+    shown = set(shown)
+    hidden = [c for c in classes if c not in shown]
+    weights = {c: 1.0 / len(shown) for c in shown}
+    weights.update({c: 1.0 / len(hidden) for c in hidden})
+    return weights
+
+
 def _sample_show_only(classes: list, rng, preferred=None) -> tuple:
     n = min(int(rng.integers(1, 3)), len(classes))
     shown = ([preferred] if preferred in classes else [])
@@ -439,7 +452,7 @@ def _sample_show_only(classes: list, rng, preferred=None) -> tuple:
             targets[goal_class] = {"vis": -HIDE_STRENGTH}
     words = [_class_word(goal_class, rng) for goal_class in shown]
     text = "show only the " + " and the ".join(words)
-    return targets, text
+    return targets, text, show_only_weights(set(shown), classes)
 
 
 def _sample_absolute(classes: list, model, start_features: dict, rng, preferred=None) -> tuple:
@@ -461,7 +474,8 @@ def _sample_brightness(classes: list, rng, preferred=None) -> tuple:
 
 def sample_instruction(name, model, start_features, rng, active_layers=None,
                        class_counts=None, balance_classes=False) -> dict:
-    """One instruction: {"kind", "text", "targets", "goal"}.
+    """One instruction: {"kind", "text", "targets", "goal"}, plus "weights"
+    for show_only instructions (see `show_only_weights`).
 
     `targets` is the goal_vector input; `text` is the spoken form. Absolute
     levels use ABSOLUTE_LEVEL x model.solo_max aggregated for the goal class,
@@ -477,17 +491,21 @@ def sample_instruction(name, model, start_features, rng, active_layers=None,
                       if class_counts.get(goal_class, 0) == minimum]
         preferred = str(rng.choice(least_seen))
     kind = _sample_kind(rng)
+    weights = None
     if kind == "relative":
         targets, text = _sample_relative(classes, rng, preferred)
     elif kind == "compound":
         targets, text = _sample_compound(classes, rng, preferred)
     elif kind == "show_only":
-        targets, text = _sample_show_only(classes, rng, preferred)
+        targets, text, weights = _sample_show_only(classes, rng, preferred)
     elif kind == "absolute":
         targets, text = _sample_absolute(classes, model, start_features, rng, preferred)
     else:
         targets, text = _sample_brightness(classes, rng, preferred)
-    return {"kind": kind, "text": text, "targets": targets, "goal": goal_vector(targets)}
+    instruction = {"kind": kind, "text": text, "targets": targets, "goal": goal_vector(targets)}
+    if weights is not None:
+        instruction["weights"] = weights
+    return instruction
 
 
 # --- Task 2: parsed commands -> goals -----------------------------------------
@@ -569,7 +587,8 @@ def _goal_show_only(command: dict, volume) -> dict:
         if goal_class not in shown:
             targets[goal_class] = {"vis": -HIDE_STRENGTH}
     text = _show_only_command_text(shown)
-    return {"kind": "show_only", "text": text, "targets": targets, "goal": goal_vector(targets)}
+    return {"kind": "show_only", "text": text, "targets": targets, "goal": goal_vector(targets),
+            "weights": show_only_weights(set(shown), classes)}
 
 
 def goal_from_command(command: dict, model, start_features: dict, volume: str = None,

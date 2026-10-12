@@ -465,6 +465,46 @@ def test_show_only_hides_the_other_classes(monkeypatch):
     assert found
 
 
+def test_show_only_weights_gives_each_group_equal_total_weight():
+    classes = list(goals.GOAL_CLASSES)  # 8 classes
+    weights = goals.show_only_weights({"skeleton"}, classes)
+    assert weights["skeleton"] == pytest.approx(1.0)
+    hidden = [c for c in classes if c != "skeleton"]
+    assert len(hidden) == 7
+    for c in hidden:
+        assert weights[c] == pytest.approx(1.0 / 7)
+    assert sum(weights[c] for c in hidden) == pytest.approx(1.0)
+
+
+def test_show_only_weights_with_two_shown_classes():
+    classes = list(goals.GOAL_CLASSES)
+    weights = goals.show_only_weights({"skeleton", "lungs"}, classes)
+    assert weights["skeleton"] == pytest.approx(0.5)
+    assert weights["lungs"] == pytest.approx(0.5)
+    hidden = [c for c in classes if c not in ("skeleton", "lungs")]
+    assert len(hidden) == 6
+    for c in hidden:
+        assert weights[c] == pytest.approx(1.0 / 6)
+
+
+def test_sampled_show_only_instruction_carries_group_balanced_weights(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.05, lungs=0.05, soft=0.05, vessels=0.05)
+    rng = np.random.default_rng(2)
+    found = False
+    for _ in range(400):
+        instruction = goals.sample_instruction("fake", model, start, rng)
+        if instruction["kind"] != "show_only":
+            continue
+        found = True
+        shown = {c for c, t in instruction["targets"].items() if t["vis"] > 0.0}
+        expected = goals.show_only_weights(shown, instruction["targets"].keys())
+        assert instruction["weights"] == expected
+    assert found
+
+
 def test_absolute_level_target_is_relative_to_solo_max():
     model = _StubModel(solo=0.5)
     delta = goals._absolute_target_delta(model, "skeleton", "high", 0.05)
@@ -588,6 +628,16 @@ def test_goal_from_command_show_only_single_string_target(monkeypatch):
     result = goals.goal_from_command(cmd, model, start, volume="fake")
     assert result["targets"]["skeleton"]["vis"] == goals.HIDE_STRENGTH
     assert result["targets"]["lungs"]["vis"] == -goals.HIDE_STRENGTH
+
+
+def test_goal_from_command_show_only_carries_group_balanced_weights(monkeypatch):
+    _patch_contrast_volume(monkeypatch)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.05, lungs=0.05, soft=0.05, vessels=0.05)
+    cmd = {"target": ["skeleton", "lungs"], "attribute": "opacity", "direction": "show_only", "strength": None}
+    result = goals.goal_from_command(cmd, model, start, volume="fake")
+    expected = goals.show_only_weights({"skeleton", "lungs"}, result["targets"].keys())
+    assert result["weights"] == expected
 
 
 def test_show_only_reachability_ignores_hidden_classes(monkeypatch):
