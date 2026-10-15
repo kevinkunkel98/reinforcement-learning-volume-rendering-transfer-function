@@ -687,6 +687,11 @@
     return floatLinear;
   }
 
+  // Called by xr.js's adaptive controller (?adapt=1) when its multiplier moves.
+  function setXRSampleMultiplier(multiplier) {
+    if (inXR()) mapper.setSampleDistance(xrBaseSampleDistance() * multiplier);
+  }
+
   // Thumbstick rotation (xr.js). The world -> physical rotation of the XR
   // placement the turns are measured against, and the turn itself: vtk.js 25
   // mis-clips a volume whose prop matrix is rotated, so the room frame turns
@@ -717,6 +722,7 @@
     render: () => { if (!inXR()) renderWindow?.render(); },
     enterXR, exitXR, inXR,
     get perfFlags() { return PERF; },
+    setXRSampleMultiplier,
     getPhysicalRotation, setVolumeRotation,
     getRenderer: () => renderer,
     getVolumeBounds: () => volume?.getBounds(),

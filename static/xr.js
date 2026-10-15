@@ -18,6 +18,8 @@
   let entering = false;
   let fps = null;
   let frameMs = null;
+  let adapt = null; // controller state when ?adapt=1, else null
+  let lastFrameTime = null;
   let frames = 0;
   let fpsSince = null;
   let mapper = null; // fresh per session, so a trigger held at exit can't carry over
@@ -159,6 +161,12 @@
   function onXRFrame(time, frame) {
     if (!session) return;
     session.requestAnimationFrame(onXRFrame);
+    if (adapt && lastFrameTime !== null) {
+      const next = logic.adaptSampleDistance(adapt, time - lastFrameTime);
+      if (next.multiplier !== adapt.multiplier) window.volumeViewer.setXRSampleMultiplier(next.multiplier);
+      adapt = next;
+    }
+    lastFrameTime = time;
     // Frame rate on the panel, refreshed once a second (a redraw re-uploads
     // the panel texture, so not every frame).
     frames += 1;
@@ -197,6 +205,7 @@
     session = null;
     mapper = null;
     sticks = null;
+    adapt = null;
     removeHud();
     button.textContent = "Enter VR";
     try {
@@ -262,6 +271,8 @@
     lastStickTime = null;
     fps = null;
     frameMs = null;
+    adapt = window.volumeViewer.perfFlags.adapt ? logic.ADAPT_INITIAL : null;
+    lastFrameTime = null;
     frames = 0;
     fpsSince = null;
     flatBackground = window.volumeViewer.getRenderer().getBackground().slice();

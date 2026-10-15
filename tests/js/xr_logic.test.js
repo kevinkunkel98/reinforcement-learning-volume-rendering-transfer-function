@@ -431,3 +431,33 @@ test("parsePerfFlags takes per-device defaults, and explicit flags still win", (
   assert.equal(explicit.crop, false);
   assert.equal(explicit.adapt, false);
 });
+
+// ---------- adaptive sample distance ----------
+
+const MISS = 20; // ms, well over 1000/72 * 1.15
+const OK = 11;   // ms, a 90 Hz frame
+const runAdapt = (state, frames) => frames.reduce((s, ms) => xr.adaptSampleDistance(s, ms), state);
+
+test("adaptSampleDistance coarsens after three consecutive missed frames", () => {
+  assert.equal(runAdapt(xr.ADAPT_INITIAL, [MISS, MISS]).multiplier, 1);
+  assert.equal(runAdapt(xr.ADAPT_INITIAL, [MISS, MISS, MISS]).multiplier, 1.25);
+});
+
+test("adaptSampleDistance only counts consecutive misses", () => {
+  assert.equal(runAdapt(xr.ADAPT_INITIAL, [MISS, MISS, OK, MISS]).multiplier, 1);
+});
+
+test("adaptSampleDistance clamps coarsening at maxMul", () => {
+  const state = { ...xr.ADAPT_INITIAL, multiplier: 3.9 };
+  assert.equal(runAdapt(state, [MISS, MISS, MISS]).multiplier, 4);
+});
+
+test("adaptSampleDistance refines slowly after a sustained on-time run", () => {
+  const state = { ...xr.ADAPT_INITIAL, multiplier: 2 };
+  assert.equal(runAdapt(state, Array(89).fill(OK)).multiplier, 2);
+  assert.equal(runAdapt(state, Array(90).fill(OK)).multiplier, 2 / 1.1);
+});
+
+test("adaptSampleDistance never refines below minMul", () => {
+  assert.equal(runAdapt(xr.ADAPT_INITIAL, Array(90).fill(OK)).multiplier, 1);
+});

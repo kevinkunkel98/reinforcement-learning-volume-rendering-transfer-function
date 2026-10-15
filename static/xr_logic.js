@@ -233,6 +233,31 @@
     ];
   }
 
+  // ---------- adaptive sample distance ----------
+
+  // XR sample-distance controller tuning: hold 72 fps (the stage target),
+  // coarsen fast after a few missed frames, refine slowly after ~1 s of
+  // on-time ones, so quality doesn't visibly pump.
+  const ADAPT_DEFAULTS = Object.freeze({
+    minMul: 1, maxMul: 4, targetMs: 1000 / 72, missFactor: 1.15,
+    coarsenAfter: 3, refineAfter: 90, coarsenStep: 1.25, refineStep: 1.1,
+  });
+  const ADAPT_INITIAL = Object.freeze({ multiplier: 1, missStreak: 0, okStreak: 0 });
+
+  // One controller step for one frame's duration. Pure; the caller applies
+  // `multiplier` to the base sample distance when it changes.
+  function adaptSampleDistance(state, frameMs, options = {}) {
+    const o = { ...ADAPT_DEFAULTS, ...options };
+    if (frameMs > o.targetMs * o.missFactor) {
+      const missStreak = state.missStreak + 1;
+      if (missStreak < o.coarsenAfter) return { ...state, missStreak, okStreak: 0 };
+      return { multiplier: Math.min(o.maxMul, state.multiplier * o.coarsenStep), missStreak: 0, okStreak: 0 };
+    }
+    const okStreak = state.okStreak + 1;
+    if (okStreak < o.refineAfter) return { ...state, okStreak, missStreak: 0 };
+    return { multiplier: Math.max(o.minMul, state.multiplier / o.refineStep), missStreak: 0, okStreak: 0 };
+  }
+
   // ---------- volume reduction for the headset ----------
 
   // Inclusive voxel-index box of every value above `threshold` in a
@@ -413,5 +438,6 @@
     PERF_DEFAULTS, HEADSET_PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
     physicalRotation, createStickRotator, centeredUserMatrix, rotatedPhysicalFrame,
     bodyBoundingBox, cropVolume, strideDownsample, toSixteenBit,
+    ADAPT_DEFAULTS, ADAPT_INITIAL, adaptSampleDistance,
   };
 });
