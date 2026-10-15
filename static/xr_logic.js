@@ -180,8 +180,35 @@
     }
   }
 
+  // Performance levers for headset testing, read from the page URL (see
+  // docs/superpowers/specs/2026-10-15-vr-performance-levers-design.md).
+  // The defaults reproduce the pre-flag behaviour; anything unparsable or out
+  // of range falls back to its default instead of throwing.
+  const PERF_DEFAULTS = Object.freeze({
+    tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false,
+  });
+
+  function parsePerfFlags(search) {
+    const query = new URLSearchParams(search);
+    const number = (key, min, max) => {
+      const raw = query.get(key);
+      const value = raw === null || raw.trim() === "" ? NaN : Number(raw);
+      return Number.isFinite(value) && value >= min && value <= max ? value : PERF_DEFAULTS[key];
+    };
+    return {
+      tex: query.get("tex") === "f16" ? "f16" : PERF_DEFAULTS.tex,
+      crop: query.get("crop") === "1",
+      down: query.get("down") === "2" ? 2 : PERF_DEFAULTS.down,
+      fov: number("fov", 0, 1),
+      xrscale: number("xrscale", 0.1, 2),
+      xrsample: number("xrsample", 0.25, 8),
+      adapt: query.get("adapt") === "1",
+    };
+  }
+
   return {
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
     summarizeStep, hudPlacement, withXRLayerContext, xrPlacement,
+    PERF_DEFAULTS, parsePerfFlags,
   };
 });

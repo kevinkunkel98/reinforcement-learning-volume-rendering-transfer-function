@@ -12,6 +12,9 @@
   const PEAK_ORDER = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"];
   const UNLABELLED_PEAKS = ["skeleton", "lungs", "soft"];
   const LABEL_BAND = 4096;
+  // Headset performance levers (?tex ?crop ?down ?fov ?xrscale ?xrsample
+  // ?adapt), parsed once; defaults reproduce the pre-flag behaviour.
+  const PERF = window.xrLogic.parsePerfFlags(window.location.search);
   const viewerEl = document.getElementById("vtk-viewer");
   const statusEl = document.getElementById("viewer-status");
   const errorEl = document.getElementById("viewer-error");
@@ -398,13 +401,13 @@
   // Per-eye render resolution relative to the headset's default. Ray-march
   // cost scales with pixel count, so 0.5 renders a quarter of the pixels.
   // Tunable on the device with ?xrscale=0.35 etc.
-  const XR_FRAMEBUFFER_SCALE = Number(new URLSearchParams(window.location.search).get("xrscale")) || 0.5;
+  const XR_FRAMEBUFFER_SCALE = PERF.xrscale;
   // Multiplies the XR ray-march sample distance (coarser = cheaper, fewer
   // samples per ray). AutoAdjustSampleDistances doesn't reliably kick in
   // inside the XR session (it's tuned against vtk's own interactor render
   // loop, not the session.requestAnimationFrame loop xr.js drives), so this
   // is a manual escape hatch. Tunable on the device with ?xrsample=2 etc.
-  const XR_SAMPLE_DISTANCE_SCALE = Number(new URLSearchParams(window.location.search).get("xrsample")) || 1;
+  const XR_SAMPLE_DISTANCE_SCALE = PERF.xrsample;
 
   function inXR() {
     return xrSaved !== null;
@@ -606,6 +609,7 @@
     // draw into the XR-sized canvas for nothing.
     render: () => { if (!inXR()) renderWindow?.render(); },
     enterXR, exitXR, inXR,
+    perfFlags: PERF,
     getRenderer: () => renderer,
     getVolumeBounds: () => volume?.getBounds(),
     // In XR the camera's own axes follow the head every frame; the physical

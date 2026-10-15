@@ -227,3 +227,25 @@ test("withXRLayerContext merges layer init overrides over vtk's init", async () 
   { framebufferScaleFactor: 0.5 });
   assert.deepEqual(created[0].init, { antialias: true, framebufferScaleFactor: 0.5 });
 });
+
+test("parsePerfFlags defaults reproduce the pre-flag behaviour", () => {
+  assert.deepEqual(xr.parsePerfFlags(""), { ...xr.PERF_DEFAULTS });
+  assert.deepEqual(xr.PERF_DEFAULTS, {
+    tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false,
+  });
+});
+
+test("parsePerfFlags reads every lever", () => {
+  assert.deepEqual(
+    xr.parsePerfFlags("?tex=f16&crop=1&down=2&fov=0.5&xrscale=1&xrsample=2&adapt=1"),
+    { tex: "f16", crop: true, down: 2, fov: 0.5, xrscale: 1, xrsample: 2, adapt: true },
+  );
+});
+
+test("parsePerfFlags falls back to defaults on garbage, never throws", () => {
+  assert.deepEqual(
+    xr.parsePerfFlags("?tex=u8&crop=yes&down=3&fov=2&xrscale=abc&xrsample=0&adapt=true"),
+    { ...xr.PERF_DEFAULTS },
+  );
+  assert.equal(xr.parsePerfFlags("?xrscale=").xrscale, 0.5);
+});
