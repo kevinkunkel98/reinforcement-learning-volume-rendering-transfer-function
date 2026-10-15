@@ -529,3 +529,22 @@ def test_main_mixes_both_pretrain_sources_into_one_combined_dataset(monkeypatch,
     assert list(merged["rewards"]) == [1.0, 1.0, 2.0, 2.0, 2.0]
     assert list(merged["obs"][:, 0]) == [1.0, 1.0, 2.0, 2.0, 2.0]
     assert captured["pretrain_info"] == {"sources": [hindsight_info, search_info]}
+
+
+def test_parse_args_threads_defaults_to_torchs_own_choice():
+    assert oneshot_train.parse_args([]).threads is None
+    assert oneshot_train.parse_args(["--threads", "3"]).threads == 3
+
+
+def test_apply_thread_limit_sets_torch_threads_only_when_given(monkeypatch):
+    calls = []
+    monkeypatch.setattr(oneshot_train.torch, "set_num_threads", calls.append)
+    oneshot_train.apply_thread_limit(None)
+    assert calls == []
+    oneshot_train.apply_thread_limit(3)
+    assert calls == [3]
+
+
+def test_apply_thread_limit_rejects_non_positive_counts():
+    with pytest.raises(ValueError):
+        oneshot_train.apply_thread_limit(0)

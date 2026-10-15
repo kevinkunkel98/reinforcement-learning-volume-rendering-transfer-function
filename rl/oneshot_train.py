@@ -23,6 +23,7 @@ import json
 import os
 
 import numpy as np
+import torch
 from stable_baselines3 import SAC
 from stable_baselines3.common.logger import configure
 
@@ -220,6 +221,11 @@ def parse_args(argv=None):
     parser.add_argument("--search-pretrain-episodes", type=int, default=1000)
     parser.add_argument("--search-evaluations", type=int, default=200,
                         help="hill_climb search budget per collected episode")
+    parser.add_argument("--threads", type=int, default=None,
+                        help="torch intra-op threads for this run (default: torch's own choice). "
+                             "visibility.features() scales only ~3x from 1 to 8 threads, so "
+                             "several seeds in parallel with a few threads each finish sooner "
+                             "than the same seeds one after another with all threads")
     parser.add_argument("--eval-episodes", type=int, default=None,
                         help=f"validation episodes per evaluation (default {VALIDATION_EPISODES})")
     args = parser.parse_args(argv)
@@ -297,8 +303,18 @@ def merge_datasets(*datasets_: dict) -> dict:
     return {key: np.concatenate([data[key] for data in datasets_]) for key in ("obs", "actions", "rewards")}
 
 
+def apply_thread_limit(threads) -> None:
+    """Cap torch's intra-op threads for this process when `threads` is given."""
+    if threads is None:
+        return
+    if threads < 1:
+        raise ValueError(f"--threads must be at least 1, got {threads}")
+    torch.set_num_threads(threads)
+
+
 def main(argv=None):
     args = parse_args(argv)
+    apply_thread_limit(args.threads)
     out = args.out or DEFAULT_OUT_TEMPLATE.format(seed=args.seed)
     timesteps = SHORT_EXPERIMENT["timesteps"] if args.short else args.timesteps
     eval_interval = SHORT_EXPERIMENT["eval_interval"] if args.short else args.eval_interval

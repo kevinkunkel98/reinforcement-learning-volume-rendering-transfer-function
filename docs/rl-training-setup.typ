@@ -208,6 +208,17 @@ mixes in brightness-only hindsight demonstrations. Env-interaction throughput
 performance pass (see
 `docs/superpowers/plans/2026-10-06-visibility-features-throughput.md`).
 
+A second pass (2026-10-15) halved `features()`/`vis_only()` again (9.5 / 6.3 ms
+on `ts_s0477`). Measured on the M1 Pro with this recipe: one run with 8 torch
+threads trains at ~38 steps/s including SAC updates. `features()` scales only
+~3× from 1 to 8 threads, so for the 3-seed protocol run the seeds in parallel
+with `--threads 3` each (~23 steps/s per run, ~1.8× sooner overall than one
+after another). MPS was measured as well and is slower for both
+`features()` (8.1 vs 7.7 ms) and SAC gradient steps (14.2 vs 7.6 ms): the
+per-call work is too small to amortize GPU launches and syncs, so training
+stays on the CPU. If a run still has to collect pretrain data, lower
+`--pretrain-workers` too when running seeds side by side.
+
 #note[For the fuller experimental narrative (why v9, hindsight pretraining
 results so far, per-run setup for a second machine) see
 `docs/experiments/2026-09-27-oneshot-v9-label-scoped-pretrain.md`. For known
