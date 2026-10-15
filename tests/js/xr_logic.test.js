@@ -268,3 +268,87 @@ test("diagnosticLines tolerates a viewer that has not loaded yet", () => {
     "xrscale=- fov=- adapt=0 crop=0 down=- shade=0 auto=0",
   ]);
 });
+
+// ---------- grab-to-rotate ----------
+
+const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+const yaw = (deg) => { const h = (deg * Math.PI) / 360; return [0, Math.sin(h), 0, Math.cos(h)]; };
+const rotZ = (deg) => { const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r); return [[c, -s, 0], [s, c, 0], [0, 0, 1]]; };
+const rotY = (deg) => { const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r); return [[c, 0, s], [0, 1, 0], [-s, 0, c]]; };
+function assertMat3Close(actual, expected) {
+  for (let r = 0; r < 3; r += 1) {
+    for (let c = 0; c < 3; c += 1) {
+      assert.ok(Math.abs(actual[r][c] - expected[r][c]) < 1e-9, `[${r}][${c}] ${actual[r][c]} != ${expected[r][c]}`);
+    }
+  }
+}
+const hand = (handedness, gripPressed, orientation, resetPressed = false) =>
+  ({ handedness, gripPressed, resetPressed, orientation });
+// Physical frame identical to world: north -z, up +y.
+const R_ID = () => xr.physicalRotation([0, 0, -1], [0, 1, 0]);
+
+test("physicalRotation rows are right, up and -north", () => {
+  assertMat3Close(R_ID(), I3);
+  assertMat3Close(xr.physicalRotation([0, -1, 0], [0, 0, 1]), [[-1, 0, 0], [0, 0, 1], [0, 1, 0]]);
+});
+
+test("grab rotator does nothing until a grip is pressed", () => {
+  const grab = xr.createGrabRotator();
+  const out = grab.update([hand("left", false, yaw(0))], R_ID());
+  assert.equal(out.rotation, null);
+  assert.equal(out.event, null);
+});
+
+test("holding grip makes the volume follow the hand's rotation", () => {
+  const grab = xr.createGrabRotator();
+  assert.equal(grab.update([hand("left", true, yaw(10))], R_ID()).event, "grab");
+  const out = grab.update([hand("left", true, yaw(100))], R_ID());
+  assertMat3Close(out.rotation, rotY(90));
+});
+
+test("releasing keeps the rotation and a new grab composes on top", () => {
+  const grab = xr.createGrabRotator();
+  grab.update([hand("right", true, yaw(0))], R_ID());
+  grab.update([hand("right", true, yaw(30))], R_ID());
+  assert.equal(grab.update([hand("right", false, yaw(30))], R_ID()).event, "release");
+  grab.update([hand("right", true, yaw(-50))], R_ID());
+  const out = grab.update([hand("right", true, yaw(-20))], R_ID());
+  assertMat3Close(out.rotation, rotY(60));
+});
+
+test("the other hand cannot steal an active grab", () => {
+  const grab = xr.createGrabRotator();
+  grab.update([hand("left", true, yaw(0)), hand("right", false, yaw(0))], R_ID());
+  const out = grab.update([hand("left", true, yaw(20)), hand("right", true, yaw(80))], R_ID());
+  assertMat3Close(out.rotation, rotY(20));
+});
+
+test("a physical-space turn becomes the matching world-space turn", () => {
+  // World +z is physical up here, so turning the hand about physical Y turns
+  // the volume about world Z.
+  const R = xr.physicalRotation([0, -1, 0], [0, 0, 1]);
+  const grab = xr.createGrabRotator();
+  grab.update([hand("left", true, yaw(0))], R);
+  assertMat3Close(grab.update([hand("left", true, yaw(40))], R).rotation, rotZ(40));
+});
+
+test("thumbstick click resets the orientation", () => {
+  const grab = xr.createGrabRotator();
+  grab.update([hand("left", true, yaw(0))], R_ID());
+  grab.update([hand("left", true, yaw(45))], R_ID());
+  grab.update([hand("left", false, yaw(45))], R_ID());
+  const out = grab.update([hand("left", false, yaw(45), true)], R_ID());
+  assert.equal(out.event, "reset");
+  assertMat3Close(out.rotation, I3);
+  // Held, not re-pressed: no second reset.
+  assert.equal(grab.update([hand("left", false, yaw(45), true)], R_ID()).event, null);
+});
+
+test("centeredUserMatrix rotates about the centre (column-major, gl-matrix)", () => {
+  const m = xr.centeredUserMatrix(rotZ(90), [1, 0, 0]);
+  const apply = (p) => [0, 1, 2].map((r) => m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2] + m[12 + r]);
+  const close = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
+  assert.ok(close(apply([1, 0, 0]), [1, 0, 0]));
+  assert.ok(close(apply([2, 0, 0]), [1, 1, 0]));
+  assert.equal(m[15], 1);
+});

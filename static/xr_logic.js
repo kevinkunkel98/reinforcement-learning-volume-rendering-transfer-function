@@ -221,9 +221,105 @@
     ];
   }
 
+  // ---------- grab-to-rotate ----------
+  // Quaternions are [x, y, z, w] (WebXR's orientation order); 3x3 matrices are
+  // row-major arrays of rows.
+
+  function quatMultiply(a, b) {
+    const [ax, ay, az, aw] = a;
+    const [bx, by, bz, bw] = b;
+    return [
+      aw * bx + ax * bw + ay * bz - az * by,
+      aw * by - ax * bz + ay * bw + az * bx,
+      aw * bz + ax * by - ay * bx + az * bw,
+      aw * bw - ax * bx - ay * by - az * bz,
+    ];
+  }
+
+  function quatToMat3([x, y, z, w]) {
+    return [
+      [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+      [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+      [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ];
+  }
+
+  function mat3Multiply(a, b) {
+    return a.map((row) => [0, 1, 2].map((c) => row[0] * b[0][c] + row[1] * b[1][c] + row[2] * b[2][c]));
+  }
+
+  function mat3Transpose(m) {
+    return [0, 1, 2].map((c) => [m[0][c], m[1][c], m[2][c]]);
+  }
+
+  const IDENTITY3 = Object.freeze([[1, 0, 0], [0, 1, 0], [0, 0, 1]]);
+
+  // vtk.js's world -> physical (room) rotation for a camera's physical view
+  // north/up (vtkCamera.getWorldToPhysicalMatrix): rows right, up, -north.
+  function physicalRotation(north, up) {
+    return [cross(north, up), up.slice(), north.map((v) => -v)];
+  }
+
+  // Grip-to-rotate: while a grip is held, the volume turns with that hand
+  // (1:1, about its own centre); releasing keeps the result, and a thumbstick
+  // click resets it. `sources` per frame: [{handedness, gripPressed,
+  // resetPressed, orientation: [x,y,z,w] in physical space | null}].
+  // `physical` is physicalRotation() of the current XR frame. Returns
+  // {rotation: world-space 3x3 or null if unchanged, event: "grab" |
+  // "release" | "reset" | null}.
+  function createGrabRotator() {
+    let rotation = IDENTITY3;
+    let grab = null; // { handedness, start: quaternion, base: rotation at grab }
+    const previous = new Map(); // handedness -> { grip, reset }
+    return {
+      update(sources, physical) {
+        let result = { rotation: null, event: null };
+        for (const source of sources) {
+          const was = previous.get(source.handedness) || { grip: false, reset: false };
+          if (source.resetPressed && !was.reset && !grab) {
+            rotation = IDENTITY3;
+            result = { rotation, event: "reset" };
+          }
+          previous.set(source.handedness, { grip: source.gripPressed, reset: source.resetPressed });
+          if (grab && grab.handedness === source.handedness) {
+            if (!source.gripPressed) {
+              grab = null;
+              result = { rotation: null, event: "release" };
+            } else if (source.orientation) {
+              // The hand's turn since the grab, in physical space, carried
+              // into world space: W = R^T Q R W0.
+              const delta = quatMultiply(source.orientation,
+                [-grab.start[0], -grab.start[1], -grab.start[2], grab.start[3]]);
+              rotation = mat3Multiply(mat3Multiply(mat3Multiply(mat3Transpose(physical),
+                quatToMat3(delta)), physical), grab.base);
+              result = { rotation, event: result.event };
+            }
+          } else if (!grab && source.gripPressed && !was.grip && source.orientation) {
+            grab = { handedness: source.handedness, start: source.orientation.slice(), base: rotation };
+            result = { rotation: null, event: "grab" };
+          }
+        }
+        return result;
+      },
+    };
+  }
+
+  // vtkProp3D user matrix (gl-matrix column-major, as Prop3D.computeMatrix
+  // consumes it) that applies world-space `rotation` about `center`.
+  function centeredUserMatrix(rotation, center) {
+    const m = new Array(16).fill(0);
+    for (let r = 0; r < 3; r += 1) {
+      for (let c = 0; c < 3; c += 1) m[c * 4 + r] = rotation[r][c];
+      m[12 + r] = center[r] - (rotation[r][0] * center[0] + rotation[r][1] * center[1] + rotation[r][2] * center[2]);
+    }
+    m[15] = 1;
+    return m;
+  }
+
   return {
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
     summarizeStep, hudPlacement, withXRLayerContext, xrPlacement,
     PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
+    physicalRotation, createGrabRotator, centeredUserMatrix,
   };
 });

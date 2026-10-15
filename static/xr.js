@@ -21,6 +21,7 @@
   let frames = 0;
   let fpsSince = null;
   let mapper = null; // fresh per session, so a trigger held at exit can't carry over
+  let grab = null; // grip-to-rotate, fresh per session
 
   function createMapper() {
     return logic.createControllerMapper({
@@ -171,17 +172,34 @@
       console.info("[xr-perf]", ...logic.diagnosticLines(window.volumeViewer.getXRDiagnostics(), fps, frameMs));
     }
     const sources = [];
+    const grabSources = [];
+    const space = window.volumeViewer.getXRReferenceSpace();
     for (const source of frame.session.inputSources) {
       if (!source.gamepad) continue;
-      sources.push({ handedness: source.handedness, pressed: source.gamepad.buttons.map((b) => b.pressed) });
+      const pressed = source.gamepad.buttons.map((b) => b.pressed);
+      sources.push({ handedness: source.handedness, pressed });
+      const pose = space && source.gripSpace ? frame.getPose(source.gripSpace, space) : null;
+      const o = pose?.transform.orientation;
+      // xr-standard mapping: 1 = grip (squeeze), 3 = thumbstick press. The
+      // trigger (0) stays push-to-talk.
+      grabSources.push({
+        handedness: source.handedness,
+        gripPressed: Boolean(pressed[1]),
+        resetPressed: Boolean(pressed[3]),
+        orientation: o ? [o.x, o.y, o.z, o.w] : null,
+      });
     }
     mapper.update(sources, busy);
+    const turned = grab.update(grabSources, window.volumeViewer.getPhysicalRotation());
+    if (turned.rotation) window.volumeViewer.setVolumeRotation(turned.rotation);
+    if (turned.event === "grab" || turned.event === "reset") pulseAll(0.3, 30);
   }
 
   async function onSessionEnd() {
     if (hudState.status === "recording") window.appControls.stopRecording();
     session = null;
     mapper = null;
+    grab = null;
     removeHud();
     button.textContent = "Enter VR";
     try {
@@ -243,6 +261,7 @@
     session = xrSession;
     session.addEventListener("end", onSessionEnd, { once: true });
     mapper = createMapper();
+    grab = logic.createGrabRotator();
     fps = null;
     frameMs = null;
     frames = 0;
