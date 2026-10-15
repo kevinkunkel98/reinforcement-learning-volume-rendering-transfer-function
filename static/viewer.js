@@ -2,15 +2,10 @@
   "use strict";
 
   const CENTER_RANGE = [-1050, 2000];
-  const WIDTH_RANGE = [10, 400];
   const TOTAL_PARAMS = 48;
-  const PARAMS_PER_PEAK = 6;
-  const N_PEAKS = TOTAL_PARAMS / PARAMS_PER_PEAK;
-  // Mirrors transfer.CANONICAL_PEAK_ORDER, transfer.UNLABELLED_PEAKS and
-  // render.LABEL_BAND: labelled HU is packed into one band per label so a
-  // single 1D transfer function can shade each class by its own peak.
-  const PEAK_ORDER = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"];
-  const UNLABELLED_PEAKS = ["skeleton", "lungs", "soft"];
+  // Mirrors render.LABEL_BAND: labelled HU is packed into one band per label
+  // so a single 1D transfer function (rows from tf_table.js) can shade each
+  // class by its own peak.
   const LABEL_BAND = 4096;
   // Headset performance levers (?tex ?crop ?down ?fov ?xrscale ?xrsample
   // ?adapt). Re-parsed with the headset defaults once load() knows this is a
@@ -289,35 +284,6 @@
     return window.xrLogic.xrSampleDistance(imageData.getSpacing()) * PERF.xrsample;
   }
 
-  function internalPeak(params, index) {
-    const base = index * PARAMS_PER_PEAK;
-    const toRange = (value, range) => range[0] + (value + 1) / 2 * (range[1] - range[0]);
-    const unit = (value) => (value + 1) / 2;
-    return {
-      center: toRange(params[base], CENTER_RANGE),
-      width: toRange(params[base + 1], WIDTH_RANGE),
-      height: unit(params[base + 2]),
-      rgb: [unit(params[base + 3]), unit(params[base + 4]), unit(params[base + 5])],
-    };
-  }
-
-  function blendPeaks(params, hu, peakNames, scale = 1) {
-    let alpha = 0;
-    let weight = 1e-6;
-    const rgb = [0, 0, 0];
-    for (const name of peakNames) {
-      const peak = internalPeak(params, PEAK_ORDER.indexOf(name));
-      const contribution = peak.height * Math.exp(-0.5 * ((hu - peak.center) / peak.width) ** 2);
-      alpha += contribution;
-      weight += contribution;
-      peak.rgb.forEach((value, channel) => { rgb[channel] += contribution * value; });
-    }
-    return {
-      alpha: Math.max(0, Math.min(1, alpha)) * scale,
-      rgb: rgb.map((value) => Math.max(0, Math.min(1, value / weight))),
-    };
-  }
-
   function setTransferFunction(params) {
     if (!Array.isArray(params) && !(params instanceof Float32Array) && !(params instanceof Float64Array)) {
       throw new Error("transfer function must be an array");
@@ -325,20 +291,13 @@
     if (params.length !== TOTAL_PARAMS) throw new Error(`transfer function must contain ${TOTAL_PARAMS} values`);
     const color = vtk.Rendering.Core.vtkColorTransferFunction.newInstance();
     const opacity = vtk.Common.DataModel.vtkPiecewiseFunction.newInstance();
-    // Label-scoped rows (transfer.label_scoped_tables): row 0 unlabelled,
-    // row id for CLASS_ORDER[id - 1], shaded by that class's peak alone and
-    // scaled by its layer opacity. Without labels: one shared HU row.
-    const rows = hasLabels()
-      ? [{ peaks: UNLABELLED_PEAKS, scale: 1 }].concat(CLASS_ORDER.map((className) => (
-        { peaks: [className], scale: activeLayers[className]?.opacity ?? 1 })))
-      : [{ peaks: PEAK_ORDER, scale: 1 }];
-    rows.forEach((row, rowIndex) => {
-      for (let i = 0; i < 256; i += 1) {
-        const hu = CENTER_RANGE[0] + i / 255 * (CENTER_RANGE[1] - CENTER_RANGE[0]);
-        const sample = blendPeaks(params, hu, row.peaks, row.scale);
+    // The same table the VR ray marcher uses (tf_table.js), laid out over
+    // the banded scalar: row r covers [r * LABEL_BAND, r * LABEL_BAND + 3050].
+    window.tfTable.tfRows(params, activeLayers, hasLabels()).forEach((row, rowIndex) => {
+      for (const { hu, rgb, alpha } of row) {
         const x = hasLabels() ? rowIndex * LABEL_BAND + hu - CENTER_RANGE[0] : hu;
-        color.addRGBPoint(x, ...sample.rgb);
-        opacity.addPoint(x, sample.alpha);
+        color.addRGBPoint(x, ...rgb);
+        opacity.addPoint(x, alpha);
       }
     });
     transferFunction = params.slice();
