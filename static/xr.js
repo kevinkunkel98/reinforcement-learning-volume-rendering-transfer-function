@@ -13,7 +13,11 @@
   let session = null;
   let hudState = logic.HUD_INITIAL;
   let busy = false;
-  let hud = null; // { canvas, ctx, texture, actor }
+  let hud = null; // { canvas, ctx, refresh, actor? }
+  // The renderer of the running session: window.vrRenderer (?renderer=custom)
+  // or window.volumeViewer (vtk.js). Both offer getPhysicalRotation,
+  // setVolumeRotation, setXRSampleMultiplier and getXRDiagnostics.
+  let target = window.volumeViewer;
   let flatBackground = null;
   let entering = false;
   let fps = null;
@@ -86,15 +90,26 @@
     ctx.fillText(wrapLine(ctx, footer, max), pad, 300);
     // Debug lines: real numbers from this exact session plus the active
     // lever config, so a photo of the panel is a complete measurement.
-    const [perf, config] = logic.diagnosticLines(window.volumeViewer.getXRDiagnostics(), fps, frameMs);
+    const [perf, config] = logic.diagnosticLines(target.getXRDiagnostics(), fps, frameMs);
     ctx.fillStyle = "#52525b";
     ctx.font = "26px monospace";
     ctx.fillText(wrapLine(ctx, perf, max), pad, 340);
     ctx.fillText(wrapLine(ctx, config, max), pad, 376);
-    hud.texture.modified();
+    hud.refresh();
   }
 
   function addHud() {
+    if (target === window.vrRenderer) {
+      const canvas = document.createElement("canvas");
+      canvas.width = HUD_W;
+      canvas.height = HUD_H;
+      const frame = target.getHudFrame();
+      const place = logic.hudPlacement(frame.bounds, frame.up, frame.dop, HUD_W / HUD_H);
+      hud = { canvas, ctx: canvas.getContext("2d"), refresh: () => target.refreshHud() };
+      target.setHud(canvas, [place.origin, place.point1, place.point2]);
+      drawHud();
+      return;
+    }
     const renderer = window.volumeViewer.getRenderer();
     const bounds = window.volumeViewer.getVolumeBounds();
     const axes = window.volumeViewer.getCameraAxes();
@@ -118,13 +133,13 @@
     actor.getProperty().setDiffuse(0);
     actor.getProperty().setSpecular(0);
     renderer.addActor(actor);
-    hud = { canvas, ctx: canvas.getContext("2d"), texture, actor };
+    hud = { canvas, ctx: canvas.getContext("2d"), actor, refresh: () => texture.modified() };
     drawHud();
   }
 
   function removeHud() {
     if (!hud) return;
-    window.volumeViewer.getRenderer()?.removeActor(hud.actor);
+    if (hud.actor) window.volumeViewer.getRenderer()?.removeActor(hud.actor);
     hud = null;
   }
 
@@ -137,12 +152,13 @@
     hudState = next;
     if (!session) return;
     drawHud();
-    const renderer = window.volumeViewer.getRenderer();
+    const setBackground = (rgb) => (target === window.vrRenderer
+      ? target.setBackground(rgb) : window.volumeViewer.getRenderer().setBackground(...rgb));
     if (next.status === "recording" && prev.status !== "recording") {
-      renderer.setBackground(...RECORDING_BG);
+      setBackground(RECORDING_BG);
       pulseAll(0.5, 40);
     } else if (prev.status === "recording" && next.status !== "recording") {
-      renderer.setBackground(...flatBackground);
+      setBackground(flatBackground);
       pulseAll(0.5, 40);
     }
     if (event.type === "applied") pulseAll(0.7, 90);
@@ -163,7 +179,7 @@
     session.requestAnimationFrame(onXRFrame);
     if (adapt && lastFrameTime !== null) {
       const next = logic.adaptSampleDistance(adapt, time - lastFrameTime);
-      if (next.multiplier !== adapt.multiplier) window.volumeViewer.setXRSampleMultiplier(next.multiplier);
+      if (next.multiplier !== adapt.multiplier) target.setXRSampleMultiplier(next.multiplier);
       adapt = next;
     }
     lastFrameTime = time;
@@ -178,7 +194,7 @@
       fpsSince = time;
       drawHud();
       // Same record for remote DevTools / logcat captures.
-      console.info("[xr-perf]", ...logic.diagnosticLines(window.volumeViewer.getXRDiagnostics(), fps, frameMs));
+      console.info("[xr-perf]", ...logic.diagnosticLines(target.getXRDiagnostics(), fps, frameMs));
     }
     const sources = [];
     const stickSources = [];
@@ -193,10 +209,10 @@
       stickSources.push({ handedness: source.handedness, stick, resetPressed: Boolean(pressed[3]) });
     }
     mapper.update(sources, busy);
-    const turned = sticks.update(stickSources, window.volumeViewer.getPhysicalRotation(),
+    const turned = sticks.update(stickSources, target.getPhysicalRotation(),
       lastStickTime === null ? 0 : time - lastStickTime);
     lastStickTime = time;
-    if (turned.rotation) window.volumeViewer.setVolumeRotation(turned.rotation);
+    if (turned.rotation) target.setVolumeRotation(turned.rotation);
     if (turned.event === "reset") pulseAll(0.3, 30);
   }
 
@@ -209,7 +225,8 @@
     removeHud();
     button.textContent = "Enter VR";
     try {
-      await window.volumeViewer.exitXR();
+      if (target === window.vrRenderer) window.vrRenderer.stop();
+      else await window.volumeViewer.exitXR();
     } catch (err) {
       window.appControls.notify(`Leaving VR failed: ${err.message}`);
     }
@@ -253,7 +270,18 @@
     const markEnded = () => { endedEarly = true; };
     xrSession.addEventListener("end", markEnded, { once: true });
     try {
-      await window.volumeViewer.enterXR(xrSession);
+      const flags = window.volumeViewer.perfFlags;
+      target = window.volumeViewer;
+      if (flags.renderer === "custom") {
+        try {
+          await window.vrRenderer.start(xrSession, { xrscale: flags.xrscale, down: flags.down });
+          target = window.vrRenderer;
+        } catch (err) {
+          console.error("[vr-renderer]", err);
+          window.appControls.notify(`Custom VR renderer failed (${err.message}); using vtk.js.`);
+        }
+      }
+      if (target === window.volumeViewer) await window.volumeViewer.enterXR(xrSession);
     } catch (err) {
       xrSession.end().catch(() => {});
       window.appControls.notify(`Could not start VR: ${err.message}`);
@@ -261,7 +289,8 @@
     }
     xrSession.removeEventListener("end", markEnded);
     if (endedEarly) {
-      await window.volumeViewer.exitXR();
+      if (target === window.vrRenderer) window.vrRenderer.stop();
+      else await window.volumeViewer.exitXR();
       return;
     }
     session = xrSession;
@@ -275,7 +304,8 @@
     lastFrameTime = null;
     frames = 0;
     fpsSince = null;
-    flatBackground = window.volumeViewer.getRenderer().getBackground().slice();
+    flatBackground = target === window.vrRenderer
+      ? [0, 0, 0] : window.volumeViewer.getRenderer().getBackground().slice();
     hudState = logic.HUD_INITIAL;
     if (!voice) hudState = logic.hudReduce(hudState, { type: "voice-unavailable" });
     addHud();
