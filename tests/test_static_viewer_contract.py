@@ -78,15 +78,18 @@ def test_viewer_applies_label_aware_rendering_and_keeps_hu_fallback():
 
 def test_viewer_shades_each_label_band_by_its_own_peak():
     viewer = read("viewer.js")
-    # Must match render.py / transfer.py, or the browser shows a different
-    # picture than the one the policy was scored on.
+    # The label-scoped rows live in tf_table.js, shared with the VR ray
+    # marcher. Must match render.py / transfer.py, or the browser shows a
+    # different picture than the one the policy was scored on.
+    table = read("tf_table.js")
+    assert 'UNLABELLED_PEAKS = ["skeleton", "lungs", "soft"]' in table
+    assert 'PEAK_ORDER = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"]' in table
+    assert "peaks: [className]" in table
+    assert "layers?.[className]?.opacity" in table
     assert "LABEL_BAND = 4096" in viewer
-    assert 'UNLABELLED_PEAKS = ["skeleton", "lungs", "soft"]' in viewer
-    assert 'PEAK_ORDER = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"]' in viewer
     assert "bandLabeledHuValues" in viewer
+    assert "window.tfTable.tfRows(params, activeLayers, hasLabels())" in viewer
     assert "rowIndex * LABEL_BAND" in viewer
-    assert "peaks: [className]" in viewer
-    assert "activeLayers[className]?.opacity" in viewer
     assert "setInterpolationTypeToNearest" in viewer
     assert "vtkPiecewiseFunction.newInstance" in viewer
     assert "vtkColorTransferFunction.newInstance" in viewer
