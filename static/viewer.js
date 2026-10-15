@@ -239,10 +239,11 @@
     return { metadata, values };
   }
 
-  function buildImageData(metadata, values) {
+  function buildImageData(metadata, values, origin = [0, 0, 0]) {
     imageData = vtk.Common.DataModel.vtkImageData.newInstance();
     imageData.setDimensions(...metadata.dimensions);
     imageData.setSpacing(...metadata.spacing);
+    imageData.setOrigin(...origin);
     imageData.getPointData().setScalars(vtk.Common.Core.vtkDataArray.newInstance({
       name: "Scalars", values, numberOfComponents: 1,
     }));
@@ -254,13 +255,37 @@
   // transfer-function change alone needs neither.
   let builtFrom = { raw: null, labels: null };
 
+  // ?crop: anything at or below this HU is air outside the body.
+  const AIR_HU = -500;
+
   function buildVolumeImage() {
-    const values = hasLabels()
+    const logic = window.xrLogic;
+    let values = hasLabels()
       ? bandLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
       : rawVolumeValues;
-    buildImageData(volumeMetadata, values);
+    let dims = volumeMetadata.dimensions;
+    let origin = [0, 0, 0];
+    if (PERF.crop) {
+      // On raw HU, so a label band's offset can't make air look like tissue.
+      const box = logic.bodyBoundingBox(rawVolumeValues, dims, AIR_HU);
+      ({ values, dims } = logic.cropVolume(values, dims, box));
+      // Shift the origin so world coordinates (camera, XR placement) match
+      // the uncropped volume's.
+      origin = box.min.map((index, axis) => index * volumeMetadata.spacing[axis]);
+    }
+    ({ values, dims } = logic.strideDownsample(values, dims, PERF.down));
+    const spacing = volumeMetadata.spacing.map((step) => step * PERF.down);
+    if (PERF.tex === "f16") values = logic.toSixteenBit(values);
+    buildImageData({ dimensions: dims, spacing }, values, origin);
+    mapper.setPreferSizeOverAccuracy(PERF.tex === "f16");
     mapper.setInputData(imageData);
     builtFrom = { raw: rawVolumeValues, labels: hasLabels() ? labelValues : null };
+  }
+
+  // Base XR ray-march step for the current image (finest spacing after any
+  // downsampling), times the fixed ?xrsample multiplier.
+  function xrBaseSampleDistance() {
+    return window.xrLogic.xrSampleDistance(imageData.getSpacing()) * XR_SAMPLE_DISTANCE_SCALE;
   }
 
   function internalPeak(params, index) {
@@ -451,7 +476,7 @@
     // "fly" in XR, which would fight push-to-talk; the base style has no 3D
     // button handlers at all.
     interactor.setInteractorStyle(vtk.Rendering.Core.vtkInteractorStyle.newInstance());
-    mapper.setSampleDistance(window.xrLogic.xrSampleDistance(volumeMetadata.spacing) * XR_SAMPLE_DISTANCE_SCALE);
+    mapper.setSampleDistance(xrBaseSampleDistance());
     // vtk.js's auto-adjust measures its own interactor loop, which doesn't
     // run in XR (it reads ~2 fps), so it pins the volume to its smallest
     // offscreen size -- 1/20 resolution per axis -- and that offscreen path
@@ -620,7 +645,7 @@
       // set above instead, falling back toward this same quality target
       // whenever the GPU can sustain it.
       mapper.setAutoAdjustSampleDistances(isXRCapableDevice);
-      mapper.setSampleDistance(Math.min(...loaded.metadata.spacing) / 2.0);
+      mapper.setSampleDistance(Math.min(...imageData.getSpacing()) / 2.0);
       volume = vtk.Rendering.Core.vtkVolume.newInstance();
       volume.setMapper(mapper);
       volume.getProperty().setShade(true);
