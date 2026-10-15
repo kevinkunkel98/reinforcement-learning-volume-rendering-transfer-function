@@ -272,7 +272,6 @@ test("diagnosticLines tolerates a viewer that has not loaded yet", () => {
 // ---------- grab-to-rotate ----------
 
 const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-const yaw = (deg) => { const h = (deg * Math.PI) / 360; return [0, Math.sin(h), 0, Math.cos(h)]; };
 const rotZ = (deg) => { const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r); return [[c, -s, 0], [s, c, 0], [0, 0, 1]]; };
 const rotY = (deg) => { const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r); return [[c, 0, s], [0, 1, 0], [-s, 0, c]]; };
 function assertMat3Close(actual, expected) {
@@ -282,66 +281,58 @@ function assertMat3Close(actual, expected) {
     }
   }
 }
-const hand = (handedness, gripPressed, orientation, resetPressed = false) =>
-  ({ handedness, gripPressed, resetPressed, orientation });
 // Physical frame identical to world: north -z, up +y.
 const R_ID = () => xr.physicalRotation([0, 0, -1], [0, 1, 0]);
+const rotX = (deg) => { const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r); return [[1, 0, 0], [0, c, -s], [0, s, c]]; };
+const stick = (handedness, x, y, resetPressed = false) => ({ handedness, stick: [x, y], resetPressed });
 
 test("physicalRotation rows are right, up and -north", () => {
   assertMat3Close(R_ID(), I3);
   assertMat3Close(xr.physicalRotation([0, -1, 0], [0, 0, 1]), [[-1, 0, 0], [0, 0, 1], [0, 1, 0]]);
 });
 
-test("grab rotator does nothing until a grip is pressed", () => {
-  const grab = xr.createGrabRotator();
-  const out = grab.update([hand("left", false, yaw(0))], R_ID());
+test("stick rotator ignores a resting thumb inside the dead zone", () => {
+  const sticks = xr.createStickRotator();
+  const out = sticks.update([stick("left", 0.1, -0.1)], R_ID(), 16);
   assert.equal(out.rotation, null);
   assert.equal(out.event, null);
 });
 
-test("holding grip makes the volume follow the hand's rotation", () => {
-  const grab = xr.createGrabRotator();
-  assert.equal(grab.update([hand("left", true, yaw(10))], R_ID()).event, "grab");
-  const out = grab.update([hand("left", true, yaw(100))], R_ID());
+test("stick right turns the volume's front to the right at 90 deg/s", () => {
+  const sticks = xr.createStickRotator();
+  let out;
+  for (let i = 0; i < 10; i += 1) out = sticks.update([stick("right", 1, 0)], R_ID(), 100);
   assertMat3Close(out.rotation, rotY(90));
 });
 
-test("releasing keeps the rotation and a new grab composes on top", () => {
-  const grab = xr.createGrabRotator();
-  grab.update([hand("right", true, yaw(0))], R_ID());
-  grab.update([hand("right", true, yaw(30))], R_ID());
-  assert.equal(grab.update([hand("right", false, yaw(30))], R_ID()).event, "release");
-  grab.update([hand("right", true, yaw(-50))], R_ID());
-  const out = grab.update([hand("right", true, yaw(-20))], R_ID());
-  assertMat3Close(out.rotation, rotY(60));
+test("stick forward tilts the top away from the viewer", () => {
+  const sticks = xr.createStickRotator();
+  let out;
+  for (let i = 0; i < 10; i += 1) out = sticks.update([stick("left", 0, -1)], R_ID(), 100);
+  assertMat3Close(out.rotation, rotX(-90));
 });
 
-test("the other hand cannot steal an active grab", () => {
-  const grab = xr.createGrabRotator();
-  grab.update([hand("left", true, yaw(0)), hand("right", false, yaw(0))], R_ID());
-  const out = grab.update([hand("left", true, yaw(20)), hand("right", true, yaw(80))], R_ID());
-  assertMat3Close(out.rotation, rotY(20));
+test("a stall doesn't turn into a jump: each step is capped at 100 ms", () => {
+  const sticks = xr.createStickRotator();
+  assertMat3Close(sticks.update([stick("left", 1, 0)], R_ID(), 5000).rotation, rotY(9));
 });
 
-test("a physical-space turn becomes the matching world-space turn", () => {
-  // World +z is physical up here, so turning the hand about physical Y turns
-  // the volume about world Z.
+test("turning happens about the viewer's axes, not the volume's", () => {
+  // World +z is physical up here, so a left/right push turns about world Z.
   const R = xr.physicalRotation([0, -1, 0], [0, 0, 1]);
-  const grab = xr.createGrabRotator();
-  grab.update([hand("left", true, yaw(0))], R);
-  assertMat3Close(grab.update([hand("left", true, yaw(40))], R).rotation, rotZ(40));
+  const sticks = xr.createStickRotator();
+  let out;
+  for (let i = 0; i < 4; i += 1) out = sticks.update([stick("left", 1, 0)], R, 100);
+  assertMat3Close(out.rotation, rotZ(36));
 });
 
-test("thumbstick click resets the orientation", () => {
-  const grab = xr.createGrabRotator();
-  grab.update([hand("left", true, yaw(0))], R_ID());
-  grab.update([hand("left", true, yaw(45))], R_ID());
-  grab.update([hand("left", false, yaw(45))], R_ID());
-  const out = grab.update([hand("left", false, yaw(45), true)], R_ID());
+test("thumbstick click resets the orientation, once per press", () => {
+  const sticks = xr.createStickRotator();
+  sticks.update([stick("left", 1, 0)], R_ID(), 100);
+  const out = sticks.update([stick("left", 0, 0, true)], R_ID(), 16);
   assert.equal(out.event, "reset");
   assertMat3Close(out.rotation, I3);
-  // Held, not re-pressed: no second reset.
-  assert.equal(grab.update([hand("left", false, yaw(45), true)], R_ID()).event, null);
+  assert.equal(sticks.update([stick("left", 0, 0, true)], R_ID(), 16).event, null);
 });
 
 test("centeredUserMatrix rotates about the centre (column-major, gl-matrix)", () => {

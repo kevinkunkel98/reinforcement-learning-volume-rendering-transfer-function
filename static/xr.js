@@ -21,7 +21,8 @@
   let frames = 0;
   let fpsSince = null;
   let mapper = null; // fresh per session, so a trigger held at exit can't carry over
-  let grab = null; // grip-to-rotate, fresh per session
+  let sticks = null; // thumbstick rotation, fresh per session
+  let lastStickTime = null;
 
   function createMapper() {
     return logic.createControllerMapper({
@@ -172,34 +173,30 @@
       console.info("[xr-perf]", ...logic.diagnosticLines(window.volumeViewer.getXRDiagnostics(), fps, frameMs));
     }
     const sources = [];
-    const grabSources = [];
-    const space = window.volumeViewer.getXRReferenceSpace();
+    const stickSources = [];
     for (const source of frame.session.inputSources) {
       if (!source.gamepad) continue;
       const pressed = source.gamepad.buttons.map((b) => b.pressed);
       sources.push({ handedness: source.handedness, pressed });
-      const pose = space && source.gripSpace ? frame.getPose(source.gripSpace, space) : null;
-      const o = pose?.transform.orientation;
-      // xr-standard mapping: 1 = grip (squeeze), 3 = thumbstick press. The
-      // trigger (0) stays push-to-talk.
-      grabSources.push({
-        handedness: source.handedness,
-        gripPressed: Boolean(pressed[1]),
-        resetPressed: Boolean(pressed[3]),
-        orientation: o ? [o.x, o.y, o.z, o.w] : null,
-      });
+      // xr-standard puts the thumbstick on axes 2/3 (0/1 are a touchpad) and
+      // its press on button 3; fall back to 0/1 for stick-only layouts.
+      const axes = source.gamepad.axes;
+      const stick = axes.length >= 4 ? [axes[2], axes[3]] : [axes[0] || 0, axes[1] || 0];
+      stickSources.push({ handedness: source.handedness, stick, resetPressed: Boolean(pressed[3]) });
     }
     mapper.update(sources, busy);
-    const turned = grab.update(grabSources, window.volumeViewer.getPhysicalRotation());
+    const turned = sticks.update(stickSources, window.volumeViewer.getPhysicalRotation(),
+      lastStickTime === null ? 0 : time - lastStickTime);
+    lastStickTime = time;
     if (turned.rotation) window.volumeViewer.setVolumeRotation(turned.rotation);
-    if (turned.event === "grab" || turned.event === "reset") pulseAll(0.3, 30);
+    if (turned.event === "reset") pulseAll(0.3, 30);
   }
 
   async function onSessionEnd() {
     if (hudState.status === "recording") window.appControls.stopRecording();
     session = null;
     mapper = null;
-    grab = null;
+    sticks = null;
     removeHud();
     button.textContent = "Enter VR";
     try {
@@ -261,7 +258,8 @@
     session = xrSession;
     session.addEventListener("end", onSessionEnd, { once: true });
     mapper = createMapper();
-    grab = logic.createGrabRotator();
+    sticks = logic.createStickRotator();
+    lastStickTime = null;
     fps = null;
     frameMs = null;
     frames = 0;

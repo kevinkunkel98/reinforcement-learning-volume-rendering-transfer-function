@@ -221,28 +221,8 @@
     ];
   }
 
-  // ---------- grab-to-rotate ----------
-  // Quaternions are [x, y, z, w] (WebXR's orientation order); 3x3 matrices are
-  // row-major arrays of rows.
-
-  function quatMultiply(a, b) {
-    const [ax, ay, az, aw] = a;
-    const [bx, by, bz, bw] = b;
-    return [
-      aw * bx + ax * bw + ay * bz - az * by,
-      aw * by - ax * bz + ay * bw + az * bx,
-      aw * bz + ax * by - ay * bx + az * bw,
-      aw * bw - ax * bx - ay * by - az * bz,
-    ];
-  }
-
-  function quatToMat3([x, y, z, w]) {
-    return [
-      [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-      [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-      [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-    ];
-  }
+  // ---------- thumbstick rotation ----------
+  // 3x3 matrices are row-major arrays of rows.
 
   function mat3Multiply(a, b) {
     return a.map((row) => [0, 1, 2].map((c) => row[0] * b[0][c] + row[1] * b[1][c] + row[2] * b[2][c]));
@@ -260,46 +240,47 @@
     return [cross(north, up), up.slice(), north.map((v) => -v)];
   }
 
-  // Grip-to-rotate: while a grip is held, the volume turns with that hand
-  // (1:1, about its own centre); releasing keeps the result, and a thumbstick
-  // click resets it. `sources` per frame: [{handedness, gripPressed,
-  // resetPressed, orientation: [x,y,z,w] in physical space | null}].
-  // `physical` is physicalRotation() of the current XR frame. Returns
-  // {rotation: world-space 3x3 or null if unchanged, event: "grab" |
-  // "release" | "reset" | null}.
-  function createGrabRotator() {
+  const STICK = Object.freeze({ degPerSec: 90, deadZone: 0.15, maxStepMs: 100 });
+
+  // Thumbstick turning about the viewer's own axes: left/right yaws about
+  // the room's vertical, forward/back tilts the top away/toward the viewer,
+  // linear past a dead zone so a resting thumb doesn't drift. A thumbstick
+  // click resets. `sources` per frame: [{handedness, stick: [x, y] (y < 0 is
+  // forward, per the Gamepad API), resetPressed}]; `physical` is
+  // physicalRotation() of the current XR frame. Returns {rotation:
+  // world-space 3x3 or null if unchanged, event: "reset" | null}.
+  function createStickRotator() {
     let rotation = IDENTITY3;
-    let grab = null; // { handedness, start: quaternion, base: rotation at grab }
-    const previous = new Map(); // handedness -> { grip, reset }
+    const resetWas = new Map();
+    const shape = (v) => {
+      const magnitude = Math.abs(v);
+      return magnitude <= STICK.deadZone ? 0 : Math.sign(v) * (magnitude - STICK.deadZone) / (1 - STICK.deadZone);
+    };
     return {
-      update(sources, physical) {
-        let result = { rotation: null, event: null };
+      update(sources, physical, dtMs) {
+        let reset = false;
+        let x = 0;
+        let y = 0;
         for (const source of sources) {
-          const was = previous.get(source.handedness) || { grip: false, reset: false };
-          if (source.resetPressed && !was.reset && !grab) {
-            rotation = IDENTITY3;
-            result = { rotation, event: "reset" };
-          }
-          previous.set(source.handedness, { grip: source.gripPressed, reset: source.resetPressed });
-          if (grab && grab.handedness === source.handedness) {
-            if (!source.gripPressed) {
-              grab = null;
-              result = { rotation: null, event: "release" };
-            } else if (source.orientation) {
-              // The hand's turn since the grab, in physical space, carried
-              // into world space: W = R^T Q R W0.
-              const delta = quatMultiply(source.orientation,
-                [-grab.start[0], -grab.start[1], -grab.start[2], grab.start[3]]);
-              rotation = mat3Multiply(mat3Multiply(mat3Multiply(mat3Transpose(physical),
-                quatToMat3(delta)), physical), grab.base);
-              result = { rotation, event: result.event };
-            }
-          } else if (!grab && source.gripPressed && !was.grip && source.orientation) {
-            grab = { handedness: source.handedness, start: source.orientation.slice(), base: rotation };
-            result = { rotation: null, event: "grab" };
-          }
+          if (source.resetPressed && !resetWas.get(source.handedness)) reset = true;
+          resetWas.set(source.handedness, source.resetPressed);
+          x += shape(source.stick[0]);
+          y += shape(source.stick[1]);
         }
-        return result;
+        if (reset) {
+          rotation = IDENTITY3;
+          return { rotation, event: "reset" };
+        }
+        if (x === 0 && y === 0) return { rotation: null, event: null };
+        const step = (STICK.degPerSec * Math.PI / 180) * Math.min(dtMs, STICK.maxStepMs) / 1000;
+        const yaw = Math.max(-1, Math.min(1, x)) * step;
+        const pitch = Math.max(-1, Math.min(1, y)) * step;
+        const [cy, sy, cp, sp] = [Math.cos(yaw), Math.sin(yaw), Math.cos(pitch), Math.sin(pitch)];
+        // Physical-space turn Q = Ry(yaw) * Rx(pitch), carried into world
+        // space and applied on top: W = R^T Q R W.
+        const turn = mat3Multiply([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]], [[1, 0, 0], [0, cp, -sp], [0, sp, cp]]);
+        rotation = mat3Multiply(mat3Multiply(mat3Multiply(mat3Transpose(physical), turn), physical), rotation);
+        return { rotation, event: null };
       },
     };
   }
@@ -320,6 +301,6 @@
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
     summarizeStep, hudPlacement, withXRLayerContext, xrPlacement,
     PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
-    physicalRotation, createGrabRotator, centeredUserMatrix,
+    physicalRotation, createStickRotator, centeredUserMatrix,
   };
 });
