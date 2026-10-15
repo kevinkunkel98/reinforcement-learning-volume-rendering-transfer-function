@@ -285,6 +285,22 @@
     };
   }
 
+  // The camera physical frame ({north, up, translation}) that shows the scene
+  // as if the volume were turned by world-space `rotation` about `center`.
+  // vtk.js 25's volume ray caster mis-clips a volume whose own prop matrix is
+  // rotated (straight-edged black cuts), so the room turns instead: with
+  // world -> physical R (w + t) / s, R' = R W and t' = W^T (c + t) - c.
+  function rotatedPhysicalFrame(base, rotation, center) {
+    const inverse = mat3Transpose(rotation);
+    const apply = (m, v) => m.map((row) => row[0] * v[0] + row[1] * v[1] + row[2] * v[2]);
+    const moved = apply(inverse, center.map((c, i) => c + base.translation[i]));
+    return {
+      north: apply(inverse, base.north),
+      up: apply(inverse, base.up),
+      translation: moved.map((v, i) => v - center[i]),
+    };
+  }
+
   // vtkProp3D user matrix (gl-matrix column-major, as Prop3D.computeMatrix
   // consumes it) that applies world-space `rotation` about `center`.
   function centeredUserMatrix(rotation, center) {
@@ -301,6 +317,6 @@
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
     summarizeStep, hudPlacement, withXRLayerContext, xrPlacement,
     PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
-    physicalRotation, createStickRotator, centeredUserMatrix,
+    physicalRotation, createStickRotator, centeredUserMatrix, rotatedPhysicalFrame,
   };
 });

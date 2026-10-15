@@ -411,6 +411,9 @@
 
   // Saved flat-viewer settings while an immersive session is running.
   let xrSaved = null;
+  // The camera's physical frame right after XR placement; thumbstick
+  // rotation turns it about the volume centre (see setVolumeRotation).
+  let xrBaseFrame = null;
   // Bounding-sphere radius and distance of the volume in VR, in metres. A
   // ~39 cm-wide chest CT has a ~33 cm bounding radius, so this is about life-size.
   const XR_RADIUS_M = 0.3;
@@ -438,6 +441,8 @@
     xrSaved = {
       style: interactor.getInteractorStyle(),
       sampleDistance: mapper.getSampleDistance(),
+      autoAdjust: mapper.getAutoAdjustSampleDistances(),
+      imageSampleDistance: mapper.getImageSampleDistance(),
       shade: volume.getProperty().getShade(),
       camera: fromRendererCamera(),
       background: renderer.getBackground().slice(),
@@ -447,6 +452,16 @@
     // button handlers at all.
     interactor.setInteractorStyle(vtk.Rendering.Core.vtkInteractorStyle.newInstance());
     mapper.setSampleDistance(window.xrLogic.xrSampleDistance(volumeMetadata.spacing) * XR_SAMPLE_DISTANCE_SCALE);
+    // vtk.js's auto-adjust measures its own interactor loop, which doesn't
+    // run in XR (it reads ~2 fps), so it pins the volume to its smallest
+    // offscreen size -- 1/20 resolution per axis -- and that offscreen path
+    // sizes itself from the canvas, not the XR eye viewports: one eye loses
+    // the volume, the other gets a black crop. In XR the WebXR layer's
+    // framebuffer scale sets the resolution instead. The scale is only
+    // recomputed on vtk's frame-rate event, so fire it once by hand.
+    mapper.setAutoAdjustSampleDistances(false);
+    mapper.setImageSampleDistance(1);
+    interactor.invokeAnimationFrameRateUpdate();
     // Per-sample gradient-lit shading roughly doubles ray-march cost and
     // stereo rendering already doubles it again (one pass per eye) -- drop
     // it in VR, where spatial understanding matters more than lighting
@@ -482,6 +497,11 @@
       camera.setPhysicalScale(place.scale);
       camera.setPhysicalTranslation(...place.translation);
       camera.setClippingRange(0.1 * place.scale, 100 * place.scale);
+      xrBaseFrame = {
+        north: camera.getPhysicalViewNorth().slice(),
+        up: camera.getPhysicalViewUp().slice(),
+        translation: camera.getPhysicalTranslation().slice(),
+      };
     } catch (error) {
       await exitXR();
       throw error;
@@ -498,10 +518,12 @@
       // or inXR() would suppress flat rendering until a reload.
       openGLRenderWindow.set({ xrReferenceSpace: null }, true);
       xrSaved = null;
-      // Thumbstick rotation is a VR-only view change; the flat viewer stays upright.
-      volume.setUserMatrix([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+      xrBaseFrame = null;
       interactor.setInteractorStyle(saved.style);
       mapper.setSampleDistance(saved.sampleDistance);
+      mapper.setAutoAdjustSampleDistances(saved.autoAdjust);
+      mapper.setImageSampleDistance(saved.imageSampleDistance);
+      interactor.invokeAnimationFrameRateUpdate();
       volume.getProperty().setShade(saved.shade);
       renderer.setBackground(...saved.background);
       camera.setPosition(...saved.camera.position);
@@ -645,17 +667,27 @@
     return floatLinear;
   }
 
-  // Thumbstick rotation (xr.js): the world -> physical rotation of the running XR
-  // session, and the volume's world-space rotation about its data centre
-  // (imageData bounds, which unlike volume.getBounds() ignore the rotation).
+  // Thumbstick rotation (xr.js). The world -> physical rotation of the XR
+  // placement the turns are measured against, and the turn itself: vtk.js 25
+  // mis-clips a volume whose prop matrix is rotated, so the room frame turns
+  // about the volume centre instead (xrLogic.rotatedPhysicalFrame), and the
+  // HUD gets the inverse turn so it stays put in the room.
   function getPhysicalRotation() {
-    return window.xrLogic.physicalRotation(camera.getPhysicalViewNorth(), camera.getPhysicalViewUp());
+    return window.xrLogic.physicalRotation(xrBaseFrame.north, xrBaseFrame.up);
   }
 
   function setVolumeRotation(rotation) {
-    const bounds = imageData.getBounds();
+    if (!xrBaseFrame) return;
+    const logic = window.xrLogic;
+    const bounds = volume.getBounds();
     const center = [0, 2, 4].map((i) => (bounds[i] + bounds[i + 1]) / 2);
-    volume.setUserMatrix(window.xrLogic.centeredUserMatrix(rotation, center));
+    const frame = logic.rotatedPhysicalFrame(xrBaseFrame, rotation, center);
+    camera.setPhysicalViewNorth(...frame.north);
+    camera.setPhysicalViewUp(...frame.up);
+    camera.setPhysicalTranslation(...frame.translation);
+    const inverse = [0, 1, 2].map((c) => [rotation[0][c], rotation[1][c], rotation[2][c]]);
+    const hudMatrix = logic.centeredUserMatrix(inverse, center);
+    renderer.getActors().forEach((actor) => actor.setUserMatrix(hudMatrix));
   }
 
   window.volumeViewer = {

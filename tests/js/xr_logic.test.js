@@ -343,3 +343,30 @@ test("centeredUserMatrix rotates about the centre (column-major, gl-matrix)", ()
   assert.ok(close(apply([2, 0, 0]), [1, 1, 0]));
   assert.equal(m[15], 1);
 });
+
+test("rotating the physical frame looks the same as rotating the volume about its centre", () => {
+  // vtk.js world -> physical: R (w + t) / s, R = physicalRotation(north, up).
+  const toPhysical = (frame, s, w) => {
+    const R = xr.physicalRotation(frame.north, frame.up);
+    const v = w.map((x, i) => x + frame.translation[i]);
+    return R.map((row) => (row[0] * v[0] + row[1] * v[1] + row[2] * v[2]) / s);
+  };
+  const base = { north: [0, -1, 0], up: [0, 0, 1], translation: [5, -3, 2] };
+  const center = [1, 2, 3];
+  const W = rotZ(40);
+  const turned = xr.rotatedPhysicalFrame(base, W, center);
+  for (const w of [[4, -1, 7], [1, 2, 3], [-2, 0.5, 9]]) {
+    const rotatedPoint = [0, 1, 2].map((r) =>
+      center[r] + W[r][0] * (w[0] - center[0]) + W[r][1] * (w[1] - center[1]) + W[r][2] * (w[2] - center[2]));
+    const expected = toPhysical(base, 2, rotatedPoint);
+    const actual = toPhysical(turned, 2, w);
+    actual.forEach((v, i) => assert.ok(Math.abs(v - expected[i]) < 1e-9, `${actual} != ${expected}`));
+  }
+});
+
+test("rotatedPhysicalFrame with no rotation is the base frame", () => {
+  const base = { north: [0, -1, 0], up: [0, 0, 1], translation: [5, -3, 2] };
+  const turned = xr.rotatedPhysicalFrame(base, I3, [1, 2, 3]);
+  [["north", turned.north, base.north], ["up", turned.up, base.up], ["translation", turned.translation, base.translation]]
+    .forEach(([name, a, b]) => a.forEach((v, i) => assert.ok(Math.abs(v - b[i]) < 1e-12, name)));
+});
