@@ -303,6 +303,7 @@
     transferFunction = params.slice();
     volume.getProperty().setRGBTransferFunction(0, color);
     volume.getProperty().setScalarOpacity(0, opacity);
+    tfListeners.forEach((listener) => listener(transferFunction, activeLayers, hasLabels()));
     // In XR, vtk.js's frame loop picks the new function up on its next frame;
     // a render() here would ray-march into the bound XR framebuffer for nothing.
     if (!inXR()) renderWindow.render();
@@ -674,6 +675,37 @@
     renderer.getActors().forEach((actor) => actor.setUserMatrix(hudMatrix));
   }
 
+  // For the custom VR ray marcher (vr_renderer.js): the raw volume, labels
+  // and current TF state, plus the flat view's lighting and orientation so
+  // VR looks and faces the same way.
+  const tfListeners = new Set();
+
+  function getVolumeData() {
+    if (!rawVolumeValues || !volumeMetadata || !volume) return null;
+    const property = volume.getProperty();
+    camera.orthogonalizeViewUp();
+    return {
+      hu: rawVolumeValues,
+      labels: hasLabels() ? labelValues : null,
+      dims: volumeMetadata.dimensions.slice(),
+      spacing: volumeMetadata.spacing.slice(),
+      params: transferFunction.slice(),
+      layers: { ...activeLayers },
+      unitDistance: property.getScalarOpacityUnitDistance(0),
+      light: {
+        ambient: property.getAmbient(), diffuse: property.getDiffuse(),
+        specular: property.getSpecular(), specularPower: property.getSpecularPower(),
+      },
+      north: camera.getDirectionOfProjection().slice(),
+      up: camera.getViewUp().slice(),
+    };
+  }
+
+  function onTransferFunctionChange(listener) {
+    tfListeners.add(listener);
+    return () => tfListeners.delete(listener);
+  }
+
   window.volumeViewer = {
     load, setTransferFunction, setLabelAwareTransferFunction, getCamera, setCamera,
     // The XR frame loop renders on its own; a flat render() mid-session would
@@ -682,6 +714,7 @@
     enterXR, exitXR, inXR,
     get perfFlags() { return PERF; },
     setXRSampleMultiplier,
+    getVolumeData, onTransferFunctionChange,
     getPhysicalRotation, setVolumeRotation,
     getRenderer: () => renderer,
     getVolumeBounds: () => volume?.getBounds(),

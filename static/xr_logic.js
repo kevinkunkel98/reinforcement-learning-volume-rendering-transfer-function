@@ -185,7 +185,7 @@
   // The defaults reproduce the pre-flag behaviour; anything unparsable or out
   // of range falls back to its default instead of throwing.
   const PERF_DEFAULTS = Object.freeze({
-    tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false,
+    tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false, renderer: "vtk",
   });
 
   // What a VR-capable (standalone headset) browser gets without flags,
@@ -215,6 +215,7 @@
       xrscale: number("xrscale", 0.1, 2),
       xrsample: number("xrsample", 0.25, 8),
       adapt: choice("adapt", { 0: false, 1: true }),
+      renderer: choice("renderer", { vtk: "vtk", custom: "custom" }),
     };
   }
 

@@ -231,14 +231,14 @@ test("withXRLayerContext merges layer init overrides over vtk's init", async () 
 test("parsePerfFlags defaults reproduce the pre-flag behaviour", () => {
   assert.deepEqual(xr.parsePerfFlags(""), { ...xr.PERF_DEFAULTS });
   assert.deepEqual(xr.PERF_DEFAULTS, {
-    tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false,
+    tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false, renderer: "vtk",
   });
 });
 
 test("parsePerfFlags reads every lever", () => {
   assert.deepEqual(
-    xr.parsePerfFlags("?tex=f16&crop=1&down=2&fov=0.5&xrscale=1&xrsample=2&adapt=1"),
-    { tex: "f16", crop: true, down: 2, fov: 0.5, xrscale: 1, xrsample: 2, adapt: true },
+    xr.parsePerfFlags("?tex=f16&crop=1&down=2&fov=0.5&xrscale=1&xrsample=2&adapt=1&renderer=custom"),
+    { tex: "f16", crop: true, down: 2, fov: 0.5, xrscale: 1, xrsample: 2, adapt: true, renderer: "custom" },
   );
 });
 
@@ -460,4 +460,10 @@ test("adaptSampleDistance refines slowly after a sustained on-time run", () => {
 
 test("adaptSampleDistance never refines below minMul", () => {
   assert.equal(runAdapt(xr.ADAPT_INITIAL, Array(90).fill(OK)).multiplier, 1);
+});
+
+test("parsePerfFlags reads the renderer, defaulting to vtk", () => {
+  assert.equal(xr.parsePerfFlags("").renderer, "vtk");
+  assert.equal(xr.parsePerfFlags("?renderer=custom").renderer, "custom");
+  assert.equal(xr.parsePerfFlags("?renderer=webgpu").renderer, "vtk");
 });
