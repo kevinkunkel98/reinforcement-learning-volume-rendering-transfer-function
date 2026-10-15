@@ -188,21 +188,33 @@
     tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false,
   });
 
-  function parsePerfFlags(search) {
+  // What a VR-capable (standalone headset) browser gets without flags,
+  // from the 2026-10-15 Vive Focus 3 benchmark: frame cost tracks voxel
+  // count, not pixel count, so halving the volume per axis (8x fewer
+  // voxels) buys ~3x while a sharp 0.8 framebuffer stays cheap.
+  const HEADSET_PERF_DEFAULTS = Object.freeze({
+    ...PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 0.8,
+  });
+
+  function parsePerfFlags(search, defaults = PERF_DEFAULTS) {
     const query = new URLSearchParams(search);
     const number = (key, min, max) => {
       const raw = query.get(key);
       const value = raw === null || raw.trim() === "" ? NaN : Number(raw);
-      return Number.isFinite(value) && value >= min && value <= max ? value : PERF_DEFAULTS[key];
+      return Number.isFinite(value) && value >= min && value <= max ? value : defaults[key];
+    };
+    const choice = (key, options) => {
+      const raw = query.get(key);
+      return Object.prototype.hasOwnProperty.call(options, raw) ? options[raw] : defaults[key];
     };
     return {
-      tex: query.get("tex") === "f16" ? "f16" : PERF_DEFAULTS.tex,
-      crop: query.get("crop") === "1",
-      down: query.get("down") === "2" ? 2 : PERF_DEFAULTS.down,
+      tex: choice("tex", { f32: "f32", f16: "f16" }),
+      crop: choice("crop", { 0: false, 1: true }),
+      down: choice("down", { 1: 1, 2: 2 }),
       fov: number("fov", 0, 1),
       xrscale: number("xrscale", 0.1, 2),
       xrsample: number("xrsample", 0.25, 8),
-      adapt: query.get("adapt") === "1",
+      adapt: choice("adapt", { 0: false, 1: true }),
     };
   }
 
@@ -398,7 +410,7 @@
   return {
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
     summarizeStep, hudPlacement, withXRLayerContext, xrPlacement,
-    PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
+    PERF_DEFAULTS, HEADSET_PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
     physicalRotation, createStickRotator, centeredUserMatrix, rotatedPhysicalFrame,
     bodyBoundingBox, cropVolume, strideDownsample, toSixteenBit,
   };

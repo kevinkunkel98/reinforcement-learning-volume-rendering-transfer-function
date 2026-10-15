@@ -13,8 +13,9 @@
   const UNLABELLED_PEAKS = ["skeleton", "lungs", "soft"];
   const LABEL_BAND = 4096;
   // Headset performance levers (?tex ?crop ?down ?fov ?xrscale ?xrsample
-  // ?adapt), parsed once; defaults reproduce the pre-flag behaviour.
-  const PERF = window.xrLogic.parsePerfFlags(window.location.search);
+  // ?adapt). Re-parsed with the headset defaults once load() knows this is a
+  // VR-capable device; explicit URL flags win either way.
+  let PERF = window.xrLogic.parsePerfFlags(window.location.search);
   const viewerEl = document.getElementById("vtk-viewer");
   const statusEl = document.getElementById("viewer-status");
   const errorEl = document.getElementById("viewer-error");
@@ -285,7 +286,7 @@
   // Base XR ray-march step for the current image (finest spacing after any
   // downsampling), times the fixed ?xrsample multiplier.
   function xrBaseSampleDistance() {
-    return window.xrLogic.xrSampleDistance(imageData.getSpacing()) * XR_SAMPLE_DISTANCE_SCALE;
+    return window.xrLogic.xrSampleDistance(imageData.getSpacing()) * PERF.xrsample;
   }
 
   function internalPeak(params, index) {
@@ -443,16 +444,13 @@
   // ~39 cm-wide chest CT has a ~33 cm bounding radius, so this is about life-size.
   const XR_RADIUS_M = 0.3;
   const XR_DISTANCE_M = 0.9;
-  // Per-eye render resolution relative to the headset's default. Ray-march
-  // cost scales with pixel count, so 0.5 renders a quarter of the pixels.
-  // Tunable on the device with ?xrscale=0.35 etc.
-  const XR_FRAMEBUFFER_SCALE = PERF.xrscale;
+  // Per-eye render resolution relative to the headset's default is
+  // PERF.xrscale (?xrscale=0.6 etc.).
   // Multiplies the XR ray-march sample distance (coarser = cheaper, fewer
   // samples per ray). AutoAdjustSampleDistances doesn't reliably kick in
   // inside the XR session (it's tuned against vtk's own interactor render
   // loop, not the session.requestAnimationFrame loop xr.js drives), so this
-  // is a manual escape hatch. Tunable on the device with ?xrsample=2 etc.
-  const XR_SAMPLE_DISTANCE_SCALE = PERF.xrsample;
+  // is a manual escape hatch: PERF.xrsample (?xrsample=2 etc.).
 
   function inXR() {
     return xrSaved !== null;
@@ -487,11 +485,6 @@
     mapper.setAutoAdjustSampleDistances(false);
     mapper.setImageSampleDistance(1);
     interactor.invokeAnimationFrameRateUpdate();
-    // Per-sample gradient-lit shading roughly doubles ray-march cost and
-    // stereo rendering already doubles it again (one pass per eye) -- drop
-    // it in VR, where spatial understanding matters more than lighting
-    // fidelity against the (2D, desktop, shaded) reference screenshots.
-    volume.getProperty().setShade(false);
     // Keep the orientation the user was looking at in the flat viewer. The
     // stored view-up needn't be perpendicular to the view direction (a saved
     // camera can look almost straight along it), and a near-parallel
@@ -514,7 +507,7 @@
         .getContext(openGLRenderWindow.getWebgl2() ? "webgl2" : "webgl");
       await window.xrLogic.withXRLayerContext(window, rawContext,
         () => openGLRenderWindow.enterXR(session),
-        { framebufferScaleFactor: XR_FRAMEBUFFER_SCALE });
+        { framebufferScaleFactor: PERF.xrscale });
       // Replace vtk's resetXRScene() placement (viewer inside a 1 m-radius
       // volume): life-size-ish, in front along the direction the flat view faced.
       const place = window.xrLogic.xrPlacement(volume.getBounds(), camera.getPhysicalViewNorth(),
@@ -601,6 +594,8 @@
         }
       }
       await xrCapabilityCheck;
+      PERF = window.xrLogic.parsePerfFlags(window.location.search,
+        isXRCapableDevice ? window.xrLogic.HEADSET_PERF_DEFAULTS : window.xrLogic.PERF_DEFAULTS);
       datasetName = name;
       if (!renderer) {
         openGLRenderWindow = vtk.Rendering.OpenGL.vtkRenderWindow.newInstance();
@@ -721,7 +716,7 @@
     // draw into the XR-sized canvas for nothing.
     render: () => { if (!inXR()) renderWindow?.render(); },
     enterXR, exitXR, inXR,
-    perfFlags: PERF,
+    get perfFlags() { return PERF; },
     getPhysicalRotation, setVolumeRotation,
     getRenderer: () => renderer,
     getVolumeBounds: () => volume?.getBounds(),
@@ -746,7 +741,7 @@
       texture: textureFormat(),
       floatLinear: floatLinearSupported(),
       foveation: xrFoveation,
-      framebufferScale: inXR() ? XR_FRAMEBUFFER_SCALE : null,
+      framebufferScale: inXR() ? PERF.xrscale : null,
       flags: PERF,
     }),
   };

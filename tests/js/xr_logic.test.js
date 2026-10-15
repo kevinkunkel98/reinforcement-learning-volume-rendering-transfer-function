@@ -420,3 +420,14 @@ test("toSixteenBit picks Int16 when the data goes negative", () => {
   assert.ok(out instanceof Int16Array);
   assert.deepEqual(Array.from(out), [-1025, 3071, 32767]);
 });
+
+test("parsePerfFlags takes per-device defaults, and explicit flags still win", () => {
+  assert.deepEqual(xr.HEADSET_PERF_DEFAULTS, { ...xr.PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 0.8 });
+  assert.deepEqual(xr.parsePerfFlags("", xr.HEADSET_PERF_DEFAULTS), { ...xr.HEADSET_PERF_DEFAULTS });
+  const explicit = xr.parsePerfFlags("?tex=f32&down=1&xrscale=1&crop=0&adapt=0", xr.HEADSET_PERF_DEFAULTS);
+  assert.equal(explicit.tex, "f32");
+  assert.equal(explicit.down, 1);
+  assert.equal(explicit.xrscale, 1);
+  assert.equal(explicit.crop, false);
+  assert.equal(explicit.adapt, false);
+});
