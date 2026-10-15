@@ -8,6 +8,9 @@
   const button = document.getElementById("enter-vr-btn");
   const HUD_W = 1024;
   const HUD_H = 420;
+  // The panel canvas is drawn at this multiple of HUD_W x HUD_H so its text
+  // stays sharp at headset resolution; layout coordinates stay in HUD units.
+  const HUD_PIXEL_SCALE = 2;
   const RECORDING_BG = [0.25, 0, 0];
 
   let session = null;
@@ -67,6 +70,7 @@
   function drawHud() {
     if (!hud) return;
     const { ctx } = hud;
+    ctx.setTransform(HUD_PIXEL_SCALE, 0, 0, HUD_PIXEL_SCALE, 0, 0);
     const [head, transcript, summary, footer] = logic.hudLines(hudState);
     ctx.fillStyle = "rgba(12, 12, 16, 0.92)";
     ctx.fillRect(0, 0, HUD_W, HUD_H);
@@ -101,8 +105,8 @@
   function addHud() {
     if (target === window.vrRenderer) {
       const canvas = document.createElement("canvas");
-      canvas.width = HUD_W;
-      canvas.height = HUD_H;
+      canvas.width = HUD_W * HUD_PIXEL_SCALE;
+      canvas.height = HUD_H * HUD_PIXEL_SCALE;
       const frame = target.getHudFrame();
       const place = logic.hudPlacement(frame.bounds, frame.up, frame.dop, HUD_W / HUD_H);
       hud = { canvas, ctx: canvas.getContext("2d"), refresh: () => target.refreshHud() };
@@ -114,8 +118,8 @@
     const bounds = window.volumeViewer.getVolumeBounds();
     const axes = window.volumeViewer.getCameraAxes();
     const canvas = document.createElement("canvas");
-    canvas.width = HUD_W;
-    canvas.height = HUD_H;
+    canvas.width = HUD_W * HUD_PIXEL_SCALE;
+    canvas.height = HUD_H * HUD_PIXEL_SCALE;
     const place = logic.hudPlacement(bounds, axes.up, axes.dop, HUD_W / HUD_H);
     const plane = vtk.Filters.Sources.vtkPlaneSource.newInstance({
       origin: place.origin, point1: place.point1, point2: place.point2,
