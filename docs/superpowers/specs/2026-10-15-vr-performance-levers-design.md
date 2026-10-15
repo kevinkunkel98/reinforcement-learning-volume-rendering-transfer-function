@@ -23,6 +23,11 @@ bandwidth-bound workload, not a smooth compute limit. Nothing shrinks the
 work per ray either: no air cropping, no downsampling, no foveation, and
 vtk.js's `AutoAdjustSampleDistances` does not engage inside the XR frame loop.
 
+A second, separate stutter source: every transfer-function change reaches
+`setLabelAwareTransferFunction` through `load()`, which re-bands all voxels
+and re-uploads the whole 3D texture (`viewer.js`, on a load it even happens
+twice). A transfer-function change needs neither.
+
 ## Strategy
 
 Staged (option C): try the cheap levers inside vtk.js first, measure each on
@@ -72,8 +77,16 @@ remote DevTools/logcat captures them too.
   Unlabelled volumes (no banding) use the same path with HU offset by
   `-CENTER_RANGE[0]` so values stay non-negative.
 
-The HUD reports the format vtk.js actually chose, read back from the mapper's
-scalar texture, not the requested one.
+vtk.js 25.11 doesn't expose its scalar texture, so the HUD derives the format
+from the same rule vtk.js applies under WebGL2 (`Float32` → `R32F`; 16-bit
+integers with `preferSizeOverAccuracy` → `R16F`), and also reports whether the
+device has `OES_texture_float_linear` (`flin=`).
+
+### 2b. Build the volume texture once per volume, not per TF change
+
+`viewer.js` remembers which raw-value and label arrays the current image data
+was built from and skips rebanding and re-uploading when they haven't
+changed. A transfer-function change then only updates the transfer function.
 
 ### 3. Crop (`crop`) and downsample (`down`)
 
