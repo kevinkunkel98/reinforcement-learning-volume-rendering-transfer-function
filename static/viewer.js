@@ -452,7 +452,13 @@
     // it in VR, where spatial understanding matters more than lighting
     // fidelity against the (2D, desktop, shaded) reference screenshots.
     volume.getProperty().setShade(false);
-    // Keep the orientation the user was looking at in the flat viewer.
+    // Keep the orientation the user was looking at in the flat viewer. The
+    // stored view-up needn't be perpendicular to the view direction (a saved
+    // camera can look almost straight along it), and a near-parallel
+    // up/north pair makes vtk's physical frame degenerate -- the volume then
+    // lands tilted and off to the side. The flat camera is restored from
+    // xrSaved on exit, so orthogonalizing it here is safe.
+    camera.orthogonalizeViewUp();
     camera.setPhysicalViewUp(...camera.getViewUp());
     camera.setPhysicalViewNorth(...camera.getDirectionOfProjection());
     try {
