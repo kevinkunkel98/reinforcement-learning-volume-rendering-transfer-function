@@ -370,3 +370,53 @@ test("rotatedPhysicalFrame with no rotation is the base frame", () => {
   [["north", turned.north, base.north], ["up", turned.up, base.up], ["translation", turned.translation, base.translation]]
     .forEach(([name, a, b]) => a.forEach((v, i) => assert.ok(Math.abs(v - b[i]) < 1e-12, name)));
 });
+
+// ---------- crop / downsample / 16-bit ----------
+
+const at = (dims, i, j, k) => i + dims[0] * (j + dims[1] * k);
+const ramp = (n) => Float32Array.from({ length: n }, (_, i) => i);
+
+test("bodyBoundingBox pads and clamps the non-air box", () => {
+  const dims = [10, 8, 6];
+  const values = new Float32Array(10 * 8 * 6).fill(-1000);
+  values[at(dims, 3, 2, 1)] = 40;
+  values[at(dims, 5, 6, 4)] = 900;
+  assert.deepEqual(xr.bodyBoundingBox(values, dims, -500, 2), { min: [1, 0, 0], max: [7, 7, 5] });
+});
+
+test("bodyBoundingBox keeps the full volume when everything is air", () => {
+  const values = new Float32Array(10 * 8 * 6).fill(-1000);
+  assert.deepEqual(xr.bodyBoundingBox(values, [10, 8, 6], -500), { min: [0, 0, 0], max: [9, 7, 5] });
+});
+
+test("cropVolume copies the inclusive box and keeps the array type", () => {
+  const { values, dims } = xr.cropVolume(ramp(24), [4, 3, 2], { min: [1, 1, 0], max: [2, 2, 1] });
+  assert.ok(values instanceof Float32Array);
+  assert.deepEqual(dims, [2, 2, 2]);
+  assert.deepEqual(Array.from(values), [5, 6, 9, 10, 17, 18, 21, 22]);
+});
+
+test("strideDownsample keeps every factor-th voxel and rounds odd sizes up", () => {
+  const { values, dims } = xr.strideDownsample(ramp(30), [5, 3, 2], 2);
+  assert.deepEqual(dims, [3, 2, 1]);
+  assert.deepEqual(Array.from(values), [0, 2, 4, 10, 12, 14]);
+});
+
+test("strideDownsample by 1 returns the input untouched", () => {
+  const input = ramp(6);
+  const result = xr.strideDownsample(input, [3, 2, 1], 1);
+  assert.equal(result.values, input);
+  assert.deepEqual(result.dims, [3, 2, 1]);
+});
+
+test("toSixteenBit picks Uint16 for non-negative data, rounding and clamping", () => {
+  const out = xr.toSixteenBit(Float32Array.from([0, 35818.4, 70000]));
+  assert.ok(out instanceof Uint16Array);
+  assert.deepEqual(Array.from(out), [0, 35818, 65535]);
+});
+
+test("toSixteenBit picks Int16 when the data goes negative", () => {
+  const out = xr.toSixteenBit(Float32Array.from([-1024.6, 3071, 40000]));
+  assert.ok(out instanceof Int16Array);
+  assert.deepEqual(Array.from(out), [-1025, 3071, 32767]);
+});

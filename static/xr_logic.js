@@ -221,6 +221,88 @@
     ];
   }
 
+  // ---------- volume reduction for the headset ----------
+
+  // Inclusive voxel-index box of every value above `threshold` in a
+  // Fortran-ordered (x fastest) volume, padded by `pad` voxels and clamped
+  // to the volume. A volume with nothing above it keeps the full box.
+  function bodyBoundingBox(values, dims, threshold, pad = 2) {
+    const [nx, ny, nz] = dims;
+    const min = [nx, ny, nz];
+    const max = [-1, -1, -1];
+    let index = 0;
+    for (let k = 0; k < nz; k += 1) {
+      for (let j = 0; j < ny; j += 1) {
+        for (let i = 0; i < nx; i += 1, index += 1) {
+          if (!(values[index] > threshold)) continue;
+          if (i < min[0]) min[0] = i;
+          if (i > max[0]) max[0] = i;
+          if (j < min[1]) min[1] = j;
+          if (j > max[1]) max[1] = j;
+          if (k < min[2]) min[2] = k;
+          if (k > max[2]) max[2] = k;
+        }
+      }
+    }
+    if (max[0] < 0) return { min: [0, 0, 0], max: [nx - 1, ny - 1, nz - 1] };
+    return {
+      min: min.map((value) => Math.max(0, value - pad)),
+      max: max.map((value, axis) => Math.min(dims[axis] - 1, value + pad)),
+    };
+  }
+
+  // Copies the inclusive `box` out of a Fortran-ordered volume.
+  function cropVolume(values, dims, box) {
+    const [nx, ny] = dims;
+    const out = box.max.map((value, axis) => value - box.min[axis] + 1);
+    const result = new values.constructor(out[0] * out[1] * out[2]);
+    let dst = 0;
+    for (let k = box.min[2]; k <= box.max[2]; k += 1) {
+      for (let j = box.min[1]; j <= box.max[1]; j += 1) {
+        const src = box.min[0] + nx * (j + ny * k);
+        result.set(values.subarray(src, src + out[0]), dst);
+        dst += out[0];
+      }
+    }
+    return { values: result, dims: out };
+  }
+
+  // Nearest-neighbour: keeps every `factor`-th voxel per axis, so a label
+  // band never blends into a neighbour's (averaging would invent values
+  // between bands, i.e. a third class).
+  function strideDownsample(values, dims, factor) {
+    if (factor === 1) return { values, dims };
+    const [nx, ny] = dims;
+    const out = dims.map((size) => Math.ceil(size / factor));
+    const result = new values.constructor(out[0] * out[1] * out[2]);
+    let dst = 0;
+    for (let k = 0; k < out[2]; k += 1) {
+      for (let j = 0; j < out[1]; j += 1) {
+        const row = nx * (j * factor + ny * k * factor);
+        for (let i = 0; i < out[0]; i += 1) result[dst++] = values[row + i * factor];
+      }
+    }
+    return { values: result, dims: out };
+  }
+
+  // The narrowest 16-bit integer array that holds the data, for vtk.js to
+  // upload as a half-float (R16F) texture with preferSizeOverAccuracy. CT HU
+  // and our label bands are integer-valued, so rounding loses nothing;
+  // anything past the 16-bit range is clamped (typed arrays would wrap).
+  function toSixteenBit(values) {
+    let min = Infinity;
+    for (let index = 0; index < values.length; index += 1) {
+      if (values[index] < min) min = values[index];
+    }
+    const signed = min < 0;
+    const [lo, hi] = signed ? [-32768, 32767] : [0, 65535];
+    const out = signed ? new Int16Array(values.length) : new Uint16Array(values.length);
+    for (let index = 0; index < values.length; index += 1) {
+      out[index] = Math.min(hi, Math.max(lo, Math.round(values[index])));
+    }
+    return out;
+  }
+
   // ---------- thumbstick rotation ----------
   // 3x3 matrices are row-major arrays of rows.
 
@@ -318,5 +400,6 @@
     summarizeStep, hudPlacement, withXRLayerContext, xrPlacement,
     PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
     physicalRotation, createStickRotator, centeredUserMatrix, rotatedPhysicalFrame,
+    bodyBoundingBox, cropVolume, strideDownsample, toSixteenBit,
   };
 });
