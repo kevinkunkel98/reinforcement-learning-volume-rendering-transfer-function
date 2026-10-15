@@ -528,3 +528,73 @@ def test_label_scoped_brightness_follows_own_peak_colour():
 def test_unknown_transfer_mode_is_rejected():
     with pytest.raises(ValueError):
         _organ_pair_model().features(_only_peak("liver"), transfer_mode="bogus")
+
+
+# ---------- optimized features() matches the reference algorithm ----------
+
+def _reference_features(model, params, layers=None):
+    """features()/vis_only() as originally written: opacity correction per
+    sample and one masked pass per class. The optimized code must agree."""
+    import torch
+    import transfer
+    from anatomy_layers import normalize_layers
+
+    opacity, luminance_table = visibility.label_transfer_tables(params, transfer.DEFAULT_TRANSFER_MODE)
+    index = ((model._labels.long() + 1) * visibility.LUT_SIZE + model.indices.long())
+    alpha = torch.from_numpy(opacity.reshape(-1))[index]
+    alpha = 1.0 - (1.0 - alpha) ** model.step_mm
+    luminance = torch.from_numpy(luminance_table.reshape(-1))[index]
+    plain_alpha = alpha
+    if layers is not None:
+        normalized = normalize_layers(layers)
+        scale = torch.ones_like(alpha)
+        for i, name in enumerate(visibility.CLASSES):
+            scale = torch.where(model._labels == i, scale.new_tensor(normalized[name]["opacity"]), scale)
+        alpha = alpha * scale
+    transparency = 1.0 - alpha
+    before = torch.cat([torch.ones_like(transparency[:, :1]), torch.cumprod(transparency, dim=1)[:, :-1]], dim=1)
+    weights, accumulated = before * alpha, 1.0 - transparency.prod(dim=1)
+    vis, bright = {}, {}
+    for i, name in enumerate(visibility.CLASSES):
+        masked = torch.where(model._labels == i, weights, torch.zeros(()))
+        total = float(masked.sum())
+        vis[name] = total / model._rays
+        bright[name] = float((masked * luminance).sum() / total) if total / model._rays > 1e-4 else 0.0
+    # Existing behaviour, preserved: features() reports "other" from the plain
+    # (unlayered) composite even when layers are given (effective_vis["other"]
+    # = vis["other"]), while vis_only() takes it from the layered one.
+    vis["other"] = float(torch.where(model._labels == -1, weights, torch.zeros(())).sum()) / model._rays
+    plain_t = 1.0 - plain_alpha
+    plain_weights = torch.cat([torch.ones_like(plain_t[:, :1]), torch.cumprod(plain_t, dim=1)[:, :-1]], dim=1) * plain_alpha
+    plain_other = float(torch.where(model._labels == -1, plain_weights, torch.zeros(())).sum()) / model._rays
+    coverage = float((accumulated >= visibility.COVERAGE_THRESHOLD).to(torch.float32).mean())
+    return vis, bright, coverage, plain_other
+
+
+def _random_labelled_model(seed=0, n=24):
+    rng = np.random.default_rng(seed)
+    volume = rng.uniform(-1000, 1500, size=(n, n, n)).astype(np.float32)
+    labels = rng.integers(0, len(visibility.CLASSES) + 1, size=(n, n, n)).astype(np.uint8)
+    return _model(volume, labels=labels, n=16)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+@pytest.mark.parametrize("layers", [None, {"liver": {"opacity": 0.3}, "skeleton": {"opacity": 0.0}}])
+def test_features_match_the_reference_algorithm(seed, layers):
+    model = _random_labelled_model(seed)
+    rng = np.random.default_rng(100 + seed)
+    params = rng.uniform(-1, 1, size=N_PEAKS * PARAMS_PER_PEAK)
+    ref_vis, ref_bright, ref_coverage, plain_other = _reference_features(model, params, layers)
+    got = model.features(params, layers)
+    vis = got["vis"] if layers is None else got["effective_vis"]
+    bright = got["bright"] if layers is None else got["effective_bright"]
+    coverage = got["coverage"] if layers is None else got["effective_coverage"]
+    for name in ref_vis:
+        expected = plain_other if name == "other" else ref_vis[name]
+        assert vis[name] == pytest.approx(expected, rel=1e-5, abs=1e-8), name
+    for name in ref_bright:
+        assert bright[name] == pytest.approx(ref_bright[name], rel=1e-5, abs=1e-8), name
+    assert coverage == pytest.approx(ref_coverage, abs=1e-6)
+    only = model.vis_only(params, layers)
+    for name in ref_vis:
+        assert only[name] == pytest.approx(ref_vis[name], rel=1e-5, abs=1e-8), name

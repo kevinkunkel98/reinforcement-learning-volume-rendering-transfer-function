@@ -154,6 +154,14 @@ class VisibilityModel:
         self._rays = int(self.indices.shape[0] * self.indices.shape[2] * self.indices.shape[3])
         self._solo_max = {}
         self._label_index_cache = None
+        # Label row per sample (0 = "other", i + 1 = CLASSES[i]): layer
+        # opacities become one gather, and per-class sums one reorder plus
+        # contiguous block sums (labels never change, so the order is fixed;
+        # ~5x faster than one masked pass per class, same precision).
+        self._class_bins = (self._labels.long() + 1)
+        flat = self._class_bins.reshape(-1)
+        self._class_order = torch.argsort(flat, stable=True).to(torch.int32)
+        self._class_counts = torch.bincount(flat, minlength=len(CLASSES) + 1).tolist()
 
     @property
     def n_views(self) -> int:
@@ -190,22 +198,18 @@ class VisibilityModel:
         for it twice."""
         opacity_table, luminance_table = label_transfer_tables(params, transfer_mode)
         index = self._label_index()
-        alpha = torch.from_numpy(opacity_table.reshape(-1))[index]
-        alpha = 1.0 - (1.0 - alpha) ** (self.step_mm / 1.0)
+        # The opacity correction is elementwise, so correct the label x LUT
+        # table and gather once, instead of correcting every sample.
+        corrected = 1.0 - (1.0 - torch.from_numpy(opacity_table.reshape(-1))) ** (self.step_mm / 1.0)
+        alpha = corrected[index]
         luminance = torch.from_numpy(luminance_table.reshape(-1))[index]
         return alpha, luminance
 
     def _layer_mask(self, alpha, layers):
         """Per-sample layer-opacity multiplier for `layers` (already
         normalized). `alpha` is only used for its shape/dtype/device."""
-        layer_opacity = torch.ones_like(alpha)
-        for class_index, name in enumerate(CLASSES):
-            layer_opacity = torch.where(
-                self._labels == class_index,
-                layer_opacity.new_tensor(layers[name]["opacity"]),
-                layer_opacity,
-            )
-        return layer_opacity
+        per_row = alpha.new_tensor([1.0] + [layers[name]["opacity"] for name in CLASSES])
+        return per_row[self._class_bins]
 
     def _composite(self, alpha):
         """(contribution per sample, accumulated opacity per ray) from alpha."""
@@ -213,6 +217,11 @@ class VisibilityModel:
         ones = torch.ones_like(transparency[:, :1])
         before = torch.cat([ones, torch.cumprod(transparency, dim=1)[:, :-1]], dim=1)
         return before * alpha, 1.0 - transparency.prod(dim=1)
+
+    def _class_sums(self, values) -> list:
+        """Sum of `values` per label row: [other, CLASSES[0], CLASSES[1], ...]."""
+        grouped = values.reshape(-1)[self._class_order]
+        return torch.stack([block.sum() for block in torch.split(grouped, self._class_counts)]).tolist()
 
     def _weights(self, params, layers=None, transfer_mode=transfer.DEFAULT_TRANSFER_MODE):
         """(contribution per sample, luminance per sample, accumulated opacity per ray)."""
@@ -245,27 +254,21 @@ class VisibilityModel:
         else:
             effective_alpha = alpha * self._layer_mask(alpha, normalize_layers(layers))
             effective_weights, effective_accumulated = self._composite(effective_alpha)
-        vis, bright = {}, {}
-        effective_vis, effective_bright = {}, {}
-        for index, name in enumerate(CLASSES):
-            masked = torch.where(self._labels == index, weights, torch.zeros(()))
-            total = float(masked.sum())
-            vis[name] = total / self._rays
-            bright[name] = (float((masked * luminance).sum() / total)
-                            if total / self._rays > 1e-4 else 0.0)
-            if layers is None:
-                effective_vis[name] = vis[name]
-                effective_bright[name] = bright[name]
-            else:
-                effective = torch.where(self._labels == index, effective_weights, torch.zeros(()))
-                effective_total = float(effective.sum())
-                effective_vis[name] = effective_total / self._rays
-                effective_bright[name] = (
-                    float((effective * luminance).sum() / effective_total)
-                    if effective_total / self._rays > 1e-4 else 0.0
-                )
-        other_masked = torch.where(self._labels == -1, weights, torch.zeros(()))
-        vis["other"] = float(other_masked.sum()) / self._rays
+        def per_class(w):
+            totals, lit = self._class_sums(w), self._class_sums(w * luminance)
+            vis_, bright_ = {}, {}
+            for index, name in enumerate(CLASSES):
+                total = totals[index + 1]
+                vis_[name] = total / self._rays
+                bright_[name] = lit[index + 1] / total if total / self._rays > 1e-4 else 0.0
+            return vis_, bright_, totals[0] / self._rays
+
+        vis, bright, other = per_class(weights)
+        if layers is None:
+            effective_vis, effective_bright = dict(vis), dict(bright)
+        else:
+            effective_vis, effective_bright, _ = per_class(effective_weights)
+        vis["other"] = other
         effective_vis["other"] = vis["other"]
         effective_bright["other"] = bright.get("other", 0.0)
         coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
@@ -286,11 +289,9 @@ class VisibilityModel:
         if layers is not None:
             alpha = alpha * self._layer_mask(alpha, normalize_layers(layers))
         weights, _ = self._composite(alpha)
-        vis = {}
-        for index, name in enumerate(CLASSES):
-            masked = torch.where(self._labels == index, weights, torch.zeros(()))
-            vis[name] = float(masked.sum()) / self._rays
-        vis["other"] = float(torch.where(self._labels == -1, weights, torch.zeros(())).sum()) / self._rays
+        totals = self._class_sums(weights)
+        vis = {name: totals[index + 1] / self._rays for index, name in enumerate(CLASSES)}
+        vis["other"] = totals[0] / self._rays
         return vis
 
     def layer_metrics(self, params, target: str, layers=None) -> dict:
