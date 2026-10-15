@@ -210,7 +210,8 @@ need it)
    ~2–3s latency acceptable for "apply once"); route `relative` to the
    rule-based executor until it's actually fixed, so the live demo never
    shows the policy's known-negative kind.
-3. **VR adaptive sample-distance controller** (a few hours, not
+3. **[Done/superseded 2026-10-15 — see `docs/experiments/2026-10-15-vr-lab-session.md`: custom WebGL2 ray marcher, 27–33 fps lit, vtk.js XR bugs fixed; opt-in `?adapt=1` controller exists.]**
+   **VR adaptive sample-distance controller** (a few hours, not
    multi-day): react to real measured frame time instead of trusting
    vtk.js's built-in `AutoAdjustSampleDistances`, which doesn't engage
    usefully inside the custom `session.requestAnimationFrame` XR loop.
