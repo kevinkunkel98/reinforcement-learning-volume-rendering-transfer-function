@@ -411,9 +411,6 @@
 
   // Saved flat-viewer settings while an immersive session is running.
   let xrSaved = null;
-  // The reference space the XR session renders in (controller poses for
-  // grab-to-rotate are read in it); null outside XR.
-  let xrSpace = null;
   // Bounding-sphere radius and distance of the volume in VR, in metres. A
   // ~39 cm-wide chest CT has a ~33 cm bounding radius, so this is about life-size.
   const XR_RADIUS_M = 0.3;
@@ -472,7 +469,6 @@
       // the model field, which has no setter.
       const space = await session.requestReferenceSpace("local");
       openGLRenderWindow.set({ xrReferenceSpace: space }, true);
-      xrSpace = space;
       // getContext() on the same canvas returns the existing (unproxied) context.
       const rawContext = openGLRenderWindow.getCanvas()
         .getContext(openGLRenderWindow.getWebgl2() ? "webgl2" : "webgl");
@@ -502,8 +498,7 @@
       // or inXR() would suppress flat rendering until a reload.
       openGLRenderWindow.set({ xrReferenceSpace: null }, true);
       xrSaved = null;
-      xrSpace = null;
-      // Grab-to-rotate is a VR-only view change; the flat viewer stays upright.
+      // Thumbstick rotation is a VR-only view change; the flat viewer stays upright.
       volume.setUserMatrix([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
       interactor.setInteractorStyle(saved.style);
       mapper.setSampleDistance(saved.sampleDistance);
@@ -650,7 +645,7 @@
     return floatLinear;
   }
 
-  // Grab-to-rotate (xr.js): the world -> physical rotation of the running XR
+  // Thumbstick rotation (xr.js): the world -> physical rotation of the running XR
   // session, and the volume's world-space rotation about its data centre
   // (imageData bounds, which unlike volume.getBounds() ignore the rotation).
   function getPhysicalRotation() {
@@ -670,7 +665,6 @@
     render: () => { if (!inXR()) renderWindow?.render(); },
     enterXR, exitXR, inXR,
     perfFlags: PERF,
-    getXRReferenceSpace: () => xrSpace,
     getPhysicalRotation, setVolumeRotation,
     getRenderer: () => renderer,
     getVolumeBounds: () => volume?.getBounds(),
