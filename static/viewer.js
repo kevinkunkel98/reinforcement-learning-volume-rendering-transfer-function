@@ -76,6 +76,7 @@
     volume = undefined;
     mapper = undefined;
     imageData = undefined;
+    builtFrom = { raw: null, labels: null };
     floatLinear = undefined;
     rawVolumeValues = undefined;
     volumeMetadata = undefined;
@@ -248,6 +249,20 @@
     return imageData;
   }
 
+  // Identity of the inputs the current imageData was built from: rebanding
+  // and re-uploading the whole volume takes seconds on a headset, and a
+  // transfer-function change alone needs neither.
+  let builtFrom = { raw: null, labels: null };
+
+  function buildVolumeImage() {
+    const values = hasLabels()
+      ? bandLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
+      : rawVolumeValues;
+    buildImageData(volumeMetadata, values);
+    mapper.setInputData(imageData);
+    builtFrom = { raw: rawVolumeValues, labels: hasLabels() ? labelValues : null };
+  }
+
   function internalPeak(params, index) {
     const base = index * PARAMS_PER_PEAK;
     const toRange = (value, range) => range[0] + (value + 1) / 2 * (range[1] - range[0]);
@@ -319,11 +334,8 @@
     labelMetadata = metadata;
     activeLayers = layers || {};
     if (rawVolumeValues && volumeMetadata && mapper) {
-      const values = hasLabels()
-        ? bandLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
-        : rawVolumeValues;
-      buildImageData(volumeMetadata, values);
-      mapper.setInputData(imageData);
+      const labels = hasLabels() ? labelValues : null;
+      if (builtFrom.raw !== rawVolumeValues || builtFrom.labels !== labels) buildVolumeImage();
       applyLabelInterpolation();
     }
     // HU-only transfer remains the fallback for datasets whose label
@@ -567,12 +579,8 @@
       }
       rawVolumeValues = loaded.values;
       volumeMetadata = loaded.metadata;
-      const values = hasLabels()
-        ? bandLabeledHuValues(rawVolumeValues, labelValues, labelMetadata, volumeMetadata)
-        : rawVolumeValues;
-      buildImageData(loaded.metadata, values);
       mapper = vtk.Rendering.Core.vtkVolumeMapper.newInstance();
-      mapper.setInputData(imageData);
+      buildVolumeImage();
       // Match render.py's server-side quality settings -- vtk.js's defaults
       // (no shading, auto-adjusted/coarser sampling) are what made this
       // viewer look flat and "hologram"-like next to the reference PNGs.
