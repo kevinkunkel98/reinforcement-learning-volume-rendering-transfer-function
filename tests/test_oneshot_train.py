@@ -548,3 +548,27 @@ def test_apply_thread_limit_sets_torch_threads_only_when_given(monkeypatch):
 def test_apply_thread_limit_rejects_non_positive_counts():
     with pytest.raises(ValueError):
         oneshot_train.apply_thread_limit(0)
+
+
+def test_evaluate_policy_on_reports_solvability(monkeypatch):
+    env = _stub_env(monkeypatch, volume_ids=("stub_a",))
+    results = oneshot_train.evaluate_policy_on(oneshot_train.validation_episodes(env, count=8, seed_base=0),
+                                               _FixedActionModel())
+    for row in results:
+        assert "solvable" in row
+        assert (row["solvable"] is None) == (row["kind"] not in ("relative", "compound"))
+
+
+def test_summarize_eval_adds_medians_and_the_relative_solvability_split():
+    results = [
+        {"attainment": 0.5, "kind": "relative", "solvable": True},
+        {"attainment": 0.9, "kind": "relative", "solvable": True},
+        {"attainment": -3.0, "kind": "relative", "solvable": False},
+        {"attainment": 0.0, "kind": "compound", "solvable": False},
+    ]
+    summary = oneshot_train.summarize_eval(results)
+    assert summary["median_by_kind"]["relative"] == pytest.approx(0.5)
+    assert summary["median_by_kind"]["show_only"] is None
+    assert summary["relative_solvable_median"] == pytest.approx(0.7)
+    assert summary["relative_unsolvable_median"] == pytest.approx(-3.0)
+    assert summary["relative_solvable_share"] == pytest.approx(2 / 3)

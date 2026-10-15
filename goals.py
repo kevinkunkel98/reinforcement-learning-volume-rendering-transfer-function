@@ -173,6 +173,27 @@ def progress(start: dict, current: dict) -> tuple:
     return c, b
 
 
+def vis_target_solvable(change: float, start_vis: float) -> bool:
+    """Whether a requested log10 visibility `change` can be met at all from
+    `start_vis`. A decrease is bounded by the EPSILON floor (vis cannot go
+    below 0); an increase of a class that is practically invisible (vis <
+    EPSILON, typically an organ behind soft tissue) needs its occluders
+    removed, which the keep terms charge -- even a 200-evaluation search
+    rarely manages it (docs/experiments/2026-10-15-relative-diagnosis.md)."""
+    if change < 0:
+        return math.log10(start_vis + EPSILON) - math.log10(EPSILON) >= -change
+    return start_vis >= EPSILON
+
+
+def instruction_solvable(instruction: dict, start: dict):
+    """For relative/compound instructions, whether every visibility target is
+    `vis_target_solvable` from the aggregated `start`; None for other kinds."""
+    if instruction.get("kind") not in ("relative", "compound"):
+        return None
+    return all(vis_target_solvable(target["vis"], start["vis"].get(goal_class, 0.0))
+               for goal_class, target in instruction["targets"].items() if "vis" in target)
+
+
 def distance(goal: np.ndarray, start: dict, current: dict, weights: dict = None) -> float:
     """How far a state is from the goal.
 

@@ -16,7 +16,6 @@ See docs/experiments/2026-10-15-relative-diagnosis.md for the findings.
 import argparse
 import collections
 import json
-import math
 import statistics
 
 import numpy as np
@@ -45,10 +44,7 @@ def decompose(goal, start, final) -> dict:
 
 def solvable(direction: str, strength: float, start_vis: float) -> bool:
     """Whether a relative target can be met at all from this start visibility."""
-    if direction == "decrease":
-        floor = math.log10(goals.EPSILON) - math.log10(start_vis + goals.EPSILON)
-        return abs(floor) >= strength
-    return start_vis >= goals.EPSILON
+    return goals.vis_target_solvable(strength if direction == "increase" else -strength, start_vis)
 
 
 def collect(checkpoints, episodes: int, hill: int) -> list:

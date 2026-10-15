@@ -36,7 +36,12 @@ VALIDATION_EPISODES = 40
 VALIDATION_SEED_BASE = 10_000   # fixed offset so validation seeds never collide with training
 EVAL_KINDS = tuple(kind for kind, _ in goals.INSTRUCTION_MIX)
 CSV_FIELDS = (["timesteps", "mean_attainment", "median_attainment", "mean_clipped_attainment", "share_positive"]
-              + [f"attainment_{kind}" for kind in EVAL_KINDS])
+              + [f"attainment_{kind}" for kind in EVAL_KINDS]
+              # Medians per kind, and relative split by solvability from the start
+              # state (goals.instruction_solvable): a per-kind mean over a few
+              # episodes is dominated by unbounded-below unsolvable ones.
+              + [f"median_{kind}" for kind in EVAL_KINDS]
+              + ["median_relative_solvable", "median_relative_unsolvable", "relative_solvable_share"])
 DEFAULT_OUT_TEMPLATE = "out/rl_v2/oneshot_seed{seed}"
 CHECKPOINT_NAME = "checkpoint_{timesteps}.zip"
 BEST_NAME = "best.zip"
@@ -80,7 +85,8 @@ def evaluate_policy_on(episodes, model) -> list:
         while not (terminated or truncated):
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
-        results.append({"attainment": info["attainment"], "kind": info["kind"]})
+        results.append({"attainment": info["attainment"], "kind": info["kind"],
+                        "solvable": info.get("solvable")})
     return results
 
 
@@ -91,13 +97,20 @@ def summarize_eval(results: list) -> dict:
     with no episodes in `results` (rather than crashing on an empty mean)."""
     attainments = [row["attainment"] for row in results]
     stats = goals.summarise_attainment(attainments)
-    by_kind = {}
+    by_kind, median_by_kind = {}, {}
     for kind in EVAL_KINDS:
         values = [row["attainment"] for row in results if row["kind"] == kind]
         by_kind[kind] = float(np.mean(values)) if values else None
+        median_by_kind[kind] = float(np.median(values)) if values else None
+    relative = [row for row in results if row["kind"] == "relative"]
+    solvable = [row["attainment"] for row in relative if row.get("solvable")]
+    unsolvable = [row["attainment"] for row in relative if row.get("solvable") is False]
     return {"mean_attainment": stats["mean_raw"], "median_attainment": stats["median"],
             "mean_clipped_attainment": stats["mean_clipped"], "share_positive": stats["share_positive"],
-            "by_kind": by_kind}
+            "by_kind": by_kind, "median_by_kind": median_by_kind,
+            "relative_solvable_median": float(np.median(solvable)) if solvable else None,
+            "relative_unsolvable_median": float(np.median(unsolvable)) if unsolvable else None,
+            "relative_solvable_share": len(solvable) / len(relative) if relative else None}
 
 
 def ensure_run_dir(out: str) -> None:
@@ -116,6 +129,10 @@ def _eval_row(timesteps: int, summary: dict) -> dict:
            "share_positive": summary["share_positive"]}
     for kind in EVAL_KINDS:
         row[f"attainment_{kind}"] = summary["by_kind"][kind]
+        row[f"median_{kind}"] = summary["median_by_kind"][kind]
+    row["median_relative_solvable"] = summary["relative_solvable_median"]
+    row["median_relative_unsolvable"] = summary["relative_unsolvable_median"]
+    row["relative_solvable_share"] = summary["relative_solvable_share"]
     return row
 
 

@@ -866,3 +866,27 @@ def test_goal_from_command_allows_a_class_the_scan_can_show(monkeypatch):
     got = goals.goal_from_command(command, model, start, volume="ts_fake")
 
     assert "skeleton" in got["targets"]
+
+
+# ---------- solvability of visibility-change targets ----------
+
+def test_vis_target_solvable_decrease_needs_room_above_the_log_floor():
+    eps = goals.EPSILON
+    needed = (10 ** 0.3 - 1) * eps
+    assert goals.vis_target_solvable(-0.3, needed * 1.01)
+    assert not goals.vis_target_solvable(-0.3, needed * 0.99)
+    assert not goals.vis_target_solvable(-0.15, 0.0)
+
+
+def test_vis_target_solvable_increase_needs_a_visible_class():
+    assert goals.vis_target_solvable(0.6, goals.EPSILON)
+    assert not goals.vis_target_solvable(0.15, goals.EPSILON * 0.5)
+
+
+def test_instruction_solvable_covers_relative_and_compound_only():
+    start = {"vis": {"liver": 0.01, "kidneys": 0.0}, "bright": {}}
+    relative = {"kind": "relative", "targets": {"liver": {"vis": -0.3}}}
+    assert goals.instruction_solvable(relative, start) is True
+    compound = {"kind": "compound", "targets": {"liver": {"vis": 0.3}, "kidneys": {"vis": -0.15}}}
+    assert goals.instruction_solvable(compound, start) is False
+    assert goals.instruction_solvable({"kind": "absolute", "targets": {"liver": {"vis": 0.2}}}, start) is None

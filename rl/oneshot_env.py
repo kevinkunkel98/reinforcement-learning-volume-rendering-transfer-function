@@ -361,7 +361,8 @@ class OneShotEnv(gym.Env):
     def _info(self, attainment: float, useless: bool) -> dict:
         info = {"attainment": attainment, "kind": self._instruction["kind"],  # pyright: ignore[reportOptionalSubscript]
                 "volume": self._volume, "text": self._instruction["text"], "useless": useless,  # pyright: ignore[reportOptionalSubscript]
-                "goal_source": "hindsight" if self._hindsight_action is not None else "instruction"}
+                "goal_source": "hindsight" if self._hindsight_action is not None else "instruction",
+                "solvable": getattr(self, "_solvable", None)}
         if self.policy_version in (V7_POLICY_VERSION, V9_POLICY_VERSION):
             info["policy_version"] = self.policy_version
         return info
@@ -544,6 +545,7 @@ class OneShotEnv(gym.Env):
         self._start_agg = start_agg
         self._start_distance = start_distance
         self._hindsight_action = hindsight_action
+        self._solvable = goals.instruction_solvable(instruction, start_agg)
 
         obs = self._build_observation()
         info = self._info(self._attainment(start_agg), goals.is_useless(raw_features, self._active_layers))

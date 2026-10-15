@@ -288,7 +288,7 @@ def test_info_has_the_expected_keys(monkeypatch):
 
     obs, reward, terminated, truncated, info = env.step(np.zeros(ACTION_SIZE, dtype=np.float32))
 
-    assert set(info.keys()) == {"attainment", "kind", "volume", "text", "useless", "goal_source"}
+    assert set(info.keys()) == {"attainment", "kind", "volume", "text", "useless", "goal_source", "solvable"}
     assert info["volume"] == "fake_a"
     assert info["goal_source"] == "instruction"   # hindsight_ratio defaults to 0
     assert info["kind"] == env._instruction["kind"]
