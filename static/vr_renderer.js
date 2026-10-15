@@ -332,5 +332,87 @@ void main() { outColor = texture(uTex, vUv); }`;
     return JSON.stringify(result);
   }
 
-  window.vrRenderer = { createScene, benchmark };
+  const XR_RADIUS_M = 0.3;
+  const XR_DISTANCE_M = 0.9;
+
+  // One immersive session on its own WebGL2 context. `options`: {xrscale,
+  // down}. Rotation (thumbstick) and HUD come from xr.js through the same
+  // methods the vtk path offers.
+  let session = null;
+
+  async function start(xrSession, options) {
+    const data = window.volumeViewer.getVolumeData();
+    if (!data) throw new Error("no local volume loaded");
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2", { xrCompatible: true, antialias: false });
+    if (!gl) throw new Error("WebGL2 unavailable");
+    const scene = createScene(gl, data, { down: options.down });
+    const space = await xrSession.requestReferenceSpace("local");
+    const layer = new XRWebGLLayer(xrSession, gl, { framebufferScaleFactor: options.xrscale, antialias: false });
+    xrSession.updateRenderState({ baseLayer: layer, depthNear: 0.05, depthFar: 100 });
+
+    const north = data.north;
+    const up = data.up;
+    const base = window.xrLogic.physicalRotation(north, up);
+    const bounds = [0, 1, 2].flatMap((a) => [0, (data.dims[a] - 1) * data.spacing[a]]);
+    const center = [0, 2, 4].map((i) => (bounds[i] + bounds[i + 1]) / 2);
+    const radius = Math.hypot(...[0, 2, 4].map((i) => bounds[i + 1] - bounds[i])) / 2;
+    const placement = { center, scale: radius / XR_RADIUS_M, room: [0, 0, -XR_DISTANCE_M], base };
+    const identity3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    let rotation = identity3;
+    let background = [0, 0, 0];
+    const unsubscribe = window.volumeViewer.onTransferFunctionChange((params, layers, labelled) =>
+      scene.setTransferFunction(params, layers, labelled));
+
+    function onFrame(time, frame) {
+      if (!session || session.xrSession !== xrSession) return;
+      xrSession.requestAnimationFrame(onFrame);
+      const pose = frame.getViewerPose(space);
+      if (!pose) return;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+      gl.clearColor(...background, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      const model = window.vrMath.modelMatrix({ ...placement, rotation });
+      const hudModel = window.vrMath.modelMatrix({ ...placement, rotation: identity3 });
+      for (const view of pose.views) {
+        const vp = layer.getViewport(view);
+        gl.viewport(vp.x, vp.y, vp.width, vp.height);
+        scene.drawVolume(model, view.transform.inverse.matrix, view.projectionMatrix);
+        scene.drawHud(hudModel, view.transform.inverse.matrix, view.projectionMatrix);
+      }
+    }
+
+    session = {
+      xrSession, gl, scene, unsubscribe, bounds, north, up, base,
+      setRotation(r) { rotation = r; },
+      setBackground(rgb) { background = rgb; },
+    };
+    xrSession.requestAnimationFrame(onFrame);
+  }
+
+  function stop() {
+    if (!session) return;
+    session.unsubscribe();
+    session.scene.dispose();
+    session = null;
+  }
+
+  window.vrRenderer = {
+    createScene, benchmark, start, stop,
+    active: () => session !== null,
+    // Same surface xr.js uses on window.volumeViewer for the vtk path.
+    getPhysicalRotation: () => session.base,
+    setVolumeRotation: (rotation) => session?.setRotation(rotation),
+    setXRSampleMultiplier: (m) => { if (session) session.scene.state.step = session.scene.baseStep * m; },
+    setBackground: (rgb) => session?.setBackground(rgb),
+    getHudFrame: () => ({ bounds: session.bounds, up: session.up, dop: session.north }),
+    setHud: (canvas, corners) => session?.scene.setHud(canvas, corners),
+    refreshHud: () => session?.scene.refreshHud(),
+    getXRDiagnostics: () => (session ? {
+      xrCapable: true, sampleDistance: session.scene.state.step, autoAdjust: false, shade: true,
+      dimensions: session.scene.dims, texture: `R16F+R8 occ=${session.scene.occupied.toFixed(2)}`,
+      floatLinear: true, foveation: null, framebufferScale: window.volumeViewer.perfFlags.xrscale,
+      flags: window.volumeViewer.perfFlags,
+    } : {}),
+  };
 })();
