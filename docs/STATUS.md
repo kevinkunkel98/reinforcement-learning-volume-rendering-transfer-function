@@ -1,250 +1,272 @@
-# Status — 2026-09-21
+# Status — 2026-10-14
 
-Found and fixed a reward-hacking blind spot the same day as the presentation
-prep: `goals.distance` never charged a transfer function for rendering
-unclassified ("other") tissue, so a search or a policy could satisfy "show
-only X" by lighting up material that belongs to none of the five measured
-classes instead of X. Fixed, retrained three fresh seeds (`oneshot_v4_seed
-{0,1,2}`), re-ran the full held-out protocol. The fix helped the aggregate
-numbers; it did not fully solve the failure mode that exposed it. Both halves
-of that sentence are below, not just the first one.
+Comprehensive project snapshot after the 8-class / label-scoped (v9) transfer
+function, the E1–E5 experiment series, the WebXR/VR integration, and a long
+methodology review session. Presented to the thesis committee 2026-10-14 —
+meeting went well. This document is the planning baseline for the remaining
+~3 weeks in the Ohio lab (VR hardware access) before returning to Leipzig,
+within an overall submission timeline of January 2027.
 
-Also found, live, why "show only X" via the rule executor looks inconsistent:
-a wide peak (skeleton's is 280 HU) keeps real opacity in a neighbour's HU
-range, so raising it alone re-lights tissue whose own peak was correctly
-zeroed. "Show only" now also caps the shown peak's width to 150 HU
-(`transfer.SHOW_ONLY_MAX_WIDTH_HU`), verified before and after with new unit
-tests. On the case that exposed it (`ts_s0454`, "show only bones", cold
-reset): skeleton visibility barely moved (11.1%→9.8%), soft-tissue haze
-dropped 124x (3.98%→0.03%), and that episode's attainment went from a clear
-regression (−0.448) to a clear win (+0.148). The *aggregate* B1 median across
-the full 200-episode held-out mix barely moved (−0.022→−0.0225) — this fixes
-a real visual artifact on individual episodes, not the rule executor's
-overall score, which still varies by which class is asked for and how bright
-it already was.
+Superseded by this doc: the 2026-09-21 version of this file (pre-8-class,
+pre-E1–E5, pre-VR-measurement). That version's "four classes" results are
+kept below for historical/regression comparison only — they are not
+re-confirmed and should not be read as current.
 
-## Where things stand
+## Project setup
 
-| | state |
+**Live app (`server.py`, FastAPI):**
+Voice (faster-whisper, local) or text → rule-based or local-LLM (Ollama)
+parser → `commands.apply_command` (deterministic, default path) → new
+transfer-function params → client-side rendering (vtk.js/WebGL), flat
+desktop and WebXR VR, same renderer. A separate `/api/compare` /
+`/api/compare/sweep` path additionally runs the trained SAC policy and
+`hill_climb` search for demo/comparison; a small offscreen VTK renderer
+produces thumbnails for that panel only. `POLICY_PATH` env var swaps
+checkpoints without a code change.
+
+**Offline RL training:** TotalSegmentator-labelled CT volumes →
+`visibility.py` (measurement, torch-based but currently CPU-only — no
+`.to(device)` calls anywhere) + `transfer.py` (8-peak, label-scoped TF) +
+`goals.py` (exact distance/attainment metric, instruction sampling,
+per-scan `solo_max` ceiling) → `rl.oneshot_env.OneShotEnv` (Gymnasium,
+97-dim observation, 24-dim action) → standard `stable-baselines3` SAC
+(`SAC("MlpPolicy", ...)`, no custom `net_arch`/`policy_kwargs` — the
+project's novelty is in the environment/reward/pretraining design, not the
+algorithm) with hindsight relabeling + search-distilled pretraining
+(`hill_climb` solutions distilled into the actor before RL starts) →
+`rl.vis_eval` / `tools.per_class_eval` / `tools.baseline_report` → 3-seed
+adoption gate (median attainment > 0 AND > 50% episodes improved, all 3
+seeds) → `out/rl_v4/<run>/best.zip`.
+
+**Transfer function:** 8 Gaussian peaks (one per class: lungs, soft,
+liver, kidneys, spleen, heart, vessels, skeleton), 6 params each
+(center, width, height, r, g, b) = 48 values. Centers fixed at calibrated
+HU values; policy/search only move width, height, colour (24 controllable
+groups = 8 × {width, height, brightness}). Label-scoped shading (v9): a
+voxel is shaded only by its own segmented class's peak, resolving the
+previous confusion of 5 classes (soft, kidneys, heart, spleen, liver) that
+all sat at 40–65 HU under the old shared-HU-lookup rendering.
+
+**Goal definition, per instruction kind** (`goals.py`, hand-set constants,
+not learned):
+- `relative`: target = current value × 10^(±strength), strength ∈
+  {slightly: 0.15, moderately: 0.3, strongly: 0.6} (log10 units; e.g.
+  "strongly less" ≈ ÷4).
+- `absolute`: target = {low: 0.1, medium: 0.4, high: 0.8} × `solo_max`
+  (the live-measured, per-volume ceiling of what that class can reach
+  under a single-peak TF — makes "high" mean the same relative level on
+  every patient regardless of raw HU/anatomy differences).
+- `show_only`: named classes → max, all others → min.
+- Instructions below `VISIBLE_CEILING` (0.005, i.e. unanswerable even in
+  the best case) are not sampled at all.
+
+**Reward:** `R = (progress − λ·drift) / d_start`, where `progress` is the
+share of `start_distance` closed and `drift` sums unrequested changes on
+every *unmentioned* class. Normalized by `start_distance` so easy and hard
+goals are comparable. Action mode is residual (`action = offset from the
+episode's own start`, `v9 = v7 + a load-time transfer_mode contract
+check`), not absolute.
+
+**Important caveat, discussed and worth keeping in mind:** the exact
+metric is a human-designed proxy, not ground truth — the strength
+constants above were picked by the developers, not fit to real human
+judgment. `tools/preference_agreement.py` exists specifically to check how
+often the metric's pick matches a real rater's pick. The drift penalty in
+particular is a flat linear sum with no perceptual weighting, so a render
+that looks correct to a human can still score low if invisible-scale drift
+on unmentioned classes accumulates — a concrete, named risk, not just a
+hypothetical.
+
+## Strengths
+
+- **Controlled ablation methodology.** E1→E2→E2+Search→E3 isolates
+  exactly what hindsight pretraining and search-distilled pretraining each
+  contribute, one variable at a time, 3-seed confirmed.
+- **A self-caught and transparently fixed measurement bug.** The
+  `show_only` reward-weighting investigation (E3-old-metric → E3-rescored
+  → E5-retrained) shows the old win (+0.061) was mostly a scoring
+  artifact, not a real capability — found, diagnosed, and reported
+  honestly rather than left standing.
+- **A real, working end-to-end system**, not a notebook experiment:
+  voice → RL/rules → render, on desktop and in an actual VR headset
+  (tested live, 2026-10-13/14, HTC Vive Focus 3).
+- **Standard RL algorithm (SAC via SB3), unmodified.** Keeps the thesis's
+  novelty claim focused on the problem formulation (one-shot amortization,
+  label-scoped TF, per-scan-normalized goals, hindsight + search-distilled
+  pretraining) rather than an unproven custom algorithm.
+- **A genuine, evidence-derived architectural insight**: `hill_climb`
+  (no learning) beats the trained policy on `show_only` (+0.196 vs
+  -0.037) — motivates routing well-defined-target instructions to search
+  and reserving RL for genuinely ambiguous ones (`relative`, `compound`,
+  later RLHF-driven preference).
+- **RLHF scaling infrastructure already exists**, not just planned:
+  `collect.html`/`collect.js` (web UI, servable like the main app),
+  `rater_id` already in the data schema, `tools/merge_preferences.py`
+  (Cohen's kappa *and* Krippendorff's alpha, hand-implemented since scipy
+  isn't available). Only the data volume is missing, not the tooling.
+- **VR performance is measured, not guessed.** Live logcat data
+  (`VRPerfMgr`) from the actual headset: 0.5×/fine sampling stable at
+  88–90 fps / 60% GPU; 0.75× GPU-bound at 99% / 6–7 fps; 1.0×/2× coarse
+  sampling 64–69 fps / 92% GPU but blurry. A real hardware ceiling for
+  stereo volume ray-marching on an Adreno 650, not a misconfiguration.
+
+## Weaknesses
+
+- **`relative` (40% of all instructions) is negative in every experiment
+  of the current 8-class generation (E1–E5), and never diagnosed.**
+  Important: it was *not* always bad — the old 4-class system (v4) scored
+  +0.354 on `relative`, third-best of five kinds. This is a regression
+  tied to the 8-class expansion, not an inherent property of the
+  instruction kind. Leading candidates, untested: more drift surface
+  (8 vs 4–5 classes to accidentally disturb), or a hindsight-data-coverage
+  shift analogous to the brightness blind spot in E2.
+- **`show_only` still misses its own adoption gate** after the
+  group-balanced reward-weighting fix (E5: 3/3 seeds improved, median
+  still -0.037, below zero).
+- **`compound` stays weak (+0.088) and got worse under E4** (show_only-
+  anchored hindsight diluted its training signal).
+- **No held-out test-split evaluation exists for the current (v9/E3/E5)
+  checkpoints** — all current numbers are validation-split only, flagged
+  explicitly as "not yet done" in `docs/experiments/2026-10-07-current-
+  setup-and-baselines.typ`. The old v4 numbers below *were* measured on a
+  real held-out test split; today's aren't directly comparable to them for
+  that reason too.
+- **RLHF data is not usable as-is**: 54 pairs, single rater (`Kevin`),
+  collected 2026-09-17 — before the 8-class/label-scoped rendering even
+  existed, so the images judged don't reflect current rendering quality.
+  Already self-quarantined as "pilot" in the prior status doc.
+- **Training currently runs entirely on CPU**, confirmed directly
+  (`SAC("MlpPolicy", ...)` has no `device=`; `visibility.py`'s torch calls
+  have no `.to(device)`/`.cuda()` anywhere). Not a weak-GPU problem, a
+  no-GPU-used-at-all problem. (MPS is available and the specific ops
+  `visibility.py` needs — 3D `grid_sample`, `cumprod`, `where` — were
+  smoke-tested working on this machine's PyTorch 2.14.0.)
+- **Out-of-source generalization was never (re-)confirmed** under the
+  current 8-class system. The 2026-09-21 status doc recorded the v4 policy
+  at or below "do nothing" on an out-of-source volume (`ct_skull`); that
+  finding predates the 8-class work and hasn't been re-run.
+- **The drift penalty is a rigid, unweighted linear formula** — it can
+  penalize a render that looks correct to a human if small, imperceptible
+  changes accumulate across unmentioned classes. A concrete, named
+  candidate for what real preference data would likely correct.
+- **The goal-definition constants themselves are hand-set, not learned
+  or validated**: `VISIBILITY_STRENGTH` (0.15/0.3/0.6) and
+  `ABSOLUTE_LEVEL` (0.1/0.4/0.8) were picked by the developers, not fit to
+  real human judgment of what "slightly"/"strongly" mean.
+
+## v1–v9, for the record
+
+| Version | What changed |
 |---|---|
-| Measurement (`visibility.py`) | validated against real renders, four of five classes; now also reports an "other" (unclassified-tissue) bucket per render |
-| Policy | 3 seeds on the reward-corrected pipeline (`oneshot_v4_seed{0,1,2}`); viewer ships seed 2, the strongest |
-| Held-out evaluation | 200 episodes, 3 seeds, baselines B0–B5, provenance recorded, re-run under the corrected objective |
-| Reproducibility | result files carry per-episode rows; `tools.compare_runs` recomputes seed-to-seed comparisons from them |
-| Viewer | four-mode comparison panel and a 20-instruction sweep |
-| Language → goal → policy | end to end, LLM parser default |
-| Figures | frontier, reliability, per-kind curves, qualitative, SAC diagnostics — **not yet re-rendered for v4**, still reflect v3 |
-| **Clean preference judgments** | **0** — the 54 collected are quarantined as a pilot |
-| Tests | 669 passing |
+| v1 | First one-shot checkpoint, replacing a ten-step formulation that never learned (abandoned within a day, no held-out eval ever run — amortizing a single forward pass over (instruction, start state) → TF works where learning a blind iterative search procedure did not). |
+| v2 | Added the reachable-ceiling (`solo_max`) observation channel. Evaluated under two undetected bugs. |
+| v3 | Both bugs fixed (ceiling probed at the wrong peak centre; a colour action collapsed r=g=b). Headline checkpoint through v4. |
+| v4 | `goals.distance` now charges for hiding behind unclassified ("other") tissue — closes a reward-hacking exploit. **4-class era, see table below.** |
+| v7 | Residual action mode + `target` reward mode introduced. |
+| v8 | Old TF + layer actions (intermediate, superseded by v9). |
+| v9 | Label-scoped TF (8 classes, voxel shaded only by its own segmented class's peak) + hindsight pretraining + brightness hindsight + a load-time `transfer_mode` contract check. **Current generation (E1–E5).** |
 
-## What changed today: the "other" keep term
+### v4 results, 4-class era (for historical/regression comparison only — not re-confirmed, different task difficulty, real held-out test split)
 
-`visibility.py` measures five anatomical classes, but every voxel the label
-volume assigns to none of them — fat, connective tissue, partial-volume edges
-— was invisible to the objective: not measured, not penalised, not present
-anywhere in `goals.distance`. Driving the viewer's "show only bones" on
-`ts_s0477` with `hill_climb` (200 evaluations) reached **full frame
-coverage** while every one of the five labelled classes read below 0.001 of
-the image — 99% of the rendered frame was material the objective could not
-see, and the search still scored it as a strong answer.
-
-Fix: `visibility.py`'s `features()` now reports an `"other"` bucket for
-those unclassified voxels, and `goals.distance` charges for it under the same
-keep-tolerance any unmentioned class already gets (it can never be *named* by
-an instruction, so it is always the unmentioned case). Verified in isolation
-before retraining — 5 new tests, full suite green at 669/669 — then three
-fresh seeds retrained from scratch under the corrected reward (same
-architecture, same 150k timesteps).
-
-## Results — v4, the corrected objective (measured 2026-09-21)
-
-200 instructions, six unseen patients, three fresh seeds. Same protocol as
-before: attainment is the median of the three seeds' medians; "improved" is
-their mean.
-
-| Method | Evaluations | v3 (old) | **v4 (now)** | Improved |
-|---|---|---|---|---|
-| hill-climb (thorough) | 200 | +0.730 | +0.692 | 100 % |
-| **policy + 3 refinements** | **4** | +0.316 | **+0.371** | 80 % |
-| **policy alone** | **0** | +0.275 | **+0.331** | 78 % |
-| hill-climb (cheap) | 10 | +0.263 | +0.258 | 93 % |
-| do nothing | 0 | 0.000 | 0.000 | — |
-| rule-based executor | 0 | −0.022 | −0.022 | 37 % |
-| random | 0 | −0.040 | −0.040 | 39 % |
-| occlusion heuristic | 0 | −0.191 | −0.198 | 30 % |
-
-**The policy improved (+0.275→+0.331 alone, +0.316→+0.371 with refinement)
-without any change to architecture or training budget** — the only change
-was what the reward charges for. Thorough search's own number *dropped*
-(+0.730→+0.692): part of its old advantage was the same exploit, now
-correctly discounted rather than rewarded. That B4 drops the most while the
-deterministic baselines (B0–B2, B5) barely move at all is the expected
-signature of a reward-hacking fix, not noise.
-
-Per instruction kind (median of the three seeds' medians): absolute +0.511,
-brightness +0.561, relative +0.354, show-only +0.166, compound +0.117. Three
-of five kinds clearly improved on the old single-seed numbers (absolute
-+0.50, brightness +0.48, relative +0.30); **compound moved from +0.09 to
-+0.117 — still weak, but not nothing.**
-
-### The honest part: `show_only` itself is not fixed
-
-Re-ran "show only bones" on `ts_s0477` with the strongest new seed (2),
-independently of the viewer, straight from the checkpoint:
-
-```
-final vis: skeleton=0.0018, lungs=0.00006, soft=0.00093, other=0.604
-attainment: 0.289  (was 0.246 with the old checkpoint)
-```
-
-Skeleton is still tiny; "other" still dominates 60% of the image. The
-attainment gain is from slightly cleaner suppression of lungs/soft tissue,
-not from the policy learning to actually raise the named class. `show_only`'s
-own median-of-medians (+0.166) sits at or slightly below the old single-seed
-figure (+0.20) — the mean, less sensitive to this specific failure, moved
-from +0.20 to ~+0.22-0.23 across the three new seeds.
-
-**Conclusion: the reward fix was correct and necessary, and it measurably
-helped the aggregate numbers, but one retrain did not teach the policy to
-solve `show_only` — that remains open.** Untested hypotheses for next steps:
-train longer, raise `LAMBDA_KEEP`, oversample `show_only` episodes during
-training. None of these have been tried yet.
-
-## v1–v4, for the record
-
-| Version | Checkpoints | What changed |
+| Method | Median attainment | Improved |
 |---|---|---|
-| v1 | `oneshot_seed{0,1}` | First one-shot checkpoint, replacing an earlier ten-step formulation that never learned. Exploratory — no held-out eval was ever run; superseded within a day. |
-| v2 | `oneshot_v2_seed{0,1,2}` | Added the reachable-ceiling (`solo_max`) channel to the observation. Evaluated, but on two undetected bugs. |
-| v3 | `oneshot_v3_seed{0,1,2}` | Both bugs fixed: the ceiling was probed at the wrong peak centre, and a colour action collapsed r=g=b. This was the headline checkpoint until today. |
-| v4 | `oneshot_v4_seed{0,1,2}` | `goals.distance` now charges for hiding behind unclassified ("other") tissue — a gap v1–v3 all shared. **Current.** |
+| hill-climb (thorough, 200 evals) | +0.692 | 100% |
+| policy + 3 refinements | +0.371 | 80% |
+| policy alone | +0.331 | 78% |
+| hill-climb (cheap, 10 evals) | +0.258 | 93% |
+| do nothing | 0.000 | — |
+| rule executor | -0.022 | 37% |
+| random | -0.040 | 39% |
+| occlusion heuristic | -0.198 | 30% |
 
-Full v2→v3 and v3→v4 write-ups with per-kind tables and significance tests
-are in `docs/rl-paper.typ` (`@retrain`, `@v4-retrain`).
+Per-kind (v4): absolute +0.511, brightness +0.561, **relative +0.354**,
+show only +0.166, compound +0.117.
 
-## The viewer, as of today
+### Current (E3/E5, 8-class era, validation split only)
 
-**compare** answers one instruction four ways from the same start state —
-applied directly, hill-climbed at 10 evaluations (B3) and 200 (B4), and by the
-policy — reporting each arm's attainment, evaluation count, wall clock and
-per-class effect beside its render. The search arms call
-`rl.baselines.hill_climb` and attainment is `goals.attainment`, so the panel
-computes the same quantities as the table above rather than a lookalike. It
-plots whichever channel the instruction names: a brightness goal barely moves
-visibility, so plotting visibility for one would show four near-identical bars
-beside attainments ranging from +0.00 to +0.94.
-
-**sweep 20** runs twenty instructions sampled from the same grammar and reports
-each method's median attainment and how often it improved on doing nothing. One
-comparison is a single draw; the claim above is a median, and the reliability
-gap means roughly one instruction in four has the policy not improving.
-
-Measured on `ts_s0477`, a held-out test subject, reset to the default transfer
-function before every measurement, **with the v4 seed-2 checkpoint**:
-
-| instruction | exact | search·10 | search·200 | policy |
-|---|---|---|---|---|
-| more bone | −0.001 | +0.348 | +0.582 | **+0.541** |
-| brighten the skeleton | +0.025 | +0.000 | +0.941 | **+0.775** |
-
-| sweep seed | exact | search·10 | policy |
+| Instruction kind | Share | Attainment | Status |
 |---|---|---|---|
-| 0 | −0.209 (37 %) | +0.342 (100 %) | **+0.473 (90 %)** |
-| 1 | −0.263 (22 %) | +0.387 (100 %) | **+0.443 (95 %)** |
-| 2 | +0.041 (60 %) | +0.384 (100 %) | **+0.352 (90 %)** |
+| brightness | 10% | +0.246 | solid |
+| absolute | 10% | +0.176 | solid |
+| show_only | 15% | +0.096 (E3) / **-0.037** (E5, current) | gate not cleared |
+| compound | 25% | +0.088 | weak, worse under E4 |
+| **relative** | **40%** | **-0.068** | negative, undiagnosed |
 
-The two single-episode examples read slightly lower than the old checkpoint's
-(+0.627/+0.819 → +0.541/+0.775) — expected variance on n=1, not a regression;
-the sweep numbers (which average over 20 instructions) are up on every seed
-(old +0.425/+0.405/+0.340 → new +0.473/+0.443/+0.352), consistent with the
-held-out table above.
+Overall (median across kinds, 3 seeds): **+0.153**, 70.8% episodes
+improved — clears the project's own gate only because the easier 60% of
+instructions carries the weighted-but-worst-performing `relative`.
 
-Exact and policy spend 0 evaluations and answer in 0 ms; search·10 takes
-~140 ms, search·200 ~2.7 s.
+## TODO, prioritized for the Ohio window (lab/VR/compute access is the
+scarce resource here, not time in general — defer anything that doesn't
+need it)
 
-## Demo notes
+1. **Diagnose the `relative` regression.** Compare v4 vs v9 hindsight-data
+   coverage and drift-penalty surface for `relative` specifically, without
+   a full retrain first — cheaper than a class-count sweep (which would
+   cost ~60 compute-hours for 5 points × 3 seeds × ~4h, not worth it
+   before a cheaper code-level diff investigation).
+2. **Hybrid routing, quick win, no retraining needed:** route `show_only`/
+   `absolute` to `hill_climb` search (already beats the policy there,
+   ~2–3s latency acceptable for "apply once"); route `relative` to the
+   rule-based executor until it's actually fixed, so the live demo never
+   shows the policy's known-negative kind.
+3. **VR adaptive sample-distance controller** (a few hours, not
+   multi-day): react to real measured frame time instead of trusting
+   vtk.js's built-in `AutoAdjustSampleDistances`, which doesn't engage
+   usefully inside the custom `session.requestAnimationFrame` XR loop.
+   Needs the physical headset to validate — do this before leaving Ohio.
+4. **Scale RLHF data collection while people are physically in the lab**
+   — this is as location-bound as the headset. Multiple raters via
+   `collect.html`, merge with `tools/merge_preferences.py`, report
+   Krippendorff's alpha (not Cohen's kappa, since >2 raters is likely).
+   Target checkpoints on the learning curve: ~100, ~200, ~400 pairs
+   (median judgment time measured at 31s, so 400 pairs ≈ 3.5 labeling-
+   hours total, trivially split across several people).
+5. **Held-out test-split evaluation** for the current E3/E5 checkpoints —
+   straightforward, no new training, just the missing eval run.
+6. **Wire `device=` through `visibility.py` and the SAC trainer.** MPS
+   already verified working locally (3D `grid_sample` included); test a
+   real before/after training-speed comparison on the M1 Pro before
+   assuming the Leipzig 2080 Super is needed at all. If MPS doesn't scale
+   to full-size volumes, CUDA on the 2080 Super is the fallback (more
+   mature PyTorch support than MPS).
 
-- **Press Reset before measuring anything.** Both panels start from wherever
-  the session is, so comparing an instruction you have already applied measures
-  from its own result — a different question, with worse-looking numbers.
-- **Drive absolute and brightness instructions for a "policy works" demo** —
-  both are strong and improved further under v4. Avoid leading with `show only`
-  — it's the one category the reward fix didn't resolve (see above).
-- **Vessels only work on `ts_s1379`.** Every named demo dataset (`ct_chest`,
-  `ct_skull`, `ct_cardio`, `ct_abdomen`, `mri_head`, `stag_beetle`) has no
-  TotalSegmentator labels at all, so `goal_classes_for_volume` never offers
-  vessels as a goal there regardless of what the scan actually shows — this
-  includes `ct_cardio`, whose name suggests otherwise. `datasets.py`'s
-  `OUT_OF_SOURCE_CT` names exactly these four as a generalization split that
-  has never actually been evaluated.
-- **Avoid "a bit less soft tissue"** (policy −2.8 on two subjects) and compound
-  instructions (median −0.25 in the sweep).
-- **Four of six test subjects have no lungs.** Lung instructions are correctly
-  refused there; that is not a bug.
+### Deferred (real ideas, not realistic for this window)
 
-## Defects found and fixed this weekend (2026-09-20)
+- Empty-space skipping / bricking and foveated rendering for VR
+  (multi-day engine work; the `FOVED` capability flag the headset reports
+  is currently unused).
+- Server-side VR rendering with the headset's existing Asynchronous Time
+  Warp compositor (`RENDER_ATWC`/`RENDER_ATW`, observed live in logcat)
+  smoothing the gaps — a legitimate pattern (cf. NVIDIA CloudXR), but a
+  real video-streaming/WebRTC pipeline, bigger than this window.
+- RLHF stage 2 (fine-tuning against a learned reward model, KL-anchored
+  to stage 1) — blocked until enough preference data exists; realistic
+  after Ohio, not during it.
+- Expanding beyond 8 classes — explicitly *not* recommended; 8 already
+  resolves the real HU-overlap problem, more would mostly add compute
+  cost without new research insight. Better use of time: make the
+  existing 8 actually work.
 
-- The viewer's **search mode was not the search the thesis measures** — a
-  bespoke coordinate stepper over `evaluate.objective` rather than
-  `rl.baselines.hill_climb` — and it only engaged for opacity commands, so
-  "show only the lungs" with search on silently did nothing.
-- The **policy fallback died on a missing visibility cache** instead of
-  degrading to exact application.
-- Every **`ts_session` test ran against the intensity-only visibility model**,
-  because the fixture patched `totalseg.subject` but not the `_subjects`
-  chokepoint that `has_labels` reads.
-- **Visibility models were rebuilt on every call**, discarding `solo_max`'s
-  memo and repaying ~190 ms each time.
-- The **comparison panel timed the render, not the arm**, which made the first
-  press of a session report the policy as slower than cheap search.
+## What we still want to achieve
 
-## Cheapest improvements, in order
+**By the end of the Ohio window (~3 weeks):** a prototype that feels
+solid end-to-end, not just on the easy instruction kinds — hybrid
+routing live, VR smooth-and-sharp-enough via the adaptive controller, a
+`relative` root-cause investigation at least started, and a meaningfully
+larger, multi-rater, Krippendorff's-alpha-validated preference dataset
+banked for later RLHF work.
 
-1. **Actually solve `show_only` for the policy.** The reward no longer rewards
-   the wrong thing, but the policy hasn't learned the right thing either — try
-   more training steps, a larger `LAMBDA_KEEP`, or oversampling `show_only`
-   episodes, and check per-episode renders, not just the attainment number.
-   (The rule executor's version of this — a wide peak re-lighting other
-   tissue — is fixed; see above. The policy's action space includes width
-   too, but nothing currently pushes it to narrow a peak the way the rule
-   now does explicitly.)
-2. **Fix compound instructions** — still the second-clearest capability gap
-   (+0.117), the one a user notices first after show-only.
-3. **Distil search into the policy** — supervised pretraining on hill-climb
-   solutions before RL. The standard way to close an amortisation gap.
-4. **Make `visibility.py` differentiable.** The index cube is constant with
-   respect to the transfer function; only `transfer_tables` needs porting to
-   torch. Gives an analytic ceiling, a teacher for distillation, and an honest
-   new baseline.
-5. **Re-render the figures for v4** — frontier, reliability, per-kind curves,
-   qualitative and SAC diagnostics all still reflect v3.
+**By January 2027 submission:** every instruction kind individually
+clearing its own 3-seed adoption gate (not just the aggregate median —
+the point made above about `relative` dragging the weighted average down
+while technically "passing" should not survive to the final thesis
+framing), a real held-out test-split number, and an honest, evidence-
+backed account of where RL helps, where search wins instead (the hybrid
+architecture), and why — which is itself the more defensible thesis claim
+than "RL solves everything."
 
-## Known issues
-
-- **The "policy, no ceiling input" ablation** was never validly run: the stored
-  result file is byte-identical to its own control, and no ablation switch has
-  ever existed in the code. Withdrawn rather than repaired.
-- **`evaluations` in the comparison panel is the budget granted**, not what
-  search spent — `hill_climb` can stop early, so B4 reports 200 where it spends
-  about 193.
-- **The per-class analysis of which anatomy benefits from retraining** was
-  measured in the stale batch and has not been re-run; per-episode rows record
-  instruction kind and volume, not goal class.
-- **Anchor-pool and image caches** under `out/cache/` are serialisation
-  contracts across raters. Do not change their key formats without invalidating
-  them deliberately.
-- **`hill_climb`'s coordinate descent still finds the same "suppress
-  everything, light up unclassified tissue" local optimum on `show_only`
-  from the default start and from randomized starts**, even under the
-  corrected objective — the fix removes the wrong incentive but doesn't
-  guarantee a greedy per-episode local search finds the right one. Not
-  addressed: would require its own scoped change to `rl.baselines.hill_climb`
-  and re-validation of the B3/B4 budget numbers, which this session
-  deliberately left alone.
-- **Out-of-source generalization (`ct_chest`, `ct_skull`, `ct_cardio`,
-  `ct_abdomen`) has never been formally evaluated**, despite
-  `datasets.OUT_OF_SOURCE_CT` and `rl.vis_eval --split out_of_source` existing
-  for exactly that. These volumes have no TotalSegmentator labels, so
-  `visibility.py` scores them on the coarser intensity fallback, and the
-  policy never trained on them. A live spot-check found the policy
-  performing at or below "do nothing" on `ct_skull`.
+**Longer-term / possible PhD continuation:** the deferred items above
+(engine-level VR optimization, full RLHF with a calibrated reward model,
+out-of-source generalization work) form a natural, already-scoped
+research agenda rather than loose ends.

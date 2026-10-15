@@ -399,6 +399,12 @@
   // cost scales with pixel count, so 0.5 renders a quarter of the pixels.
   // Tunable on the device with ?xrscale=0.35 etc.
   const XR_FRAMEBUFFER_SCALE = Number(new URLSearchParams(window.location.search).get("xrscale")) || 0.5;
+  // Multiplies the XR ray-march sample distance (coarser = cheaper, fewer
+  // samples per ray). AutoAdjustSampleDistances doesn't reliably kick in
+  // inside the XR session (it's tuned against vtk's own interactor render
+  // loop, not the session.requestAnimationFrame loop xr.js drives), so this
+  // is a manual escape hatch. Tunable on the device with ?xrsample=2 etc.
+  const XR_SAMPLE_DISTANCE_SCALE = Number(new URLSearchParams(window.location.search).get("xrsample")) || 1;
 
   function inXR() {
     return xrSaved !== null;
@@ -420,7 +426,7 @@
     // "fly" in XR, which would fight push-to-talk; the base style has no 3D
     // button handlers at all.
     interactor.setInteractorStyle(vtk.Rendering.Core.vtkInteractorStyle.newInstance());
-    mapper.setSampleDistance(window.xrLogic.xrSampleDistance(volumeMetadata.spacing));
+    mapper.setSampleDistance(window.xrLogic.xrSampleDistance(volumeMetadata.spacing) * XR_SAMPLE_DISTANCE_SCALE);
     // Per-sample gradient-lit shading roughly doubles ray-march cost and
     // stereo rendering already doubles it again (one pass per eye) -- drop
     // it in VR, where spatial understanding matters more than lighting
