@@ -206,9 +206,24 @@
     };
   }
 
+  // The HUD's two debug lines: measured performance, then the active config,
+  // so a photo of the panel is a complete record of one lab measurement.
+  function diagnosticLines(diag, fps, frameMs) {
+    const flags = diag.flags || {};
+    const on = (value) => (value ? 1 : 0);
+    const dash = (value) => (value === null || value === undefined ? "-" : value);
+    return [
+      `${dash(fps)} fps ${frameMs == null ? "-" : frameMs.toFixed(1)}ms tex=${dash(diag.texture)} `
+        + `flin=${on(diag.floatLinear)} dim=${diag.dimensions ? diag.dimensions.join("x") : "-"} `
+        + `sd=${diag.sampleDistance == null ? "-" : diag.sampleDistance.toFixed(2)}`,
+      `xrscale=${dash(diag.framebufferScale)} fov=${dash(diag.foveation)} adapt=${on(flags.adapt)} `
+        + `crop=${on(flags.crop)} down=${dash(flags.down)} shade=${on(diag.shade)} auto=${on(diag.autoAdjust)}`,
+    ];
+  }
+
   return {
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
     summarizeStep, hudPlacement, withXRLayerContext, xrPlacement,
-    PERF_DEFAULTS, parsePerfFlags,
+    PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
   };
 });

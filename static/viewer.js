@@ -47,6 +47,10 @@
   // reference screenshots, and is far too slow on a standalone headset's
   // mobile GPU, even for the flat (non-XR) page.
   let isXRCapableDevice = false;
+  // Fixed-foveation level actually applied in the running XR session (or
+  // "unsupported"); null outside XR.
+  let xrFoveation = null;
+  let floatLinear;
   // A browser without navigator.xr at all (e.g. desktop Safari/Firefox)
   // makes the optional-chained call below evaluate to undefined rather than
   // a promise -- fall back to one so `.then` is always safe to call.
@@ -72,6 +76,7 @@
     volume = undefined;
     mapper = undefined;
     imageData = undefined;
+    floatLinear = undefined;
     rawVolumeValues = undefined;
     volumeMetadata = undefined;
   }
@@ -603,6 +608,27 @@
     }
   }
 
+  // The 3D texture vtk.js 25.11 builds from our scalars under WebGL2:
+  // Float32 is uploaded as R32F; 16-bit integers become R16F (half float)
+  // with preferSizeOverAccuracy on (Rendering/OpenGL/Texture.js,
+  // create3DFilterableFromRaw). vtk.js doesn't expose the texture itself.
+  function textureFormat() {
+    const type = imageData?.getPointData().getScalars()?.getDataType();
+    if (!type) return null;
+    const sixteenBit = type === "Uint16Array" || type === "Int16Array";
+    return sixteenBit && mapper.getPreferSizeOverAccuracy() ? "R16F" : "R32F";
+  }
+
+  // Whether this GPU can linearly filter float textures natively.
+  function floatLinearSupported() {
+    if (floatLinear === undefined && openGLRenderWindow) {
+      const gl = openGLRenderWindow.getCanvas()
+        .getContext(openGLRenderWindow.getWebgl2() ? "webgl2" : "webgl");
+      floatLinear = Boolean(gl?.getExtension("OES_texture_float_linear"));
+    }
+    return floatLinear;
+  }
+
   window.volumeViewer = {
     load, setTransferFunction, setLabelAwareTransferFunction, getCamera, setCamera,
     // The XR frame loop renders on its own; a flat render() mid-session would
@@ -629,7 +655,12 @@
       sampleDistance: mapper?.getSampleDistance(),
       autoAdjust: mapper?.getAutoAdjustSampleDistances(),
       shade: volume?.getProperty().getShade(),
-      dimensions: volumeMetadata?.dimensions,
+      dimensions: imageData?.getDimensions(),
+      texture: textureFormat(),
+      floatLinear: floatLinearSupported(),
+      foveation: xrFoveation,
+      framebufferScale: inXR() ? XR_FRAMEBUFFER_SCALE : null,
+      flags: PERF,
     }),
   };
 })();

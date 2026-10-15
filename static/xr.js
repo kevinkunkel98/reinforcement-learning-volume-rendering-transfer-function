@@ -7,7 +7,7 @@
   const logic = window.xrLogic;
   const button = document.getElementById("enter-vr-btn");
   const HUD_W = 1024;
-  const HUD_H = 384;
+  const HUD_H = 420;
   const RECORDING_BG = [0.25, 0, 0];
 
   let session = null;
@@ -17,6 +17,7 @@
   let flatBackground = null;
   let entering = false;
   let fps = null;
+  let frameMs = null;
   let frames = 0;
   let fpsSince = null;
   let mapper = null; // fresh per session, so a trigger held at exit can't carry over
@@ -79,21 +80,13 @@
     ctx.fillStyle = "#71717a";
     ctx.font = "34px system-ui, sans-serif";
     ctx.fillText(wrapLine(ctx, footer, max), pad, 300);
-    if (fps !== null) {
-      ctx.textAlign = "right";
-      ctx.fillText(`${fps} fps`, HUD_W - pad, 300);
-      ctx.textAlign = "left";
-    }
-    // Debug line: real numbers from this exact session, so a "laggy" report
-    // comes with the actual sample distance/auto-adjust/shade state rather
-    // than needing a follow-up question.
-    const diag = window.volumeViewer.getXRDiagnostics();
+    // Debug lines: real numbers from this exact session plus the active
+    // lever config, so a photo of the panel is a complete measurement.
+    const [perf, config] = logic.diagnosticLines(window.volumeViewer.getXRDiagnostics(), fps, frameMs);
     ctx.fillStyle = "#52525b";
     ctx.font = "26px monospace";
-    ctx.fillText(
-      `xr=${diag.xrCapable} auto=${diag.autoAdjust} sd=${diag.sampleDistance?.toFixed(2)} `
-      + `shade=${diag.shade} dim=${diag.dimensions?.join("x")}`,
-      pad, 340);
+    ctx.fillText(wrapLine(ctx, perf, max), pad, 340);
+    ctx.fillText(wrapLine(ctx, config, max), pad, 376);
     hud.texture.modified();
   }
 
@@ -170,9 +163,12 @@
     if (fpsSince === null) fpsSince = time;
     if (time - fpsSince >= 1000) {
       fps = Math.round((frames * 1000) / (time - fpsSince));
+      frameMs = (time - fpsSince) / frames;
       frames = 0;
       fpsSince = time;
       drawHud();
+      // Same record for remote DevTools / logcat captures.
+      console.info("[xr-perf]", ...logic.diagnosticLines(window.volumeViewer.getXRDiagnostics(), fps, frameMs));
     }
     const sources = [];
     for (const source of frame.session.inputSources) {
@@ -248,6 +244,7 @@
     session.addEventListener("end", onSessionEnd, { once: true });
     mapper = createMapper();
     fps = null;
+    frameMs = null;
     frames = 0;
     fpsSince = null;
     flatBackground = window.volumeViewer.getRenderer().getBackground().slice();

@@ -249,3 +249,22 @@ test("parsePerfFlags falls back to defaults on garbage, never throws", () => {
   );
   assert.equal(xr.parsePerfFlags("?xrscale=").xrscale, 0.5);
 });
+
+test("diagnosticLines formats a full measurement record", () => {
+  const lines = xr.diagnosticLines({
+    texture: "R16F", floatLinear: false, dimensions: [256, 256, 140], sampleDistance: 1.6,
+    framebufferScale: 1, foveation: "unsupported", shade: false, autoAdjust: true,
+    flags: { adapt: true, crop: true, down: 2 },
+  }, 72, 13.9);
+  assert.deepEqual(lines, [
+    "72 fps 13.9ms tex=R16F flin=0 dim=256x256x140 sd=1.60",
+    "xrscale=1 fov=unsupported adapt=1 crop=1 down=2 shade=0 auto=1",
+  ]);
+});
+
+test("diagnosticLines tolerates a viewer that has not loaded yet", () => {
+  assert.deepEqual(xr.diagnosticLines({}, null, null), [
+    "- fps -ms tex=- flin=0 dim=- sd=-",
+    "xrscale=- fov=- adapt=0 crop=0 down=- shade=0 auto=0",
+  ]);
+});
