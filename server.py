@@ -345,6 +345,34 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params, active_l
     return apply_controllable(start_params, action)
 
 
+# The viewer's policy mode polishes the policy's one-shot proposal with a short
+# hill_climb started from it (~1 s at ~33 ms per evaluation). Measured on 200
+# val episodes, the model-based proposal alone is +0.12 median attainment and
+# +0.33 after 30 evaluations -- what a 200-evaluation search from the start
+# reaches (docs/experiments/2026-10-16-overnight-results.md). The comparison
+# panel's "policy" arm stays the bare proposal. 0 disables the refinement.
+POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "30"))
+POLICY_REFINE_STEP = 0.1
+
+
+def refine_policy_proposal(model, proposal, start_params, instruction, start_agg, evaluations,
+                           active_layers=None):
+    """`hill_climb` from the policy's `proposal`, measuring the instruction from
+    the command's own start (`reference_params`), keeping whichever of
+    {proposal, refined} scores higher -- the same contract as
+    `rl.vis_eval.run_policy_with_refinement`."""
+    refined = hill_climb(model, proposal, instruction, evaluations=evaluations,
+                         initial_step=POLICY_REFINE_STEP, active_layers=active_layers,
+                         reference_params=start_params)
+    weights = {} if instruction.get("weights") is None else {"weights": instruction["weights"]}
+
+    def score(params):
+        final = goals.aggregate(model.features(params, active_layers), active_layers)
+        return goals.attainment(instruction["goal"], start_agg, final, **weights)
+
+    return refined if score(refined) > score(proposal) else proposal
+
+
 def run_search_arm(model, start_params, instruction, evaluations, active_layers=None):
     """Run the hill-climb baseline (`rl.baselines.hill_climb`) on an
     already-built goal -- the search twin of `run_policy_arm`.
@@ -602,6 +630,7 @@ class Session:
         # both without touching VTK or a real checkpoint.
         self.policy_provider = policy_provider or _load_policy
         self.model_for_volume = model_for_volume
+        self.policy_refine_evaluations = POLICY_REFINE_EVALUATIONS
         self._load_or_init()
 
     def _load_or_init(self):
@@ -737,8 +766,12 @@ class Session:
         start_agg = goals.aggregate(model.features(current_params, layers), layers)
         instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name,
                                               active_layers=layers)
-        return run_policy_arm(model, policy, instruction, start_agg, current_params,
-                              active_layers=layers), instruction["text"]
+        proposal = run_policy_arm(model, policy, instruction, start_agg, current_params,
+                                  active_layers=layers)
+        if self.policy_refine_evaluations > 0:
+            proposal = refine_policy_proposal(model, proposal, current_params, instruction, start_agg,
+                                              self.policy_refine_evaluations, active_layers=layers)
+        return proposal, instruction["text"]
 
     def _run_search(self, cmd, current_params, steps):
         """mode="search": resolve the volume model, build the goal, and hand

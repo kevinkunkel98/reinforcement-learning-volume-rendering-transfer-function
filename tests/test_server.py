@@ -707,10 +707,56 @@ def ts_session(monkeypatch):
     original_dataset = server._dataset_name
     s = _fresh_session()
     s.switch_dataset("ts_s1379")
+    # The tests below pin what the policy itself proposes; the viewer's warm
+    # search on top of it has its own tests (test_policy_mode_refinement_*).
+    s.policy_refine_evaluations = 0
     try:
         yield s
     finally:
         server.set_dataset(original_dataset)
+
+
+def _command_attainment(s, text, params):
+    cmd, _ = server.parse_command_with_meta(text, parser="rule")
+    model = s.model_for_volume(server._dataset_name)
+    start = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    start_agg = goals.aggregate(model.features(start))
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+    final = goals.aggregate(model.features(np.asarray(params, dtype=np.float64)))
+    return goals.attainment(instruction["goal"], start_agg, final)
+
+
+def test_policy_mode_refinement_never_scores_below_the_bare_proposal(ts_session):
+    s = ts_session
+    action = np.linspace(-0.4, 0.4, len(CONTROLLABLE))
+    s.policy_provider = lambda: _StubPolicy(action)
+    bare = s.command("more bone", mode="policy")["current"]["params"]
+    s.back()
+    s.policy_refine_evaluations = 30
+    refined = s.command("more bone", mode="policy")
+    s.back()
+
+    assert refined["current"]["mode"] == "policy"
+    assert (_command_attainment(s, "more bone", refined["current"]["params"])
+            >= _command_attainment(s, "more bone", bare) - 1e-9)
+
+
+def test_policy_mode_refinement_improves_a_poor_proposal(ts_session):
+    s = ts_session
+    # "more bone" with every peak pushed down: a search started there can only help.
+    s.policy_provider = lambda: _StubPolicy(np.full(len(CONTROLLABLE), -0.3))
+    bare = s.command("more bone", mode="policy")["current"]["params"]
+    s.back()
+    s.policy_refine_evaluations = 30
+    refined = s.command("more bone", mode="policy")["current"]["params"]
+    s.back()
+
+    assert _command_attainment(s, "more bone", refined) > _command_attainment(s, "more bone", bare)
+
+
+def test_policy_refinement_is_on_by_default():
+    assert server.POLICY_REFINE_EVALUATIONS == 30
+    assert _fresh_session().policy_refine_evaluations == 30
 
 
 def test_policy_mode_applies_the_policys_action(ts_session):
