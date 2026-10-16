@@ -92,6 +92,11 @@ def fixed_episodes(split: str, count: int, seed: int = 0,
 # --- running the policy and the baselines -------------------------------------
 
 def _load_sac(path: str):
+    """A policy checkpoint: SB3's .zip, or a `rl.model_based` checkpoint.pt
+    (same `predict` interface, same oneshot-v9 metadata.json beside it)."""
+    if path.endswith(".pt"):
+        from rl.model_based import ModelBasedPolicy
+        return ModelBasedPolicy.load(path)
     from stable_baselines3 import SAC
     return SAC.load(path)
 
