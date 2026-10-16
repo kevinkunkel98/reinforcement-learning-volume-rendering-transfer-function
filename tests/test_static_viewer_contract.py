@@ -327,15 +327,14 @@ def test_mobile_main_keeps_intentional_stack_scrolling():
     assert re.search(r"#main\s*\{[^}]*overflow:\s*(?:auto|scroll)", mobile, re.S)
 
 
-def test_viewer_parses_with_the_llm_but_applies_the_command_exactly():
-    # Policy mode answers "show only bones" with soft tissue still dominant
-    # (43.1% soft vs 4.9% skeleton on ct_chest); exact application isolates
-    # the class the user named. The policy proposes, it does not execute.
+def test_viewer_parses_with_the_llm_and_answers_with_the_policy():
+    # The model-based policy is the default answer (+0.18 median alone, every
+    # instruction kind positive); exact and search stay one click away.
     app = read("app.js")
     assert re.search(r"config\s*=\s*\{[^}]*parser:\s*\"llm\"", app)
-    assert re.search(r"config\s*=\s*\{[^}]*mode:\s*\"exact\"", app)
+    assert re.search(r"config\s*=\s*\{[^}]*mode:\s*\"policy\"", app)
     html = read("index.html")
-    assert re.search(r'id="policy-toggle-btn"[^>]*data-active="false"', html)
+    assert re.search(r'id="policy-toggle-btn"[^>]*data-active="true"', html)
 
 
 def test_viewer_leaves_the_camera_alone_when_a_step_does_not_move_it():
@@ -428,7 +427,7 @@ def test_answer_mode_toggles_expose_and_sync_pressed_state():
     assert 'id="search-toggle-btn"' in html
     assert 'id="policy-toggle-btn"' in html
     assert 'id="search-toggle-btn" class="toggle" data-active="false" aria-pressed="false"' in html
-    assert 'id="policy-toggle-btn" class="toggle" data-active="false" aria-pressed="false"' in html
+    assert 'id="policy-toggle-btn" class="toggle" data-active="true" aria-pressed="true"' in html
     assert 'searchToggleBtn.setAttribute("aria-pressed", String(config.search));' in app
     assert 'policyToggleBtn.setAttribute("aria-pressed", "false");' in app
     assert 'policyToggleBtn.setAttribute("aria-pressed", String(active));' in app

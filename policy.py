@@ -29,7 +29,13 @@ from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, observ
 # v2's +0.247, as the median of the three seeds' own medians. On the paired
 # v2/v3 test (a different statistic -- do not cross the two): v3 +0.286
 # against v2 +0.201, Wilcoxon p = 0.0064.
-POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_v3/oneshot_seed0/best.zip")
+#
+# Model-based (rl.model_based, one Dyna round) replaced SAC as the default on
+# 2026-10-16: policy alone +0.182 seed-averaged median on 200 val episodes
+# against SAC E3's +0.001 (paired Wilcoxon p = 5e-20, 3 seeds each), positive on
+# every instruction kind including show_only (docs/experiments/
+# 2026-10-16-overnight-results.md). A .zip path still loads an SB3 checkpoint.
+POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb/r1_seed0/checkpoint.pt")
 
 _state = {"policies": {}}
 
@@ -37,6 +43,11 @@ _state = {"policies": {}}
 def _load_sac(path):
     from stable_baselines3 import SAC
     return SAC.load(path)
+
+
+def _load_model_based(path):
+    from rl.model_based import ModelBasedPolicy
+    return ModelBasedPolicy.load(path)
 
 
 def write_metadata(path: str) -> None:
@@ -66,7 +77,7 @@ def load_policy(path: str = None):
     if path not in _state["policies"]:
         loaded = None
         if os.path.exists(path):
-            loaded = _load_sac(path)
+            loaded = _load_model_based(path) if path.endswith(".pt") else _load_sac(path)
             _validate_checkpoint(loaded, path)
         _state["policies"][path] = loaded
     return _state["policies"][path]

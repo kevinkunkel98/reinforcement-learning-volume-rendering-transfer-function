@@ -3,14 +3,13 @@ const state = { current: null, cursor: 0, total: 1, dataset: null };
 // answered ("exact" | "search" | "policy"); `search` is kept in sync for the
 // request body / UI toggle state the search-options panel reads.
 // The LLM parser is the default (it handles phrasings the rule grammar can't,
-// and falls back to the rule parser when Ollama is down), but the command is
-// APPLIED exactly by default, not answered by the policy. Measured on
-// "show only bones" (ct_chest): exact isolates it -- skeleton 16.7%, lungs
-// 0.0% -- while the policy leaves soft tissue dominant at 43.1% and the
-// skeleton at 4.9%. The policy's held-out attainment is +0.275 (median of
-// three seeds; the seed-0 checkpoint this viewer loads is +0.231); it proposes
-// a direction, it does not execute an instruction. Policy stays one click away.
-const config = { parser: "llm", search: false, mode: "exact" };
+// and falls back to the rule parser when Ollama is down), and the command is
+// answered by the trained policy by default: the model-based checkpoint
+// (rl/model_based.py) scores +0.18 median attainment alone on held-out
+// volumes, positive on every instruction kind, where the old SAC policy sat at
+// ~0 and made show_only worse. Without a checkpoint the server falls back to
+// exact application and says so. Exact and search stay one click away.
+const config = { parser: "llm", search: false, mode: "policy" };
 
 const el = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"']/g, (char) => ({
