@@ -652,3 +652,50 @@ def test_solvable_instructions_reaches_the_sampler_only_when_enabled(monkeypatch
     OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
                solvable_instructions=True).reset(seed=0)
     assert seen == [None, True]
+
+
+def test_start_variety_off_keeps_the_default_start_stream():
+    plain = OneShotEnv(["synthetic"])
+    off = OneShotEnv(["synthetic"], start_variety=0.0)
+    for seed in range(3):
+        plain.reset(seed=seed)
+        off.reset(seed=seed)
+        np.testing.assert_array_equal(plain._start_params, off._start_params)
+        assert plain._instruction["text"] == off._instruction["text"]
+
+
+def test_start_variety_dims_soft_tissue_and_raises_organs():
+    from rl.oneshot_env import START_VARIETY_ORGAN_HEIGHT, START_VARIETY_ORGANS, START_VARIETY_SOFT_HEIGHT
+
+    def unit_height(params, goal_class):
+        index = transfer.ANATOMICAL_PEAK_INDEX[goal_class] * transfer.PARAMS_PER_PEAK + 2
+        return (params[index] + 1.0) / 2.0
+
+    env = OneShotEnv(["synthetic"], start_variety=1.0)
+    for seed in range(5):
+        env.reset(seed=seed)
+        low, high = START_VARIETY_SOFT_HEIGHT
+        assert low <= unit_height(env._start_params, "soft") <= high
+        for goal_class in START_VARIETY_ORGANS:
+            low, high = START_VARIETY_ORGAN_HEIGHT
+            assert low <= unit_height(env._start_params, goal_class) <= high
+
+
+@pytest.mark.parametrize("kwargs", [{"start_variety": -0.1}, {"start_variety": 1.5},
+                                    {"target_drift_weight": -1.0}])
+def test_start_variety_and_drift_weight_are_validated(kwargs):
+    with pytest.raises(ValueError):
+        OneShotEnv(["synthetic"], **kwargs)
+
+
+@pytest.mark.parametrize("weight", [0.0, 0.1, 0.5])
+def test_target_drift_weight_scales_the_extra_drift_term(weight):
+    env = OneShotEnv(["synthetic"], policy_version="oneshot-v9", action_mode="residual",
+                     reward_mode="target", target_drift_weight=weight)
+    rng = np.random.default_rng(0)
+    for seed in range(4):
+        env.reset(seed=seed)
+        _obs, reward, _done, _truncated, info = env.step(rng.uniform(-0.3, 0.3, ACTION_SIZE))
+        expected = info["target_progress"] - weight * info["drift"] / env._start_distance
+        expected = float(np.clip(expected, -1.0, 1.0)) - (USELESS_PENALTY if info["useless"] else 0.0)
+        assert reward == pytest.approx(expected)

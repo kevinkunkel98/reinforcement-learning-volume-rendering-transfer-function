@@ -30,7 +30,7 @@ from stable_baselines3.common.logger import configure
 import datasets
 import goals
 from rl import pretrain
-from rl.oneshot_env import OneShotEnv, observation_metadata
+from rl.oneshot_env import TARGET_DRIFT_WEIGHT, OneShotEnv, observation_metadata
 
 VALIDATION_EPISODES = 40
 VALIDATION_SEED_BASE = 10_000   # fixed offset so validation seeds never collide with training
@@ -152,7 +152,10 @@ def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
     ensure_run_dir(out)
     env_kwargs = {} if env_kwargs is None else dict(env_kwargs)
     train_env = train_env if train_env is not None else build_env(**env_kwargs)
-    eval_env = eval_env if eval_env is not None else build_eval_env(**env_kwargs)
+    # Validation always starts from the default start distribution, so runs
+    # with and without start variety are selected on the same episodes.
+    eval_env = eval_env if eval_env is not None else build_eval_env(
+        **{key: value for key, value in env_kwargs.items() if key != "start_variety"})
 
     model = SAC("MlpPolicy", train_env, seed=seed, verbose=1, learning_starts=LEARNING_STARTS)
     model.set_logger(configure(out, ["stdout", "csv"]))
@@ -162,7 +165,9 @@ def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
     best_path = os.path.join(out, BEST_NAME)
     metadata = {**observation_metadata(train_env.policy_version, train_env.action_mode,
                                         train_env.reward_mode), "seed": seed, "timesteps": timesteps,
-                "solvable_instructions": bool(getattr(train_env, "solvable_instructions", False))}
+                "solvable_instructions": bool(getattr(train_env, "solvable_instructions", False)),
+                "start_variety": float(getattr(train_env, "start_variety", 0.0)),
+                "target_drift_weight": getattr(train_env, "target_drift_weight", None)}
     if pretrain_data is not None:
         report = pretrain.pretrain_actor(model, pretrain_data, epochs=pretrain_epochs, seed=seed)
         pretrain.prefill_replay_buffer(model, pretrain_data)
@@ -242,6 +247,13 @@ def parse_args(argv=None):
     parser.add_argument("--solvable-instructions", action="store_true",
                         help="sample only relative/compound targets the start state allows "
                              "(docs/experiments/2026-10-15-relative-diagnosis.md)")
+    parser.add_argument("--start-variety", type=float, default=0.0,
+                        help="share of training resets whose start draws soft tissue nearly "
+                             "transparent and organs more opaque (OneShotEnv.START_VARIETY_*); "
+                             "validation keeps the default starts")
+    parser.add_argument("--target-drift-weight", type=float, default=TARGET_DRIFT_WEIGHT,
+                        help="weight of the target reward's extra no-tolerance drift term "
+                             "(0 = reward is exactly the clipped attainment)")
     parser.add_argument("--threads", type=int, default=None,
                         help="torch intra-op threads for this run (default: torch's own choice). "
                              "visibility.features() scales only ~3x from 1 to 8 threads, so "
@@ -362,7 +374,9 @@ def main(argv=None):
                                       "hindsight_brightness_share": args.hindsight_brightness,
                                       "hindsight_show_only_share": args.hindsight_show_only,
                                       "reward_mode": args.reward_mode,
-                                      "solvable_instructions": args.solvable_instructions},
+                                      "solvable_instructions": args.solvable_instructions,
+                                      "start_variety": args.start_variety,
+                                      "target_drift_weight": args.target_drift_weight},
                           pretrain_data=pretrain_data, pretrain_epochs=args.pretrain_epochs,
                           pretrain_info=pretrain_info)
     print(f"\n[oneshot_train] wrote {result['eval_progress_path']} and {result['best_path']}")

@@ -577,3 +577,37 @@ def test_summarize_eval_adds_medians_and_the_relative_solvability_split():
 def test_parse_args_solvable_instructions_flag():
     assert oneshot_train.parse_args([]).solvable_instructions is False
     assert oneshot_train.parse_args(["--solvable-instructions"]).solvable_instructions is True
+
+
+def test_parse_args_start_variety_and_drift_weight_flags():
+    from rl.oneshot_env import TARGET_DRIFT_WEIGHT
+    defaults = oneshot_train.parse_args([])
+    assert defaults.start_variety == 0.0
+    assert defaults.target_drift_weight == TARGET_DRIFT_WEIGHT
+    args = oneshot_train.parse_args(["--start-variety", "0.5", "--target-drift-weight", "0"])
+    assert args.start_variety == 0.5
+    assert args.target_drift_weight == 0.0
+
+
+def test_validation_env_never_gets_start_variety(monkeypatch, tmp_path):
+    seen = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_build_env(**kwargs):
+        seen["train"] = kwargs
+        return object()
+
+    def fake_build_eval_env(**kwargs):
+        seen["eval"] = kwargs
+        raise _Stop
+
+    monkeypatch.setattr(oneshot_train, "build_env", fake_build_env)
+    monkeypatch.setattr(oneshot_train, "build_eval_env", fake_build_eval_env)
+    with pytest.raises(_Stop):
+        oneshot_train.run_training(out=str(tmp_path / "run"), timesteps=1, seed=0, eval_interval=1,
+                                   env_kwargs={"start_variety": 0.5, "solvable_instructions": True})
+    assert seen["train"]["start_variety"] == 0.5
+    assert "start_variety" not in seen["eval"]
+    assert seen["eval"]["solvable_instructions"] is True

@@ -51,6 +51,20 @@ REWARD_CLIP = 1.0
 # uniform per controllable group -- matches VisibilityTFEnv's reset noise.
 START_NOISE = 0.3
 
+# Start variety (opt-in, `start_variety`): with this share of resets, the
+# start draws soft tissue nearly transparent and the organs more opaque, so
+# organs that the anatomical start hides behind soft tissue are visible and
+# can be asked about. On the training split this roughly doubles how often
+# a start shows heart/vessels/kidneys/spleen at vis >= goals.EPSILON
+# (kidneys 16 -> 30 %, spleen 19 -> 44 %, vessels 22 -> 45 %, heart 34 -> 60 %,
+# 80-120 starts each), without making any start useless. Redrawing *every*
+# height uniformly instead made organs rarer (kidneys 1 %), since a dense
+# skeleton or soft-tissue peak then hides them again. Unit heights, like
+# transfer.ANATOMICAL_HEIGHTS.
+START_VARIETY_SOFT_HEIGHT = (0.0, 0.15)
+START_VARIETY_ORGAN_HEIGHT = (0.25, 0.7)
+START_VARIETY_ORGANS = ("heart", "vessels", "liver", "kidneys", "spleen")
+
 # Hindsight target noise, in the same normalized parameter units as
 # START_NOISE: the target transfer function is the start's controllable values
 # plus U(-HINDSIGHT_NOISE, HINDSIGHT_NOISE) per group, not a uniform draw over
@@ -225,7 +239,8 @@ class OneShotEnv(gym.Env):
                  hindsight_ratio: float = 0.0, policy_version: str = POLICY_VERSION,
                  action_mode: str = "absolute", reward_mode: str = "attainment",
                  balance_classes: bool = False, hindsight_brightness_share: float = 0.0,
-                 hindsight_show_only_share: float = 0.0, solvable_instructions: bool = False):
+                 hindsight_show_only_share: float = 0.0, solvable_instructions: bool = False,
+                 start_variety: float = 0.0, target_drift_weight: float = TARGET_DRIFT_WEIGHT):
         super().__init__()
         if not volume_ids:
             raise ValueError("volume_ids must not be empty")
@@ -262,6 +277,12 @@ class OneShotEnv(gym.Env):
         # Sample only relative/compound targets the start state allows
         # (goals.sample_instruction(solvable_only=True)).
         self.solvable_instructions = bool(solvable_instructions)
+        if not 0.0 <= start_variety <= 1.0:
+            raise ValueError("start_variety must be between 0 and 1")
+        self.start_variety = float(start_variety)
+        if target_drift_weight < 0.0:
+            raise ValueError("target_drift_weight must not be negative")
+        self.target_drift_weight = float(target_drift_weight)
         self._class_counts = {}
         # A sampled instruction can be unanswerable on the volume it lands on
         # ("a bit more lungs" on a pelvis scan, where the lung ceiling is a
@@ -331,7 +352,21 @@ class OneShotEnv(gym.Env):
             noise = rng.uniform(-START_NOISE, START_NOISE)
             for index in group:
                 params[index] = params[index] + noise
+        # Draw only when enabled, so the default path's RNG stream (and with
+        # it every existing seeded episode) is unchanged.
+        if self.start_variety > 0.0 and rng.random() < self.start_variety:
+            self._vary_start(params, rng)
         return np.clip(params, -1.0, 1.0)
+
+    @staticmethod
+    def _vary_start(params: np.ndarray, rng) -> None:
+        """Soft tissue nearly transparent, organs more opaque (START_VARIETY_*)."""
+        def set_height(goal_class, low, high):
+            index = transfer.ANATOMICAL_PEAK_INDEX[goal_class] * transfer.PARAMS_PER_PEAK + 2
+            params[index] = rng.uniform(low, high) * 2.0 - 1.0
+        set_height("soft", *START_VARIETY_SOFT_HEIGHT)
+        for goal_class in START_VARIETY_ORGANS:
+            set_height(goal_class, *START_VARIETY_ORGAN_HEIGHT)
 
     def _controllable_values(self, params: np.ndarray) -> list:
         return [float(np.mean([params[i] for i in group])) for group in CONTROLLABLE]
@@ -604,7 +639,7 @@ class OneShotEnv(gym.Env):
             # Same start_distance denominator as target_progress, so a given
             # fraction of the goal's own budget spent on collateral drift
             # costs the same whether the goal itself was easy or hard.
-            reward = target_progress - TARGET_DRIFT_WEIGHT * float(drift) / start_distance
+            reward = target_progress - self.target_drift_weight * float(drift) / start_distance
             reward = float(np.clip(reward, -REWARD_CLIP, REWARD_CLIP))
             if useless:
                 reward -= USELESS_PENALTY
