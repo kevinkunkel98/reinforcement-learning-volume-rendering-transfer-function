@@ -161,7 +161,8 @@ def run_training(out: str, timesteps: int, seed: int, eval_interval: int,
     eval_path = os.path.join(out, EVAL_PROGRESS_NAME)
     best_path = os.path.join(out, BEST_NAME)
     metadata = {**observation_metadata(train_env.policy_version, train_env.action_mode,
-                                        train_env.reward_mode), "seed": seed, "timesteps": timesteps}
+                                        train_env.reward_mode), "seed": seed, "timesteps": timesteps,
+                "solvable_instructions": bool(getattr(train_env, "solvable_instructions", False))}
     if pretrain_data is not None:
         report = pretrain.pretrain_actor(model, pretrain_data, epochs=pretrain_epochs, seed=seed)
         pretrain.prefill_replay_buffer(model, pretrain_data)
@@ -238,6 +239,9 @@ def parse_args(argv=None):
     parser.add_argument("--search-pretrain-episodes", type=int, default=1000)
     parser.add_argument("--search-evaluations", type=int, default=200,
                         help="hill_climb search budget per collected episode")
+    parser.add_argument("--solvable-instructions", action="store_true",
+                        help="sample only relative/compound targets the start state allows "
+                             "(docs/experiments/2026-10-15-relative-diagnosis.md)")
     parser.add_argument("--threads", type=int, default=None,
                         help="torch intra-op threads for this run (default: torch's own choice). "
                              "visibility.features() scales only ~3x from 1 to 8 threads, so "
@@ -357,7 +361,8 @@ def main(argv=None):
                                       "balance_classes": args.balance_classes,
                                       "hindsight_brightness_share": args.hindsight_brightness,
                                       "hindsight_show_only_share": args.hindsight_show_only,
-                                      "reward_mode": args.reward_mode},
+                                      "reward_mode": args.reward_mode,
+                                      "solvable_instructions": args.solvable_instructions},
                           pretrain_data=pretrain_data, pretrain_epochs=args.pretrain_epochs,
                           pretrain_info=pretrain_info)
     print(f"\n[oneshot_train] wrote {result['eval_progress_path']} and {result['best_path']}")

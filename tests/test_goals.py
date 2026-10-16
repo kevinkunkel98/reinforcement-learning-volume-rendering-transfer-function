@@ -890,3 +890,50 @@ def test_instruction_solvable_covers_relative_and_compound_only():
     compound = {"kind": "compound", "targets": {"liver": {"vis": 0.3}, "kidneys": {"vis": -0.15}}}
     assert goals.instruction_solvable(compound, start) is False
     assert goals.instruction_solvable({"kind": "absolute", "targets": {"liver": {"vis": 0.2}}}, start) is None
+
+
+# ---------- solvable-only instruction sampling ----------
+
+def _mixed_visibility_start():
+    # lungs invisible (no decrease, no increase), vessels barely visible
+    # (only a slight decrease is possible), skeleton/soft clearly visible.
+    return _aggregated(skeleton=0.05, lungs=0.0, soft=0.05, vessels=0.0006)
+
+
+def test_solvable_only_samples_only_reachable_relative_and_compound_targets(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _StubModel()
+    start = _mixed_visibility_start()
+    rng = np.random.default_rng(3)
+    seen = 0
+    for _ in range(400):
+        instruction = goals.sample_instruction("fake", model, start, rng, solvable_only=True)
+        if instruction["kind"] in ("relative", "compound"):
+            seen += 1
+            assert goals.instruction_solvable(instruction, start), instruction["text"]
+    assert seen > 150
+
+
+def test_solvable_only_false_keeps_the_original_sequence(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _StubModel()
+    start = _mixed_visibility_start()
+    plain = [goals.sample_instruction("fake", model, start, rng)
+             for rng in [np.random.default_rng(7)] for _ in range(50)]
+    flagged = [goals.sample_instruction("fake", model, start, rng, solvable_only=False)
+               for rng in [np.random.default_rng(7)] for _ in range(50)]
+    for a, b in zip(plain, flagged):
+        assert a["text"] == b["text"] and np.array_equal(a["goal"], b["goal"])
+
+
+def test_solvable_only_falls_back_to_another_kind_when_nothing_is_reachable(monkeypatch):
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: _all_classes_present())
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    model = _StubModel()
+    start = _aggregated(skeleton=0.0, lungs=0.0, soft=0.0, vessels=0.0)
+    rng = np.random.default_rng(4)
+    for _ in range(200):
+        instruction = goals.sample_instruction("fake", model, start, rng, solvable_only=True)
+        assert instruction["kind"] not in ("relative", "compound")

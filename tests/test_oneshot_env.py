@@ -636,3 +636,19 @@ def test_v8_layer_action_does_not_change_rgb(monkeypatch):
     env.step(action)
 
     assert {name: layer["rgb"] for name, layer in env._active_layers.items()} == original
+
+
+def test_solvable_instructions_reaches_the_sampler_only_when_enabled(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    seen = []
+    original = goals.sample_instruction
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("solvable_only"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(goals, "sample_instruction", spy)
+    OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel()).reset(seed=0)
+    OneShotEnv(["fake_a"], model_for_volume=lambda name: _StubModel(),
+               solvable_instructions=True).reset(seed=0)
+    assert seen == [None, True]

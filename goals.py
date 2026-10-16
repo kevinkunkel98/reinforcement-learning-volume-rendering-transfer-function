@@ -455,6 +455,56 @@ def _sample_compound(classes: list, rng, preferred=None) -> tuple:
     return targets, ", ".join(phrases)
 
 
+SOLVABLE_DRAWS = 10   # (direction, strength) draws before giving up on a solvable target
+
+
+def _draw_solvable_target(candidates: list, start_vis: dict, rng, preferred=None):
+    """(class, signed log10 change) for a relative target that
+    `vis_target_solvable` from `start_vis`, or None if SOLVABLE_DRAWS
+    (direction, strength) draws find no class it is solvable for. Direction
+    and strength are drawn first and the class is chosen among the classes
+    that allow them, so the direction/strength mix stays as declared."""
+    for _ in range(SOLVABLE_DRAWS):
+        sign = 1.0 if rng.choice(("increase", "decrease")) == "increase" else -1.0
+        strength = rng.choice(list(VISIBILITY_STRENGTH))
+        change = sign * VISIBILITY_STRENGTH[strength]
+        eligible = [c for c in candidates if vis_target_solvable(change, start_vis.get(c, 0.0))]
+        if eligible:
+            return _choose_class(eligible, rng, preferred), change, strength
+    return None
+
+
+def _relative_phrase(goal_class: str, change: float, strength: str, rng) -> str:
+    return _relative_text(goal_class, "increase" if change > 0 else "decrease", strength, rng)
+
+
+def _sample_relative_solvable(classes: list, start_vis: dict, rng, preferred=None):
+    """Like `_sample_relative`, but only targets that can be met from the
+    start state (docs/experiments/2026-10-15-relative-diagnosis.md); None
+    when no class allows any relative change."""
+    drawn = _draw_solvable_target(classes, start_vis, rng, preferred)
+    if drawn is None:
+        return None
+    goal_class, change, strength = drawn
+    return {goal_class: {"vis": change}}, _relative_phrase(goal_class, change, strength, rng)
+
+
+def _sample_compound_solvable(classes: list, start_vis: dict, rng, preferred=None):
+    """Like `_sample_compound`, but both targets solvable; None if two
+    distinct classes with solvable targets can't be found."""
+    first = _draw_solvable_target(classes, start_vis, rng, preferred)
+    if first is None:
+        return None
+    second = _draw_solvable_target([c for c in classes if c != first[0]], start_vis, rng)
+    if second is None:
+        return None
+    targets, phrases = {}, []
+    for goal_class, change, strength in (first, second):
+        targets[goal_class] = {"vis": change}
+        phrases.append(_relative_phrase(goal_class, change, strength, rng))
+    return targets, ", ".join(phrases)
+
+
 def show_only_weights(shown: set, classes) -> dict:
     """Equal total weight for the shown group and the hidden group,
     regardless of how many classes are in each -- 1/n_shown per shown class,
@@ -513,7 +563,7 @@ def _sample_brightness(classes: list, rng, preferred=None) -> tuple:
 
 
 def sample_instruction(name, model, start_features, rng, active_layers=None,
-                       class_counts=None, balance_classes=False) -> dict:
+                       class_counts=None, balance_classes=False, solvable_only=False) -> dict:
     """One instruction: {"kind", "text", "targets", "goal"}, plus "weights"
     for show_only instructions (see `show_only_weights`).
 
@@ -532,7 +582,18 @@ def sample_instruction(name, model, start_features, rng, active_layers=None,
         preferred = str(rng.choice(least_seen))
     kind = _sample_kind(rng)
     weights = None
-    if kind == "relative":
+    drawn = None
+    if solvable_only and kind in ("relative", "compound"):
+        # Only targets the start state allows; when there are none, an
+        # absolute request stays meaningful ("make X high") where "a bit
+        # more X" for an invisible X is not.
+        sampler = _sample_relative_solvable if kind == "relative" else _sample_compound_solvable
+        drawn = sampler(classes, start_features["vis"], rng, preferred)
+        if drawn is None:
+            kind = "absolute"
+    if drawn is not None:
+        targets, text = drawn
+    elif kind == "relative":
         targets, text = _sample_relative(classes, rng, preferred)
     elif kind == "compound":
         targets, text = _sample_compound(classes, rng, preferred)

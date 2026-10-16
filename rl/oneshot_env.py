@@ -225,7 +225,7 @@ class OneShotEnv(gym.Env):
                  hindsight_ratio: float = 0.0, policy_version: str = POLICY_VERSION,
                  action_mode: str = "absolute", reward_mode: str = "attainment",
                  balance_classes: bool = False, hindsight_brightness_share: float = 0.0,
-                 hindsight_show_only_share: float = 0.0):
+                 hindsight_show_only_share: float = 0.0, solvable_instructions: bool = False):
         super().__init__()
         if not volume_ids:
             raise ValueError("volume_ids must not be empty")
@@ -259,6 +259,9 @@ class OneShotEnv(gym.Env):
         self.action_mode = action_mode
         self.reward_mode = reward_mode
         self.balance_classes = balance_classes
+        # Sample only relative/compound targets the start state allows
+        # (goals.sample_instruction(solvable_only=True)).
+        self.solvable_instructions = bool(solvable_instructions)
         self._class_counts = {}
         # A sampled instruction can be unanswerable on the volume it lands on
         # ("a bit more lungs" on a pelvis scan, where the lung ceiling is a
@@ -525,9 +528,12 @@ class OneShotEnv(gym.Env):
         if rng.random() < self.hindsight_ratio:
             instruction, hindsight_action = self._sample_hindsight_goal(rng, model, start_params, start_agg)
         else:
+            # The kwarg only when enabled: tests stub sample_instruction with
+            # the original fixed signature.
+            solvable = {"solvable_only": True} if self.solvable_instructions else {}
             instruction, hindsight_action = (goals.sample_instruction(
                 volume, model, start_agg, rng, self._active_layers,
-                self._class_counts, self.balance_classes), None)
+                self._class_counts, self.balance_classes, **solvable), None)
             for goal_class in instruction["targets"]:
                 self._class_counts[goal_class] = self._class_counts.get(goal_class, 0) + 1
         # Omitting the `weights` kwarg entirely when it's None (rather than

@@ -572,3 +572,8 @@ def test_summarize_eval_adds_medians_and_the_relative_solvability_split():
     assert summary["relative_solvable_median"] == pytest.approx(0.7)
     assert summary["relative_unsolvable_median"] == pytest.approx(-3.0)
     assert summary["relative_solvable_share"] == pytest.approx(2 / 3)
+
+
+def test_parse_args_solvable_instructions_flag():
+    assert oneshot_train.parse_args([]).solvable_instructions is False
+    assert oneshot_train.parse_args(["--solvable-instructions"]).solvable_instructions is True
