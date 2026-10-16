@@ -350,8 +350,10 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params, active_l
 # val episodes, the model-based proposal alone is +0.12 median attainment and
 # +0.33 after 30 evaluations -- what a 200-evaluation search from the start
 # reaches (docs/experiments/2026-10-16-overnight-results.md). The comparison
-# panel's "policy" arm stays the bare proposal. 0 disables the refinement.
-POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "30"))
+# panel's "policy" arm stays the bare proposal. Off by default while the pure
+# policy is being pushed (it should be what the viewer shows); set
+# POLICY_REFINE_EVALUATIONS=30 to turn the polish on.
+POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "0"))
 POLICY_REFINE_STEP = 0.1
 
 

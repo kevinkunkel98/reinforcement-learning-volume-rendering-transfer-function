@@ -754,9 +754,9 @@ def test_policy_mode_refinement_improves_a_poor_proposal(ts_session):
     assert _command_attainment(s, "more bone", refined) > _command_attainment(s, "more bone", bare)
 
 
-def test_policy_refinement_is_on_by_default():
-    assert server.POLICY_REFINE_EVALUATIONS == 30
-    assert _fresh_session().policy_refine_evaluations == 30
+def test_viewer_shows_the_pure_policy_by_default():
+    assert server.POLICY_REFINE_EVALUATIONS == 0
+    assert _fresh_session().policy_refine_evaluations == 0
 
 
 def test_policy_mode_applies_the_policys_action(ts_session):
