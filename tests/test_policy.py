@@ -44,7 +44,7 @@ def test_policy_metadata_round_trips_as_json(tmp_path):
 
 
 def test_default_policy_path_is_the_model_based_checkpoint():
-    assert policy.POLICY_PATH == "out/rl_mb/r1_seed0/checkpoint.pt"
+    assert policy.POLICY_PATH == "out/rl_mb/r1_seed1/checkpoint.pt"
 
 
 def test_missing_policy_path_returns_none(monkeypatch, tmp_path):

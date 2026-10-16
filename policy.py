@@ -33,9 +33,10 @@ from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, observ
 # Model-based (rl.model_based, one Dyna round) replaced SAC as the default on
 # 2026-10-16: policy alone +0.182 seed-averaged median on 200 val episodes
 # against SAC E3's +0.001 (paired Wilcoxon p = 5e-20, 3 seeds each), positive on
-# every instruction kind including show_only (docs/experiments/
+# every instruction kind including show_only; seed 1 ships as the strongest of
+# 0.165 / 0.202 / 0.191 per-seed medians (docs/experiments/
 # 2026-10-16-overnight-results.md). A .zip path still loads an SB3 checkpoint.
-POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb/r1_seed0/checkpoint.pt")
+POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb/r1_seed1/checkpoint.pt")
 
 _state = {"policies": {}}
 
