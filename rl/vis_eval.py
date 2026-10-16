@@ -214,6 +214,14 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
     return results
 
 
+# Refinement starts next to a proposal that already made progress, so it
+# probes smaller steps than the from-scratch baselines' 0.2. On 150 val
+# episodes (E3 seed 0) 0.1 gave median attainment 0.18 vs 0.12 at 0.2 and
+# 0.20 at 0.05 with 30 evaluations, and 0.27 vs 0.24 (0.05) with 60 -- while
+# the same search started from the episode's start reaches only 0.05 / 0.13.
+REFINE_INITIAL_STEP = 0.1
+
+
 def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int = 3,
                                 model_for_volume=None, load_model=None, active_layers=None) -> list:
     """Run the one-shot policy's proposal (as `run_policy` does for
@@ -229,18 +237,14 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
     `evaluations=0` skips the search entirely and returns exactly what
     `run_policy` would.
 
-    `hill_climb` keeps the best state *it* has seen, but relative to its own
-    reference point: the proposal, passed to it as `start_params`, not the
-    episode's original start. An instruction's goal deltas are fixed,
-    absolute log10/brightness changes computed once relative to the
-    original start; reapplied by `hill_climb` relative to a start that has
-    already made some of that progress, the search can chase past the goal
-    and, once scored back against the original start (as `run_policy`
-    scores the plain proposal), come out worse than the proposal it began
-    from. So this function does not trust `hill_climb`'s internal notion of
-    "improved" -- it independently scores the refined result against the
-    same original-start baseline `run_policy` uses via `goals.attainment`,
-    and keeps whichever of {proposal, refined} is better itself.
+    The search starts at the proposal but measures the instruction from the
+    episode's original start (`hill_climb(reference_params=...)`): an
+    instruction's goal deltas are fixed changes relative to that start, and
+    measured from the proposal instead they would be applied a second time
+    on top of the progress it already made -- which is what this function
+    did before, so refinement chased past the goal and mostly kept the bare
+    proposal. The result is still scored independently against the original
+    start and the better of {proposal, refined} kept, as a guard.
     """
     loader = load_model or _load_sac
     model = loader(model_path)
@@ -260,7 +264,8 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
             search_kwargs = ({"active_layers": env._active_layers}
                              if env._active_layers is not None else {})
             refined_params = hill_climb(env._model, env._params, episode["instruction"],
-                                         evaluations=evaluations, **search_kwargs)
+                                         evaluations=evaluations, initial_step=REFINE_INITIAL_STEP,
+                                         reference_params=env._start_params, **search_kwargs)
             refined_agg = goals.aggregate(_features(env._model, refined_params, env._active_layers),
                                           env._active_layers)
             refined_attainment = env._attainment(refined_agg)

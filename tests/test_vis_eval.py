@@ -447,7 +447,8 @@ def test_run_policy_with_refinement_never_scores_worse_than_the_proposal(monkeyp
                                  load_model=lambda path: policy, formulation="one_shot")
     proposal_attainment = plain[0]["attainment"]
 
-    def _hides_everything(model, start_params, instruction, evaluations=200, initial_step=0.2):
+    def _hides_everything(model, start_params, instruction, evaluations=200, initial_step=0.2,
+                          reference_params=None):
         bad = start_params.copy()
         for group in CONTROLLABLE:
             for index in group:
@@ -1046,3 +1047,23 @@ def test_main_writes_one_row_per_episode_for_every_method(tmp_path, monkeypatch)
     written = json.loads(out.read_text())
     assert written["episodes_detail"]["policy"][0]["volume"] == "ts_s0454"
     assert len(written["episodes_detail"]["B0_do_nothing"]) == 2
+
+
+def test_refinement_measures_the_goal_from_the_episode_start(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    episodes = vis_eval.fixed_episodes(
+        "val", 1, seed=0, volume_ids=("stub_a",), model_for_volume=_model_for_volume,
+        formulation="one_shot")
+    seen = {}
+
+    def fake_hill_climb(model, params, instruction, **kwargs):
+        seen["warm"], seen["reference"] = params.copy(), kwargs.get("reference_params")
+        return params
+
+    monkeypatch.setattr(vis_eval, "hill_climb", fake_hill_climb)
+    vis_eval.run_policy_with_refinement(
+        "unused.zip", episodes, evaluations=5, model_for_volume=_model_for_volume,
+        load_model=lambda path: _FixedActionModel(action=np.full(ACTION_SIZE, 0.2, dtype=np.float32)))
+
+    np.testing.assert_array_equal(seen["reference"], episodes[0]["start_params"])
+    assert not np.array_equal(seen["warm"], episodes[0]["start_params"])

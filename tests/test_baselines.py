@@ -254,6 +254,31 @@ def test_hill_climb_respects_its_evaluation_budget():
     assert model.calls <= 17
 
 
+def test_hill_climb_warm_start_scores_against_the_reference():
+    model = _StubModel()
+    start = _start_params()
+    instruction = _relative_instruction("skeleton", goals.VISIBILITY_STRENGTH["strongly"])
+    reference_agg = goals.aggregate(model.features(start))
+    warm = baselines.hill_climb(model, start, instruction, evaluations=20)
+
+    result = baselines.hill_climb(model, warm, instruction, evaluations=30, reference_params=start)
+
+    def distance(params):
+        return goals.distance(instruction["goal"], reference_agg, goals.aggregate(model.features(params)))
+    # Never worse than its warm start, measured from the episode's own start.
+    assert distance(result) <= distance(warm)
+
+
+def test_hill_climb_warm_start_respects_its_evaluation_budget():
+    model = _CountingModel()
+    start = _start_params()
+    instruction = _relative_instruction("skeleton", goals.VISIBILITY_STRENGTH["strongly"])
+
+    baselines.hill_climb(model, start.copy(), instruction, evaluations=17, reference_params=start)
+
+    assert model.calls <= 17
+
+
 def test_hill_climb_passes_active_layers_to_effective_scoring():
     model = _LayerAwareModel()
     start = _start_params()

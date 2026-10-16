@@ -203,21 +203,34 @@ def _evaluate(model, goal, start_agg, params, active_layers=None, weights: dict 
 
 
 def hill_climb(model, start_params, instruction, evaluations: int = 200,
-               initial_step: float = 0.2, active_layers=None) -> np.ndarray:
+               initial_step: float = 0.2, active_layers=None, reference_params=None) -> np.ndarray:
     """Coordinate search on `goals.distance`: try +-step on each of the 12
     controllable values, keep improvements, halve the step once a full sweep
     finds none. `evaluations` bounds the number of `model.features` calls
     (one to score the start state, one per proposal after that). Applies
     `instruction`'s own `weights` (set for show_only; None otherwise) so this
     search optimizes the identical objective the RL policy is trained and
-    judged on."""
+    judged on.
+
+    `reference_params` (default: `start_params`) is the state the
+    instruction's changes are measured from -- the episode's original start.
+    Passing it separately warm-starts the search at `start_params` (e.g. a
+    policy's proposal) while still optimising the episode's own objective;
+    measured from the proposal instead, a relative goal would be applied a
+    second time on top of the progress the proposal already made. The warm
+    start then costs one extra evaluation, to score it."""
     goal = instruction["goal"]
     weights = instruction.get("weights")
-    start_agg = goals.aggregate(goals.features(model, start_params, active_layers), active_layers)
+    reference = start_params if reference_params is None else reference_params
+    start_agg = goals.aggregate(goals.features(model, reference, active_layers), active_layers)
     used = 1
 
     best_params = start_params.copy()
-    best_distance = goals.distance(goal, start_agg, start_agg, weights=weights)
+    if reference_params is None:
+        best_distance = goals.distance(goal, start_agg, start_agg, weights=weights)
+    else:
+        best_distance = _evaluate(model, goal, start_agg, best_params, active_layers, weights=weights)
+        used += 1
     step = initial_step
 
     while used < evaluations and step > 1e-3:
