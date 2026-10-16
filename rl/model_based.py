@@ -135,8 +135,8 @@ class ModelBasedPolicy:
         self.action_space = _Space((ACTION_SIZE,))
 
     @staticmethod
-    def new_net() -> nn.Module:
-        return mlp(OBSERVATION_SIZE, ACTION_SIZE, hidden=256, depth=2)
+    def new_net(hidden: int = 256, depth: int = 2) -> nn.Module:
+        return mlp(OBSERVATION_SIZE, ACTION_SIZE, hidden=hidden, depth=depth)
 
     def action_tensor(self, observation):
         return torch.tanh(self.net(observation.clamp(-OBSERVATION_BOUND, OBSERVATION_BOUND)))
@@ -151,6 +151,7 @@ class ModelBasedPolicy:
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, CHECKPOINT_NAME)
         torch.save({"policy": self.net.state_dict(),
+                    "arch": {"hidden": self.net[0].out_features, "depth": (len(self.net) - 1) // 2},
                     "dynamics": None if dynamics is None else dynamics.state_dict(),
                     "metadata": self.metadata}, path)
         # rl.oneshot_env.load_policy_metadata reads this, as for a SAC run.
@@ -162,7 +163,7 @@ class ModelBasedPolicy:
     @classmethod
     def load(cls, path: str) -> "ModelBasedPolicy":
         payload = torch.load(path, map_location="cpu", weights_only=False)
-        net = cls.new_net()
+        net = cls.new_net(**payload.get("arch", {}))
         net.load_state_dict(payload["policy"])
         return cls(net, payload.get("metadata"))
 
@@ -177,10 +178,10 @@ def load_dynamics(path: str) -> DynamicsEnsemble:
 # --- data -------------------------------------------------------------------
 
 def _collect_chunk(args):
-    seeds, actions_per_start, policy_path, volume_ids = args
+    seeds, actions_per_start, policy_path, volume_ids, start_variety = args
     torch.set_num_threads(1)
     from rl.oneshot_train import build_env
-    env = build_env(volume_ids=volume_ids, **ENV_KWARGS, balance_classes=True)
+    env = build_env(volume_ids=volume_ids, **ENV_KWARGS, balance_classes=True, start_variety=start_variety)
     policy = ModelBasedPolicy.load(policy_path) if policy_path else None
     return collect_starts(env, seeds, actions_per_start, policy)
 
@@ -239,9 +240,13 @@ def collect_starts(env, seeds, actions_per_start: int = ACTIONS_PER_START, polic
 
 
 def collect(seeds, workers: int = 3, actions_per_start: int = ACTIONS_PER_START,
-            policy_path: str = None, volume_ids=None) -> dict:
+            policy_path: str = None, volume_ids=None, start_variety: float = 0.0) -> dict:
+    """`collect_starts` over `workers` processes. `start_variety` is
+    `OneShotEnv`'s: that share of starts dims soft tissue and raises the organs,
+    so the model also sees states where organs are visible."""
     seeds = list(seeds)
-    chunks = [(seeds[i::workers * 4], actions_per_start, policy_path, volume_ids) for i in range(workers * 4)]
+    chunks = [(seeds[i::workers * 4], actions_per_start, policy_path, volume_ids, start_variety)
+              for i in range(workers * 4)]
     chunks = [chunk for chunk in chunks if chunk[0]]
     with mp.get_context("spawn").Pool(workers) as pool:
         parts = pool.map(_collect_chunk, chunks)
@@ -335,7 +340,8 @@ def dynamics_report(ensemble, data, val_starts, context=None) -> dict:
 
 
 def train_policy(ensemble, data, train_starts, steps: int = 6000, beta: float = 1.0,
-                 useless_weight: float = 1.0, seed: int = 0, batch: int = 256, log=print):
+                 useless_weight: float = 1.0, seed: int = 0, batch: int = 256, hidden: int = 256,
+                 depth: int = 2, learning_rate: float = 3e-4, cosine: bool = False, log=print):
     """Fit the actor by gradient descent on the model-predicted normalised goal
     distance (1 - attainment, capped at 3 so hopeless instructions do not
     dominate), plus `beta` x ensemble disagreement and `useless_weight` x the
@@ -344,9 +350,10 @@ def train_policy(ensemble, data, train_starts, steps: int = 6000, beta: float = 
     rng = np.random.default_rng(seed)
     context, goal_all, weights_all = _context(data), _tensor(data["goal"]), _tensor(data["weights"])
     hist, solo, ctrl, s0 = (_tensor(data[k]) for k in ("hist", "solo", "ctrl", "s0"))
-    net = ModelBasedPolicy.new_net()
+    net = ModelBasedPolicy.new_net(hidden, depth)
     policy = ModelBasedPolicy(net.train())
-    optimizer = torch.optim.Adam(net.parameters(), lr=3e-4)
+    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
+    schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, steps) if cosine else None
     per_start = data["goal"].shape[1]
     model_attainment = None
     for step in range(steps):
@@ -366,6 +373,8 @@ def train_policy(ensemble, data, train_starts, steps: int = 6000, beta: float = 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        if schedule is not None:
+            schedule.step()
         if step % 1000 == 999:
             model_attainment = float((1 - normalised[keep]).median().detach())
             log(f"[model_based] policy step {step + 1}: model-predicted median attainment "
@@ -396,16 +405,30 @@ def evaluate(policy, episodes: int = 200, seed_base: int = VALIDATION_SEED_BASE,
 
 
 def run_training(data_paths, out: str, seed: int = 0, model_epochs: int = 60, policy_steps: int = 6000,
-                 beta: float = 1.0, useless_weight: float = 1.0, eval_episodes: int = 200, log=print) -> dict:
+                 beta: float = 1.0, useless_weight: float = 1.0, eval_episodes: int = 200,
+                 dynamics_path: str = None, hidden: int = 256, depth: int = 2,
+                 learning_rate: float = 3e-4, cosine: bool = False, log=print) -> dict:
+    """Fit the dynamics ensemble (or reuse the one in `dynamics_path`, a
+    checkpoint.pt trained on the same data), then the policy through it."""
     data = load_data(data_paths)
     train_starts, val_starts = split_starts(len(data["s0"]))
     t0 = time.time()
-    ensemble, dyn_report = train_dynamics(data, train_starts, val_starts, epochs=model_epochs, seed=seed, log=log)
+    if dynamics_path:
+        ensemble = load_dynamics(dynamics_path)
+        for parameter in ensemble.parameters():
+            parameter.requires_grad_(False)
+        dyn_report = {"reused": dynamics_path, **dynamics_report(ensemble, data, val_starts)}
+        log(f"[model_based] reused dynamics: {dyn_report}")
+    else:
+        ensemble, dyn_report = train_dynamics(data, train_starts, val_starts, epochs=model_epochs,
+                                              seed=seed, log=log)
     policy, pol_report = train_policy(ensemble, data, train_starts, steps=policy_steps, beta=beta,
-                                      useless_weight=useless_weight, seed=seed, log=log)
+                                      useless_weight=useless_weight, seed=seed, hidden=hidden,
+                                      depth=depth, learning_rate=learning_rate, cosine=cosine, log=log)
     policy.metadata = {"seed": seed, "data": list(data_paths), "starts": int(len(data["s0"])),
                        "model_epochs": model_epochs, "policy_steps": policy_steps, "beta": beta,
-                       "useless_weight": useless_weight}
+                       "useless_weight": useless_weight, "hidden": hidden, "depth": depth,
+                       "learning_rate": learning_rate, "cosine": cosine, "dynamics": dynamics_path}
     report = {"dynamics": dyn_report, "policy": pol_report, "train_seconds": round(time.time() - t0)}
     if eval_episodes:
         result = evaluate(policy, episodes=eval_episodes)
@@ -429,6 +452,10 @@ def parse_args(argv=None):
     c.add_argument("--workers", type=int, default=3)
     c.add_argument("--actions", type=int, default=ACTIONS_PER_START)
     c.add_argument("--policy", default=None, help="checkpoint.pt whose proposals fill half the actions (Dyna)")
+    c.add_argument("--splits", default="train",
+                   help="comma-separated volume splits to draw starts from, e.g. train,train_extra")
+    c.add_argument("--start-variety", type=float, default=0.0,
+                   help="share of starts with soft tissue dimmed and organs raised (OneShotEnv)")
     t = sub.add_parser("train", help="fit the dynamics ensemble, then the policy through it")
     t.add_argument("--data", required=True, help="comma-separated .npz files from `collect`")
     t.add_argument("--out", required=True)
@@ -439,14 +466,23 @@ def parse_args(argv=None):
     t.add_argument("--useless-weight", type=float, default=1.0)
     t.add_argument("--eval-episodes", type=int, default=200)
     t.add_argument("--threads", type=int, default=3)
+    t.add_argument("--dynamics", default=None, help="reuse this checkpoint.pt's dynamics ensemble")
+    t.add_argument("--policy-hidden", type=int, default=256)
+    t.add_argument("--policy-depth", type=int, default=2)
+    t.add_argument("--policy-lr", type=float, default=3e-4)
+    t.add_argument("--policy-cosine", action="store_true", help="cosine-anneal the policy learning rate")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
     if args.command == "collect":
+        import datasets
+        volume_ids = [name for split in args.splits.split(",") for name in datasets.volumes_for_split(split)]
         data = collect(range(args.seed_base, args.seed_base + args.starts), workers=args.workers,
-                       actions_per_start=args.actions, policy_path=args.policy)
+                       volume_ids=volume_ids,
+                       actions_per_start=args.actions, policy_path=args.policy,
+                       start_variety=args.start_variety)
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         np.savez_compressed(args.out, **data)
         print(f"[model_based] wrote {args.out}: {len(data['s0'])} starts x {data['act'].shape[1]} actions")
@@ -454,7 +490,9 @@ def main(argv=None):
         torch.set_num_threads(args.threads)
         run_training(args.data.split(","), args.out, seed=args.seed, model_epochs=args.model_epochs,
                      policy_steps=args.policy_steps, beta=args.beta, useless_weight=args.useless_weight,
-                     eval_episodes=args.eval_episodes)
+                     eval_episodes=args.eval_episodes, dynamics_path=args.dynamics,
+                     hidden=args.policy_hidden, depth=args.policy_depth, learning_rate=args.policy_lr,
+                     cosine=args.policy_cosine)
 
 
 if __name__ == "__main__":

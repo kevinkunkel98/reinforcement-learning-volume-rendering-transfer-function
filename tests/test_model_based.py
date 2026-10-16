@@ -137,3 +137,25 @@ def test_evaluate_scores_real_renders(monkeypatch):
     result = mb.evaluate(policy, episodes=3, volume_ids=["fake_a"], model_for_volume=lambda name: _StubModel())
     assert len(result["rows"]) == 3
     assert all(math.isfinite(r["attainment"]) for r in result["rows"])
+
+
+def test_policy_architecture_round_trips(tmp_path):
+    policy = mb.ModelBasedPolicy(mb.ModelBasedPolicy.new_net(hidden=64, depth=3))
+    path = policy.save(str(tmp_path / "run"))
+    loaded = mb.ModelBasedPolicy.load(path)
+    assert loaded.net[0].out_features == 64
+    assert (len(loaded.net) - 1) // 2 == 3
+
+
+def test_training_can_reuse_a_saved_dynamics_ensemble(monkeypatch, tmp_path):
+    env = _stub_env(monkeypatch)
+    data = mb.collect_starts(env, seeds=range(12), actions_per_start=6)
+    data_path = tmp_path / "data.npz"
+    np.savez_compressed(data_path, **data)
+    first = mb.run_training([str(data_path)], str(tmp_path / "first"), model_epochs=2, policy_steps=10,
+                            eval_episodes=0, log=lambda *_: None)
+    second = mb.run_training([str(data_path)], str(tmp_path / "second"), policy_steps=10, eval_episodes=0,
+                             dynamics_path=first["path"], log=lambda *_: None)
+    assert second["report"]["dynamics"]["reused"] == first["path"]
+    for a, b in zip(first["dynamics"].state_dict().values(), mb.load_dynamics(second["path"]).state_dict().values()):
+        assert torch.equal(a, b)
