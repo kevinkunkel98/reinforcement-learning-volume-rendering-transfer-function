@@ -153,54 +153,64 @@ def read_ct_header(zf: zipfile.ZipFile, subject_id: str):
     return header.get_data_shape(), header.get_zooms()
 
 
+def extract_subject(zf, sid, info, split, out_dir=DEFAULT_OUT_DIR) -> dict:
+    """Extract one subject's ct.nii.gz and collapsed label volume into
+    out_dir/<sid>/ and return its manifest entry."""
+    path = os.path.join(out_dir, sid, "ct.nii.gz")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = path + ".tmp"
+    with zf.open(f"{sid}/ct.nii.gz") as src, open(tmp_path, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    os.replace(tmp_path, path)
+
+    labels, affine = _subject_label_volume(zf, sid, info["shape"])
+    labels_path = os.path.join(out_dir, sid, "labels.nii.gz")
+    labels_tmp_path = labels_path + ".tmp"
+    with open(labels_tmp_path, "wb") as f:
+        f.write(gzip.compress(nib.Nifti1Image(labels, affine).to_bytes()))
+    os.replace(labels_tmp_path, labels_path)
+    class_counts = {name: int(np.count_nonzero(labels == index))
+                     for index, name in enumerate(CLASS_NAMES, start=1)}
+    classes_present = sorted(name for name, count in class_counts.items()
+                             if count >= MIN_LABEL_VOXELS)
+    print(f"  {sid}: " + ", ".join(f"{name}={count}" for name, count in class_counts.items()))
+    return {"id": sid, "name": f"ts_{sid}", "split": split,
+            "label_layout_version": CLASS_LAYOUT_VERSION,
+            **info, "path": os.path.relpath(path), "sha256": _sha256_file(path),
+            "labels_path": os.path.relpath(labels_path),
+            "classes_present": classes_present,
+            "contrast": "angiography" in info["study_type"].lower()}
+
+
+def eligible_candidates(zf):
+    """(candidates, info) for every subject passing the extent filter."""
+    candidates, info = [], {}
+    for row in read_meta(zf):
+        sid = row["image_id"]
+        shape, zooms = read_ct_header(zf, sid)
+        if not passes_extent_filter(shape, zooms):
+            continue
+        try:
+            region = region_for_study_type(row["study_type"])
+        except ValueError as exc:
+            raise ValueError(f"{sid}: {exc}") from exc
+        candidates.append({"id": sid, "region": region})
+        info[sid] = {
+            "study_type": row["study_type"],
+            "region": region,
+            "shape": [int(v) for v in shape[:3]],
+            "spacing": [round(float(v), 6) for v in zooms[:3]],
+        }
+    return candidates, info
+
+
 def build_manifest(zip_path, out_dir=DEFAULT_OUT_DIR, seed=0, split_counts=SPLIT_COUNTS) -> dict:
     """Select subjects, extract their ct.nii.gz into out_dir, return the manifest dict."""
     with zipfile.ZipFile(zip_path) as zf:
-        candidates, info = [], {}
-        for row in read_meta(zf):
-            sid = row["image_id"]
-            shape, zooms = read_ct_header(zf, sid)
-            if not passes_extent_filter(shape, zooms):
-                continue
-            try:
-                region = region_for_study_type(row["study_type"])
-            except ValueError as exc:
-                raise ValueError(f"{sid}: {exc}") from exc
-            candidates.append({"id": sid, "region": region})
-            info[sid] = {
-                "study_type": row["study_type"],
-                "region": region,
-                "shape": [int(v) for v in shape[:3]],
-                "spacing": [round(float(v), 6) for v in zooms[:3]],
-            }
+        candidates, info = eligible_candidates(zf)
         assignment = select_and_split(candidates, split_counts, seed)
-        subjects = []
-        for sid in sorted(assignment):
-            path = os.path.join(out_dir, sid, "ct.nii.gz")
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            tmp_path = path + ".tmp"
-            with zf.open(f"{sid}/ct.nii.gz") as src, open(tmp_path, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-            os.replace(tmp_path, path)
-
-            labels, affine = _subject_label_volume(zf, sid, info[sid]["shape"])
-            labels_path = os.path.join(out_dir, sid, "labels.nii.gz")
-            labels_tmp_path = labels_path + ".tmp"
-            with open(labels_tmp_path, "wb") as f:
-                f.write(gzip.compress(nib.Nifti1Image(labels, affine).to_bytes()))
-            os.replace(labels_tmp_path, labels_path)
-            class_counts = {name: int(np.count_nonzero(labels == index))
-                             for index, name in enumerate(CLASS_NAMES, start=1)}
-            classes_present = sorted(name for name, count in class_counts.items()
-                                     if count >= MIN_LABEL_VOXELS)
-            print(f"  {sid}: " + ", ".join(f"{name}={count}" for name, count in class_counts.items()))
-
-            subjects.append({"id": sid, "name": f"ts_{sid}", "split": assignment[sid],
-                             "label_layout_version": CLASS_LAYOUT_VERSION,
-                             **info[sid], "path": os.path.relpath(path), "sha256": _sha256_file(path),
-                             "labels_path": os.path.relpath(labels_path),
-                             "classes_present": classes_present,
-                             "contrast": "angiography" in info[sid]["study_type"].lower()})
+        subjects = [extract_subject(zf, sid, info[sid], assignment[sid], out_dir)
+                    for sid in sorted(assignment)]
     return {
         "label_layout_version": CLASS_LAYOUT_VERSION,
         "source": {

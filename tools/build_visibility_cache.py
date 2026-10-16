@@ -10,6 +10,7 @@ import datasets
 import visibility
 
 SPLITS = ("train", "val", "test", "out_of_source")
+OPTIONAL_SPLITS = ("train_extra",)
 
 
 def build(splits=SPLITS, cache_dir=None) -> list:
@@ -26,7 +27,7 @@ def build(splits=SPLITS, cache_dir=None) -> list:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--splits", nargs="+", default=list(SPLITS), choices=list(SPLITS))
+    parser.add_argument("--splits", nargs="+", default=list(SPLITS), choices=list(SPLITS) + list(OPTIONAL_SPLITS))
     parser.add_argument("--cache-dir", default=None)
     args = parser.parse_args()
     built = build(tuple(args.splits), args.cache_dir)

@@ -16,7 +16,7 @@ from anatomy import CANONICAL_CLASSES, CLASS_LAYOUT_VERSION
 
 MANIFEST_PATH = "data/totalseg_manifest.json"
 NAME_PREFIX = "ts_"
-SPLITS = ("train", "val", "test")
+SPLITS = ("train", "val", "test", "train_extra")
 _FETCH_HINT = "run `python -m tools.select_totalseg` to extract the volumes"
 LABEL_CHUNK_BYTES = 8 * 1024 * 1024
 
