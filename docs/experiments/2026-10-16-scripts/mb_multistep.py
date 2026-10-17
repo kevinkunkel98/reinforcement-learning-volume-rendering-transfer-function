@@ -25,7 +25,10 @@ LOG_FLOOR = float(np.log10(goals.EPSILON))
 LOG_CEIL = float(np.log10(1.0 + goals.EPSILON))
 
 
-def remaining_goal_t(goal, delta, state=None):
+TASK_VERSION = os.environ.get("TASK_VERSION", "v1")
+
+
+def remaining_goal_t(goal, delta, state=None, weights=None):
     """Torch twin of the closed-loop goal rebasing; `delta` is cumulative change from the start.
     With CLAMP_GOAL=1 and `state`, a remaining visibility change is clipped to what the current
     log10 visibility can still move (not below the EPSILON floor, not above full visibility)."""
@@ -33,6 +36,10 @@ def remaining_goal_t(goal, delta, state=None):
     d, m, e, mb_ = goal[:, :N], goal[:, N:2 * N], goal[:, 2 * N:3 * N], goal[:, 3 * N:]
     drifted = (m == 0) & (c.abs() > TOL)
     new_d = torch.where(m > 0, d - c, torch.where(drifted, -c, torch.zeros_like(d)))
+    if weights is not None:
+        # task v2 occluders ("mentioned with weight 0") stay free: no undo target
+        free = weights[:, :N] == 0
+        new_d = torch.where(free, torch.zeros_like(d), new_d)
     if CLAMP and state is not None:
         current = state[:, :N]
         new_d = torch.maximum(torch.minimum(new_d, LOG_CEIL - current), LOG_FLOOR - current)
@@ -41,10 +48,13 @@ def remaining_goal_t(goal, delta, state=None):
     return torch.cat([new_d, new_m, new_e, mb_], 1)
 
 
-def remaining_goal_np(goal, start_agg, cur_agg):
+def remaining_goal_np(goal, start_agg, cur_agg, weights=None):
     cur = torch.as_tensor(mb.state_vector(cur_agg))[None]
     delta = cur - torch.as_tensor(mb.state_vector(start_agg))[None]
-    return remaining_goal_t(torch.as_tensor(np.asarray(goal), dtype=torch.float32)[None], delta, cur)[0].numpy()
+    w = None
+    if weights:
+        w = torch.tensor([[weights.get(c, 1.0) for c in goals.GOAL_CLASSES]], dtype=torch.float32)
+    return remaining_goal_t(torch.as_tensor(np.asarray(goal), dtype=torch.float32)[None], delta, cur, w)[0].numpy()
 
 
 def train(policy, ensemble, data, train_starts, K, steps, seed, batch=256, lr=1e-4, inter_w=0.2):
@@ -64,7 +74,7 @@ def train(policy, ensemble, data, train_starts, K, steps, seed, batch=256, lr=1e
         loss, disagree_sum, useless_sum = 0.0, 0.0, 0.0
         for t in range(K):
             delta = state - s0[si]
-            obs = mb.policy_observation(remaining_goal_t(goal, delta, state), hist[si], state, solo[si], ctrl)
+            obs = mb.policy_observation(remaining_goal_t(goal, delta, state, w), hist[si], state, solo[si], ctrl)
             a = (ctrl + policy.action_tensor(obs)).clamp(-1, 1) - ctrl
             ctx = torch.cat([hist[si], solo[si], ctrl, state], 1)
             pred = ensemble(ctx, a)
@@ -87,7 +97,7 @@ def train(policy, ensemble, data, train_starts, K, steps, seed, batch=256, lr=1e
 def evaluate_closed_loop(policy, K, episodes=200):
     from rl.oneshot_env import OneShotEnv, build_observation
     import datasets
-    env = OneShotEnv(datasets.volumes_for_split("val"), **mb.ENV_KWARGS)
+    env = OneShotEnv(datasets.volumes_for_split("val"), **mb.ENV_KWARGS, task_version=TASK_VERSION)
     res = collections.defaultdict(lambda: collections.defaultdict(list)); rows = []
     for seed in range(mb.VALIDATION_SEED_BASE, mb.VALIDATION_SEED_BASE + episodes):
         env.reset(seed=seed)
@@ -97,7 +107,8 @@ def evaluate_closed_loop(policy, K, episodes=200):
         row = {"seed": seed, "kind": env._instruction["kind"], "solvable": env._solvable}
         for t in range(1, K + 1):
             ctrl = np.asarray(env._controllable_values(params))
-            obs = build_observation(remaining_goal_np(goal, start_agg, agg), model.histogram, agg, solo, ctrl)
+            obs = build_observation(remaining_goal_np(goal, start_agg, agg, env._instruction.get("weights")),
+                                    model.histogram, agg, solo, ctrl)
             a, _ = policy.predict(np.clip(obs, -10, 10))
             params = apply_controllable(params, np.clip(ctrl + a, -1, 1))
             agg = goals.aggregate(goals.features(model, params))
@@ -126,6 +137,7 @@ if __name__ == "__main__":
     print(f"after {K}-step training:", flush=True)
     summary, rows = evaluate_closed_loop(policy, K)
     os.makedirs(out, exist_ok=True)
-    policy.metadata = {"closed_loop_steps": K, "init": init, "train_steps": steps, "seed": seed}
+    policy.metadata = {"closed_loop_steps": K, "init": init, "train_steps": steps, "seed": seed,
+                       "task_version": TASK_VERSION}
     policy.save(out, ensemble, {"closed_loop": summary})
     json.dump({"summary": summary, "rows": rows}, open(f"{out}/eval_closed_loop.json", "w"), indent=1)
