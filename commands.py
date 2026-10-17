@@ -388,20 +388,22 @@ def _center_band_clip(ext_value: float, tissue: str) -> float:
     return float(np.clip(ext_value, lo_ext, hi_ext))
 
 
-def apply_command(cmd: dict, params: np.ndarray) -> np.ndarray:
+def apply_command(cmd: dict, params: np.ndarray, reset_params=None) -> np.ndarray:
+    """`cmd` applied to `params`. "reset" returns `reset_params` (the viewer's
+    start TF for its task version), `default_params()` when not given."""
     if "compound" in cmd:
         # Multiple tissues set to different absolute levels in one utterance
         # ("high opacity spongy, low opacity bone") -- fold each sub-command
         # through this same function in sequence. Not a search target: an
         # absolute multi-tissue assignment isn't something to hill-climb.
         for sub in cmd["compound"]:
-            params = apply_command(sub, params)
+            params = apply_command(sub, params, reset_params)
         return params
 
     params = params.copy()
 
     if cmd["direction"] == "reset":
-        return default_params()
+        return default_params() if reset_params is None else np.array(reset_params, dtype=np.float64)
 
     if cmd["direction"] == "show_only":
         targets = cmd["target"] if isinstance(cmd["target"], list) else [cmd["target"]]

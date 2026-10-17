@@ -859,3 +859,10 @@ def test_multi_clause_compound_still_rejects_a_show_only_sub_command():
         {"target": ["lungs"], "attribute": None, "direction": "show_only", "strength": None},
         {"target": "skeleton", "attribute": "opacity", "direction": "set", "level": "low"},
     ]})
+
+
+def test_reset_returns_the_given_start_tf():
+    start = default_params() * 0.5
+    reset = parse_command_rule("reset")
+    np.testing.assert_array_equal(apply_command(reset, default_params() * 0.1, reset_params=start), start)
+    np.testing.assert_array_equal(apply_command(reset, start), default_params())

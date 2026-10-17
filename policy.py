@@ -36,7 +36,13 @@ from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, observ
 # every instruction kind including show_only; seed 1 ships as the strongest of
 # 0.165 / 0.202 / 0.191 per-seed medians (docs/experiments/
 # 2026-10-16-overnight-results.md). A .zip path still loads an SB3 checkpoint.
-POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb/r1_seed1/checkpoint.pt")
+#
+# Task v2 (2026-10-17, docs/experiments/2026-10-17-task-v2.md): the viewer opens
+# on the visible-organ start TF and scores commands as v2 (server.TASK_VERSION),
+# so it runs a v2 policy -- two Dyna rounds plus closed-loop fine-tuning
+# (rl.closed_loop), one-shot val median 0.477, the best of 0.461 / 0.438 /
+# 0.477. With TASK_VERSION=v1 set POLICY_PATH=out/rl_mb/r1_seed1/checkpoint.pt.
+POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb_v2/cl2_r2_seed2/checkpoint.pt")
 
 _state = {"policies": {}}
 

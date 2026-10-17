@@ -125,3 +125,21 @@ def test_v2_env_starts_visible_and_samples_well_posed_instructions(monkeypatch):
                 assert start + env._instruction["goal"][i] >= math.log10(goals.EPSILON) - 1e-9
     with pytest.raises(ValueError):
         OneShotEnv(["fake"], model_for_volume=lambda name: _OccludingModel(), **V9, task_version="v3")
+
+
+def test_for_task_version_is_identity_for_v1_and_applies_both_v2_transforms():
+    model = _OccludingModel()
+    params = goals.starting_params()
+    params[goals._height_index("soft")] = 0.4
+    instruction = {"kind": "relative", "targets": {"heart": {"vis": 3.0}},
+                   "goal": goals.goal_vector({"heart": {"vis": 3.0}})}
+    start = goals.aggregate(model.features(params))
+    assert goals.for_task_version(instruction, model, params, start, "v1") is instruction
+    v2 = goals.for_task_version(instruction, model, params, start, "v2")
+    expected = goals.reachable_targets(
+        goals.occlusion_aware(instruction, goals.find_occluders(model, params, instruction)), model, start)
+    np.testing.assert_allclose(v2["goal"], expected["goal"])
+    assert v2["weights"]["other"] == 0.0
+    with pytest.raises(ValueError):
+        goals.for_task_version(instruction, model, params, start, "v3")
+

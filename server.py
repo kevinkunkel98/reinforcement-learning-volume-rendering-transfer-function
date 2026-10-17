@@ -354,6 +354,16 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params, active_l
 # policy is being pushed (it should be what the viewer shows); set
 # POLICY_REFINE_EVALUATIONS=30 to turn the polish on.
 POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "0"))
+# The task the viewer runs (goals.TASK_VERSIONS). v2 opens on the transfer
+# function with the organs in view and scores a command the way the v2
+# policy was trained: occluders of a target are free to fade, targets are
+# clipped to what the class can reach. TASK_VERSION=v1 restores the original.
+TASK_VERSION = os.environ.get("TASK_VERSION", "v2")
+
+
+def initial_params(task_version: str = None) -> np.ndarray:
+    """The transfer function a viewer session starts from (and "reset" returns to)."""
+    return goals.starting_params(task_version or TASK_VERSION)
 POLICY_REFINE_STEP = 0.1
 
 
@@ -633,6 +643,7 @@ class Session:
         self.policy_provider = policy_provider or _load_policy
         self.model_for_volume = model_for_volume
         self.policy_refine_evaluations = POLICY_REFINE_EVALUATIONS
+        self.task_version = TASK_VERSION
         self._load_or_init()
 
     def _load_or_init(self):
@@ -645,7 +656,7 @@ class Session:
             # sessions instead of passing invalid state to the browser.
             if not history or any(len(step.get("params", [])) != TOTAL_PARAMS for step in history):
                 self.session_id = self._new_session_id()
-                step = _render_step(default_params(), None, None, False, 0,
+                step = _render_step(initial_params(), None, None, False, 0,
                                     self.session_id, default_camera_for(_dataset_name),
                                     layers=default_layers())
                 self.history = [step]
@@ -661,7 +672,7 @@ class Session:
             self.session_id = data.get("session_id") or self._new_session_id()
             return
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, False, 0, self.session_id,
+        step = _render_step(initial_params(), None, None, False, 0, self.session_id,
                             default_camera_for(_dataset_name), layers=default_layers())
         self.history = [step]
         self.cursor = 0
@@ -698,7 +709,7 @@ class Session:
     def switch_dataset(self, name: str):
         set_dataset(name)  # raises ValueError for an unknown name
         self.session_id = self._new_session_id()
-        step = _render_step(default_params(), None, None, False, 0, self.session_id,
+        step = _render_step(initial_params(), None, None, False, 0, self.session_id,
                             default_camera_for(name), layers=default_layers())
         self.history = [step]
         self.cursor = 0
@@ -749,6 +760,15 @@ class Session:
             "verdict": None,
         })
 
+    def instruction_for(self, cmd, model, params, layers):
+        """The start aggregate and the goal `cmd` sets from `params`, as this
+        session's task version scores it (`goals.for_task_version`)."""
+        start_agg = goals.aggregate(model.features(params, layers), layers)
+        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name,
+                                              active_layers=layers)
+        return start_agg, goals.for_task_version(instruction, model, params, start_agg,
+                                                 self.task_version, layers)
+
     def _run_policy(self, cmd, current_params):
         """mode="policy": resolve the checkpoint and the volume model, build
         the goal, and hand them to `run_policy_arm`.
@@ -765,9 +785,7 @@ class Session:
             raise ValueError(NO_POLICY_CHECKPOINT_MESSAGE)
         model = self.model_for_volume(_dataset_name)
         layers = self.history[self.cursor].get("anatomy_layers", default_layers())
-        start_agg = goals.aggregate(model.features(current_params, layers), layers)
-        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name,
-                                              active_layers=layers)
+        start_agg, instruction = self.instruction_for(cmd, model, current_params, layers)
         proposal = run_policy_arm(model, policy, instruction, start_agg, current_params,
                                   active_layers=layers)
         if self.policy_refine_evaluations > 0:
@@ -786,9 +804,7 @@ class Session:
         no cache, same as it does for the policy branch)."""
         model = self.model_for_volume(_dataset_name)
         layers = self.history[self.cursor].get("anatomy_layers", default_layers())
-        start_agg = goals.aggregate(model.features(current_params, layers), layers)
-        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name,
-                                              active_layers=layers)
+        start_agg, instruction = self.instruction_for(cmd, model, current_params, layers)
         return run_search_arm(model, current_params, instruction, steps,
                               active_layers=layers), instruction["text"]
 
@@ -833,7 +849,7 @@ class Session:
                 actual_mode, search_flag = "policy", False
             except ValueError as exc:
                 message = str(exc)
-                new_params = apply_command(cmd, current_params)
+                new_params = apply_command(cmd, current_params, reset_params=initial_params(self.task_version))
                 actual_mode, search_flag = "exact", False
         elif effective_mode == "search":
             try:
@@ -852,10 +868,10 @@ class Session:
                                f"start; a full sweep needs about {full_sweep}")
             except (ValueError, FileNotFoundError, KeyError) as exc:
                 message = str(exc)
-                new_params = apply_command(cmd, current_params)
+                new_params = apply_command(cmd, current_params, reset_params=initial_params(self.task_version))
                 actual_mode, search_flag = "exact", False
         else:
-            new_params = apply_command(cmd, current_params)
+            new_params = apply_command(cmd, current_params, reset_params=initial_params(self.task_version))
             actual_mode, search_flag = "exact", False
 
         if parser_meta["parser_fallback"] and not message:
@@ -1069,9 +1085,7 @@ async def compare_route(req: CompareRequest):
     try:
         volume_model = session.model_for_volume(_dataset_name)
         layers = session.history[session.cursor].get("anatomy_layers", default_layers())
-        start_agg = goals.aggregate(volume_model.features(start_params, layers), layers)
-        instruction = goals.goal_from_command(cmd, volume_model, start_agg, volume=_dataset_name,
-                                              active_layers=layers)
+        start_agg, instruction = session.instruction_for(cmd, volume_model, start_params, layers)
     except ValueError as exc:
         # Camera, reset, width and centre commands are not goals, and neither
         # is a goal this volume cannot support (lungs on an abdominal scan).

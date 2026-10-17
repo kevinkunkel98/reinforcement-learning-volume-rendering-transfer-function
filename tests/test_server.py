@@ -1499,7 +1499,7 @@ def test_policy_path_points_at_a_checkpoint_trained_on_the_corrected_observation
     # cc167af). The viewer must not demo that checkpoint when a v3-or-later
     # one exists. v4 (current) adds goals.distance's "other" keep term on top
     # of v3's observation fix -- it doesn't regress this property.
-    assert server.POLICY_PATH == "out/rl_mb/r1_seed1/checkpoint.pt"
+    assert server.POLICY_PATH == "out/rl_mb_v2/cl2_r2_seed2/checkpoint.pt"
 
 
 def test_framing_is_measured_once_per_dataset_not_per_command():
@@ -1522,4 +1522,37 @@ def test_collector_and_viewer_load_the_same_checkpoint():
 
     assert server.POLICY_PATH == policy.POLICY_PATH
     assert collect.POLICY_PATH == policy.POLICY_PATH
-    assert policy.POLICY_PATH == "out/rl_mb/r1_seed1/checkpoint.pt"
+    assert policy.POLICY_PATH == "out/rl_mb_v2/cl2_r2_seed2/checkpoint.pt"
+
+
+def test_viewer_opens_and_resets_on_the_task_versions_start_tf():
+    assert server.TASK_VERSION == "v2"
+    s = _fresh_session()
+    np.testing.assert_allclose(s.history[0]["params"], goals.starting_params("v2"))
+    s.command("more bone")
+    state = s.command("reset")
+    np.testing.assert_allclose(state["current"]["params"], goals.starting_params("v2"))
+
+
+def test_policy_goal_is_scored_as_the_sessions_task_version(ts_session):
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    layers = s.history[s.cursor].get("anatomy_layers", server.default_layers())
+    cmd, _ = server.parse_command_with_meta("show only the kidneys", parser="rule")
+    start_agg = goals.aggregate(model.features(params, layers), layers)
+    bare = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name, active_layers=layers)
+    for version in goals.TASK_VERSIONS:
+        s.task_version = version
+        _, instruction = s.instruction_for(cmd, model, params, layers)
+        expected = goals.for_task_version(bare, model, params, start_agg, version, layers)
+        np.testing.assert_allclose(instruction["goal"], expected["goal"])
+        assert instruction.get("weights") == expected.get("weights")
+
+
+def test_default_policy_was_trained_on_the_viewers_task_version():
+    path = os.path.join(_REPO_ROOT, os.path.dirname(server.POLICY_PATH), "metadata.json")
+    if not os.path.exists(path):
+        pytest.skip("default checkpoint not present")
+    with open(path) as stream:
+        assert json.load(stream).get("task_version", "v1") == server.TASK_VERSION

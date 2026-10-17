@@ -576,11 +576,8 @@ class OneShotEnv(gym.Env):
                                                self._class_counts, self.balance_classes, **solvable)
         for goal_class in instruction["targets"]:
             self._class_counts[goal_class] = self._class_counts.get(goal_class, 0) + 1
-        if self.task_version == "v2":
-            instruction = goals.occlusion_aware(instruction, goals.find_occluders(
-                model, start_params, instruction, self._active_layers))
-            instruction = goals.reachable_targets(instruction, model, start_agg, self._active_layers)
-        return instruction
+        return goals.for_task_version(instruction, model, start_params, start_agg, self.task_version,
+                                      self._active_layers)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)

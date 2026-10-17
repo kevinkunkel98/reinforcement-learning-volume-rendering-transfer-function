@@ -862,3 +862,17 @@ def reachable_targets(instruction: dict, model, start: dict, active_layers=None)
         ceiling = math.log10(max(class_ceiling(model, goal_class, active_layers), start_vis) + EPSILON)
         goal[i] = min(max(goal[i], floor - current), ceiling - current)
     return {**instruction, "goal": goal}
+
+
+def for_task_version(instruction: dict, model, start_params, start: dict, task_version: str = "v1",
+                     active_layers=None) -> dict:
+    """`instruction` as `task_version` scores it. v1 leaves it unchanged; v2
+    exempts the target's occluders from the keep terms (`occlusion_aware`) and
+    clips every target to what is reachable from `start` (`reachable_targets`).
+    The env, the model-based collector and the viewer all go through here."""
+    if task_version not in TASK_VERSIONS:
+        raise ValueError(f"unknown task version {task_version!r}")
+    if task_version == "v1":
+        return instruction
+    instruction = occlusion_aware(instruction, find_occluders(model, start_params, instruction, active_layers))
+    return reachable_targets(instruction, model, start, active_layers)
