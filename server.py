@@ -342,6 +342,10 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params, active_l
                                      solo_max_log, controllable)
 
     action = _predict_action(policy, observation)
+    if getattr(policy, "action_mode", "absolute") == "residual":
+        # A residual policy (every model-based checkpoint, SAC v9) proposes a
+        # change to the current values, as OneShotEnv.step applies it.
+        action = np.clip(np.asarray(controllable) + action, -1.0, 1.0)
     return apply_controllable(start_params, action)
 
 
@@ -359,6 +363,10 @@ POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "0")
 # policy was trained: occluders of a target are free to fade, targets are
 # clipped to what the class can reach. TASK_VERSION=v1 restores the original.
 TASK_VERSION = os.environ.get("TASK_VERSION", "v2")
+# How many times the policy acts on one command: after each step the viewer
+# re-measures the render and the policy sees what is left of the goal
+# (rl.closed_loop.rollout's loop) -- still the policy alone, no search.
+POLICY_STEPS = int(os.environ.get("POLICY_STEPS", "1"))
 
 
 def initial_params(task_version: str = None) -> np.ndarray:
@@ -644,6 +652,7 @@ class Session:
         self.model_for_volume = model_for_volume
         self.policy_refine_evaluations = POLICY_REFINE_EVALUATIONS
         self.task_version = TASK_VERSION
+        self.policy_steps = POLICY_STEPS
         self._load_or_init()
 
     def _load_or_init(self):
@@ -788,6 +797,13 @@ class Session:
         start_agg, instruction = self.instruction_for(cmd, model, current_params, layers)
         proposal = run_policy_arm(model, policy, instruction, start_agg, current_params,
                                   active_layers=layers)
+        if self.policy_steps > 1:
+            from rl.closed_loop import remaining_goal_for
+            for _ in range(self.policy_steps - 1):
+                agg = goals.aggregate(model.features(proposal, layers), layers)
+                remaining = {**instruction, "goal": remaining_goal_for(
+                    instruction["goal"], start_agg, agg, instruction.get("weights"))}
+                proposal = run_policy_arm(model, policy, remaining, agg, proposal, active_layers=layers)
         if self.policy_refine_evaluations > 0:
             proposal = refine_policy_proposal(model, proposal, current_params, instruction, start_agg,
                                               self.policy_refine_evaluations, active_layers=layers)

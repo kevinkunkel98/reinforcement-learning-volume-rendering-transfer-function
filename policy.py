@@ -14,7 +14,8 @@ Two callers, one constant. Anything that needs the policy imports it here.
 import os
 import json
 
-from rl.oneshot_env import ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, observation_metadata
+from rl.oneshot_env import (ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, load_policy_metadata,
+                            observation_metadata)
 
 # v4: trained after goals.distance gained an "other" keep term (visibility.py's
 # unlabeled-tissue bucket) -- v3 and earlier let a transfer function satisfy
@@ -86,6 +87,9 @@ def load_policy(path: str = None):
         if os.path.exists(path):
             loaded = _load_model_based(path) if path.endswith(".pt") else _load_sac(path)
             _validate_checkpoint(loaded, path)
+            # How the viewer turns an action into a TF: a residual policy's
+            # action is a change to the current controllable values.
+            loaded.action_mode = load_policy_metadata(path).get("action_mode", "absolute")
         _state["policies"][path] = loaded
     return _state["policies"][path]
 

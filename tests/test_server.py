@@ -1556,3 +1556,50 @@ def test_default_policy_was_trained_on_the_viewers_task_version():
         pytest.skip("default checkpoint not present")
     with open(path) as stream:
         assert json.load(stream).get("task_version", "v1") == server.TASK_VERSION
+
+
+def test_policy_steps_feed_the_remaining_goal_back_to_the_policy(ts_session):
+    s = ts_session
+    seen = []
+
+    class _Recording:
+        def predict(self, observation, deterministic=True):
+            seen.append(np.array(observation))
+            return np.zeros(len(CONTROLLABLE), dtype=np.float32), None
+
+    recording = _Recording()
+    recording.action_mode = "residual"
+    s.policy_provider = lambda: recording
+    s.policy_steps = 2
+    state = s.command("more bone", mode="policy")
+    assert state["current"]["mode"] == "policy" and len(seen) == 2
+    # a zero residual changes nothing, so nothing of the goal is used up
+    np.testing.assert_allclose(seen[1], seen[0], atol=1e-6)
+
+
+def test_viewer_runs_the_policy_once_per_command_by_default():
+    assert _fresh_session().policy_steps == server.POLICY_STEPS
+
+
+def test_a_residual_policys_action_is_a_change_to_the_current_tf(ts_session):
+    s = ts_session
+    residual = np.linspace(-0.2, 0.2, len(CONTROLLABLE))
+    policy = _StubPolicy(residual)
+    policy.action_mode = "residual"
+    s.policy_provider = lambda: policy
+    before = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    params = np.array(s.command("more bone", mode="policy")["current"]["params"], dtype=np.float64)
+    for group, change in zip(CONTROLLABLE, residual):
+        start = float(np.mean([before[i] for i in group]))
+        expected = float(np.clip(start + change, -1.0, 1.0))
+        assert float(np.mean([params[i] for i in group])) == pytest.approx(expected, abs=1e-6)
+
+
+def test_load_policy_marks_the_checkpoints_action_mode(tmp_path):
+    from rl import model_based as mb
+    path = mb.ModelBasedPolicy(mb.ModelBasedPolicy.new_net()).save(str(tmp_path / "run"))
+    server.policy_module.reset_cache()
+    try:
+        assert server.policy_module.load_policy(path).action_mode == "residual"
+    finally:
+        server.policy_module.reset_cache()

@@ -1067,3 +1067,20 @@ def test_refinement_measures_the_goal_from_the_episode_start(monkeypatch):
 
     np.testing.assert_array_equal(seen["reference"], episodes[0]["start_params"])
     assert not np.array_equal(seen["warm"], episodes[0]["start_params"])
+
+
+def test_closed_loop_policy_with_one_step_matches_plain_policy(monkeypatch):
+    _patch_totalseg(monkeypatch)
+    v9 = {"policy_version": "oneshot-v9", "action_mode": "residual", "reward_mode": "target"}
+    monkeypatch.setattr(vis_eval, "load_policy_metadata", lambda path: v9)
+    episodes = vis_eval.fixed_episodes(
+        "val", 3, seed=0, volume_ids=("stub_a", "stub_b"), model_for_volume=_model_for_volume,
+        formulation="one_shot", policy_metadata=v9)
+    policy = _FixedActionModel(action=np.full(ACTION_SIZE, 0.2, dtype=np.float32))
+    kw = {"model_for_volume": _model_for_volume, "load_model": lambda path: policy}
+    plain = vis_eval.run_policy("unused.zip", episodes, formulation="one_shot", **kw)
+    one = vis_eval.run_policy_closed_loop("unused.zip", episodes, steps=1, **kw)
+    two = vis_eval.run_policy_closed_loop("unused.zip", episodes, steps=2, **kw)
+    assert [r["attainment"] for r in one] == pytest.approx([r["attainment"] for r in plain])
+    assert [r["kind"] for r in two] == [r["kind"] for r in plain]
+    assert all(np.isfinite(r["attainment"]) for r in two)

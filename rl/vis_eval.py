@@ -281,6 +281,25 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
     return results
 
 
+def run_policy_closed_loop(model_path: str, episodes: list, steps: int = 2, model_for_volume=None,
+                           load_model=None, active_layers=None) -> list:
+    """The one-shot policy applied `steps` times per episode, re-rendering and
+    re-observing the remaining goal in between (`rl.closed_loop.rollout`) --
+    still the policy alone, no search. Scored after the last step against the
+    episode's original start."""
+    from rl.closed_loop import rollout
+    model = (load_model or _load_sac)(model_path)
+    policy_metadata = load_policy_metadata(model_path)
+    kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
+    results = []
+    for episode in episodes:
+        env, _, _ = _frozen_one_shot_env(
+            episode["volume"], episode["start_params"], episode["instruction"], active_layers=active_layers,
+            policy_metadata=_episode_policy_metadata(episode, policy_metadata), **kwargs)
+        results.append({"attainment": rollout(model, env, steps)[-1], "kind": episode["instruction"]["kind"]})
+    return results
+
+
 def _attainment_or_zero(goal, start_agg: dict, final_agg: dict, weights: dict = None) -> float:
     # Same floor as VisibilityTFEnv._attainment: when the start state
     # already meets the goal, distance(start) is ~0 and attainment's ratio
@@ -632,6 +651,9 @@ def parse_args(argv=None):
                         help="visibility-evaluation budget to refine the one-shot policy's proposal "
                              "with a hill_climb search (0 = off, default: %(default)s); adds a "
                              "policy_plus_refine row to the comparison")
+    parser.add_argument("--policy-steps", type=int, default=1,
+                        help="with K > 1, also run the one-shot policy K times with a re-render in "
+                             "between (rl.closed_loop.rollout); adds a policy_closed_loop row")
     layers = parser.add_mutually_exclusive_group()
     layers.add_argument("--layers", help="active anatomy layers as inline JSON")
     layers.add_argument("--layers-file", help="JSON file containing active anatomy layers")
@@ -656,6 +678,9 @@ def main(argv=None, active_layers=None):
 
     results = {"policy": run_policy(args.policy, episodes, formulation=args.formulation,
                                       active_layers=active_layers)}
+    if args.policy_steps > 1 and args.formulation == "one_shot":
+        results["policy_closed_loop"] = run_policy_closed_loop(
+            args.policy, episodes, steps=args.policy_steps, active_layers=active_layers)
     if args.refine > 0:
         results["policy_plus_refine"] = run_policy_with_refinement(
             args.policy, episodes, evaluations=args.refine, active_layers=active_layers)
@@ -669,6 +694,7 @@ def main(argv=None, active_layers=None):
     # and the run says so before anyone quotes it.
     result = {"policy": args.policy, "split": args.split, "episodes": args.episodes,
               "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
+              "policy_steps": args.policy_steps,
               "provenance": provenance.result_provenance(active_layers),
               "episodes_detail": episodes_detail(results, episodes),
                 **compare(results, episodes=episodes, active_layers=active_layers),

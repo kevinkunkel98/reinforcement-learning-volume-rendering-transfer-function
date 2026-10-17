@@ -107,31 +107,46 @@ def finetune(policy, ensemble, data, train_starts, steps: int = 20_000, horizon:
     return policy, {"model_predicted_median": model_attainment}
 
 
+def rollout(policy, env, horizon: int = 2) -> list:
+    """Run `policy` for `horizon` steps from the episode `env` (a `OneShotEnv`
+    after `reset`, or frozen into an episode) is in, re-rendering and
+    re-observing the remaining goal after each step. Returns the attainment
+    after every step, measured from the episode start; the first is the
+    one-shot score. Leaves `env._params` at the final transfer function."""
+    from rl.oneshot_env import build_observation
+    if env.action_mode != "residual":
+        raise ValueError("closed-loop rollout needs a residual-action policy")
+    model, instruction, start_agg, layers = env._model, env._instruction, env._start_agg, env._active_layers
+    solo = env._solo_max_log(env._volume, model)
+    params, agg, scores = np.asarray(env._start_params, dtype=np.float64).copy(), start_agg, []
+    for _ in range(horizon):
+        ctrl = np.asarray(env._controllable_values(params))
+        goal = remaining_goal_for(instruction["goal"], start_agg, agg, instruction.get("weights"))
+        action, _ = policy.predict(build_observation(goal, model.histogram, agg, solo, ctrl))
+        params = apply_controllable(params, np.clip(ctrl + action, -1, 1))
+        agg = goals.aggregate(env._features(params), layers)
+        scores.append(env._attainment(agg))
+    env._params = params
+    return scores
+
+
 def evaluate(policy, horizon: int = 2, episodes: int = 200, seed_base: int = mb.VALIDATION_SEED_BASE,
              split: str = "val", task_version: str = "v1", volume_ids=None, model_for_volume=None) -> dict:
-    """The policy alone on real renders, re-rendering and re-observing after each step.
-    Medians are per kind and per step ("t1" is the one-shot score)."""
+    """The policy alone on real renders (`rollout`), per kind and per step
+    ("t1" is the one-shot score)."""
     import datasets
-    from rl.oneshot_env import OneShotEnv, build_observation
+    from rl.oneshot_env import OneShotEnv
     ids = volume_ids if volume_ids is not None else datasets.volumes_for_split(split)
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
     env = OneShotEnv(ids, **kwargs, **mb.ENV_KWARGS, task_version=task_version)
     by_kind, rows = collections.defaultdict(lambda: collections.defaultdict(list)), []
     for seed in range(seed_base, seed_base + episodes):
         env.reset(seed=seed)
-        model, instruction, start_agg = env._model, env._instruction, env._start_agg
-        solo = env._solo_max_log(env._volume, model)
-        params, agg = env._start_params.copy(), start_agg
-        row = {"seed": seed, "kind": instruction["kind"], "solvable": env._solvable}
-        for t in range(1, horizon + 1):
-            ctrl = np.asarray(env._controllable_values(params))
-            goal = remaining_goal_for(instruction["goal"], start_agg, agg, instruction.get("weights"))
-            action, _ = policy.predict(build_observation(goal, model.histogram, agg, solo, ctrl))
-            params = apply_controllable(params, np.clip(ctrl + action, -1, 1))
-            agg = goals.aggregate(goals.features(model, params))
-            row[f"t{t}"] = env._attainment(agg)
-            by_kind[row["kind"]][f"t{t}"].append(row[f"t{t}"])
-            by_kind["ALL"][f"t{t}"].append(row[f"t{t}"])
+        row = {"seed": seed, "kind": env._instruction["kind"], "solvable": env._solvable}
+        for t, score in enumerate(rollout(policy, env, horizon), start=1):
+            row[f"t{t}"] = score
+            by_kind[row["kind"]][f"t{t}"].append(score)
+            by_kind["ALL"][f"t{t}"].append(score)
         rows.append(row)
     medians = {k: {t: float(np.median(v)) for t, v in steps.items()} for k, steps in sorted(by_kind.items())}
     return {"medians": medians, "rows": rows}
