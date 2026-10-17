@@ -40,10 +40,12 @@ from rl.oneshot_env import (ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, load_
 #
 # Task v2 (2026-10-17, docs/experiments/2026-10-17-task-v2.md): the viewer opens
 # on the visible-organ start TF and scores commands as v2 (server.TASK_VERSION),
-# so it runs a v2 policy -- two Dyna rounds plus closed-loop fine-tuning
-# (rl.closed_loop), one-shot val median 0.477, the best of 0.461 / 0.438 /
-# 0.477. With TASK_VERSION=v1 set POLICY_PATH=out/rl_mb/r1_seed1/checkpoint.pt.
-POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb_v2/cl2_r2_seed2/checkpoint.pt")
+# so it runs a v2 policy -- three Dyna rounds plus kind-balanced closed-loop
+# fine-tuning (rl.closed_loop --balance-kinds). rl.vis_eval, 300 val episodes,
+# policy alone: median 0.539 (absolute 0.62, show_only 0.44, both above the
+# 200-evaluation search) against 0.511 for the round-2 policy it replaces.
+# With TASK_VERSION=v1 set POLICY_PATH=out/rl_mb/r1_seed1/checkpoint.pt.
+POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb_v2/clb_r3_seed1/checkpoint.pt")
 
 _state = {"policies": {}}
 

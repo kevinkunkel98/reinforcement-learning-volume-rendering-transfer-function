@@ -1499,7 +1499,7 @@ def test_policy_path_points_at_a_checkpoint_trained_on_the_corrected_observation
     # cc167af). The viewer must not demo that checkpoint when a v3-or-later
     # one exists. v4 (current) adds goals.distance's "other" keep term on top
     # of v3's observation fix -- it doesn't regress this property.
-    assert server.POLICY_PATH == "out/rl_mb_v2/cl2_r2_seed2/checkpoint.pt"
+    assert server.POLICY_PATH == "out/rl_mb_v2/clb_r3_seed1/checkpoint.pt"
 
 
 def test_framing_is_measured_once_per_dataset_not_per_command():
@@ -1522,7 +1522,7 @@ def test_collector_and_viewer_load_the_same_checkpoint():
 
     assert server.POLICY_PATH == policy.POLICY_PATH
     assert collect.POLICY_PATH == policy.POLICY_PATH
-    assert policy.POLICY_PATH == "out/rl_mb_v2/cl2_r2_seed2/checkpoint.pt"
+    assert policy.POLICY_PATH == "out/rl_mb_v2/clb_r3_seed1/checkpoint.pt"
 
 
 def test_viewer_opens_and_resets_on_the_task_versions_start_tf():
