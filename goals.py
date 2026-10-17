@@ -623,7 +623,8 @@ def sample_instruction(name, model, start_features, rng, active_layers=None,
 _NOT_A_GOAL = ("{what} is not a goal -- apply it exactly via commands.apply_command")
 
 _CLASS_LABEL = {"skeleton": "the skeleton", "lungs": "the lungs",
-                "soft": "soft tissue", "vessels": "the vessels"}
+                "soft": "soft tissue", "vessels": "the vessels", "liver": "the liver",
+                "kidneys": "the kidneys", "spleen": "the spleen", "heart": "the heart"}
 
 
 def _check_class_supported(goal_class: str, volume) -> None:

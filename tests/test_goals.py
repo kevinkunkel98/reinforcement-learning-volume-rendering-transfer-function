@@ -937,3 +937,9 @@ def test_solvable_only_falls_back_to_another_kind_when_nothing_is_reachable(monk
     for _ in range(200):
         instruction = goals.sample_instruction("fake", model, start, rng, solvable_only=True)
         assert instruction["kind"] not in ("relative", "compound")
+
+
+def test_every_goal_class_has_a_command_label():
+    # goal_from_command words its goal text with these; a missing organ made
+    # "more liver" raise KeyError in the viewer's policy and search modes.
+    assert set(goals._CLASS_LABEL) >= set(goals.GOAL_CLASSES)
