@@ -57,8 +57,11 @@ def remaining_goal_for(goal, start_agg, current_agg, weights=None) -> np.ndarray
 
 
 def finetune(policy, ensemble, data, train_starts, steps: int = 20_000, horizon: int = 2, seed: int = 0,
-             batch: int = 256, learning_rate: float = 1e-4, intermediate_weight: float = 0.2, log=print):
-    """Train `policy` in place through `horizon`-step rollouts in the frozen `ensemble`."""
+             batch: int = 256, learning_rate: float = 1e-4, intermediate_weight: float = 0.2,
+             balance_kinds: bool = False, log=print):
+    """Train `policy` in place through `horizon`-step rollouts in the frozen `ensemble`.
+    `balance_kinds` draws every instruction kind equally often instead of in the
+    grammar's mix (absolute and brightness are 10 % each)."""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     T = mb._tensor
@@ -67,10 +70,17 @@ def finetune(policy, ensemble, data, train_starts, steps: int = 20_000, horizon:
     optimizer = torch.optim.Adam(policy.net.parameters(), lr=learning_rate)
     policy.net.train()
     per_start = data["goal"].shape[1]
+    pairs = np.array([(s, i) for s in train_starts for i in range(per_start)])
+    p = None
+    if balance_kinds:
+        kinds = data["kind"][pairs[:, 0], pairs[:, 1]]
+        names, inverse, counts = np.unique(kinds, return_inverse=True, return_counts=True)
+        p = 1.0 / counts[inverse]
+        p /= p.sum()
     model_attainment = None
     for step in range(steps):
-        starts = torch.as_tensor(rng.choice(train_starts, batch))
-        pick = torch.as_tensor(rng.integers(0, per_start, batch))
+        chosen = pairs[rng.choice(len(pairs), batch, p=p)]
+        starts, pick = torch.as_tensor(chosen[:, 0]), torch.as_tensor(chosen[:, 1])
         goal, weights = goal_all[starts, pick], weights_all[starts, pick]
         start_distance = mb.goal_distance(goal, weights, torch.zeros(batch, mb.STATE_SIZE))
         keep = start_distance > 1e-6
@@ -137,6 +147,8 @@ def parse_args(argv=None):
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--intermediate-weight", type=float, default=0.2)
+    parser.add_argument("--balance-kinds", action="store_true",
+                        help="draw every instruction kind equally often")
     parser.add_argument("--eval-episodes", type=int, default=200)
     parser.add_argument("--threads", type=int, default=3)
     parser.add_argument("--task-version", choices=goals.TASK_VERSIONS, default="v1")
@@ -154,10 +166,12 @@ def main(argv=None):
     policy = mb.ModelBasedPolicy.load(args.init)
     policy, report = finetune(policy, ensemble, data, train_starts, steps=args.steps, horizon=args.horizon,
                               seed=args.seed, learning_rate=args.learning_rate,
-                              intermediate_weight=args.intermediate_weight)
+                              intermediate_weight=args.intermediate_weight,
+                              balance_kinds=args.balance_kinds)
     policy.metadata = {"init": args.init, "data": args.data.split(","), "closed_loop_horizon": args.horizon,
                        "train_steps": args.steps, "seed": args.seed, "learning_rate": args.learning_rate,
-                       "intermediate_weight": args.intermediate_weight, "task_version": args.task_version}
+                       "intermediate_weight": args.intermediate_weight,
+                       "balance_kinds": args.balance_kinds, "task_version": args.task_version}
     os.makedirs(args.out, exist_ok=True)
     if args.eval_episodes:
         result = evaluate(policy, horizon=args.horizon, episodes=args.eval_episodes,
