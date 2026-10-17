@@ -98,17 +98,20 @@ class DynamicsEnsemble(nn.Module):
 
 
 def goal_distance(goal, weights, delta):
-    """`goals.distance` in torch, batched: `goal` B x 4n, `weights` B x n (1.0
-    where the instruction has none), `delta` B x STATE_SIZE (the change from the
-    start state, so `delta = 0` is the start's own distance)."""
+    """`goals.distance` in torch, batched: `goal` B x 4n, `weights` B x n or
+    B x (n + 1) (1.0 where the instruction has none; the optional last column is
+    weights["other"], task v2's occlusion exemption), `delta` B x STATE_SIZE (the
+    change from the start state, so `delta = 0` is the start's own distance)."""
     n = N_CLASSES
+    other_weight = weights[:, n] if weights.shape[1] > n else 1.0
+    weights = weights[:, :n]
     c, c_other, b = delta[:, :n], delta[:, n], delta[:, n + 1:2 * n + 1]
     d, m, e, mb = goal[:, :n], goal[:, n:2 * n], goal[:, 2 * n:3 * n], goal[:, 3 * n:4 * n]
     total = (m * weights * (c - d).abs()).sum(1) + goals.KAPPA * (mb * weights * (b - e).abs()).sum(1)
     total = total + goals.LAMBDA_KEEP * ((1 - m) * torch.relu(c.abs() - goals.KEEP_TOLERANCE)).sum(1)
     total = total + goals.LAMBDA_KEEP * goals.KAPPA * (
         (1 - mb) * torch.relu(b.abs() - goals.KEEP_TOLERANCE)).sum(1)
-    return total + goals.LAMBDA_KEEP * torch.relu(c_other.abs() - goals.KEEP_TOLERANCE)
+    return total + goals.LAMBDA_KEEP * other_weight * torch.relu(c_other.abs() - goals.KEEP_TOLERANCE)
 
 
 def policy_observation(goal, histogram, start_state, solo_max_log, controllable):
@@ -156,7 +159,8 @@ class ModelBasedPolicy:
                     "metadata": self.metadata}, path)
         # rl.oneshot_env.load_policy_metadata reads this, as for a SAC run.
         with open(os.path.join(out_dir, METADATA_NAME), "w") as stream:
-            json.dump({**observation_metadata(**ENV_KWARGS), "algorithm": "model_based",
+            task_version = self.metadata.get("task_version", "v1")
+            json.dump({**observation_metadata(**ENV_KWARGS, task_version=task_version), "algorithm": "model_based",
                        **self.metadata, **({"report": report} if report else {})}, stream, indent=2)
         return path
 
@@ -178,10 +182,11 @@ def load_dynamics(path: str) -> DynamicsEnsemble:
 # --- data -------------------------------------------------------------------
 
 def _collect_chunk(args):
-    seeds, actions_per_start, policy_path, volume_ids, start_variety = args
+    seeds, actions_per_start, policy_path, volume_ids, start_variety, task_version = args
     torch.set_num_threads(1)
     from rl.oneshot_train import build_env
-    env = build_env(volume_ids=volume_ids, **ENV_KWARGS, balance_classes=True, start_variety=start_variety)
+    env = build_env(volume_ids=volume_ids, **ENV_KWARGS, balance_classes=True, start_variety=start_variety,
+                    task_version=task_version)
     policy = ModelBasedPolicy.load(policy_path) if policy_path else None
     return collect_starts(env, seeds, actions_per_start, policy)
 
@@ -224,7 +229,7 @@ def collect_starts(env, seeds, actions_per_start: int = ACTIONS_PER_START, polic
                 env._class_counts[goal_class] = env._class_counts.get(goal_class, 0) + 1
             weights = instruction.get("weights") or {}
             goal_rows.append(instruction["goal"])
-            weight_rows.append([weights.get(c, 1.0) for c in goals.GOAL_CLASSES])
+            weight_rows.append([weights.get(c, 1.0) for c in goals.GOAL_CLASSES] + [weights.get("other", 1.0)])
             kinds.append(instruction["kind"])
         out["hist"].append(np.asarray(env._model.histogram, np.float32))
         out["solo"].append(np.asarray(env._solo_max_log(env._volume, env._model), np.float32))
@@ -240,12 +245,13 @@ def collect_starts(env, seeds, actions_per_start: int = ACTIONS_PER_START, polic
 
 
 def collect(seeds, workers: int = 3, actions_per_start: int = ACTIONS_PER_START,
-            policy_path: str = None, volume_ids=None, start_variety: float = 0.0) -> dict:
+            policy_path: str = None, volume_ids=None, start_variety: float = 0.0,
+            task_version: str = "v1") -> dict:
     """`collect_starts` over `workers` processes. `start_variety` is
     `OneShotEnv`'s: that share of starts dims soft tissue and raises the organs,
     so the model also sees states where organs are visible."""
     seeds = list(seeds)
-    chunks = [(seeds[i::workers * 4], actions_per_start, policy_path, volume_ids, start_variety)
+    chunks = [(seeds[i::workers * 4], actions_per_start, policy_path, volume_ids, start_variety, task_version)
               for i in range(workers * 4)]
     chunks = [chunk for chunk in chunks if chunk[0]]
     with mp.get_context("spawn").Pool(workers) as pool:
@@ -384,13 +390,13 @@ def train_policy(ensemble, data, train_starts, steps: int = 6000, beta: float = 
 
 
 def evaluate(policy, episodes: int = 200, seed_base: int = VALIDATION_SEED_BASE, split: str = "val",
-             volume_ids=None, model_for_volume=None) -> dict:
+             volume_ids=None, model_for_volume=None, task_version: str = "v1") -> dict:
     """The policy alone on real renders: one `OneShotEnv` step per episode."""
     import datasets
     from rl.oneshot_env import OneShotEnv
     ids = volume_ids if volume_ids is not None else datasets.volumes_for_split(split)
     kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
-    env = OneShotEnv(ids, **kwargs, **ENV_KWARGS)
+    env = OneShotEnv(ids, **kwargs, **ENV_KWARGS, task_version=task_version)
     rows, by_kind = [], collections.defaultdict(list)
     for seed in range(seed_base, seed_base + episodes):
         obs, _ = env.reset(seed=seed)
@@ -407,7 +413,8 @@ def evaluate(policy, episodes: int = 200, seed_base: int = VALIDATION_SEED_BASE,
 def run_training(data_paths, out: str, seed: int = 0, model_epochs: int = 60, policy_steps: int = 6000,
                  beta: float = 1.0, useless_weight: float = 1.0, eval_episodes: int = 200,
                  dynamics_path: str = None, hidden: int = 256, depth: int = 2,
-                 learning_rate: float = 3e-4, cosine: bool = False, log=print) -> dict:
+                 learning_rate: float = 3e-4, cosine: bool = False, task_version: str = "v1",
+                 log=print) -> dict:
     """Fit the dynamics ensemble (or reuse the one in `dynamics_path`, a
     checkpoint.pt trained on the same data), then the policy through it."""
     data = load_data(data_paths)
@@ -428,10 +435,11 @@ def run_training(data_paths, out: str, seed: int = 0, model_epochs: int = 60, po
     policy.metadata = {"seed": seed, "data": list(data_paths), "starts": int(len(data["s0"])),
                        "model_epochs": model_epochs, "policy_steps": policy_steps, "beta": beta,
                        "useless_weight": useless_weight, "hidden": hidden, "depth": depth,
-                       "learning_rate": learning_rate, "cosine": cosine, "dynamics": dynamics_path}
+                       "learning_rate": learning_rate, "cosine": cosine, "dynamics": dynamics_path,
+                       "task_version": task_version}
     report = {"dynamics": dyn_report, "policy": pol_report, "train_seconds": round(time.time() - t0)}
     if eval_episodes:
-        result = evaluate(policy, episodes=eval_episodes)
+        result = evaluate(policy, episodes=eval_episodes, task_version=task_version)
         report["val"] = {"medians": result["medians"], "useless_share": result["useless_share"]}
         log(f"[model_based] real val medians: {result['medians']}")
         os.makedirs(out, exist_ok=True)
@@ -454,6 +462,7 @@ def parse_args(argv=None):
     c.add_argument("--policy", default=None, help="checkpoint.pt whose proposals fill half the actions (Dyna)")
     c.add_argument("--splits", default="train",
                    help="comma-separated volume splits to draw starts from, e.g. train,train_extra")
+    c.add_argument("--task-version", choices=goals.TASK_VERSIONS, default="v1")
     c.add_argument("--start-variety", type=float, default=0.0,
                    help="share of starts with soft tissue dimmed and organs raised (OneShotEnv)")
     t = sub.add_parser("train", help="fit the dynamics ensemble, then the policy through it")
@@ -471,6 +480,7 @@ def parse_args(argv=None):
     t.add_argument("--policy-depth", type=int, default=2)
     t.add_argument("--policy-lr", type=float, default=3e-4)
     t.add_argument("--policy-cosine", action="store_true", help="cosine-anneal the policy learning rate")
+    t.add_argument("--task-version", choices=goals.TASK_VERSIONS, default="v1")
     return parser.parse_args(argv)
 
 
@@ -482,7 +492,7 @@ def main(argv=None):
         data = collect(range(args.seed_base, args.seed_base + args.starts), workers=args.workers,
                        volume_ids=volume_ids,
                        actions_per_start=args.actions, policy_path=args.policy,
-                       start_variety=args.start_variety)
+                       start_variety=args.start_variety, task_version=args.task_version)
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         np.savez_compressed(args.out, **data)
         print(f"[model_based] wrote {args.out}: {len(data['s0'])} starts x {data['act'].shape[1]} actions")
@@ -492,7 +502,7 @@ def main(argv=None):
                      policy_steps=args.policy_steps, beta=args.beta, useless_weight=args.useless_weight,
                      eval_episodes=args.eval_episodes, dynamics_path=args.dynamics,
                      hidden=args.policy_hidden, depth=args.policy_depth, learning_rate=args.policy_lr,
-                     cosine=args.policy_cosine)
+                     cosine=args.policy_cosine, task_version=args.task_version)
 
 
 if __name__ == "__main__":

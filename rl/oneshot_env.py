@@ -139,6 +139,12 @@ def resolve_policy_metadata(metadata=None) -> dict:
               "reward_mode": "attainment"}
     if metadata:
         values.update({key: metadata[key] for key in values if key in metadata})
+        # Only a v2 task is recorded, so every v1 checkpoint's metadata (and the
+        # env kwargs built from it) stays exactly as it was.
+        if metadata.get("task_version", "v1") != "v1":
+            if metadata["task_version"] not in goals.TASK_VERSIONS:
+                raise ValueError(f"unsupported task version: {metadata['task_version']}")
+            values["task_version"] = metadata["task_version"]
     if values["policy_version"] not in POLICY_VERSIONS:
         raise ValueError(f"unsupported policy version: {values['policy_version']}")
     if values["policy_version"] == V9_POLICY_VERSION and metadata and \
@@ -171,7 +177,7 @@ def load_policy_metadata(checkpoint_path: str) -> dict:
 
 
 def observation_metadata(policy_version: str = POLICY_VERSION, action_mode: str = "absolute",
-                         reward_mode: str = "attainment") -> dict:
+                         reward_mode: str = "attainment", task_version: str = "v1") -> dict:
     """Return the serialized contract shared by training and inference."""
     resolved = resolve_policy_metadata({"policy_version": policy_version,
                                         "action_mode": action_mode,
@@ -188,6 +194,10 @@ def observation_metadata(policy_version: str = POLICY_VERSION, action_mode: str 
     }
     if resolved["policy_version"] == V9_POLICY_VERSION:
         metadata["transfer_mode"] = transfer.DEFAULT_TRANSFER_MODE
+    if task_version != "v1":
+        if task_version not in goals.TASK_VERSIONS:
+            raise ValueError(f"unsupported task version: {task_version}")
+        metadata["task_version"] = task_version
     if resolved["policy_version"] == V8_POLICY_VERSION:
         metadata["observation_size"] = V8_OBSERVATION_SIZE
         metadata["anatomy_layers"] = list(LAYER_NAMES)
@@ -240,8 +250,15 @@ class OneShotEnv(gym.Env):
                  action_mode: str = "absolute", reward_mode: str = "attainment",
                  balance_classes: bool = False, hindsight_brightness_share: float = 0.0,
                  hindsight_show_only_share: float = 0.0, solvable_instructions: bool = False,
-                 start_variety: float = 0.0, target_drift_weight: float = TARGET_DRIFT_WEIGHT):
+                 start_variety: float = 0.0, target_drift_weight: float = TARGET_DRIFT_WEIGHT,
+                 task_version: str = "v1"):
         super().__init__()
+        if task_version not in goals.TASK_VERSIONS:
+            raise ValueError(f"unsupported task version: {task_version}")
+        # Task v2 (goals.py, docs/experiments/2026-10-17-task-v2.md): organs
+        # visible at the start, well-posed instructions only, occluders exempt
+        # from the keep terms, every target clipped to what its class can reach.
+        self.task_version = task_version
         if not volume_ids:
             raise ValueError("volume_ids must not be empty")
         self.volume_ids = list(volume_ids)
@@ -275,8 +292,8 @@ class OneShotEnv(gym.Env):
         self.reward_mode = reward_mode
         self.balance_classes = balance_classes
         # Sample only relative/compound targets the start state allows
-        # (goals.sample_instruction(solvable_only=True)).
-        self.solvable_instructions = bool(solvable_instructions)
+        # (goals.sample_instruction(solvable_only=True)). Always on in task v2.
+        self.solvable_instructions = bool(solvable_instructions) or task_version == "v2"
         if not 0.0 <= start_variety <= 1.0:
             raise ValueError("start_variety must be between 0 and 1")
         self.start_variety = float(start_variety)
@@ -313,7 +330,8 @@ class OneShotEnv(gym.Env):
         self._hindsight_action = None
 
     def contract_metadata(self) -> dict:
-        return observation_metadata(self.policy_version, self.action_mode, self.reward_mode)
+        return observation_metadata(self.policy_version, self.action_mode, self.reward_mode,
+                                    self.task_version)
 
     def _get_model(self, volume: str):
         # visibility.for_volume() already caches to disk; this in-memory cache
@@ -347,7 +365,7 @@ class OneShotEnv(gym.Env):
         return cached
 
     def _sample_start_params(self, rng) -> np.ndarray:
-        params = goals.starting_params()
+        params = goals.starting_params(self.task_version)
         for group in CONTROLLABLE:
             noise = rng.uniform(-START_NOISE, START_NOISE)
             for index in group:
@@ -571,6 +589,10 @@ class OneShotEnv(gym.Env):
                 self._class_counts, self.balance_classes, **solvable), None)
             for goal_class in instruction["targets"]:
                 self._class_counts[goal_class] = self._class_counts.get(goal_class, 0) + 1
+            if self.task_version == "v2":
+                instruction = goals.occlusion_aware(instruction, goals.find_occluders(
+                    model, start_params, instruction, self._active_layers))
+                instruction = goals.reachable_targets(instruction, model, start_agg, self._active_layers)
         # Omitting the `weights` kwarg entirely when it's None (rather than
         # always passing `weights=None`) matters: some tests monkeypatch
         # `goals.distance` with a fixed-arity stub lacking a `weights`

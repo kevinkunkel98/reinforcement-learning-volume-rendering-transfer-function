@@ -109,14 +109,34 @@ ANATOMICAL_COLOURS = {
 }
 
 
-def anatomical_params() -> np.ndarray:
-    """One peak per goal class at its tissue's Hounsfield value."""
+# Task v2's start (docs/experiments/2026-10-17-task-v2.md): soft tissue, which
+# also shades the unlabelled skin/fat shell in front of everything
+# (UNLABELLED_PEAKS), nearly transparent and the organs raised, so an organ an
+# instruction names is not hidden before anything is changed. On 100 val
+# episodes this lifts the share of solvable relative/compound instructions from
+# 48 % to 60 % and show_only's achievable median from 0.16 to 0.39.
+VISIBLE_ORGAN_HEIGHTS = {
+    "lungs": 0.05,
+    "soft": 0.06,
+    "liver": 0.45,
+    "kidneys": 0.45,
+    "spleen": 0.45,
+    "heart": 0.45,
+    "vessels": 0.45,
+    "skeleton": 0.45,
+}
+
+
+def anatomical_params(heights: dict = None) -> np.ndarray:
+    """One peak per goal class at its tissue's Hounsfield value, at
+    `heights` (unit, per class; default ANATOMICAL_HEIGHTS)."""
+    heights = ANATOMICAL_HEIGHTS if heights is None else heights
     params = np.zeros(TOTAL_PARAMS, dtype=np.float64)
     for goal_class, index in ANATOMICAL_PEAK_INDEX.items():
         base = index * PARAMS_PER_PEAK
         params[base + 0] = _from_range(ANATOMICAL_CENTRES_HU[goal_class], *CENTER_RANGE)
         params[base + 1] = _from_range(ANATOMICAL_WIDTHS_HU[goal_class], *WIDTH_RANGE)
-        params[base + 2] = _from_unit(ANATOMICAL_HEIGHTS[goal_class])
+        params[base + 2] = _from_unit(heights[goal_class])
         r, g, b = ANATOMICAL_COLOURS[goal_class]
         params[base + 3] = _from_unit(r)
         params[base + 4] = _from_unit(g)

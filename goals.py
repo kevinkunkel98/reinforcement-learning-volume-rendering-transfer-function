@@ -47,12 +47,18 @@ BRIGHTNESS_STRENGTH = {"slightly": 0.1, "moderately": 0.2, "strongly": 0.4}
 ABSOLUTE_LEVEL = {"low": 0.1, "medium": 0.4, "high": 0.8}                      # share of solo_max
 
 
-def starting_params() -> np.ndarray:
+TASK_VERSIONS = ("v1", "v2")
+
+
+def starting_params(task_version: str = "v1") -> np.ndarray:
     """RL v2's starting transfer function: one peak per goal class.
 
     The same layout `visibility.solo_max` probes at, so "what the instruction
-    asks for" and "what this volume can reach" are measured in one geometry."""
-    return transfer.anatomical_params()
+    asks for" and "what this volume can reach" are measured in one geometry.
+    Task v2 starts with the organs visible (`transfer.VISIBLE_ORGAN_HEIGHTS`)."""
+    if task_version not in TASK_VERSIONS:
+        raise ValueError(f"unknown task version {task_version!r}")
+    return transfer.anatomical_params(transfer.VISIBLE_ORGAN_HEIGHTS if task_version == "v2" else None)
 
 
 def features(model, params, active_layers=None) -> dict:
@@ -229,8 +235,11 @@ def distance(goal: np.ndarray, start: dict, current: dict, weights: dict = None)
     # always the unmentioned case -- without this, a transfer function can
     # satisfy "show only X" by rendering an opaque wall of unclassified
     # material instead of X, since "other" is not a goal class and is never
-    # charged by the mentioned-class terms.
-    total += LAMBDA_KEEP * max(0.0, abs(c["other"]) - KEEP_TOLERANCE)
+    # charged by the mentioned-class terms. Task v2's occlusion-aware goals
+    # (`occlusion_aware`) can exempt it with weights["other"] = 0, when that
+    # unlabelled shell is what hides a target.
+    other_weight = 1.0 if weights is None else weights.get("other", 1.0)
+    total += LAMBDA_KEEP * other_weight * max(0.0, abs(c["other"]) - KEEP_TOLERANCE)
     return float(total)
 
 
@@ -755,3 +764,100 @@ def _goal_from_command(command: dict, model, start_features: dict, volume, activ
         return _goal_brightness(command, volume)
 
     raise ValueError(_NOT_A_GOAL.format(what=f"{command!r}"))
+
+
+# --- task v2: making hidden-organ instructions solvable ----------------------
+#
+# Under the v1 task about half of relative/compound val instructions cannot be
+# improved by any method (docs/experiments/2026-10-17-task-v2.md): they ask to
+# lower a class that is already invisible, to raise a class hidden behind other
+# tissue (fading the occluder costs more keep-drift than the goal gains), or to
+# move a class further than it can physically go. Task v2 keeps the metric and
+# changes what an instruction asks for: well-posed sampling (solvable_only), the
+# two transforms below, and a start transfer function with the organs visible
+# (`transfer.VISIBLE_ORGAN_HEIGHTS`). Each is expressed through the goal vector
+# and `weights`, so every caller of `distance` scores v2 without change.
+
+OCCLUDER_GAIN = 0.15     # log10 visibility a target must gain for a class to count as its occluder
+
+
+def _height_index(goal_class: str) -> int:
+    return transfer.ANATOMICAL_PEAK_INDEX[goal_class] * transfer.PARAMS_PER_PEAK + 2
+
+
+def find_occluders(model, params, instruction, active_layers=None) -> set:
+    """Classes (and "other", the unlabelled tissue) that hide a target the
+    instruction asks to make more visible.
+
+    A class k is an occluder when removing it alone lifts a target's log10
+    visibility by more than OCCLUDER_GAIN, or when -- with every unmentioned
+    class removed -- putting k back drops a target by that much (joint
+    occlusion: a heart behind both soft tissue and the liver). "other" is not a
+    peak of its own (the skeleton/lungs/soft peaks shade it), so it counts when
+    clearing the unmentioned classes both removes it and lifts a target."""
+    targets = [c for c, t in instruction["targets"].items() if t.get("vis", 0.0) > 0]
+    if not targets:
+        return set()
+    log = lambda vis, c: math.log10(vis.get(c, 0.0) + EPSILON)
+    vis_of = lambda p: aggregate(model.features(p) if active_layers is None
+                                 else model.features(p, active_layers), active_layers)["vis"]
+    others = [k for k in GOAL_CLASSES if k not in instruction["targets"]]
+    base = vis_of(params)
+    found = set()
+    for k in others:
+        p = np.array(params, dtype=np.float64)
+        p[_height_index(k)] = -1.0
+        if any(log(vis_of(p), c) - log(base, c) > OCCLUDER_GAIN for c in targets):
+            found.add(k)
+    cleared = np.array(params, dtype=np.float64)
+    for k in others:
+        cleared[_height_index(k)] = -1.0
+    clear_vis = vis_of(cleared)
+    if (log(base, "other") - log(clear_vis, "other") > OCCLUDER_GAIN
+            and any(log(clear_vis, c) - log(base, c) > OCCLUDER_GAIN for c in targets)):
+        found.add("other")
+    for k in others:
+        p = cleared.copy()
+        p[_height_index(k)] = params[_height_index(k)]
+        if any(log(clear_vis, c) - log(vis_of(p), c) > OCCLUDER_GAIN for c in targets):
+            found.add(k)
+    return found
+
+
+def occlusion_aware(instruction: dict, occluders: set) -> dict:
+    """`instruction` with its occluders exempt from the keep terms: each occluding
+    class becomes "mentioned with weight 0" for visibility and brightness, and an
+    occluding "other" gets weights["other"] = 0. Revealing a hidden class by
+    fading what is in front of it is what was asked for, not drift."""
+    if not occluders:
+        return instruction
+    n = len(GOAL_CLASSES)
+    goal = np.array(instruction["goal"], dtype=np.float64)
+    weights = dict(instruction.get("weights") or {c: 1.0 for c in GOAL_CLASSES})
+    for i, goal_class in enumerate(GOAL_CLASSES):
+        if goal_class in occluders:
+            goal[i], goal[n + i] = 0.0, 1.0
+            goal[2 * n + i], goal[3 * n + i] = 0.0, 1.0
+            weights[goal_class] = 0.0
+    if "other" in occluders:
+        weights["other"] = 0.0
+    return {**instruction, "goal": goal, "weights": weights, "occluders": sorted(occluders)}
+
+
+def reachable_targets(instruction: dict, model, start: dict, active_layers=None) -> dict:
+    """`instruction` with every visibility target clipped to what its class can
+    reach from `start`: not below the EPSILON floor ("a lot less lungs" when the
+    lungs are already invisible) and not above the class's single-peak ceiling
+    (show_only's +1 for a class that cannot get that bright). Occluder entries
+    (weight 0) are left alone."""
+    n = len(GOAL_CLASSES)
+    goal = np.array(instruction["goal"], dtype=np.float64)
+    floor = math.log10(EPSILON)
+    for i, goal_class in enumerate(GOAL_CLASSES):
+        if not goal[n + i]:
+            continue
+        start_vis = start["vis"].get(goal_class, 0.0)
+        current = math.log10(start_vis + EPSILON)
+        ceiling = math.log10(max(class_ceiling(model, goal_class, active_layers), start_vis) + EPSILON)
+        goal[i] = min(max(goal[i], floor - current), ceiling - current)
+    return {**instruction, "goal": goal}
