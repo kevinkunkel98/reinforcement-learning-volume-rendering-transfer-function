@@ -197,7 +197,8 @@ def collect_starts(env, seeds, actions_per_start: int = ACTIONS_PER_START, polic
     `INSTRUCTIONS_PER_START` real instructions for policy training. With
     `policy`, the first half of the actions are its proposals plus noise
     (Dyna: data where the policy actually acts)."""
-    out = {k: [] for k in ("hist", "solo", "ctrl", "s0", "act", "s1", "useless", "goal", "weights", "kind")}
+    out = {k: [] for k in ("hist", "solo", "ctrl", "s0", "act", "s1", "useless", "goal", "weights", "kind",
+                           "volume")}
     for seed in seeds:
         obs, _ = env.reset(seed=int(seed))
         rng = np.random.default_rng(int(seed))
@@ -223,10 +224,8 @@ def collect_starts(env, seeds, actions_per_start: int = ACTIONS_PER_START, polic
             useless.append(goals.is_useless(raw))
         goal_rows, weight_rows, kinds = [], [], []
         for _ in range(INSTRUCTIONS_PER_START):
-            instruction = goals.sample_instruction(env._volume, env._model, env._start_agg, rng, None,
-                                                   env._class_counts, True)
-            for goal_class in instruction["targets"]:
-                env._class_counts[goal_class] = env._class_counts.get(goal_class, 0) + 1
+            instruction = env.sample_real_instruction(rng, env._volume, env._model, env._start_params,
+                                                      env._start_agg)
             weights = instruction.get("weights") or {}
             goal_rows.append(instruction["goal"])
             weight_rows.append([weights.get(c, 1.0) for c in goals.GOAL_CLASSES] + [weights.get("other", 1.0)])
@@ -241,6 +240,7 @@ def collect_starts(env, seeds, actions_per_start: int = ACTIONS_PER_START, polic
         out["goal"].append(np.asarray(goal_rows, np.float32))
         out["weights"].append(np.asarray(weight_rows, np.float32))
         out["kind"].append(kinds)
+        out["volume"].append(env._volume)
     return {k: np.array(v) for k, v in out.items()}
 
 
@@ -260,8 +260,16 @@ def collect(seeds, workers: int = 3, actions_per_start: int = ACTIONS_PER_START,
 
 
 def load_data(paths) -> dict:
+    """Concatenate `collect` outputs; keys only some files carry (older files
+    lack "volume") are dropped, and weights are padded to the n + 1 column
+    layout ("other" = 1.0) when files differ."""
     parts = [dict(np.load(p, allow_pickle=True)) for p in paths]
-    return {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    if len({p["weights"].shape[-1] for p in parts}) > 1:
+        for p in parts:
+            if p["weights"].shape[-1] == N_CLASSES:
+                p["weights"] = np.concatenate([p["weights"], np.ones(p["weights"].shape[:-1] + (1,), np.float32)], -1)
+    keys = set.intersection(*(set(p) for p in parts))
+    return {k: np.concatenate([p[k] for p in parts]) for k in parts[0] if k in keys}
 
 
 # --- training -----------------------------------------------------------------

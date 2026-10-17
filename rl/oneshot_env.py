@@ -563,6 +563,25 @@ class OneShotEnv(gym.Env):
         }
         return instruction, action  # pyright: ignore[reportPossiblyUnboundVariable]
 
+    def sample_real_instruction(self, rng, volume, model, start_params, start_agg) -> dict:
+        """One instruction from the real grammar for this start, exactly as
+        `reset` draws it -- the single implementation, so a caller sampling
+        extra instructions per start (`rl.model_based.collect_starts`) trains on
+        the same task the env evaluates: solvable-only sampling when enabled
+        and, in task v2, the occlusion-aware and reachable-target transforms."""
+        # The kwarg only when enabled: tests stub sample_instruction with
+        # the original fixed signature.
+        solvable = {"solvable_only": True} if self.solvable_instructions else {}
+        instruction = goals.sample_instruction(volume, model, start_agg, rng, self._active_layers,
+                                               self._class_counts, self.balance_classes, **solvable)
+        for goal_class in instruction["targets"]:
+            self._class_counts[goal_class] = self._class_counts.get(goal_class, 0) + 1
+        if self.task_version == "v2":
+            instruction = goals.occlusion_aware(instruction, goals.find_occluders(
+                model, start_params, instruction, self._active_layers))
+            instruction = goals.reachable_targets(instruction, model, start_agg, self._active_layers)
+        return instruction
+
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         rng = self.np_random
@@ -581,18 +600,8 @@ class OneShotEnv(gym.Env):
         if rng.random() < self.hindsight_ratio:
             instruction, hindsight_action = self._sample_hindsight_goal(rng, model, start_params, start_agg)
         else:
-            # The kwarg only when enabled: tests stub sample_instruction with
-            # the original fixed signature.
-            solvable = {"solvable_only": True} if self.solvable_instructions else {}
-            instruction, hindsight_action = (goals.sample_instruction(
-                volume, model, start_agg, rng, self._active_layers,
-                self._class_counts, self.balance_classes, **solvable), None)
-            for goal_class in instruction["targets"]:
-                self._class_counts[goal_class] = self._class_counts.get(goal_class, 0) + 1
-            if self.task_version == "v2":
-                instruction = goals.occlusion_aware(instruction, goals.find_occluders(
-                    model, start_params, instruction, self._active_layers))
-                instruction = goals.reachable_targets(instruction, model, start_agg, self._active_layers)
+            instruction, hindsight_action = self.sample_real_instruction(
+                rng, volume, model, start_params, start_agg), None
         # Omitting the `weights` kwarg entirely when it's None (rather than
         # always passing `weights=None`) matters: some tests monkeypatch
         # `goals.distance` with a fixed-arity stub lacking a `weights`

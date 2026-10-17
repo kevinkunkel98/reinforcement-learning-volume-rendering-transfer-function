@@ -159,3 +159,34 @@ def test_training_can_reuse_a_saved_dynamics_ensemble(monkeypatch, tmp_path):
     assert second["report"]["dynamics"]["reused"] == first["path"]
     for a, b in zip(first["dynamics"].state_dict().values(), mb.load_dynamics(second["path"]).state_dict().values()):
         assert torch.equal(a, b)
+
+
+def test_collect_draws_instructions_through_the_envs_own_pipeline(monkeypatch):
+    # Training instructions must be the task the env evaluates (in task v2 the
+    # transformed ones), not a separate draw from the bare grammar.
+    env = _stub_env(monkeypatch)
+    calls = []
+    original = env.sample_real_instruction
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(env, "sample_real_instruction", spy)
+    data = mb.collect_starts(env, seeds=[0, 1], actions_per_start=2)
+    assert len(calls) == 2 * (mb.INSTRUCTIONS_PER_START + 1)   # + the one reset() draws
+    assert data["weights"].shape[-1] == len(goals.GOAL_CLASSES) + 1
+    assert list(data["volume"]) == ["fake_a", "fake_a"]
+
+
+def test_load_data_pads_old_weight_layouts(tmp_path, monkeypatch):
+    env = _stub_env(monkeypatch)
+    new = mb.collect_starts(env, seeds=[0], actions_per_start=2)
+    old = {k: v for k, v in new.items() if k != "volume"}
+    old["weights"] = old["weights"][..., :len(goals.GOAL_CLASSES)]
+    np.savez_compressed(tmp_path / "old.npz", **old)
+    np.savez_compressed(tmp_path / "new.npz", **new)
+    data = mb.load_data([str(tmp_path / "old.npz"), str(tmp_path / "new.npz")])
+    assert data["weights"].shape == (2, mb.INSTRUCTIONS_PER_START, len(goals.GOAL_CLASSES) + 1)
+    assert np.all(data["weights"][0, :, -1] == 1.0)
+    assert "volume" not in data
