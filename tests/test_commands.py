@@ -95,7 +95,7 @@ def test_parse_reset():
 
 def test_parse_unrecognized_raises():
     with pytest.raises(ValueError):
-        parse_command_rule("make the skeleton pop")
+        parse_command_rule("make the weather nicer")
 
 
 def test_apply_command_increases_target_height():
@@ -866,3 +866,125 @@ def test_reset_returns_the_given_start_tf():
     reset = parse_command_rule("reset")
     np.testing.assert_array_equal(apply_command(reset, default_params() * 0.1, reset_params=start), start)
     np.testing.assert_array_equal(apply_command(reset, start), default_params())
+
+
+# ---------- everyday phrasings (data/parser_eval_set.json has the full set) ----------
+
+def _rel(target, direction, strength="moderately", attribute="opacity"):
+    return {"target": target, "attribute": attribute, "direction": direction, "strength": strength}
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("add bones", _rel("skeleton", "increase")),
+    ("increase opacity of soft tissues strongly", _rel("soft", "increase", "strongly")),
+    ("decrease soft tissue opacity strongly.", _rel("soft", "decrease", "strongly")),
+    ("decrease opacity of soft tissue a lot", _rel("soft", "decrease", "strongly")),
+    ("make the skeleton pop", _rel("skeleton", "increase")),
+    ("the lungs are barely visible", _rel("lungs", "increase")),
+    ("let me see through the muscle", _rel("soft", "decrease")),
+    ("tone down the veins a bit", _rel("vessels", "decrease", "slightly")),
+    ("I need to see the pulmonary tissue better", _rel("lungs", "increase")),
+    ("darken langs extremely", _rel("lungs", "decrease", "strongly", "brightness")),
+    ("brighten skeleton a lot", _rel("skeleton", "increase", "strongly", "brightness")),
+    ("decrease opacity of soft tissue so I can see the bones.", _rel("soft", "decrease")),
+])
+def test_rule_parser_everyday_phrasings(text, expected):
+    assert parse_command_rule(text) == expected
+
+
+@pytest.mark.parametrize("text,level,target", [
+    ("high spleen", "high", "spleen"), ("set the spleen to high", "high", "spleen"),
+    ("liver opacity medium", "medium", "liver"), ("make the kidneys low opacity", "low", "kidneys"),
+])
+def test_rule_parser_absolute_levels_in_any_order(text, level, target):
+    assert parse_command_rule(text) == {"target": target, "attribute": "opacity",
+                                        "direction": "set", "level": level}
+
+
+@pytest.mark.parametrize("text,target", [
+    ("only the kidneys", "kidneys"), ("isolate the liver", "liver"),
+    ("I only want to see the vessels", "vessels"), ("nothing but bone", "skeleton"),
+    ("display just the lungs and heart", ["lungs", "heart"]),
+])
+def test_rule_parser_show_only_phrasings(text, target):
+    cmd = parse_command_rule(text)
+    assert cmd["direction"] == "show_only" and cmd["target"] == target
+
+
+def test_rule_parser_keeps_every_clause_of_a_compound():
+    # Before: the greedy verb regex read this as one darken of soft tissue.
+    cmd = parse_command_rule("darken bone extremely and decrease opacity of soft tissue strongly.")
+    assert cmd == {"compound": [_rel("skeleton", "decrease", "strongly", "brightness"),
+                                _rel("soft", "decrease", "strongly")]}
+    # Before: "show ... less" became show_only.
+    assert parse_command_rule("show a lot less bones") == _rel("skeleton", "decrease", "strongly")
+
+
+def test_rule_parser_pronoun_clause_refers_to_the_previous_class():
+    assert parse_command_rule("the aorta is dominating the view, pull it back") == _rel("vessels", "decrease")
+
+
+def test_rule_parser_folds_a_modifier_only_clause_into_its_neighbour():
+    assert parse_command_rule("Darken the skeleton, extremely.") == _rel("skeleton", "decrease", "strongly",
+                                                                          "brightness")
+
+
+@pytest.mark.parametrize("text", ["revert", "start over", "go back to the default"])
+def test_rule_parser_reset_words(text):
+    assert parse_command_rule(text)["direction"] == "reset"
+
+
+@pytest.mark.parametrize("text", ["thank you.", "bye.", "you", "okay"])
+def test_rule_parser_refuses_speech_noise(text):
+    with pytest.raises(ValueError):
+        parse_command_rule(text)
+
+
+def test_parse_command_llm_repairs_a_missing_strength_and_attribute():
+    payload = {"target": "soft", "attribute": None, "direction": "decrease"}
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        cmd = parse_command_llm("hide the soft tissue completely")
+    assert cmd == _rel("soft", "decrease", "strongly")
+
+
+def test_parse_command_llm_maps_an_off_schema_strength():
+    payload = {"target": "lungs", "attribute": "brightness", "direction": "decrease", "strength": "extremely"}
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        assert parse_command_llm("darken the lungs extremely")["strength"] == "strongly"
+
+
+def test_parse_command_llm_accepts_a_bare_set_command():
+    payload = {"attribute": "opacity", "direction": "set", "level": "high", "target": "vessels"}
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        cmd = parse_command_llm("high opacity vessels")
+    assert cmd == {"target": "vessels", "attribute": "opacity", "direction": "set", "level": "high"}
+
+
+def test_parse_command_llm_accepts_a_wrapped_show_only_without_strength():
+    payload = {"compound": [{"attribute": None, "direction": "show_only", "target": "skeleton"}]}
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        cmd = parse_command_llm("show only bones")
+    assert cmd["direction"] == "show_only" and cmd["target"] == "skeleton"
+
+
+def test_parse_command_llm_not_an_instruction_raises():
+    with patch("commands.urlopen", return_value=_fake_response({"none": True})):
+        with pytest.raises(ValueError):
+            parse_command_llm("thank you.")
+
+
+def test_parse_command_llm_not_an_instruction_still_tries_the_rule_parser():
+    with patch("commands.urlopen", return_value=_fake_response({"none": True})):
+        assert parse_command_llm("start over")["direction"] == "reset"
+
+
+@pytest.mark.parametrize("text,payload", [
+    ("bye.", {"target": None, "attribute": None, "direction": "reset", "strength": None}),
+    ("you", {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "moderately"}),
+])
+def test_parse_command_llm_refuses_a_command_the_text_does_not_ask_for(text, payload):
+    reasons = []
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        with pytest.raises(ValueError):
+            parse_command_llm(text, _on_fallback=reasons.append)
+    assert reasons and reasons[0].startswith("ungrounded")

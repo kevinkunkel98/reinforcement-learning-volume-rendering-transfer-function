@@ -501,7 +501,7 @@ def test_command_appends_a_step():
 def test_unparseable_command_raises_and_does_not_append():
     s = _fresh_session()
     with pytest.raises(ValueError):
-        s.command("make the skeleton pop", parser="rule", search=False)
+        s.command("make the weather nicer", parser="rule", search=False)
     assert s.state()["total"] == 1
 
 

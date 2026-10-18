@@ -194,7 +194,9 @@ python -m pytest -q -m "not slow"
 Run from the repository root — paths like `out/` and `static/` are relative.
 Everything runs on CPU. LLM parsing needs Ollama (`ollama serve && ollama pull
 qwen2.5:7b`); without it, commands fall back to the rule parser, which covers
-the grammar in `COMMANDS.md` but not free phrasings such as "high spleen".
+the grammar in `COMMANDS.md` and everyday phrasings ("add bones", "set the
+spleen to high", "the aorta is dominating the view, pull it back"). Both are
+scored by `eval_parsers.py` (`docs/experiments/2026-10-18-instruction-parser.md`).
 
 ## Layout
 

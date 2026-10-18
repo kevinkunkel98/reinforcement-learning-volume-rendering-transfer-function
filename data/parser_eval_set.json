@@ -1,0 +1,1253 @@
+[
+ {
+  "text": "show only bones",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "show only soft tissues",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "show only skeleton.",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "show only the ribs",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "Show me only the skeleton.",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "show only heart",
+  "expected": {
+   "target": "heart",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "show only the lungs",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "high opacity vessels",
+  "expected": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "set",
+   "level": "high"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "darken the soft tissue",
+  "expected": {
+   "target": "soft",
+   "attribute": "brightness",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "darken bone extremely and decrease opacity of soft tissue strongly.",
+  "expected": {
+   "compound": [
+    {
+     "target": "skeleton",
+     "attribute": "brightness",
+     "direction": "decrease",
+     "strength": "strongly"
+    },
+    {
+     "target": "soft",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "strongly"
+    }
+   ]
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "increase soft tissues",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "increase opacity of soft tissues strongly",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "add bones",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "add soft tissue.",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "add a bit of soft tissue",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "slightly"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "add lungs",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "decrease opacity of soft tissue so I can see the bones.",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "decrease opacity of soft tissue strongly.",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "decrease opacity of soft tissue a lot",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "decrease soft tissue opacity strongly.",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "show less tissue",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "make the bones stand out a lot more",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "revert",
+  "expected": {
+   "target": null,
+   "attribute": null,
+   "direction": "reset",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "darken langs extremely",
+  "expected": {
+   "target": "lungs",
+   "attribute": "brightness",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "thank you.",
+  "expected": null,
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "bye.",
+  "expected": null,
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "oh",
+  "expected": null,
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "you",
+  "expected": null,
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "the fat layer is way too visible",
+  "expected": null,
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "show only fat.",
+  "expected": null,
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "more bone",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "a bit less soft tissue",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "slightly"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "brighten skeleton",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "reset",
+  "expected": {
+   "target": null,
+   "attribute": null,
+   "direction": "reset",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "zoom in",
+  "expected": {
+   "camera": {
+    "action": "zoom",
+    "direction": "in",
+    "strength": "moderately"
+   }
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "show only skeleton and lungs",
+  "expected": {
+   "target": [
+    "skeleton",
+    "lungs"
+   ],
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "dev",
+  "source": "log"
+ },
+ {
+  "text": "I can't see the bones very well",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "make the skeleton pop",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "bring the ribs forward",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "punch up the bone density",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "I want the skeleton to stand out more",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "the spine is completely washed out",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": [
+    "moderately",
+    "strongly"
+   ]
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "the lungs are barely visible",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": [
+    "moderately",
+    "strongly"
+   ]
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "I need to see the pulmonary tissue better",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "bring out the lung fields",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "hide the lungs completely",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "the lungs are drowning out everything else",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": [
+    "moderately",
+    "strongly"
+   ]
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "the soft tissue is hiding everything",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": [
+    "moderately",
+    "strongly"
+   ]
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "let me see through the muscle",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "hide the soft tissue completely",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "fade the muscle layer",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "the organs are barely there, bring them forward",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": [
+    "moderately",
+    "strongly"
+   ]
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "the vessels are invisible, bring them out",
+  "expected": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": [
+    "moderately",
+    "strongly"
+   ]
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "I want the arteries to stand out more",
+  "expected": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "give the blood vessels a boost",
+  "expected": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "tone down the veins a bit",
+  "expected": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "slightly"
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "the aorta is dominating the view, pull it back",
+  "expected": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": [
+    "moderately",
+    "strongly"
+   ]
+  },
+  "split": "dev",
+  "source": "written"
+ },
+ {
+  "text": "can you make the liver more visible",
+  "expected": {
+   "target": "liver",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "I'd like to see the kidneys a little better",
+  "expected": {
+   "target": "kidneys",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "slightly"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "turn the lungs down",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "less heart please",
+  "expected": {
+   "target": "heart",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "boost the spleen a lot",
+  "expected": {
+   "target": "spleen",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "make the vessels slightly more opaque",
+  "expected": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "slightly"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "the liver is too faint",
+  "expected": {
+   "target": "liver",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "reduce the muscle a bit",
+  "expected": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "slightly"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "get rid of the ribs",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "the heart is too strong, tone it down",
+  "expected": {
+   "target": "heart",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "increase the kidney opacity",
+  "expected": {
+   "target": "kidneys",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "emphasize the aorta",
+  "expected": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "make the skeleton much more transparent",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "lungs more",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "a little more spleen",
+  "expected": {
+   "target": "spleen",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "slightly"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "high spleen",
+  "expected": {
+   "target": "spleen",
+   "attribute": "opacity",
+   "direction": "set",
+   "level": "high"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "set the spleen to high",
+  "expected": {
+   "target": "spleen",
+   "attribute": "opacity",
+   "direction": "set",
+   "level": "high"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "liver opacity medium",
+  "expected": {
+   "target": "liver",
+   "attribute": "opacity",
+   "direction": "set",
+   "level": "medium"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "make the kidneys low opacity",
+  "expected": {
+   "target": "kidneys",
+   "attribute": "opacity",
+   "direction": "set",
+   "level": "low"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "put the heart at high opacity",
+  "expected": {
+   "target": "heart",
+   "attribute": "opacity",
+   "direction": "set",
+   "level": "high"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "set bone opacity to low",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "set",
+   "level": "low"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "medium lungs",
+  "expected": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "set",
+   "level": "medium"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "only the kidneys",
+  "expected": {
+   "target": "kidneys",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "just show me the heart",
+  "expected": {
+   "target": "heart",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "isolate the liver",
+  "expected": {
+   "target": "liver",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "show only the spleen and the kidneys",
+  "expected": {
+   "target": [
+    "spleen",
+    "kidneys"
+   ],
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "I only want to see the vessels",
+  "expected": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "display just the lungs and heart",
+  "expected": {
+   "target": [
+    "lungs",
+    "heart"
+   ],
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "nothing but bone",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "more liver and less bone",
+  "expected": {
+   "compound": [
+    {
+     "target": "liver",
+     "attribute": "opacity",
+     "direction": "increase",
+     "strength": "moderately"
+    },
+    {
+     "target": "skeleton",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "moderately"
+    }
+   ]
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "increase the heart, decrease the lungs",
+  "expected": {
+   "compound": [
+    {
+     "target": "heart",
+     "attribute": "opacity",
+     "direction": "increase",
+     "strength": "moderately"
+    },
+    {
+     "target": "lungs",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "moderately"
+    }
+   ]
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "a bit more kidneys and a lot less soft tissue",
+  "expected": {
+   "compound": [
+    {
+     "target": "kidneys",
+     "attribute": "opacity",
+     "direction": "increase",
+     "strength": "slightly"
+    },
+    {
+     "target": "soft",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "strongly"
+    }
+   ]
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "high opacity liver, low opacity lungs",
+  "expected": {
+   "compound": [
+    {
+     "target": "liver",
+     "attribute": "opacity",
+     "direction": "set",
+     "level": "high"
+    },
+    {
+     "target": "lungs",
+     "attribute": "opacity",
+     "direction": "set",
+     "level": "low"
+    }
+   ]
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "brighten the heart and hide the ribs",
+  "expected": {
+   "compound": [
+    {
+     "target": "heart",
+     "attribute": "brightness",
+     "direction": "increase",
+     "strength": "moderately"
+    },
+    {
+     "target": "skeleton",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "strongly"
+    }
+   ]
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "more vessels, less lungs, less bone",
+  "expected": {
+   "compound": [
+    {
+     "target": "vessels",
+     "attribute": "opacity",
+     "direction": "increase",
+     "strength": "moderately"
+    },
+    {
+     "target": "lungs",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "moderately"
+    },
+    {
+     "target": "skeleton",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "moderately"
+    }
+   ]
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "show more spleen but less liver",
+  "expected": {
+   "compound": [
+    {
+     "target": "spleen",
+     "attribute": "opacity",
+     "direction": "increase",
+     "strength": "moderately"
+    },
+    {
+     "target": "liver",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "moderately"
+    }
+   ]
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "make the liver brighter",
+  "expected": {
+   "target": "liver",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "the kidneys are too bright",
+  "expected": {
+   "target": "kidneys",
+   "attribute": "brightness",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "lighten the spleen",
+  "expected": {
+   "target": "spleen",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "darker heart",
+  "expected": {
+   "target": "heart",
+   "attribute": "brightness",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "brighten the vessels a lot",
+  "expected": {
+   "target": "vessels",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "high brightness for the skeleton",
+  "expected": {
+   "target": "skeleton",
+   "attribute": "brightness",
+   "direction": "set",
+   "level": "high"
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "start over",
+  "expected": {
+   "target": null,
+   "attribute": null,
+   "direction": "reset",
+   "strength": null
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "go back to the default",
+  "expected": {
+   "target": null,
+   "attribute": null,
+   "direction": "reset",
+   "strength": null
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "zoom out a bit",
+  "expected": {
+   "camera": {
+    "action": "zoom",
+    "direction": "out",
+    "strength": "slightly"
+   }
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "rotate to the right",
+  "expected": {
+   "camera": {
+    "action": "rotate",
+    "direction": "right",
+    "strength": "moderately"
+   }
+  },
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "what's for lunch",
+  "expected": null,
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "okay",
+  "expected": null,
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "more fat",
+  "expected": null,
+  "split": "heldout",
+  "source": "written"
+ },
+ {
+  "text": "sharpen the lungs",
+  "expected": {
+   "target": "lungs",
+   "attribute": "width",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "split": "heldout",
+  "source": "written"
+ }
+]

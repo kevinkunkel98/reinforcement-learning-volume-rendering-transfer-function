@@ -1,5 +1,6 @@
 """Text -> command dict (two implementations) and command -> params."""
 import datetime as _dt
+import difflib
 import json as _json
 import os
 import re
@@ -19,14 +20,14 @@ from transfer import (
 CLASS_SYNONYMS = {
     "skeleton": ["bone", "bones", "skeleton", "ribs", "rib", "spine", "vertebrae",
                  "hip", "femur", "skull"],
-    "lungs": ["lung", "lungs", "pulmonary"],
+    "lungs": ["lung", "lungs", "pulmonary", "pulmonary tissue", "lung tissue"],
     "heart": ["heart", "cardiac"],
     "vessels": ["vessel", "vessels", "artery", "arteries", "vein", "veins",
                  "blood vessel", "aorta", "vena cava", "contrast"],
     "liver": ["liver"],
     "kidneys": ["kidney", "kidneys", "renal"],
     "spleen": ["spleen"],
-    "soft": ["soft tissue", "soft", "organs", "organ", "muscle", "muscles"],
+    "soft": ["soft tissue", "soft", "tissue", "organs", "organ", "muscle", "muscles"],
 }
 CLASS_SYNONYMS = {name: CLASS_SYNONYMS[name] for name in anatomy.CANONICAL_CLASSES}
 _CLASS_LOOKUP = sorted(
@@ -81,15 +82,11 @@ _STRENGTH_MODIFIER_WORDS = {"a bit": "slightly", "a lot": "strongly", "much": "s
 def _parse_relative_clause(clause: str):
     """One relative clause -> a single relative command dict, or None if the
     clause isn't one of the recognized relative phrasings."""
-    m = re.search(r"\b(increase|decrease)\s+(opacity|width|sharpness|brightness)\s+for\s+([\w ]+)", clause)
+    m = re.search(r"\b(increase|decrease)\s+(opacity|width|sharpness|brightness)\s+(?:for|of)\s+([\w ]+)", clause)
     if m:
         direction, attr_word, target_text = m.group(1), m.group(2), m.group(3)
         attribute = ATTRIBUTE_WORD_ALIASES.get(attr_word, attr_word)
-        strength = "moderately"
-        for word in STRENGTH_WORDS:
-            if word in target_text:
-                strength = word
-                target_text = target_text.replace(word, "")
+        strength = _strength_in(target_text)
         cls = _find_class(target_text)
         if cls:
             return {"target": cls, "attribute": attribute,
@@ -101,7 +98,7 @@ def _parse_relative_clause(clause: str):
         modifier, verb, target_text = m.group(1), m.group(2), m.group(3)
         cls = _find_class(target_text)
         if cls:
-            strength = _STRENGTH_MODIFIER_WORDS.get(modifier, "moderately")
+            strength = _STRENGTH_MODIFIER_WORDS.get(modifier) or _strength_in(clause)
             direction = "increase" if verb == "more" else "decrease"
             return {"target": cls, "attribute": "opacity",
                     "direction": direction, "strength": strength}
@@ -186,8 +183,231 @@ DIRECT_VERBS = {
 ATTRIBUTE_WORD_ALIASES = {"sharpness": "width"}
 
 
+def _normalise_text(text: str) -> str:
+    t = re.sub(r"\s+", " ", text.lower().strip())
+    return re.sub(r"[.!?]+$", "", t).strip()
+
+
+_SLIGHT_RE = re.compile(r"\b(a bit|a little|a touch|slightly|somewhat|little)\b")
+_STRONG_RE = re.compile(r"\b(a lot|much|strongly|extremely|completely|totally|fully|really|way|far|"
+                        r"very(?! well))\b")
+
+
+def _strength_in(text: str, default: str = "moderately") -> str:
+    """The strength a phrase asks for: an explicit strength word, or a
+    modifier ("a bit", "a lot", "extremely"), else `default`."""
+    for word in STRENGTH_WORDS:
+        if re.search(rf"\b{word}\b", text):
+            return word
+    if _SLIGHT_RE.search(text):
+        return "slightly"
+    if _STRONG_RE.search(text):
+        return "strongly"
+    return default
+
+
+def _find_classes(text: str) -> list:
+    """Every class named in `text`, in order of appearance: whole words
+    (plurals allowed), longest phrase first, no overlaps ("pulmonary tissue"
+    is lungs, not lungs + soft)."""
+    taken, found = [], []
+    for phrase, cls in _CLASS_LOOKUP:
+        for m in re.finditer(rf"\b{re.escape(phrase)}(?:s|es)?\b", text):
+            if any(m.start() < end and start < m.end() for start, end in taken):
+                continue
+            taken.append((m.start(), m.end()))
+            found.append((m.start(), cls))
+    classes = []
+    for _, cls in sorted(found):
+        if cls not in classes:
+            classes.append(cls)
+    return classes
+
+
+_SINGLE_WORD_SYNONYMS = {phrase: cls for phrase, cls in _CLASS_LOOKUP if " " not in phrase}
+
+
+def _fuzzy_classes(text: str) -> list:
+    """Classes behind misspelt or misheard words ("langs" -> lungs), for a
+    clause that names none exactly."""
+    classes = []
+    for word in re.findall(r"[a-z]+", text):
+        if len(word) < 4:
+            continue
+        close = difflib.get_close_matches(word, _SINGLE_WORD_SYNONYMS, n=1, cutoff=0.8)
+        if close and _SINGLE_WORD_SYNONYMS[close[0]] not in classes:
+            classes.append(_SINGLE_WORD_SYNONYMS[close[0]])
+    return classes
+
+
+_RESET_RE = re.compile(r"\b(reset|revert|start over|start again|from scratch|defaults?|original settings)\b")
+_PRONOUN_RE = re.compile(r"\b(it|them|they|those|these|that|this)\b")
+_RELATIVE_CUE_RE = re.compile(r"\b(more|less|increase\w*|decrease\w*|brighte\w*|darke\w*|lighte\w*)\b")
+_SHOW_ONLY_RE = re.compile(r"\b(only|isolate|nothing but|exclusively)\b|^just\b|\b(show|display)\b(?! (more|less)\b)")
+_BRIGHTNESS_RE = re.compile(r"\b(bright\w*|light(?:en|er)\w*|dark\w*|dim\w*)\b")
+_DECREASE_RE = re.compile(
+    r"\b(less|decrease\w*|reduc\w*|lower\w*|fade\w*|hide|hiding|remove|get rid of|eliminate|weaken\w*|"
+    r"transparent|translucent|see through|dominat\w*|drown\w*|obscur\w*|block\w*|cut back|"
+    r"too (?:strong|much|visible|opaque|prominent|dense))\b"
+    r"|\b(?:turn|tone|dial)\w*\b.*\bdown\b|\bpull\w*\b.*\bback\b")
+_INCREASE_RE = re.compile(
+    r"\b(more|increase\w*|add|boost\w*|raise|bring\w*|stand out|emphasi[sz]e\w*|highlight\w*|"
+    r"strengthen\w*|pop|punch\w*|enhance\w*|better|can'?t see|cannot see|barely|faint|invisible|"
+    r"washed out|missing|visible|opaque|stronger)\b|\b(?:turn|dial)\w*\b.*\bup\b")
+_BRIGHTNESS_DOWN_RE = re.compile(r"\b(darken\w*|darker|dim\w*|too bright|decrease\w*|reduc\w*|less|lower\w*)\b")
+_BRIGHTNESS_UP_RE = re.compile(r"\b(brighten\w*|brighter|lighten\w*|lighter|too dark|increase\w*|more|raise)\b")
+
+
+def _free_direction(clause: str, attribute: str):
+    if attribute == "brightness":
+        if _BRIGHTNESS_DOWN_RE.search(clause):
+            return "decrease"
+        if _BRIGHTNESS_UP_RE.search(clause):
+            return "increase"
+        return "decrease" if re.search(r"\b(dark|dim)", clause) else "increase"
+    # Decrease cues first: "more transparent" and "less visible" are decreases.
+    if _DECREASE_RE.search(clause):
+        return "decrease"
+    if _INCREASE_RE.search(clause):
+        return "increase"
+    return None
+
+
+def _parse_free_clause(clause: str, previous_target=None):
+    """A clause in everyday words: a class (named, misspelt, or "it"/"them"
+    for the previous clause's class) plus a cue for what should happen to it --
+    a level ("high spleen", "set the liver to low"), a brightness word, or an
+    opacity verb or description ("add", "tone down", "barely visible",
+    "dominating the view"). Returns a list of sub-commands, or None."""
+    classes = _find_classes(clause) or _fuzzy_classes(clause)
+    if not classes:
+        if previous_target is None or not _PRONOUN_RE.search(clause):
+            return None
+        classes = [previous_target]
+    attribute = "brightness" if _BRIGHTNESS_RE.search(clause) else "opacity"
+    level = re.search(r"\b(low|medium|high)\b", clause)
+    if level:
+        return [{"target": c, "attribute": attribute, "direction": "set", "level": level.group(1)}
+                for c in classes]
+    direction = _free_direction(clause, attribute)
+    if direction is None:
+        return None
+    default = "strongly" if re.search(r"\b(hide|remove|get rid of|eliminate)\b", clause) else "moderately"
+    strength = _strength_in(clause, default)
+    return [{"target": c, "attribute": attribute, "direction": direction, "strength": strength}
+            for c in classes]
+
+
+def _parse_show_only(t: str):
+    """"show only the heart", "just the kidneys", "isolate the liver", "I only
+    want to see the vessels" -> show_only over every class named."""
+    if not _SHOW_ONLY_RE.search(t) or _RELATIVE_CUE_RE.search(t):
+        return None
+    classes = _find_classes(t) or _fuzzy_classes(t)
+    if not classes:
+        return None
+    return {"target": classes[0] if len(classes) == 1 else classes,
+            "attribute": "opacity", "direction": "show_only", "strength": None}
+
+
+def _parse_camera(t: str):
+    m = re.search(r"\b(?:rotate|turn)\b(?:\s+\w+){0,3}?\s+(left|right)\b", t)
+    if m:
+        return {"camera": {"action": "rotate", "direction": m.group(1), "strength": _strength_in(t)}}
+    m = re.search(r"\btilt\b(?:\s+\w+){0,2}?\s+(up|down)\b", t)
+    if m:
+        return {"camera": {"action": "tilt", "direction": m.group(1), "strength": _strength_in(t)}}
+    m = re.search(r"\bzoom\s+(in|out)\b", t)
+    if m:
+        return {"camera": {"action": "zoom", "direction": m.group(1), "strength": _strength_in(t)}}
+    return None
+
+
+def _parse_grammar_clause(t: str):
+    """The fixed grammar (COMMANDS.md) for one clause; a list of
+    sub-commands, or None."""
+    m = re.search(r"show\s+(more|less)\s+([\w ]+)", t)
+    if m:
+        cls = _find_class(m.group(2))
+        if cls:
+            return [{"target": cls, "attribute": "opacity",
+                     "direction": "increase" if m.group(1) == "more" else "decrease",
+                     "strength": "moderately"}]
+
+    m = re.search(r"\b(sharpen|soften|brighten|darken|hide|remove|reduce)\b\s+([\w ]+)", t)
+    if m:
+        verb, target_text = m.group(1), m.group(2)
+        attribute, direction, strength = DIRECT_VERBS[verb]
+        cls = _find_class(target_text)
+        if cls:
+            return [{"target": cls, "attribute": attribute, "direction": direction,
+                     "strength": _strength_in(target_text, strength)}]
+
+    m = re.search(r"\b(?:shift|move)\s+([\w ]+?)(?:'s)?\s+(?:center|position)?\s*(up|down|higher|lower)\b", t)
+    if m:
+        cls = _find_class(m.group(1))
+        if cls:
+            direction = "increase" if m.group(2) in ("up", "higher") else "decrease"
+            return [{"target": cls, "attribute": "center", "direction": direction, "strength": "moderately"}]
+
+    # "high opacity vessels", "low opacity for skeleton", "high sharpness bone":
+    # an absolute level per class+attribute, not a relative delta.
+    subcommands = []
+    for lm in re.finditer(r"(low|medium|high)\s+(opacity|width|sharpness|brightness)\s+(?:for\s+)?(?:the\s+)?(\w+)", t):
+        cls = _find_class(lm.group(3))
+        if cls:
+            subcommands.append({"target": cls, "attribute": ATTRIBUTE_WORD_ALIASES.get(lm.group(2), lm.group(2)),
+                                "direction": "set", "level": lm.group(1)})
+    if subcommands:
+        return subcommands
+
+    single = _parse_relative_clause(t)
+    return [single] if single else None
+
+
+_PURPOSE_RE = re.compile(r"\s*\b(so that|so|in order to|because)\b.*$")
+_CLAUSE_SPLIT_RE = re.compile(r"\s*(?:[,;+]|\band\b|\bbut\b|\bthen\b|\bplus\b|\bwhile\b)\s*")
+
+
+_FILLER_RE = re.compile(r"\b(please|again|even|the|a|an|just)\b")
+
+
+def _is_modifier_only(clause: str) -> bool:
+    """A clause with nothing but strength, verb or filler words ("extremely",
+    "darken", "a lot please") belongs to its neighbour."""
+    rest = clause
+    for pattern in (_SLIGHT_RE, _STRONG_RE, _DECREASE_RE, _INCREASE_RE, _BRIGHTNESS_RE, _FILLER_RE):
+        rest = pattern.sub(" ", rest)
+    return not rest.strip() and not _find_classes(clause)
+
+
+def _merge_modifier_clauses(clauses: list) -> list:
+    if len(clauses) < 2:
+        return clauses
+    merged, pending = [], []
+    for clause in clauses:
+        if _is_modifier_only(clause):
+            pending.append(clause)
+            continue
+        merged.append(" ".join(pending + [clause]))
+        pending = []
+    if pending:
+        if not merged:
+            return [" ".join(pending)]
+        merged[-1] = " ".join([merged[-1]] + pending)
+    return merged
+
+
 def parse_command_rule(text: str) -> dict:
-    t = text.lower().strip()
+    """Text -> command, without a language model.
+
+    The fixed grammar in COMMANDS.md parses exactly as before; everyday
+    phrasings ("add bones", "set the spleen to high", "the aorta is
+    dominating the view, pull it back", "darken langs extremely") go through
+    `_parse_free_clause`. A sentence is split into clauses (commas, "and",
+    "but"); every clause must parse, or the whole command is refused rather
+    than silently dropping part of what was said."""
+    t = _normalise_text(text)
 
     _check_retired(t)
 
@@ -203,107 +423,35 @@ def parse_command_rule(text: str) -> dict:
         return {"target": ["heart", "spleen"], "attribute": "opacity", "direction": "show_only",
                 "strength": None, "layer_action": {"action": "show", "targets": ["heart", "spleen"]}}
 
-    if "reset" in t:
+    if _RESET_RE.search(t):
         return {"target": None, "attribute": None, "direction": "reset", "strength": None}
 
-    m = re.search(r"show\s+(more|less)\s+([\w ]+)", t)
-    if m:
-        cls = _find_class(m.group(2))
-        if cls:
-            return {"target": cls, "attribute": "opacity",
-                    "direction": "increase" if m.group(1) == "more" else "decrease",
-                    "strength": "moderately"}
+    camera = _parse_camera(t)
+    if camera:
+        return camera
 
-    m = re.search(r"show(?:\s+only|\s+me(?:\s+the)?|)\s+([\w ,\+]+)", t)
-    if m:
-        classes = _split_class_list(m.group(1))
-        if classes:
-            return {"target": classes[0] if len(classes) == 1 else classes,
-                     "attribute": "opacity", "direction": "show_only", "strength": None}
+    t = _PURPOSE_RE.sub("", t) or t
+    show_only = _parse_show_only(t)
+    if show_only:
+        return show_only
 
-    m = re.search(r"\b(sharpen|soften|brighten|darken|hide|remove|reduce)\b\s+([\w ]+)", t)
-    if m:
-        verb, target_text = m.group(1), m.group(2)
-        attribute, direction, strength = DIRECT_VERBS[verb]
-        for word in STRENGTH_WORDS:
-            if word in target_text:
-                strength = word
-                target_text = target_text.replace(word, "")
-        cls = _find_class(target_text)
-        if cls:
-            return {"target": cls, "attribute": attribute,
-                     "direction": direction, "strength": strength}
-
-    m = re.search(r"\b(?:shift|move)\s+([\w ]+?)(?:'s)?\s+(?:center|position)?\s*(up|down|higher|lower)\b", t)
-    if m:
-        target_text, word = m.group(1), m.group(2)
-        cls = _find_class(target_text)
-        if cls:
-            direction = "increase" if word in ("up", "higher") else "decrease"
-            return {"target": cls, "attribute": "center",
-                     "direction": direction, "strength": "moderately"}
-
-    m = re.search(r"\b(rotate|turn)\s+(left|right)\b", t)
-    if m:
-        strength = "moderately"
-        for word in STRENGTH_WORDS:
-            if word in t:
-                strength = word
-        return {"camera": {"action": "rotate", "direction": m.group(2), "strength": strength}}
-
-    m = re.search(r"\btilt\s+(up|down)\b", t)
-    if m:
-        strength = "moderately"
-        for word in STRENGTH_WORDS:
-            if word in t:
-                strength = word
-        return {"camera": {"action": "tilt", "direction": m.group(1), "strength": strength}}
-
-    m = re.search(r"\bzoom\s+(in|out)\b", t)
-    if m:
-        strength = "moderately"
-        for word in STRENGTH_WORDS:
-            if word in t:
-                strength = word
-        return {"camera": {"action": "zoom", "direction": m.group(1), "strength": strength}}
-
-    # "high opacity vessels", "low opacity for skeleton", "high sharpness bone" --
-    # an absolute level per class+attribute, not a relative delta. One or
-    # more may appear in the same sentence, each becomes its own
-    # sub-command, folded together into one compound command.
-    level_matches = list(re.finditer(
-        r"(low|medium|high)\s+(opacity|width|sharpness|brightness)\s+(?:for\s+)?(\w+)", t))
-    if level_matches:
-        subcommands = []
-        for lm in level_matches:
-            level, attr_word, class_text = lm.group(1), lm.group(2), lm.group(3)
-            attribute = ATTRIBUTE_WORD_ALIASES.get(attr_word, attr_word)
-            cls = _find_class(class_text)
-            if cls:
-                subcommands.append({"target": cls, "attribute": attribute,
-                                      "direction": "set", "level": level})
-        if subcommands:
-            return subcommands[0] if len(subcommands) == 1 else {"compound": subcommands}
-
-    # Relative clauses: "increase opacity for skeleton strongly", "more bone",
-    # "a bit less soft tissue". Several comma/semicolon-separated clauses
-    # become a compound of all of them; if some clauses in a multi-clause
-    # sentence parse as relative commands and others don't, that's an error
-    # -- never silently drop a clause the user actually said.
-    clauses = [c.strip() for c in re.split(r"\s*[,;]\s*", t) if c.strip()]
-    if len(clauses) > 1:
-        parsed = [_parse_relative_clause(c) for c in clauses]
-        if any(p is not None for p in parsed):
-            if all(p is not None for p in parsed):
-                return {"compound": parsed}
-            bad = clauses[parsed.index(None)]
-            raise ValueError(f"could not parse clause {bad!r} in compound command: {text!r}")
-    else:
-        single = _parse_relative_clause(t)
-        if single:
-            return single
-
-    raise ValueError(f"rule parser cannot parse: {text!r}")
+    clauses = _merge_modifier_clauses([c for c in _CLAUSE_SPLIT_RE.split(t) if c])
+    subcommands, previous = [], None
+    for clause in clauses:
+        parsed = _parse_grammar_clause(clause) or _parse_free_clause(clause, previous)
+        if not parsed:
+            if len(clauses) > 1:
+                raise ValueError(f"could not parse clause {clause!r} in compound command: {text!r}")
+            raise ValueError(f"rule parser cannot parse: {text!r}")
+        subcommands.extend(parsed)
+        previous = parsed[-1]["target"]
+    # "the heart is too strong, tone it down" says one thing twice.
+    unique = []
+    for sub in subcommands:
+        if not any((u["target"], u["attribute"], u["direction"]) == (sub["target"], sub["attribute"], sub["direction"])
+                   for u in unique):
+            unique.append(sub)
+    return unique[0] if len(unique) == 1 else {"compound": unique}
 
 
 def parse_command_with_meta(text: str, parser: str = "rule", model: str = "qwen2.5:7b"):
@@ -544,6 +692,10 @@ increase). If something is hiding, dominating, or should be reduced, that is
 Never output numeric values. "reset" has target=null, attribute=null, strength=null.
 "show_only" has strength=null.
 
+strength comes from the user's modifier words: "a bit", "a little", "slightly"
+-> "slightly"; "a lot", "much", "very", "extremely", "completely" ->
+"strongly"; no modifier -> "moderately". "add X" means increase X.
+
 The four directions above are the only ones that exist. There is no "hide"
 direction: hiding a class completely is "decrease" with strength "strongly",
 and showing only some classes is "show_only" naming the ones to keep.
@@ -580,7 +732,79 @@ Examples:
 - "show heart" -> canonical target "heart"
 - "reduce aorta" -> canonical target "vessels"
 
+If the input is not an instruction about the rendering at all -- small talk,
+a filler word, a fragment the speech recogniser picked up ("thank you",
+"okay", "bye", "you") -- respond {{"none": true}}. Never guess a command for it,
+and never answer "reset" unless the user asks to reset, revert or start over.
+
 Respond with JSON only, no prose."""
+
+
+_STRENGTH_ALIASES = {"slight": "slightly", "little": "slightly", "a bit": "slightly", "a little": "slightly",
+                     "moderate": "moderately", "medium": "moderately", "normal": "moderately",
+                     "strong": "strongly", "very": "strongly", "extremely": "strongly", "extreme": "strongly",
+                     "a lot": "strongly", "much": "strongly", "completely": "strongly"}
+
+
+def _repair_single(obj, text: str):
+    """Fill in what a near-miss answer left out, the way the prompt defines
+    it: a missing strength (null for show_only/reset, else the text's own
+    modifier), a null attribute on a relative change ("opacity"), and a
+    strength word outside the schema ("extremely" -> "strongly")."""
+    if not isinstance(obj, dict) or "camera" in obj:
+        return obj
+    obj = dict(obj)
+    direction = obj.get("direction")
+    if direction == "set":
+        obj.pop("strength", None)
+        if obj.get("attribute") is None:
+            obj["attribute"] = "opacity"
+        return obj
+    if direction in ("show_only", "reset"):
+        obj["strength"] = None
+        obj.setdefault("attribute", None)
+        return obj
+    if direction in ("increase", "decrease"):
+        if obj.get("attribute") is None:
+            obj["attribute"] = "opacity"
+        strength = obj.get("strength")
+        if strength not in STRENGTH_WORDS:
+            obj["strength"] = _STRENGTH_ALIASES.get(str(strength).lower()) if strength else None
+            if obj["strength"] is None:
+                obj["strength"] = _strength_in(_normalise_text(text))
+    return obj
+
+
+def _repair_cmd(obj, text: str):
+    if isinstance(obj, dict) and isinstance(obj.get("compound"), list):
+        return {"compound": [_repair_single(sub, text) for sub in obj["compound"]]}
+    if isinstance(obj, dict) and obj.get("direction") == "set":
+        return {"compound": [_repair_single(obj, text)]}
+    return _repair_single(obj, text)
+
+
+def _command_targets(cmd) -> list:
+    subs = cmd["compound"] if isinstance(cmd, dict) and "compound" in cmd else [cmd]
+    targets = []
+    for sub in subs:
+        target = sub.get("target") if isinstance(sub, dict) else None
+        targets.extend(target if isinstance(target, list) else [target] if target else [])
+    return targets
+
+
+def _ungrounded_reason(cmd, text: str):
+    """Why `cmd` is not supported by the words of `text`, or None. The model
+    turned speech-recognition noise into commands ("bye" -> reset, "you" ->
+    more skeleton); a command is only kept when every class it changes is
+    named in the text and a reset was actually asked for."""
+    t = _normalise_text(text)
+    if isinstance(cmd, dict) and cmd.get("direction") == "reset" and not _RESET_RE.search(t):
+        return "reset without a reset word"
+    named = set(_find_classes(t)) | set(_fuzzy_classes(t))
+    missing = [c for c in _command_targets(cmd) if c not in named]
+    if missing:
+        return f"target(s) {missing} not named in the text"
+    return None
 
 
 def _validate_set_cmd(obj) -> bool:
@@ -763,10 +987,25 @@ def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = None,
         elif "target" in cmd:
             cmd["target"] = _normalize_target(cmd["target"])
 
-    if not _validate_cmd(cmd):
-        print(f"[llm-parser] falling back to rule parser: invalid schema {cmd!r}")
-        final = parse_command_rule(text)
-        reason = f"invalid schema: {cmd!r}"
+    # "Not an instruction" goes through the same fallback as every other
+    # refusal: the rule parser refuses noise too, and answers what it knows.
+    if isinstance(cmd, dict) and cmd.get("none"):
+        reason = "model: not an instruction"
+    else:
+        cmd = _repair_cmd(cmd, text)
+        reason = None if _validate_cmd(cmd) else f"invalid schema: {cmd!r}"
+    if reason is None:
+        ungrounded = _ungrounded_reason(cmd, text)
+        reason = f"ungrounded: {ungrounded}: {cmd!r}" if ungrounded else None
+    if reason is not None:
+        print(f"[llm-parser] falling back to rule parser: {reason}")
+        try:
+            final = parse_command_rule(text)
+        except ValueError:
+            _log_llm_request(text, model, host, raw_response, cmd, None, reason)
+            if _on_fallback:
+                _on_fallback(reason)
+            raise
         _log_llm_request(text, model, host, raw_response, cmd, final, reason)
         if _on_fallback:
             _on_fallback(reason)
