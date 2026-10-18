@@ -143,3 +143,19 @@ def test_for_task_version_is_identity_for_v1_and_applies_both_v2_transforms():
     with pytest.raises(ValueError):
         goals.for_task_version(instruction, model, params, start, "v3")
 
+
+
+def test_target_reward_survives_an_instruction_clipped_to_nothing(monkeypatch):
+    # reachable_targets can clip every target to 0 (all at the floor or the
+    # ceiling already); the episode then asks for nothing, like attainment's
+    # floor case, instead of dividing by a zero start distance.
+    monkeypatch.setattr(goals.totalseg, "classes_present", lambda name: list(CANONICAL_CLASSES))
+    monkeypatch.setattr(goals.totalseg, "is_contrast", lambda name: True)
+    env = OneShotEnv(["fake"], model_for_volume=lambda name: _OccludingModel(), **V9, task_version="v2")
+    env.reset(seed=0)
+    nothing = goals.goal_vector({"heart": {"vis": 0.0}})
+    env._instruction = {**env._instruction, "targets": {"heart": {"vis": 0.0}}, "goal": nothing,
+                        "weights": None}
+    env._start_distance = goals.distance(nothing, env._start_agg, env._start_agg)
+    _, reward, _, _, info = env.step(np.zeros(env.action_space.shape, dtype=np.float32))
+    assert info["attainment"] == 0.0 and math.isfinite(reward)

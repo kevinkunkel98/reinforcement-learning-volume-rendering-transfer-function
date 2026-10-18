@@ -656,7 +656,11 @@ class OneShotEnv(gym.Env):
             # and a show_only goal (start_distance ~6): both can reach +1 for
             # a perfect solve, instead of brightness being squeezed toward 0
             # by the clip while show_only saturates it almost for free.
-            target_progress = (start_distance - final_distance) / start_distance
+            # An instruction that asks for nothing (task v2's reachable_targets
+            # can clip every target to 0) has no budget to normalise by: no
+            # progress to make, and drift is charged unscaled.
+            scale = start_distance if start_distance > _ATTAINMENT_FLOOR else None
+            target_progress = 0.0 if scale is None else (start_distance - final_distance) / scale
             mentioned = set(self._instruction["targets"])
             visibility_progress, brightness_progress = goals.progress(self._start_agg, final_agg)
             drift = sum(abs(value) for key, value in visibility_progress.items()
@@ -667,7 +671,7 @@ class OneShotEnv(gym.Env):
             # Same start_distance denominator as target_progress, so a given
             # fraction of the goal's own budget spent on collateral drift
             # costs the same whether the goal itself was easy or hard.
-            reward = target_progress - self.target_drift_weight * float(drift) / start_distance
+            reward = target_progress - self.target_drift_weight * float(drift) / (scale or 1.0)
             reward = float(np.clip(reward, -REWARD_CLIP, REWARD_CLIP))
             if useless:
                 reward -= USELESS_PENALTY
