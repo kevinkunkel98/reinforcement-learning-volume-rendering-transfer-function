@@ -5,9 +5,10 @@ const state = { current: null, cursor: 0, total: 1, dataset: null };
 // The LLM parser is the default (it handles phrasings the rule grammar can't,
 // and falls back to the rule parser when Ollama is down), and the command is
 // answered by the trained policy by default: the model-based checkpoint
-// (rl/model_based.py) scores +0.18 median attainment alone on held-out
-// volumes, positive on every instruction kind, where the old SAC policy sat at
-// ~0 and made show_only worse. Without a checkpoint the server falls back to
+// (rl/model_based.py) proposes a transfer function and the server polishes it
+// with a 30-evaluation search started there (POLICY_REFINE_EVALUATIONS) --
+// 0.70 median attainment on task v2 val, about what a 200-evaluation search
+// from the start reaches. Without a checkpoint the server falls back to
 // exact application and says so. Exact and search stay one click away.
 const config = { parser: "llm", search: false, mode: "policy" };
 
