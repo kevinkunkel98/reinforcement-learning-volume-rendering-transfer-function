@@ -47,10 +47,13 @@ from rl.oneshot_env import (ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, load_
 #
 # Task v3 (2026-10-19, docs/experiments/2026-10-19-task-v3.md): the same recipe
 # on v3; seed 2, the best of three on val (policy alone 0.51, policy + 200
-# evaluations 0.89, with about twice the on-screen change of v2).
+# evaluations 0.89, with about twice the on-screen change of v2). Retrained
+# after the v3 ceiling fix (out/rl_mb_v3c): seed 1, best on val with
+# planning through its dynamics model (policy + planning 0.63 val / 0.65 test,
+# + 30 evaluations 0.77 / 0.78).
 # With TASK_VERSION=v2 set POLICY_PATH=out/rl_mb_v2/clb_r3_seed1/checkpoint.pt,
 # with TASK_VERSION=v1 POLICY_PATH=out/rl_mb/r1_seed1/checkpoint.pt.
-POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb_v3/clb_r3_seed2/checkpoint.pt")
+POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb_v3c/clb_r3_seed1/checkpoint.pt")
 
 _state = {"policies": {}}
 

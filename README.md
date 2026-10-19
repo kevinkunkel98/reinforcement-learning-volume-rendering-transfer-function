@@ -31,7 +31,7 @@ same over twenty sampled instructions.
 
 | env var | default | |
 |---|---|---|
-| `POLICY_PATH` | `out/rl_mb_v3/clb_r3_seed2/checkpoint.pt` | policy checkpoint (must match the task version) |
+| `POLICY_PATH` | `out/rl_mb_v3c/clb_r3_seed1/checkpoint.pt` | policy checkpoint (must match the task version) |
 | `POLICY_REFINE_EVALUATIONS` | `200` | search on top of the policy; `30` ≈ 0.70 in ~0.7 s, `0` shows the pure policy |
 | `POLICY_STEPS` | `1` | times the policy acts per command (re-rendering in between) |
 | `TASK_VERSION` | `v3` | `v2` (with `out/rl_mb_v2/clb_r3_seed1/checkpoint.pt`) or `v1` restores an earlier task |
@@ -79,11 +79,11 @@ Task v3 is what the viewer runs. On v2 the unlabelled shell -- skin and fat lit
 by the soft-tissue peak -- still covered half the image, so a "more liver"
 scored as complete moved half a percent of it. v3 draws unlabelled tissue at
 0.2 opacity, asks brightness only of classes that are visible, and lets
-"show only" hide everything else completely. Policy + 200 evaluations reaches
-the goal as often as on v2 (0.89 val, 0.87-0.89 test) with about twice the
-on-screen change (median 2-2.8 percentage points of the image against 1); the
-policy alone is a little weaker (0.49-0.51 val, 0.43-0.46 test)
-(`docs/experiments/2026-10-19-task-v3.md`). Every evaluation also reports
+"show only" hide everything else completely, and a class's reachable ceiling
+is probed at several peak heights (soft tissue is most visible at a low one).
+Policy + 200 evaluations reaches the goal as often as on v2 (0.88-0.92) with
+two to three times the on-screen change (median 2.5-3 percentage points of the
+image against 1) (`docs/experiments/2026-10-19-task-v3.md`). Every evaluation also reports
 **visible pp**, the percentage points of the image moved toward the goal.
 
 ## The policy
@@ -94,18 +94,25 @@ random changes on 90 training patients. The policy is trained by
 backpropagating the exact goal distance through that learned model; Dyna
 rounds render the policy's own proposals and refit the model where it was
 wrong. A closed-loop fine-tune (`rl/closed_loop.py`) trains through two-step
-rollouts, with every instruction kind drawn equally often. Model-free SAC on
-the same task stayed at a median of 0.00-0.09.
+rollouts, with every instruction kind drawn equally often. At use, the
+policy's answer is refined by gradient descent through its own learned model
+(`rl.model_based.plan`, no renders, ~0.2 s). Model-free SAC on the same task
+stayed at a median of 0.00-0.09.
 
 Task v3, 300 episodes per split, median attainment (median visible pp);
 policy rows are three training seeds:
 
 | method | evaluations | val | **test** (run once) |
 |---|---|---|---|
-| **policy + search** (viewer default) | 200 | 0.89 / 0.88 / 0.89 (2.2-2.8) | **0.89 / 0.87 / 0.88 (2.0)** |
-| **policy + search** | 30 | 0.65 / 0.64 / 0.68 (1.8) | **0.67 / 0.64 / 0.65 (1.6)** |
-| search (hill climb) | 200 | 0.73 (1.9) | 0.67 (1.9) |
-| **policy alone** | 0 | 0.49 / 0.49 / 0.51 (1.5-1.6) | **0.43 / 0.45 / 0.46 (1.4-1.6)** |
+| **policy + planning + search** (viewer default) | 200 | 0.89 / 0.90 / 0.90 (2.9-3.1) | **0.91 / 0.92 / 0.90 (2.5)** |
+| **policy + planning + search** | 30 | 0.75 / 0.77 / 0.75 (2.7-3.0) | **0.77 / 0.78 / 0.77 (2.3-2.5)** |
+| search (hill climb) | 200 | 0.75 (2.1) | 0.70 (2.0) |
+| **policy + planning** | 0 | 0.62 / 0.63 / 0.63 (2.6-2.7) | **0.62 / 0.65 / 0.64 (2.3-2.5)** |
+| **policy alone** | 0 | 0.50 / 0.49 / 0.49 (1.4-1.6) | **0.48 / 0.47 / 0.47 (1.2-1.5)** |
+
+Planning beats the policy alone, and planning + 30 beats policy + 30, on every
+seed and split (paired Wilcoxon, p ≤ 3e-5); planning + 30 is level with the
+200-evaluation search from scratch (p = 0.14-0.9).
 
 Task v2, 300 episodes per split, the same episodes for every method, median
 attainment; policy rows are three training seeds:
