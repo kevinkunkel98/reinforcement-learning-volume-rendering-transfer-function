@@ -12,10 +12,10 @@
   // was 8-10 % faster on the headset benchmark (2026-10-19).
   const SKIP_MAX_OCCUPIED = 0.6;
   // While the stick turns the volume (and briefly after), rays step this much
-  // farther: turned end-on, a body scan's rays cross far more tissue and read
+  // farther (3x felt smoother than 2x in the headset, no visible cost): turned end-on, a body scan's rays cross far more tissue and read
   // it against the texture's cache layout, and motion hides the coarser
   // sampling. The still image keeps the full rate.
-  const MOTION_STEP = 2;
+  const MOTION_STEP = 3;
   const MOTION_HOLD_MS = 250;
 
   const VOLUME_VS = `#version 300 es
