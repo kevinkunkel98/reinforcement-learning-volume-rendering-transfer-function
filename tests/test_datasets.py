@@ -250,7 +250,7 @@ def test_totalseg_version_metadata_and_camera(ts_volume):
     metadata = datasets.dataset_metadata(ts_volume)
     assert metadata["orientation"] == "RAS"
     assert metadata["version"] == "sha256:" + "cd" * 32
-    assert datasets.default_camera_for(ts_volume) == {"azimuth": 0.0, "elevation": 80.0, "zoom": 1.0}
+    assert datasets.default_camera_for(ts_volume) == {"azimuth": 180.0, "elevation": 80.0, "zoom": 1.0}
 
 
 def test_existing_datasets_keep_dataset_normalized_orientation(monkeypatch):

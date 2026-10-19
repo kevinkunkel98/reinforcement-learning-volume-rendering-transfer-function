@@ -140,9 +140,13 @@ DATASETS = {
 # calibrated Slicer CTs, loaded with load_dataset(name, canonical=True).
 OUT_OF_SOURCE_CT = ("ct_chest", "ct_skull", "ct_cardio", "ct_abdomen")
 
-# TotalSegmentator volumes are RAS; this chat-UI camera shows them from the
-# front with superior up (checked by rendering one, 2026-09-15).
-TOTALSEG_DEFAULT_CAMERA = {"azimuth": 0.0, "elevation": 80.0, "zoom": 1.0}
+# TotalSegmentator volumes are RAS; this camera shows them from the front with
+# superior up and the patient's right on the viewer's left. Azimuth 180 first
+# matters: from VTK's default seat (+z, view-up +y) elevation 80 alone also puts
+# the camera in front, but the kept +y view-up then projects onto inferior, so
+# every render was upside down and mirrored (found 2026-10-18 from the
+# heart and lungs drawn below the liver).
+TOTALSEG_DEFAULT_CAMERA = {"azimuth": 180.0, "elevation": 80.0, "zoom": 1.0}
 
 
 def _sha256(path: str) -> str:
