@@ -7,7 +7,9 @@
   const logic = window.xrLogic;
   const button = document.getElementById("enter-vr-btn");
   const HUD_W = 1024;
-  const HUD_H = 420;
+  // Tall enough for the chat reply's rows: what the last command moved.
+  const HUD_H = 760;
+  const HUD_MAX_ROWS = 6;
   // The panel canvas is drawn at this multiple of HUD_W x HUD_H so its text
   // stays sharp at headset resolution; layout coordinates stay in HUD units.
   const HUD_PIXEL_SCALE = 2;
@@ -67,6 +69,38 @@
     return `${cut}…`;
   }
 
+  // The chat reply's rows: colour dot, class, "before → after%", and an arrow
+  // for the direction, largest change first.
+  function drawDeltas(ctx, deltas, x, y, width) {
+    const rowH = 56;
+    const shown = deltas.slice(0, HUD_MAX_ROWS);
+    shown.forEach((row, i) => {
+      const top = y + i * rowH;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.04)";
+      ctx.fillRect(x - 12, top, width + 24, rowH - 8);
+      ctx.fillStyle = row.color;
+      ctx.beginPath();
+      ctx.arc(x + 14, top + (rowH - 8) / 2, 12, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.textBaseline = "middle";
+      ctx.font = "40px system-ui, sans-serif";
+      ctx.fillStyle = "#e4e4e7";
+      ctx.fillText(row.label, x + 44, top + (rowH - 8) / 2);
+      ctx.font = "40px monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(row.text, x + width - 56, top + (rowH - 8) / 2);
+      ctx.fillStyle = row.up ? "#4ade80" : "#f87171";
+      ctx.fillText(row.up ? "▲" : "▼", x + width, top + (rowH - 8) / 2);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+    });
+    if (deltas.length > shown.length) {
+      ctx.fillStyle = "#71717a";
+      ctx.font = "32px system-ui, sans-serif";
+      ctx.fillText(`+ ${deltas.length - shown.length} more`, x + 44, y + shown.length * rowH);
+    }
+  }
+
   function drawHud() {
     if (!hud) return;
     const { ctx } = hud;
@@ -85,20 +119,21 @@
     ctx.fillText(wrapLine(ctx, head, max), pad, 36);
     ctx.fillStyle = "#e4e4e7";
     ctx.font = "italic 44px system-ui, sans-serif";
-    ctx.fillText(wrapLine(ctx, transcript, max), pad, 128);
+    ctx.fillText(wrapLine(ctx, transcript, max), pad, 124);
     ctx.fillStyle = "#a1a1aa";
     ctx.font = "40px system-ui, sans-serif";
-    ctx.fillText(wrapLine(ctx, summary, max), pad, 200);
+    ctx.fillText(wrapLine(ctx, summary, max), pad, 190);
+    drawDeltas(ctx, hudState.deltas, pad, 250, max);
     ctx.fillStyle = "#71717a";
     ctx.font = "34px system-ui, sans-serif";
-    ctx.fillText(wrapLine(ctx, footer, max), pad, 300);
+    ctx.fillText(wrapLine(ctx, footer, max), pad, HUD_H - 124);
     // Debug lines: real numbers from this exact session plus the active
     // lever config, so a photo of the panel is a complete measurement.
     const [perf, config] = logic.diagnosticLines(target.getXRDiagnostics(), fps, frameMs);
     ctx.fillStyle = "#52525b";
     ctx.font = "26px monospace";
-    ctx.fillText(wrapLine(ctx, perf, max), pad, 340);
-    ctx.fillText(wrapLine(ctx, config, max), pad, 376);
+    ctx.fillText(wrapLine(ctx, perf, max), pad, HUD_H - 80);
+    ctx.fillText(wrapLine(ctx, config, max), pad, HUD_H - 46);
     hud.refresh();
   }
 

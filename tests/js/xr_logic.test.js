@@ -137,11 +137,35 @@ const CLASSES = ["lungs", "skeleton"];
 const LABELS = { lungs: "Lungs", skeleton: "Skeleton" };
 const SAID = { policy: "the policy answered", exact: "applied directly" };
 
-test("summarizeStep lists classes that moved", () => {
+test("summarizeStep names the method; the moved classes are rows of their own", () => {
   const text = xr.summarizeStep(
     { mode: "policy", class_visibility: { lungs: 0.5, skeleton: 0.2 } },
     { lungs: 0.1, skeleton: 0.2 }, CLASSES, LABELS, SAID);
-  assert.equal(text, "the policy answered · Lungs 10.0→50.0%");
+  assert.equal(text, "the policy answered");
+});
+
+test("stepDeltas lists what moved like the chat reply, largest change first", () => {
+  const rows = xr.stepDeltas(
+    { lungs: 0.5, skeleton: 0.19, heart: 0.05 }, { lungs: 0.1, skeleton: 0.2, heart: 0.05 },
+    ["skeleton", "lungs", "heart"], { lungs: "Lungs", skeleton: "Skeleton", heart: "Heart" },
+    { lungs: "#d95926", skeleton: "#3987e5" });
+  assert.deepEqual(rows, [
+    { name: "lungs", label: "Lungs", color: "#d95926", before: 0.1, after: 0.5, text: "10.00 → 50.00%", up: true },
+    { name: "skeleton", label: "Skeleton", color: "#3987e5", before: 0.2, after: 0.19, text: "20.00 → 19.00%", up: false },
+  ]);
+});
+
+test("stepDeltas has nothing without a before, and skips unmeasurable classes", () => {
+  assert.deepEqual(xr.stepDeltas({ lungs: 0.5 }, null, CLASSES, LABELS, {}), []);
+  assert.deepEqual(xr.stepDeltas({ lungs: null }, { lungs: 0.1 }, CLASSES, LABELS, {}), []);
+});
+
+test("the panel keeps the deltas of the last applied step", () => {
+  const rows = [{ name: "lungs" }];
+  let s = xr.hudReduce(xr.HUD_INITIAL, { type: "applied", summary: "x", deltas: rows });
+  assert.deepEqual(s.deltas, rows);
+  s = xr.hudReduce(s, { type: "applied", summary: "stepped back" });
+  assert.deepEqual(s.deltas, []);
 });
 
 test("summarizeStep keeps the server message and falls back to exact", () => {

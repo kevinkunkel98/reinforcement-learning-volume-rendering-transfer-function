@@ -121,6 +121,13 @@ function emitAppEvent(type, detail = {}) {
   window.dispatchEvent(new CustomEvent(`app:${type}`, { detail }));
 }
 
+// The chat reply's per-class rows (with the --class-* hues) for the VR panel.
+function classDeltas(now, before) {
+  const css = getComputedStyle(document.documentElement);
+  const colors = Object.fromEntries(CLASS_ORDER.map((c) => [c, css.getPropertyValue(`--class-${c}`).trim()]));
+  return window.xrLogic.stepDeltas(now, before, CLASS_ORDER, CLASS_LABEL, colors);
+}
+
 function setLoading(loading) {
   const wasActive = loadingCount > 0;
   loadingCount = Math.max(0, loadingCount + (loading ? 1 : -1));
@@ -545,6 +552,7 @@ async function sendCommandImpl(text) {
   appendReply(data.current, before);
   emitAppEvent("applied", {
     summary: window.xrLogic.summarizeStep(data.current, before, CLASS_ORDER, CLASS_LABEL, METHOD_SAID),
+    deltas: classDeltas(data.current.class_visibility, before),
     dataset: state.dataset,
   });
 }
@@ -590,6 +598,7 @@ async function navigateImpl(path) {
   });
   emitAppEvent("applied", {
     summary: path.endsWith("/back") ? "stepped back" : "stepped forward",
+    deltas: classDeltas(data.current?.class_visibility, previous?.current?.class_visibility),
     dataset: state.dataset,
   });
 }

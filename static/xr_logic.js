@@ -52,6 +52,7 @@
     voice: true,
     transcript: "",
     summary: "",
+    deltas: [],
     dataset: "",
     error: "",
   });
@@ -76,7 +77,7 @@
           ? { ...state, status: "idle" }
           : state;
       case "applied":
-        return { ...state, summary: event.summary, dataset: event.dataset || state.dataset };
+        return { ...state, summary: event.summary, deltas: event.deltas || [], dataset: event.dataset || state.dataset };
       case "error":
         return { ...state, status: "error", error: event.message };
       case "voice-unavailable":
@@ -99,18 +100,29 @@
     return [head, state.transcript ? `“${state.transcript}”` : "", state.summary, footer];
   }
 
-  // One-line version of app.js's appendReply, for the VR panel.
+  // The classes a step moved, as app.js's appendReply lists them in the chat
+  // (same threshold, same two decimals), largest change first: the VR panel
+  // draws one row per entry.
+  function stepDeltas(now, before, classOrder, classLabel, classColor) {
+    if (!before || !now) return [];
+    return classOrder
+      .filter((c) => before[c] != null && now[c] != null && Math.abs(now[c] - before[c]) >= 0.0001)
+      .sort((a, b) => Math.abs(now[b] - before[b]) - Math.abs(now[a] - before[a]))
+      .map((c) => ({
+        name: c, label: classLabel[c] || c, color: classColor[c] || "#a1a1aa",
+        before: before[c], after: now[c],
+        text: `${(before[c] * 100).toFixed(2)} → ${(now[c] * 100).toFixed(2)}%`,
+        up: now[c] > before[c],
+      }));
+  }
+
+  // The chat reply's header line for the VR panel: how the command was
+  // answered, the server's note, or that nothing moved.
   function summarizeStep(step, before, classOrder, classLabel, methodSaid) {
     const parts = [methodSaid[step.mode] || methodSaid.exact];
     if (step.message) parts.push(step.message);
-    const now = step.class_visibility || {};
-    const moved = classOrder.filter((c) => before && before[c] != null && now[c] != null
-      && Math.abs(now[c] - before[c]) >= 0.0001);
-    if (moved.length) {
-      parts.push(moved.map((c) => `${classLabel[c]} ${(before[c] * 100).toFixed(1)}→${(now[c] * 100).toFixed(1)}%`).join(", "));
-    } else if (!step.message) {
-      parts.push("nothing moved measurably");
-    }
+    const moved = stepDeltas(step.class_visibility, before, classOrder, classLabel, {});
+    if (!moved.length && !step.message) parts.push("nothing moved measurably");
     return parts.join(" · ");
   }
 
@@ -446,7 +458,7 @@
 
   return {
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
-    summarizeStep, hudPlacement, withXRLayerContext, xrPlacement,
+    summarizeStep, stepDeltas, hudPlacement, withXRLayerContext, xrPlacement,
     PERF_DEFAULTS, HEADSET_PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
     physicalRotation, createStickRotator, centeredUserMatrix, rotatedPhysicalFrame,
     bodyBoundingBox, cropVolume, strideDownsample, toSixteenBit,
