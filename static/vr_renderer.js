@@ -33,6 +33,8 @@ uniform vec3 uEye;         // eye in data mm (headlight)
 uniform vec4 uLight;       // ambient, diffuse, specular, specular power
 uniform float uSkip;       // 1 = empty-space skipping on
 uniform float uLit;        // 1 = gradient lighting on
+uniform float uFovStep;    // step multiplier at the view's edge (1 = uniform)
+uniform vec2 uFovCenter;   // NDC of the eye's optical axis
 in vec2 vNdc;
 out vec4 outColor;
 
@@ -55,7 +57,13 @@ void main() {
   vec3 hi = (uDims - 1.0) * uSpacing;
   vec2 hit = boxHit(ro, inv, vec3(0.0), hi);
   if (hit.y <= max(hit.x, 0.0)) { outColor = vec4(0.0); return; }
-  float t = max(hit.x, 0.0) + hash(gl_FragCoord.xy) * uStep;
+  // Foveated stepping: full rate near the optical axis, up to uFovStep times
+  // longer steps toward the edge, where the lens blurs anyway. Opacity is
+  // corrected per step below, so only the sampling density changes.
+  float scale = mix(1.0, uFovStep, smoothstep(0.3, 0.9, length(vNdc - uFovCenter)));
+  float dt = uStep * scale;
+  float opacityExp = uOpacityExp * scale;
+  float t = max(hit.x, 0.0) + hash(gl_FragCoord.xy) * dt;
   vec4 acc = vec4(0.0);
   vec3 texel = 1.0 / uDims;
   for (int i = 0; i < ${MAX_STEPS}; i++) {
@@ -69,7 +77,7 @@ void main() {
         vec3 blo = (vec3(b * ${BRICK}) - 0.5) * uSpacing;
         vec3 bhi = blo + float(${BRICK}) * uSpacing;
         vec2 bh = boxHit(p, inv, blo, bhi);
-        t += max(bh.y, 0.0) + 0.01 * uStep;
+        t += max(bh.y, 0.0) + 0.01 * dt;
         continue;
       }
     }
@@ -79,11 +87,14 @@ void main() {
     float u = clamp((hu - uHuRange.x) / (uHuRange.y - uHuRange.x), 0.0, 1.0);
     vec4 c = texture(uTf, vec2(u * 255.0 / 256.0 + 0.5 / 256.0, (floor(row + 0.5) + 0.5) / uRows));
     if (c.a > 0.002) {
-      float a = 1.0 - pow(1.0 - c.a, uOpacityExp);
-      vec3 g = uLit < 0.5 ? vec3(0.0) : vec3(
-        texture(uHu, tc + vec3(texel.x, 0.0, 0.0)).r - texture(uHu, tc - vec3(texel.x, 0.0, 0.0)).r,
-        texture(uHu, tc + vec3(0.0, texel.y, 0.0)).r - texture(uHu, tc - vec3(0.0, texel.y, 0.0)).r,
-        texture(uHu, tc + vec3(0.0, 0.0, texel.z)).r - texture(uHu, tc - vec3(0.0, 0.0, texel.z)).r) / uSpacing;
+      float a = 1.0 - pow(1.0 - c.a, opacityExp);
+      // Forward differences reuse the sample already read: 3 extra fetches
+      // per lit sample instead of central differences' 6 (lighting cost
+      // ~40 % of the frame on the Adreno 650).
+      vec3 g = uLit < 0.5 ? vec3(0.0) : (vec3(
+        texture(uHu, tc + vec3(texel.x, 0.0, 0.0)).r,
+        texture(uHu, tc + vec3(0.0, texel.y, 0.0)).r,
+        texture(uHu, tc + vec3(0.0, 0.0, texel.z)).r) - hu) / uSpacing;
       float glen = length(g);
       vec3 rgb = c.rgb * (uLight.x + uLight.y);
       if (glen > 1e-3) {
@@ -95,7 +106,7 @@ void main() {
       acc.rgb += (1.0 - acc.a) * a * rgb;
       acc.a += (1.0 - acc.a) * a;
     }
-    t += uStep;
+    t += dt;
   }
   outColor = acc;
 }`;
@@ -203,7 +214,7 @@ void main() { outColor = texture(uTex, vUv); }`;
     setTransferFunction(data.params, data.layers, Boolean(labels));
 
     const baseStep = Math.min(...spacing);
-    const state = { step: baseStep, skip: true, lit: true };
+    const state = { step: baseStep, skip: true, lit: true, fovStep: 1 };
 
     // Draw the volume for one view into the bound framebuffer/viewport.
     // `model`: data mm -> room m; `view`: room -> eye; `proj`: eye -> clip.
@@ -230,6 +241,11 @@ void main() { outColor = texture(uTex, vUv); }`;
       gl.uniform4f(u.uLight, data.light.ambient, data.light.diffuse, data.light.specular, data.light.specularPower);
       gl.uniform1f(u.uSkip, state.skip ? 1 : 0);
       gl.uniform1f(u.uLit, state.lit ? 1 : 0);
+      gl.uniform1f(u.uFovStep, state.fovStep);
+      // Where the eye's forward axis lands on screen (asymmetric per-eye
+      // frusta put it off-centre).
+      const axis = window.vrMath.transformPoint(proj, [0, 0, -1]);
+      gl.uniform2f(u.uFovCenter, axis[0], axis[1]);
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
       gl.bindVertexArray(quad);
@@ -309,7 +325,8 @@ void main() { outColor = texture(uTex, vUv); }`;
   // the volume centre from -y (as the Stage C rdp/bench.js did), volume
   // filling the view. Returns ms per frame (readPixels-synced) and,
   // optionally, a PNG data URL for screenshot parity.
-  function benchmark({ w = 1152, h = 576, n = 8, skip = true, lit = true, stepScale = 1, down = 1, image = false } = {}) {
+  function benchmark({ w = 1152, h = 576, n = 8, skip = true, lit = true, stepScale = 1, down = 1, fovstep = 1,
+    image = false } = {}) {
     const data = window.volumeViewer.getVolumeData();
     const canvas = document.createElement("canvas");
     canvas.width = w;
@@ -318,6 +335,7 @@ void main() { outColor = texture(uTex, vUv); }`;
     const scene = createScene(gl, data, { down });
     scene.state.skip = skip;
     scene.state.lit = lit;
+    scene.state.fovStep = fovstep;
     scene.state.step = scene.baseStep * stepScale;
     const center = data.dims.map((d, i) => (d - 1) * data.spacing[i] / 2);
     const V = window.vrMath.lookAt([center[0], center[1] - 1500, center[2]], center, [0, 0, 1]);
@@ -356,6 +374,7 @@ void main() { outColor = texture(uTex, vUv); }`;
     const gl = canvas.getContext("webgl2", { xrCompatible: true, antialias: false });
     if (!gl) throw new Error("WebGL2 unavailable");
     const scene = createScene(gl, data, { down: options.down });
+    scene.state.fovStep = options.fovstep || 1;
     const space = await xrSession.requestReferenceSpace("local");
     const layer = new XRWebGLLayer(xrSession, gl, { framebufferScaleFactor: options.xrscale, antialias: false });
     xrSession.updateRenderState({ baseLayer: layer, depthNear: 0.05, depthFar: 100 });

@@ -933,6 +933,17 @@ session = Session(UI_SESSION_PATH)
 app = FastAPI()
 if os.path.isdir("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    """Browsers may reuse a cached script without asking (heuristic freshness);
+    the headset browser kept a stale xr_logic.js across reloads. `no-cache`
+    makes every load revalidate, and the ETag keeps an unchanged file a 304."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 app.include_router(collect.router)
 
 

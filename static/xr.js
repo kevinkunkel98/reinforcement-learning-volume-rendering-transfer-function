@@ -278,7 +278,7 @@
       target = window.volumeViewer;
       if (flags.renderer === "custom") {
         try {
-          await window.vrRenderer.start(xrSession, { xrscale: flags.xrscale, down: flags.down });
+          await window.vrRenderer.start(xrSession, { xrscale: flags.xrscale, down: flags.down, fovstep: flags.fovstep });
           target = window.vrRenderer;
         } catch (err) {
           console.error("[vr-renderer]", err);

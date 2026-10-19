@@ -231,20 +231,20 @@ test("withXRLayerContext merges layer init overrides over vtk's init", async () 
 test("parsePerfFlags defaults reproduce the pre-flag behaviour", () => {
   assert.deepEqual(xr.parsePerfFlags(""), { ...xr.PERF_DEFAULTS });
   assert.deepEqual(xr.PERF_DEFAULTS, {
-    tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false, renderer: "vtk",
+    tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false, renderer: "vtk", fovstep: 1,
   });
 });
 
 test("parsePerfFlags reads every lever", () => {
   assert.deepEqual(
-    xr.parsePerfFlags("?tex=f16&crop=1&down=2&fov=0.5&xrscale=1&xrsample=2&adapt=1&renderer=custom"),
-    { tex: "f16", crop: true, down: 2, fov: 0.5, xrscale: 1, xrsample: 2, adapt: true, renderer: "custom" },
+    xr.parsePerfFlags("?tex=f16&crop=1&down=2&fov=0.5&xrscale=1&xrsample=2&adapt=1&renderer=custom&fovstep=2.5"),
+    { tex: "f16", crop: true, down: 2, fov: 0.5, xrscale: 1, xrsample: 2, adapt: true, renderer: "custom", fovstep: 2.5 },
   );
 });
 
 test("parsePerfFlags falls back to defaults on garbage, never throws", () => {
   assert.deepEqual(
-    xr.parsePerfFlags("?tex=u8&crop=yes&down=3&fov=2&xrscale=abc&xrsample=0&adapt=true"),
+    xr.parsePerfFlags("?tex=u8&crop=yes&down=3&fov=2&xrscale=abc&xrsample=0&adapt=true&fovstep=0.5"),
     { ...xr.PERF_DEFAULTS },
   );
   assert.equal(xr.parsePerfFlags("?xrscale=").xrscale, 0.5);
@@ -254,18 +254,18 @@ test("diagnosticLines formats a full measurement record", () => {
   const lines = xr.diagnosticLines({
     texture: "R16F", floatLinear: false, dimensions: [256, 256, 140], sampleDistance: 1.6,
     framebufferScale: 1, foveation: "unsupported", shade: false, autoAdjust: true,
-    flags: { adapt: true, crop: true, down: 2 },
+    flags: { adapt: true, crop: true, down: 2, fovstep: 2 },
   }, 72, 13.9);
   assert.deepEqual(lines, [
     "72 fps 13.9ms tex=R16F flin=0 dim=256x256x140 sd=1.60",
-    "xrscale=1 fov=unsupported adapt=1 crop=1 down=2 shade=0 auto=1",
+    "xrscale=1 fov=unsupported adapt=1 crop=1 down=2 fstep=2 shade=0 auto=1",
   ]);
 });
 
 test("diagnosticLines tolerates a viewer that has not loaded yet", () => {
   assert.deepEqual(xr.diagnosticLines({}, null, null), [
     "- fps -ms tex=- flin=0 dim=- sd=-",
-    "xrscale=- fov=- adapt=0 crop=0 down=- shade=0 auto=0",
+    "xrscale=- fov=- adapt=0 crop=0 down=- fstep=- shade=0 auto=0",
   ]);
 });
 
@@ -422,14 +422,17 @@ test("toSixteenBit picks Int16 when the data goes negative", () => {
 });
 
 test("parsePerfFlags takes per-device defaults, and explicit flags still win", () => {
-  assert.deepEqual(xr.HEADSET_PERF_DEFAULTS, { ...xr.PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 0.8 });
+  assert.deepEqual(xr.HEADSET_PERF_DEFAULTS, {
+    ...xr.PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 0.8, renderer: "custom", fovstep: 2,
+  });
   assert.deepEqual(xr.parsePerfFlags("", xr.HEADSET_PERF_DEFAULTS), { ...xr.HEADSET_PERF_DEFAULTS });
-  const explicit = xr.parsePerfFlags("?tex=f32&down=1&xrscale=1&crop=0&adapt=0", xr.HEADSET_PERF_DEFAULTS);
+  const explicit = xr.parsePerfFlags("?tex=f32&down=1&xrscale=1&crop=0&adapt=0&renderer=vtk", xr.HEADSET_PERF_DEFAULTS);
   assert.equal(explicit.tex, "f32");
   assert.equal(explicit.down, 1);
   assert.equal(explicit.xrscale, 1);
   assert.equal(explicit.crop, false);
   assert.equal(explicit.adapt, false);
+  assert.equal(explicit.renderer, "vtk");
 });
 
 // ---------- adaptive sample distance ----------

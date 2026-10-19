@@ -186,14 +186,23 @@
   // of range falls back to its default instead of throwing.
   const PERF_DEFAULTS = Object.freeze({
     tex: "f32", crop: false, down: 1, fov: 0, xrscale: 0.5, xrsample: 1, adapt: false, renderer: "vtk",
+    // Custom renderer only: ray step multiplier at the edge of each eye's
+    // view (1 = uniform steps), a shader-side stand-in for the foveation
+    // Wolvic doesn't offer.
+    fovstep: 1,
   });
 
   // What a VR-capable (standalone headset) browser gets without flags,
   // from the 2026-10-15 Vive Focus 3 benchmark: frame cost tracks voxel
   // count, not pixel count, so halving the volume per axis (8x fewer
-  // voxels) buys ~3x while a sharp 0.8 framebuffer stays cheap.
+  // voxels) buys ~3x while a sharp 0.8 framebuffer stays cheap. VR sessions
+  // run on the custom ray marcher (static/vr_renderer.js): 27-33 fps lit
+  // against vtk.js's ~21-25, with linear HU and no wedge clipping;
+  // ?renderer=vtk still picks vtk.js. fovstep=2 (2026-10-19, same TF and
+  // view): 58-59 fps against 44-52 with uniform steps, no visible edge;
+  // 3 was no faster. down=1 is out of reach: it restarted the VR runtime.
   const HEADSET_PERF_DEFAULTS = Object.freeze({
-    ...PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 0.8,
+    ...PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 0.8, renderer: "custom", fovstep: 2,
   });
 
   function parsePerfFlags(search, defaults = PERF_DEFAULTS) {
@@ -216,6 +225,7 @@
       xrsample: number("xrsample", 0.25, 8),
       adapt: choice("adapt", { 0: false, 1: true }),
       renderer: choice("renderer", { vtk: "vtk", custom: "custom" }),
+      fovstep: number("fovstep", 1, 4),
     };
   }
 
@@ -230,7 +240,7 @@
         + `flin=${on(diag.floatLinear)} dim=${diag.dimensions ? diag.dimensions.join("x") : "-"} `
         + `sd=${diag.sampleDistance == null ? "-" : diag.sampleDistance.toFixed(2)}`,
       `xrscale=${dash(diag.framebufferScale)} fov=${dash(diag.foveation)} adapt=${on(flags.adapt)} `
-        + `crop=${on(flags.crop)} down=${dash(flags.down)} shade=${on(diag.shade)} auto=${on(diag.autoAdjust)}`,
+        + `crop=${on(flags.crop)} down=${dash(flags.down)} fstep=${dash(flags.fovstep)} shade=${on(diag.shade)} auto=${on(diag.autoAdjust)}`,
     ];
   }
 
