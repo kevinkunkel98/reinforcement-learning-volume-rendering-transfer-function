@@ -198,9 +198,10 @@
   // voxels) buys ~3x while a sharp 0.8 framebuffer stays cheap. VR sessions
   // run on the custom ray marcher (static/vr_renderer.js): 27-33 fps lit
   // against vtk.js's ~21-25, with linear HU and no wedge clipping;
-  // ?renderer=vtk still picks vtk.js. fovstep=2 (2026-10-19, same TF and
-  // view): 58-59 fps against 44-52 with uniform steps, no visible edge;
-  // 3 was no faster. down=1 is out of reach: it restarted the VR runtime.
+  // ?renderer=vtk still picks vtk.js. fovstep=2 (2026-10-19, same TF):
+  // ~20 % shorter frames than uniform steps on the flat benchmark and in VR,
+  // no visible edge; 3 was no faster. Head-on at 0.9 m on a 523-slice body
+  // scan: 21-22 fps. down=1 is out of reach: it restarted the VR runtime.
   const HEADSET_PERF_DEFAULTS = Object.freeze({
     ...PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 0.8, renderer: "custom", fovstep: 2,
   });

@@ -217,7 +217,11 @@
       lastStickTime === null ? 0 : time - lastStickTime);
     lastStickTime = time;
     if (turned.rotation) target.setVolumeRotation(turned.rotation);
-    if (turned.event === "reset") pulseAll(0.3, 30);
+    if (turned.event === "reset") {
+      // The custom renderer also brings the volume back in front of you.
+      if (target.recenter) target.recenter();
+      pulseAll(0.3, 30);
+    }
   }
 
   async function onSessionEnd() {

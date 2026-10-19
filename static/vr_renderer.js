@@ -385,7 +385,10 @@ void main() { outColor = texture(uTex, vUv); }`;
     const bounds = [0, 1, 2].flatMap((a) => [0, (data.dims[a] - 1) * data.spacing[a]]);
     const center = [0, 2, 4].map((i) => (bounds[i] + bounds[i + 1]) / 2);
     const radius = Math.hypot(...[0, 2, 4].map((i) => bounds[i + 1] - bounds[i])) / 2;
-    const placement = { center, scale: radius / XR_RADIUS_M, room: [0, 0, -XR_DISTANCE_M], base };
+    const placement = { center, scale: radius / XR_RADIUS_M, room: [0, 0, -XR_DISTANCE_M], base, yaw: 0 };
+    // Placed in front of the viewer on the first pose and on each recenter,
+    // not at a fixed spot in the reference space.
+    let placeNext = true;
     const identity3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
     let rotation = identity3;
     let background = [0, 0, 0];
@@ -397,6 +400,10 @@ void main() { outColor = texture(uTex, vUv); }`;
       xrSession.requestAnimationFrame(onFrame);
       const pose = frame.getViewerPose(space);
       if (!pose) return;
+      if (placeNext) {
+        Object.assign(placement, window.vrMath.placeInFront(pose.transform.matrix, XR_DISTANCE_M));
+        placeNext = false;
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
       gl.clearColor(...background, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -413,6 +420,7 @@ void main() { outColor = texture(uTex, vUv); }`;
     session = {
       xrSession, gl, scene, unsubscribe, bounds, north, up, base,
       setRotation(r) { rotation = r; },
+      recenter() { placeNext = true; },
       setBackground(rgb) { background = rgb; },
     };
     xrSession.requestAnimationFrame(onFrame);
@@ -431,6 +439,7 @@ void main() { outColor = texture(uTex, vUv); }`;
     // Same surface xr.js uses on window.volumeViewer for the vtk path.
     getPhysicalRotation: () => session.base,
     setVolumeRotation: (rotation) => session?.setRotation(rotation),
+    recenter: () => session?.recenter(),
     setXRSampleMultiplier: (m) => { if (session) session.scene.state.step = session.scene.baseStep * m; },
     setBackground: (rgb) => session?.setBackground(rgb),
     getHudFrame: () => ({ bounds: session.bounds, up: session.up, dop: session.north }),

@@ -45,3 +45,36 @@ test("perspective and lookAt project the target to the screen centre", () => {
   const ndc = m.transformPoint(m.multiply(P, V), [0, 0, 0]);
   assert.ok(Math.abs(ndc[0]) < 1e-5 && Math.abs(ndc[1]) < 1e-5);
 });
+
+const rotY = (deg) => { const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r); return [[c, 0, s], [0, 1, 0], [-s, 0, c]]; };
+// A viewer pose (eye -> room): standing at `pos`, turned by `deg` about +y,
+// pitched by `pitch` degrees about +x.
+const pose = (pos, deg, pitch = 0) => {
+  const p = (pitch * Math.PI) / 180, c = Math.cos(p), s = Math.sin(p);
+  return m.multiply(m.translation(pos), m.multiply(m.fromRotation(rotY(deg)), m.fromRotation([[1, 0, 0], [0, c, -s], [0, s, c]])));
+};
+
+test("placeInFront puts the volume ahead of the viewer at head height, facing them", () => {
+  const ahead = m.placeInFront(pose([0, 1.6, 0], 0), 0.9);
+  assert.ok(close(ahead.room, [0, 1.6, -0.9]), `${ahead.room}`);
+  assert.ok(Math.abs(ahead.yaw) < 1e-9);
+  const left = m.placeInFront(pose([1, 1.6, 2], 90), 0.9);  // turned to face -x
+  assert.ok(close(left.room, [0.1, 1.6, 2]), `${left.room}`);
+  assert.ok(Math.abs(left.yaw - Math.PI / 2) < 1e-6, `${left.yaw}`);
+});
+
+test("placeInFront ignores head pitch, and looking straight down still faces -z", () => {
+  const tilted = m.placeInFront(pose([0, 1.6, 0], 0, -40), 0.9);
+  assert.ok(close(tilted.room, [0, 1.6, -0.9]), `${tilted.room}`);
+  const down = m.placeInFront(pose([0, 1.6, 0], 0, -90), 0.9);
+  assert.ok(close(down.room, [0, 1.6, -0.9]), `${down.room}`);
+});
+
+test("modelMatrix turns the placed volume by yaw about the room's vertical", () => {
+  const M = m.modelMatrix({
+    center: [0, 0, 0], scale: 1000, room: [0, 0, 0], base: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], yaw: Math.PI / 2,
+  });
+  // +x data (1000 mm) ends up along -z in the room after a 90° turn left
+  assert.ok(close(m.transformPoint(M, [1000, 0, 0]), [0, 0, -1]), `${m.transformPoint(M, [1000, 0, 0])}`);
+});

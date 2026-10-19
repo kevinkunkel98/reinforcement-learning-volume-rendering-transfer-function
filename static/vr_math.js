@@ -69,12 +69,30 @@
   // world space), carry world into the room frame (`base`, world -> room
   // rotation: rows right, up, -north), shrink by `scale` mm per m, and put
   // the centre at `room`. Mirrors vtk's physical frame + Stage C rotation.
-  function modelMatrix({ center, scale, room, base, rotation }) {
+  function modelMatrix({ center, scale, room, base, rotation, yaw = 0 }) {
     let out = translation(center.map((v) => -v));
     out = multiply(fromRotation(rotation), out);
     out = multiply(fromRotation(base), out);
     out = multiply(scaling(1 / scale), out);
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    out = multiply(fromRotation([[c, 0, s], [0, 1, 0], [-s, 0, c]]), out);
     return multiply(translation(room), out);
+  }
+
+  // Where to put the volume for a viewer pose (eye -> room, column-major):
+  // `distance` m ahead along the horizontal gaze, at head height, and the
+  // yaw that turns the room's -z (the volume's front) toward that gaze.
+  // The "local" reference space's origin is wherever tracking started, which
+  // can be a metre away from where the user now stands.
+  function placeInFront(viewer, distance) {
+    let fx = -viewer[8];
+    let fz = -viewer[10];
+    const len = Math.hypot(fx, fz);
+    if (len < 1e-3) { fx = 0; fz = -1; } else { fx /= len; fz /= len; }
+    return {
+      room: [viewer[12] + fx * distance, viewer[13], viewer[14] + fz * distance],
+      yaw: Math.atan2(-fx, -fz),
+    };
   }
 
   // Distance along a ray (unit `dir`) from `origin` (inside the box) to
@@ -111,6 +129,6 @@
 
   return {
     identity, multiply, invert, translation, scaling, fromRotation, transformPoint,
-    modelMatrix, rayBoxExit, perspective, lookAt,
+    modelMatrix, placeInFront, rayBoxExit, perspective, lookAt,
   };
 });
