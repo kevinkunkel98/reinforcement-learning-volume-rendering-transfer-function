@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Task v3, the v2 recipe end to end: collect, train, three Dyna rounds with
 # balanced closed-loop fine-tuning, three seeds, official scores.
-#   bash docs/experiments/2026-10-19-scripts/pipeline_v3.sh
+#   [O=out/dir] bash docs/experiments/2026-10-19-scripts/pipeline_v3.sh
 set -euo pipefail
 PY=.venv/bin/python
-O=out/rl_mb_v3
+O=${O:-out/rl_mb_v3}
 B="--splits train,train_extra --task-version v3"
 T="--task-version v3"
 mkdir -p $O

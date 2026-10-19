@@ -1,8 +1,10 @@
 """Per episode on vis_eval's fixed 300 episodes (seed 0): policy alone, policy +
 warm hill_climb at 30 / 200 evaluations, and (with --cold) hill_climb from the
 start at 200 -- attainment and on-screen change (goals.visible_change, pp).
+With --plan also the proposal refined through the checkpoint's dynamics
+ensemble (rl.model_based.plan, no renders), alone and + 30 / 200.
 
-    eval_v3.py CKPT OUT.json SPLIT LO HI [--cold]
+    eval_v3.py CKPT OUT.json SPLIT LO HI [--cold] [--plan]
 """
 import json
 import sys
@@ -17,6 +19,7 @@ from rl.baselines import hill_climb  # noqa: E402
 
 ckpt, out, split, lo, hi = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
 cold = "--cold" in sys.argv
+planning = "--plan" in sys.argv
 meta = ve.load_policy_metadata(ckpt)
 episodes = ve.fixed_episodes(split, 300, seed=0, formulation="one_shot", policy_metadata=meta)[lo:hi]
 policy = ve._load_sac(ckpt)
@@ -34,14 +37,23 @@ for i, ep in enumerate(episodes, start=lo):
             ep["instruction"]["goal"], env._start_agg, final, ep["instruction"].get("weights"))
 
     row = {"i": i, "kind": info["kind"], "volume": ep["volume"]}
-    row["policy"], row["policy_pp"] = scored(proposal)
-    for budget in (30, 200):
-        warm = hill_climb(env._model, proposal, ep["instruction"], evaluations=budget,
-                          initial_step=ve.REFINE_INITIAL_STEP, reference_params=start)
-        att, pp = scored(warm)
-        # vis_eval --refine's contract: keep the better of {proposal, refined}.
-        row[f"warm{budget}"], row[f"warm{budget}_pp"] = (att, pp) if att > row["policy"] else (
-            row["policy"], row["policy_pp"])
+
+    def proposal_and_search(name, params):
+        row[name], row[name + "_pp"] = scored(params)
+        prefix = "" if name == "policy" else name + "_"
+        for budget in (30, 200):
+            warm = hill_climb(env._model, params, ep["instruction"], evaluations=budget,
+                              initial_step=ve.REFINE_INITIAL_STEP, reference_params=start)
+            att, pp = scored(warm)
+            # vis_eval --refine's contract: keep the better of {proposal, refined}.
+            row[f"{prefix}warm{budget}"], row[f"{prefix}warm{budget}_pp"] = (att, pp) if att > row[name] else (
+                row[name], row[name + "_pp"])
+
+    proposal_and_search("policy", proposal)
+    if planning:
+        env._params = start.copy()
+        env.step(ve._planned(policy, env, action))
+        proposal_and_search("plan", env._params.copy())
     if cold:
         row["cold200"], row["cold200_pp"] = scored(hill_climb(env._model, start, ep["instruction"],
                                                               evaluations=200))
