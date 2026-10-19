@@ -48,8 +48,9 @@ ABSOLUTE_LEVEL = {"low": 0.1, "medium": 0.4, "high": 0.8}                      #
 
 
 TASK_VERSIONS = ("v1", "v2", "v3")
-# Task v3 is v2 with the unlabelled shell faded (`transfer.UNLABELLED_OPACITY`)
-# and brightness asked only of classes that are visible at the start
+# Task v3 is v2 with the unlabelled shell faded (`transfer.UNLABELLED_OPACITY`),
+# brightness asked only of classes that are visible at the start, and show_only
+# asking its hidden classes to vanish (`hide_fully`)
 # (docs/experiments/2026-10-19-task-v3.md). It changes what a render shows, so
 # it needs its own dynamics model and policy.
 UNLABELLED_OPACITY_BY_TASK = {"v1": 1.0, "v2": 1.0, "v3": 0.2}
@@ -917,16 +918,42 @@ def reachable_targets(instruction: dict, model, start: dict, active_layers=None)
     return {**instruction, "goal": goal}
 
 
+def hide_fully(instruction: dict, start: dict) -> dict:
+    """Task v3's show_only: every class the instruction hides is asked to be
+    invisible (the EPSILON floor) rather than HIDE_STRENGTH below its start,
+    and the unlabelled tissue is free to fade (weights["other"] = 0).
+
+    Under v2, "show only the kidneys" on ts_s0477 scored 0.62 with the lungs
+    grown from 4.6 % to 8.7 % of the image, and 0.43 with them hidden: the
+    unlabelled tissue sees the lungs peak, so hiding the lungs took "other"
+    from 24 % to 3 % -- charged as drift -- and a fully hidden class
+    overshot its -1 target. Hiding everything that was not named, unlabelled
+    tissue included, is what was asked. Raising "other" still costs through
+    the hidden classes: it is shaded only by their peaks."""
+    if instruction.get("kind") != "show_only":
+        return instruction
+    n = len(GOAL_CLASSES)
+    goal = np.array(instruction["goal"], dtype=np.float64)
+    floor = math.log10(EPSILON)
+    for i, goal_class in enumerate(GOAL_CLASSES):
+        if goal[n + i] and goal[i] < 0.0:
+            goal[i] = floor - math.log10(start["vis"].get(goal_class, 0.0) + EPSILON)
+    weights = dict(instruction.get("weights") or {c: 1.0 for c in GOAL_CLASSES})
+    weights["other"] = 0.0
+    return {**instruction, "goal": goal, "weights": weights}
+
+
 def for_task_version(instruction: dict, model, start_params, start: dict, task_version: str = "v1",
                      active_layers=None) -> dict:
     """`instruction` as `task_version` scores it. v1 leaves it unchanged; v2
     exempts the target's occluders from the keep terms (`occlusion_aware`) and
     clips every target to what is reachable from `start` (`reachable_targets`);
-    v3 scores the same way as v2.
+    v3 also asks show_only's hidden classes to vanish (`hide_fully`).
     The env, the model-based collector and the viewer all go through here."""
     if task_version not in TASK_VERSIONS:
         raise ValueError(f"unknown task version {task_version!r}")
     if task_version == "v1":
         return instruction
     instruction = occlusion_aware(instruction, find_occluders(model, start_params, instruction, active_layers))
-    return reachable_targets(instruction, model, start, active_layers)
+    instruction = reachable_targets(instruction, model, start, active_layers)
+    return hide_fully(instruction, start) if task_version == "v3" else instruction

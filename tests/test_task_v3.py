@@ -68,3 +68,31 @@ def test_visible_brightness_never_asks_an_invisible_class(monkeypatch):
     start["vis"]["liver"] = 0.0
     inst = goals.sample_instruction("fake", _OccludingModel(), start, rng, visible_brightness=True)
     assert inst["kind"] == "absolute"
+
+
+def test_v3_show_only_hides_fully_and_frees_the_unlabelled_tissue():
+    targets = {c: {"vis": -goals.HIDE_STRENGTH} for c in goals.GOAL_CLASSES}
+    targets["kidneys"] = {"vis": goals.HIDE_STRENGTH}
+    instruction = {"kind": "show_only", "targets": targets, "goal": goals.goal_vector(targets),
+                   "weights": goals.show_only_weights({"kidneys"}, goals.GOAL_CLASSES)}
+    start = {"vis": {c: 0.05 for c in list(goals.GOAL_CLASSES) + ["other"]}}
+    hidden = goals.hide_fully(instruction, start)
+    i = goals.GOAL_CLASSES.index("lungs")
+    assert hidden["goal"][i] == pytest.approx(np.log10(goals.EPSILON) - np.log10(0.05 + goals.EPSILON))
+    assert hidden["goal"][goals.GOAL_CLASSES.index("kidneys")] == goals.HIDE_STRENGTH
+    assert hidden["weights"]["other"] == 0.0
+    # A fully hidden lung with the unlabelled tissue gone is now the goal, not a penalty.
+    final = {"vis": {**start["vis"], "lungs": 0.0, "other": 0.001}, "bright": {}}
+    start_full = {**start, "bright": {}}
+    lungs_hidden = goals.attainment(hidden["goal"], start_full, final, weights=hidden["weights"])
+    lungs_grown = goals.attainment(hidden["goal"], start_full,
+                                   {**final, "vis": {**final["vis"], "lungs": 0.1, "other": 0.05}},
+                                   weights=hidden["weights"])
+    assert lungs_hidden > lungs_grown
+    # Under v2's scoring the same hidden-lung render scored no better than leaving the lungs alone.
+    v2_hidden = goals.attainment(instruction["goal"], start_full, final, weights=instruction["weights"])
+    assert lungs_hidden - lungs_grown > v2_hidden - goals.attainment(
+        instruction["goal"], start_full, {**final, "vis": {**final["vis"], "lungs": 0.1, "other": 0.05}},
+        weights=instruction["weights"])
+    relative = {"kind": "relative", "goal": goals.goal_vector({"lungs": {"vis": -0.3}}), "targets": {}}
+    assert goals.hide_fully(relative, start) is relative
