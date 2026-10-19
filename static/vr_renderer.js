@@ -7,6 +7,16 @@
 
   const BRICK = 8;
   const MAX_STEPS = 2048;
+  // Above this share of occupied bricks, per-step brick checks cost more
+  // than they skip: with the default TF (0.82 occupied) turning skipping off
+  // was 8-10 % faster on the headset benchmark (2026-10-19).
+  const SKIP_MAX_OCCUPIED = 0.6;
+  // While the stick turns the volume (and briefly after), rays step this much
+  // farther: turned end-on, a body scan's rays cross far more tissue and read
+  // it against the texture's cache layout, and motion hides the coarser
+  // sampling. The still image keeps the full rate.
+  const MOTION_STEP = 2;
+  const MOTION_HOLD_MS = 250;
 
   const VOLUME_VS = `#version 300 es
 in vec2 aPos;
@@ -221,7 +231,7 @@ void main() { outColor = texture(uTex, vUv); }`;
     setTransferFunction(data.params, data.layers, Boolean(labels));
 
     const baseStep = Math.min(...spacing);
-    const state = { step: baseStep, skip: true, lit: true, fovStep: 1, emptyStride: 2 };
+    const state = { step: baseStep, skip: true, lit: true, fovStep: 1, emptyStride: 2, motion: 1 };
 
     // Draw the volume for one view into the bound framebuffer/viewport.
     // `model`: data mm -> room m; `view`: room -> eye; `proj`: eye -> clip.
@@ -240,13 +250,13 @@ void main() { outColor = texture(uTex, vUv); }`;
       gl.uniformMatrix4fv(u.uInvMvp, false, invMvp);
       gl.uniform3fv(u.uDims, dims);
       gl.uniform3fv(u.uSpacing, spacing);
-      gl.uniform1f(u.uStep, state.step);
-      gl.uniform1f(u.uOpacityExp, state.step / data.unitDistance);
+      gl.uniform1f(u.uStep, state.step * state.motion);
+      gl.uniform1f(u.uOpacityExp, state.step * state.motion / data.unitDistance);
       gl.uniform1f(u.uRows, rowCount);
       gl.uniform2f(u.uHuRange, -1050, 2000);
       gl.uniform3fv(u.uEye, eye);
       gl.uniform4f(u.uLight, data.light.ambient, data.light.diffuse, data.light.specular, data.light.specularPower);
-      gl.uniform1f(u.uSkip, state.skip ? 1 : 0);
+      gl.uniform1f(u.uSkip, state.skip && occupied < SKIP_MAX_OCCUPIED ? 1 : 0);
       gl.uniform1f(u.uLit, state.lit ? 1 : 0);
       gl.uniform1f(u.uFovStep, state.fovStep);
       gl.uniform1f(u.uEmptyStride, state.emptyStride);
@@ -400,6 +410,7 @@ void main() { outColor = texture(uTex, vUv); }`;
     let placeNext = true;
     const identity3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
     let rotation = identity3;
+    let movedAt = -Infinity;
     let background = [0, 0, 0];
     const unsubscribe = window.volumeViewer.onTransferFunctionChange((params, layers, labelled) =>
       scene.setTransferFunction(params, layers, labelled));
@@ -409,6 +420,7 @@ void main() { outColor = texture(uTex, vUv); }`;
       xrSession.requestAnimationFrame(onFrame);
       const pose = frame.getViewerPose(space);
       if (!pose) return;
+      scene.state.motion = time - movedAt < MOTION_HOLD_MS ? MOTION_STEP : 1;
       if (placeNext) {
         Object.assign(placement, window.vrMath.placeInFront(pose.transform.matrix, XR_DISTANCE_M));
         placeNext = false;
@@ -428,7 +440,7 @@ void main() { outColor = texture(uTex, vUv); }`;
 
     session = {
       xrSession, gl, scene, unsubscribe, bounds, north, up, base,
-      setRotation(r) { rotation = r; },
+      setRotation(r) { rotation = r; movedAt = performance.now(); },
       recenter() { placeNext = true; },
       setBackground(rgb) { background = rgb; },
     };
