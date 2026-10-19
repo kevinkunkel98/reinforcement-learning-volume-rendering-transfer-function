@@ -117,6 +117,6 @@ on another.
    (10/30/100/200) on v3c with and without planning; per-stage training
    ablation; per-patient table; planning ablation re-run on v3c.
 4. **Write the thesis** — skeleton with tables and figure briefs exists
-   (Overleaf), plus an architecture overview figure.
+   (Overleaf), plus an architecture overview figure (`docs/figures/arch.pdf`, made by `docs/figures/make_arch.py`).
 5. Optional: start a ceiling-fix-style render audit for the remaining weak
    cases (strong increases, small-organ brightness).
