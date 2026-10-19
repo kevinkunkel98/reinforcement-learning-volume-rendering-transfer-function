@@ -98,7 +98,7 @@ def test_v2_start_shows_the_organs():
     assert v2[goals._height_index("heart")] > v1[goals._height_index("heart")]
     np.testing.assert_allclose(v1, transfer.anatomical_params())
     with pytest.raises(ValueError):
-        goals.starting_params("v3")
+        goals.starting_params("v9")
 
 
 def test_task_version_is_recorded_only_for_v2():
@@ -124,7 +124,7 @@ def test_v2_env_starts_visible_and_samples_well_posed_instructions(monkeypatch):
                 start = math.log10(env._start_agg["vis"][goal_class] + goals.EPSILON)
                 assert start + env._instruction["goal"][i] >= math.log10(goals.EPSILON) - 1e-9
     with pytest.raises(ValueError):
-        OneShotEnv(["fake"], model_for_volume=lambda name: _OccludingModel(), **V9, task_version="v3")
+        OneShotEnv(["fake"], model_for_volume=lambda name: _OccludingModel(), **V9, task_version="v9")
 
 
 def test_for_task_version_is_identity_for_v1_and_applies_both_v2_transforms():
@@ -141,7 +141,7 @@ def test_for_task_version_is_identity_for_v1_and_applies_both_v2_transforms():
     np.testing.assert_allclose(v2["goal"], expected["goal"])
     assert v2["weights"]["other"] == 0.0
     with pytest.raises(ValueError):
-        goals.for_task_version(instruction, model, params, start, "v3")
+        goals.for_task_version(instruction, model, params, start, "v9")
 
 
 

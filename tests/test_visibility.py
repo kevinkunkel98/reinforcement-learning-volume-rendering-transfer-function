@@ -410,7 +410,7 @@ def test_for_volume_returns_the_same_instance_so_solo_max_stays_warm(tmp_path, m
     second = visibility.for_volume("fake")
 
     assert second is first
-    assert "skeleton" in second._solo_max
+    assert ("skeleton", 1.0) in second._solo_max
 
 
 def test_for_volume_rebuilds_when_the_volume_version_changes(tmp_path, monkeypatch):

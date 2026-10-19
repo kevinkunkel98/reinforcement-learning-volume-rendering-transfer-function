@@ -193,6 +193,23 @@ TRANSFER_MODES = ("label_scoped", "global")
 UNLABELLED_PEAKS = ("skeleton", "lungs", "soft")
 DEFAULT_TRANSFER_MODE = "label_scoped"
 
+# Opacity multiplier on the unlabelled row in "label_scoped" mode. The
+# unlabelled skin/fat shell sees the soft peak by HU and covers ~half the image
+# at the v2 start (val: "other" 0.54 of the image, every organ < 2 %), so an
+# organ that changes a lot in log visibility barely changes on screen. Task v3
+# (goals.UNLABELLED_OPACITY_BY_TASK) holds it at 0.2: the body outline stays as
+# context and the organs come forward. Process-wide, set through
+# `goals.use_task_version`, because the renderer, the visibility estimate and
+# the browser viewer must all agree on it.
+UNLABELLED_OPACITY = 1.0
+
+
+def set_unlabelled_opacity(scale: float) -> None:
+    global UNLABELLED_OPACITY
+    if not 0.0 <= scale <= 1.0:
+        raise ValueError(f"unlabelled opacity must be in [0, 1], got {scale}")
+    UNLABELLED_OPACITY = float(scale)
+
 
 def check_transfer_mode(mode: str) -> str:
     if mode not in TRANSFER_MODES:
@@ -203,14 +220,16 @@ def check_transfer_mode(mode: str) -> str:
 def label_scoped_tables(params: np.ndarray, hu: np.ndarray, classes=CANONICAL_CLASSES,
                         mode: str = DEFAULT_TRANSFER_MODE) -> list:
     """(opacity, rgb) per label row: row 0 for unlabelled voxels, row i + 1
-    for `classes[i]`. "label_scoped": row 0 sums UNLABELLED_PEAKS, a class row
-    is that class's own peak. "global": every row sums every peak."""
+    for `classes[i]`. "label_scoped": row 0 sums UNLABELLED_PEAKS, scaled by
+    UNLABELLED_OPACITY, a class row is that class's own peak. "global": every
+    row sums every peak."""
     check_transfer_mode(mode)
     if mode == "global":
         shared = _opacity_and_color_at(params, hu)
         return [shared] * (len(classes) + 1)
     unlabelled = tuple(ANATOMICAL_PEAK_INDEX[name] for name in UNLABELLED_PEAKS)
-    rows = [_opacity_and_color_at(params, hu, unlabelled)]
+    opacity, rgb = _opacity_and_color_at(params, hu, unlabelled)
+    rows = [(opacity * UNLABELLED_OPACITY, rgb)]
     for name in classes:
         rows.append(_opacity_and_color_at(params, hu, (ANATOMICAL_PEAK_INDEX[name],)))
     return rows

@@ -43,6 +43,7 @@ from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
 from rl.oneshot_env import build_observation
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
 from transfer import TOTAL_PARAMS, TISSUE_BANDS, _opacity_and_color_at, default_params, opacity_mass
+import transfer
 import visibility
 from anatomy_layers import default_layers, normalize_layers
 
@@ -652,6 +653,7 @@ class Session:
         self.model_for_volume = model_for_volume
         self.policy_refine_evaluations = POLICY_REFINE_EVALUATIONS
         self.task_version = TASK_VERSION
+        goals.use_task_version(self.task_version)
         self.policy_steps = POLICY_STEPS
         self._load_or_init()
 
@@ -713,6 +715,8 @@ class Session:
                 "dataset_version": _dataset_version(_dataset_name),
             },
             "anatomy": _anatomy_metadata(_dataset_name),
+            # The browser viewer shades the unlabelled row with this too (tf_table.js).
+            "unlabelled_opacity": transfer.UNLABELLED_OPACITY,
         }
 
     def switch_dataset(self, name: str):

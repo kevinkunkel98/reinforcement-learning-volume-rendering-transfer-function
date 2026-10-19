@@ -55,3 +55,15 @@ test("tfTextureData packs rows as RGBA8, row-major by row then sample", () => {
   const rows = [[{ hu: 0, rgb: [1, 0.5, 0], alpha: 0.25 }, { hu: 1, rgb: [0, 0, 1], alpha: 1 }]];
   assert.deepEqual(Array.from(tf.tfTextureData(rows)), [255, 128, 0, 64, 0, 0, 255, 255]);
 });
+
+test("the unlabelled row follows the server's shell opacity", () => {
+  const params = paramsWith({ soft: { center: 40, width: 80, height: 0.5 } });
+  const full = nearest(tf.tfRows(params, {}, true)[0], 40).alpha;
+  tf.setUnlabelledOpacity(0.2);
+  try {
+    assert.ok(Math.abs(nearest(tf.tfRows(params, {}, true)[0], 40).alpha - 0.2 * full) < 1e-9);
+    assert.throws(() => tf.setUnlabelledOpacity(2));
+  } finally {
+    tf.setUnlabelledOpacity(1);
+  }
+});

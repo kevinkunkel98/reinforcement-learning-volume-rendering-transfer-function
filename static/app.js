@@ -260,6 +260,9 @@ async function refresh(data) {
   el("forward-btn").disabled = state.cursor >= state.total - 1;
 
   el("current-image").src = `data:image/png;base64,${state.current.image_b64}`;
+  if (window.tfTable && typeof data.unlabelled_opacity === "number") {
+    window.tfTable.setUnlabelledOpacity(data.unlabelled_opacity);
+  }
   if (window.volumeViewer && state.dataset && state.current) {
     await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera,
       state.current.anatomy_layers, data.anatomy);

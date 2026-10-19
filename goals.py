@@ -47,7 +47,21 @@ BRIGHTNESS_STRENGTH = {"slightly": 0.1, "moderately": 0.2, "strongly": 0.4}
 ABSOLUTE_LEVEL = {"low": 0.1, "medium": 0.4, "high": 0.8}                      # share of solo_max
 
 
-TASK_VERSIONS = ("v1", "v2")
+TASK_VERSIONS = ("v1", "v2", "v3")
+# Task v3 is v2 with the unlabelled shell faded (`transfer.UNLABELLED_OPACITY`)
+# and brightness asked only of classes that are visible at the start
+# (docs/experiments/2026-10-19-task-v3.md). It changes what a render shows, so
+# it needs its own dynamics model and policy.
+UNLABELLED_OPACITY_BY_TASK = {"v1": 1.0, "v2": 1.0, "v3": 0.2}
+
+
+def use_task_version(task_version: str) -> None:
+    """Make this process render and measure the way `task_version` does
+    (today: the unlabelled shell's opacity). Every entry point that runs a
+    task -- the env, the viewer -- calls this."""
+    if task_version not in TASK_VERSIONS:
+        raise ValueError(f"unknown task version {task_version!r}")
+    transfer.set_unlabelled_opacity(UNLABELLED_OPACITY_BY_TASK[task_version])
 
 
 def starting_params(task_version: str = "v1") -> np.ndarray:
@@ -55,10 +69,10 @@ def starting_params(task_version: str = "v1") -> np.ndarray:
 
     The same layout `visibility.solo_max` probes at, so "what the instruction
     asks for" and "what this volume can reach" are measured in one geometry.
-    Task v2 starts with the organs visible (`transfer.VISIBLE_ORGAN_HEIGHTS`)."""
+    Task v2 and v3 start with the organs visible (`transfer.VISIBLE_ORGAN_HEIGHTS`)."""
     if task_version not in TASK_VERSIONS:
         raise ValueError(f"unknown task version {task_version!r}")
-    return transfer.anatomical_params(transfer.VISIBLE_ORGAN_HEIGHTS if task_version == "v2" else None)
+    return transfer.anatomical_params(None if task_version == "v1" else transfer.VISIBLE_ORGAN_HEIGHTS)
 
 
 def features(model, params, active_layers=None) -> dict:
@@ -562,7 +576,14 @@ def _sample_absolute(classes: list, model, start_features: dict, rng, preferred=
     return targets, _absolute_text(goal_class, level, rng)
 
 
-def _sample_brightness(classes: list, rng, preferred=None) -> tuple:
+def _sample_brightness(classes: list, rng, preferred=None, start_vis=None) -> tuple:
+    """With `start_vis`, only classes visible at the start (vis >= EPSILON):
+    brightening an invisible organ changes nothing on screen, and its measured
+    brightness is 0 until it shows. None when no class is visible."""
+    if start_vis is not None:
+        classes = [c for c in classes if start_vis.get(c, 0.0) >= EPSILON]
+        if not classes:
+            return None
     goal_class = _choose_class(classes, rng, preferred)
     direction = rng.choice(("increase", "decrease"))
     strength = rng.choice(list(BRIGHTNESS_STRENGTH))
@@ -572,14 +593,16 @@ def _sample_brightness(classes: list, rng, preferred=None) -> tuple:
 
 
 def sample_instruction(name, model, start_features, rng, active_layers=None,
-                       class_counts=None, balance_classes=False, solvable_only=False) -> dict:
+                       class_counts=None, balance_classes=False, solvable_only=False,
+                       visible_brightness=False) -> dict:
     """One instruction: {"kind", "text", "targets", "goal"}, plus "weights"
     for show_only instructions (see `show_only_weights`).
 
     `targets` is the goal_vector input; `text` is the spoken form. Absolute
     levels use ABSOLUTE_LEVEL x model.solo_max aggregated for the goal class,
     turned into a requested change from the start state, so "high skeleton"
-    means the same thing on every volume.
+    means the same thing on every volume. `visible_brightness` (task v3) asks
+    brightness only of classes visible at the start.
     """
     classes = (reachable_goal_classes(name, model, active_layers)
                if active_layers is not None else reachable_goal_classes(name, model))
@@ -600,6 +623,12 @@ def sample_instruction(name, model, start_features, rng, active_layers=None,
         drawn = sampler(classes, start_features["vis"], rng, preferred)
         if drawn is None:
             kind = "absolute"
+    if visible_brightness and kind == "brightness":
+        brightness = _sample_brightness(classes, rng, preferred, start_features["vis"])
+        if brightness is None:
+            kind = "absolute"
+        else:
+            drawn = brightness
     if drawn is not None:
         targets, text = drawn
     elif kind == "relative":
@@ -868,7 +897,8 @@ def for_task_version(instruction: dict, model, start_params, start: dict, task_v
                      active_layers=None) -> dict:
     """`instruction` as `task_version` scores it. v1 leaves it unchanged; v2
     exempts the target's occluders from the keep terms (`occlusion_aware`) and
-    clips every target to what is reachable from `start` (`reachable_targets`).
+    clips every target to what is reachable from `start` (`reachable_targets`);
+    v3 scores the same way as v2.
     The env, the model-based collector and the viewer all go through here."""
     if task_version not in TASK_VERSIONS:
         raise ValueError(f"unknown task version {task_version!r}")

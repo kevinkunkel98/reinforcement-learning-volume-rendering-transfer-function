@@ -17,6 +17,14 @@
   const UNLABELLED_PEAKS = ["skeleton", "lungs", "soft"];
   // Label id - 1 -> class (viewer.js CLASS_IDS).
   const CLASS_ORDER = ["skeleton", "lungs", "heart", "vessels", "liver", "kidneys", "spleen", "soft"];
+  // transfer.UNLABELLED_OPACITY: the unlabelled row's opacity multiplier for
+  // the task the server runs (/api/state "unlabelled_opacity"; task v3 0.2).
+  let unlabelledOpacity = 1;
+
+  function setUnlabelledOpacity(value) {
+    if (!(value >= 0 && value <= 1)) throw new Error("unlabelled opacity must be in [0, 1]");
+    unlabelledOpacity = value;
+  }
 
   function internalPeak(params, index) {
     const base = index * PARAMS_PER_PEAK;
@@ -53,7 +61,7 @@
   // Each row: SAMPLES x {hu, rgb, alpha} evenly over CENTER_RANGE.
   function tfRows(params, layers, labelled) {
     const rows = labelled
-      ? [{ peaks: UNLABELLED_PEAKS, scale: 1 }].concat(CLASS_ORDER.map((className) => (
+      ? [{ peaks: UNLABELLED_PEAKS, scale: unlabelledOpacity }].concat(CLASS_ORDER.map((className) => (
         { peaks: [className], scale: layers?.[className]?.opacity ?? 1 })))
       : [{ peaks: PEAK_ORDER, scale: 1 }];
     return rows.map((row) => Array.from({ length: SAMPLES }, (_, i) => {
@@ -79,6 +87,6 @@
 
   return {
     CENTER_RANGE, WIDTH_RANGE, SAMPLES, PEAK_ORDER, UNLABELLED_PEAKS, CLASS_ORDER,
-    tfRows, tfTextureData,
+    tfRows, tfTextureData, setUnlabelledOpacity,
   };
 });

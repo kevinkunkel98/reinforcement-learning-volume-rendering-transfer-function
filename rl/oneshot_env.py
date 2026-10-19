@@ -259,6 +259,7 @@ class OneShotEnv(gym.Env):
         # visible at the start, well-posed instructions only, occluders exempt
         # from the keep terms, every target clipped to what its class can reach.
         self.task_version = task_version
+        goals.use_task_version(task_version)
         if not volume_ids:
             raise ValueError("volume_ids must not be empty")
         self.volume_ids = list(volume_ids)
@@ -292,8 +293,8 @@ class OneShotEnv(gym.Env):
         self.reward_mode = reward_mode
         self.balance_classes = balance_classes
         # Sample only relative/compound targets the start state allows
-        # (goals.sample_instruction(solvable_only=True)). Always on in task v2.
-        self.solvable_instructions = bool(solvable_instructions) or task_version == "v2"
+        # (goals.sample_instruction(solvable_only=True)). Always on in task v2/v3.
+        self.solvable_instructions = bool(solvable_instructions) or task_version != "v1"
         if not 0.0 <= start_variety <= 1.0:
             raise ValueError("start_variety must be between 0 and 1")
         self.start_variety = float(start_variety)
@@ -572,6 +573,8 @@ class OneShotEnv(gym.Env):
         # The kwarg only when enabled: tests stub sample_instruction with
         # the original fixed signature.
         solvable = {"solvable_only": True} if self.solvable_instructions else {}
+        if self.task_version == "v3":
+            solvable["visible_brightness"] = True
         instruction = goals.sample_instruction(volume, model, start_agg, rng, self._active_layers,
                                                self._class_counts, self.balance_classes, **solvable)
         for goal_class in instruction["targets"]:

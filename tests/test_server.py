@@ -1175,7 +1175,7 @@ def test_compare_arms_warms_the_ceiling_before_timing_any_arm(ts_session, monkey
     real_arm = server.run_policy_arm
 
     def _spy(model_, policy_, instruction_, start_agg_, start_params_):
-        warm_at_arm["classes"] = set(model_._solo_max)
+        warm_at_arm["classes"] = {name for name, _ in model_._solo_max}
         return real_arm(model_, policy_, instruction_, start_agg_, start_params_)
 
     monkeypatch.setattr(server, "run_policy_arm", _spy)

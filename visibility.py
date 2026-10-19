@@ -325,15 +325,18 @@ class VisibilityModel:
         ("fully shown"): what that means depends on how much of that class
         this volume contains and what sits in front of it.
         """
-        if name not in self._solo_max:
+        # Keyed by the shell opacity too: the shell occludes, so the ceiling
+        # depends on it (task v3 fades it).
+        key = (name, transfer.UNLABELLED_OPACITY)
+        if key not in self._solo_max:
             best = 0.0
             for peak in range(N_PEAKS):
                 params = anatomical_params().copy()
                 for i in range(N_PEAKS):
                     params[i * PARAMS_PER_PEAK + 2] = 1.0 if i == peak else -1.0
                 best = max(best, self.features(params)["vis"][name])
-            self._solo_max[name] = best
-        return self._solo_max[name]
+            self._solo_max[key] = best
+        return self._solo_max[key]
 
     def cache_key(self, volume_version: str, label_identity: str = "",
                   layer_layout: str = LAYER_LAYOUT_VERSION,
