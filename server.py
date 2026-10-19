@@ -350,14 +350,14 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params, active_l
 
 
 # The viewer's policy mode polishes the policy's one-shot proposal with a short
-# hill_climb started from it (~24 ms per evaluation on ts_s1379, so ~0.7 s for
-# 30). Task v2, 300 val episodes, 3 policy seeds (median attainment): the
-# proposal alone 0.50-0.54, after 30 evaluations 0.70-0.72 -- a 200-evaluation
-# search from the start reaches 0.66 -- and 0.85-0.87 after 100
+# hill_climb started from it (~24 ms per evaluation on ts_s1379, so ~5 s for
+# 200). Task v2, 300 val episodes, 3 policy seeds (median attainment): the
+# proposal alone 0.50-0.54, after 30 evaluations 0.70-0.72, after 200 0.89 --
+# a 200-evaluation search from the start reaches 0.66
 # (docs/experiments/2026-10-17-task-v2.md). The comparison panel's "policy"
-# arm stays the bare proposal; POLICY_REFINE_EVALUATIONS=0 shows the pure
-# policy.
-POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "30"))
+# arm stays the bare proposal; POLICY_REFINE_EVALUATIONS=30 answers in
+# ~0.7 s, 0 shows the pure policy.
+POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "200"))
 # The task the viewer runs (goals.TASK_VERSIONS). v2 opens on the transfer
 # function with the organs in view and scores a command the way the v2
 # policy was trained: occluders of a target are free to fade, targets are

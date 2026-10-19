@@ -752,8 +752,8 @@ def test_policy_mode_refinement_improves_a_poor_proposal(ts_session):
 
 
 def test_viewer_polishes_the_policy_with_a_short_search_by_default():
-    assert server.POLICY_REFINE_EVALUATIONS == 30
-    assert _fresh_session().policy_refine_evaluations == 30
+    assert server.POLICY_REFINE_EVALUATIONS == 200
+    assert _fresh_session().policy_refine_evaluations == 200
 
 
 def test_policy_mode_applies_the_policys_action(ts_session):

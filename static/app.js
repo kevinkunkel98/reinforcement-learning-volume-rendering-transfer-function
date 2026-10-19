@@ -6,9 +6,9 @@ const state = { current: null, cursor: 0, total: 1, dataset: null };
 // and falls back to the rule parser when Ollama is down), and the command is
 // answered by the trained policy by default: the model-based checkpoint
 // (rl/model_based.py) proposes a transfer function and the server polishes it
-// with a 30-evaluation search started there (POLICY_REFINE_EVALUATIONS) --
-// 0.70 median attainment on task v2 val, about what a 200-evaluation search
-// from the start reaches. Without a checkpoint the server falls back to
+// with a 200-evaluation search started there (POLICY_REFINE_EVALUATIONS) --
+// 0.89 median attainment on task v2 val, against 0.66 for the same search
+// from the start. Without a checkpoint the server falls back to
 // exact application and says so. Exact and search stay one click away.
 const config = { parser: "llm", search: false, mode: "policy" };
 

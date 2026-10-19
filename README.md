@@ -22,8 +22,8 @@ python server.py      # http://127.0.0.1:8000
 ```
 
 Type or hold Space to talk. The viewer opens on a transfer function with the
-organs in view; every command is answered by the policy plus a 30-evaluation
-search (~0.7 s). Exact application of the parsed command and plain search are
+organs in view; every command is answered by the policy plus a 200-evaluation
+search (~5 s). Exact application of the parsed command and plain search are
 one click away. **compare** answers one instruction four ways from the same
 start — applied directly, hill-climbed at 10 and 200 evaluations, and by the
 bare policy — with attainment and cost side by side; **sweep 20** does the
@@ -32,7 +32,7 @@ same over twenty sampled instructions.
 | env var | default | |
 |---|---|---|
 | `POLICY_PATH` | `out/rl_mb_v2/clb_r3_seed1/checkpoint.pt` | policy checkpoint |
-| `POLICY_REFINE_EVALUATIONS` | `30` | search on top of the policy; `0` shows the pure policy, `100` ≈ 0.86 for ~2.4 s |
+| `POLICY_REFINE_EVALUATIONS` | `200` | search on top of the policy; `30` ≈ 0.70 in ~0.7 s, `0` shows the pure policy |
 | `POLICY_STEPS` | `1` | times the policy acts per command (re-rendering in between) |
 | `TASK_VERSION` | `v2` | `v1` restores the original start TF and scoring |
 
@@ -91,9 +91,9 @@ attainment; policy rows are three training seeds:
 
 | method | evaluations | val | **test** (run once) |
 |---|---|---|---|
-| **policy + search** | 200 | 0.89 / 0.89 / 0.89 | **0.90 / 0.91 / 0.90** |
+| **policy + search** (viewer default) | 200 | 0.89 / 0.89 / 0.89 | **0.90 / 0.91 / 0.90** |
 | **policy + search** | 100 | 0.85 / 0.87 / 0.85 | **0.86 / 0.86 / 0.85** |
-| **policy + search** (viewer default) | 30 | 0.70 / 0.72 / 0.71 | **0.71 / 0.70 / 0.70** |
+| **policy + search** | 30 | 0.70 / 0.72 / 0.71 | **0.71 / 0.70 / 0.70** |
 | search (hill climb) | 200 | 0.66 | 0.65 |
 | **policy alone** | 0 | 0.50 / 0.54 / 0.50 | **0.49 / 0.51 / 0.50** |
 | search | 100 | 0.48 | 0.49 |
