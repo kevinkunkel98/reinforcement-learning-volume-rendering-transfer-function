@@ -116,22 +116,11 @@ def test_viewer_uses_state_availability_before_fetching_labels():
     assert "label-unavailable" in viewer
 
 
-def test_app_exposes_editable_controls_for_all_anatomy_classes():
-    app = read("app.js")
-    html = read("index.html")
-    css = read("style.css")
-    for name in ("skeleton", "lungs", "heart", "vessels", "liver", "kidneys", "spleen", "soft"):
-        assert f'id="layer-{name}"' in html
-        assert f"layer-{name}-opacity" in html
-        assert f"layer-{name}-color" in html
-    assert "available_classes" in app
-    assert "layer-unavailable" in app
-    assert "applyLayerCommand" in app
-    assert '"/api/layers"' in app
-    assert "event.target.value" in app
-    assert "event.target.value" in app
-    assert "label unavailable" in app.lower() or "no anatomical labels" in app.lower()
-    assert ".layer-control" in css
+def test_viewer_has_no_layer_panel():
+    # Removed 2026-10-18: a manual per-class mixer the policy never used, with
+    # a colour picker that did not reach the renderer.
+    assert "layer-control" not in read("index.html")
+    assert "/api/layers" not in read("app.js")
 
 
 def test_viewer_adapts_exactly_48_values_and_exposes_camera_state():

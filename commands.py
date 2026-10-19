@@ -411,18 +411,6 @@ def parse_command_rule(text: str) -> dict:
 
     _check_retired(t)
 
-    if t == "restore all anatomy":
-        return {"attribute": "layers", "action": "restore", "targets": []}
-    if t == "show only liver":
-        return {"target": "liver", "attribute": "opacity", "direction": "show_only",
-                "strength": None, "layer_action": {"action": "show_only", "targets": ["liver"]}}
-    if t == "hide the kidneys":
-        return {"target": "kidneys", "attribute": "opacity", "direction": "decrease",
-                "strength": "strongly", "layer_action": {"action": "hide", "targets": ["kidneys"]}}
-    if t == "show heart and spleen":
-        return {"target": ["heart", "spleen"], "attribute": "opacity", "direction": "show_only",
-                "strength": None, "layer_action": {"action": "show", "targets": ["heart", "spleen"]}}
-
     if _RESET_RE.search(t):
         return {"target": None, "attribute": None, "direction": "reset", "strength": None}
 

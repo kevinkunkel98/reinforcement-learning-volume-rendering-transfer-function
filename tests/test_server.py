@@ -409,16 +409,13 @@ def test_initial_state_has_one_step_at_cursor_zero():
     assert len(state["current"]["params"]) == transfer.TOTAL_PARAMS
 
 
-def test_layer_command_persists_layers_without_changing_48_hu_values():
+def test_show_only_liver_changes_the_transfer_function_not_the_layers():
     s = _fresh_session()
     before = np.array(s.state()["current"]["params"])
     state = s.command("show only liver", parser="rule", search=False)
 
-    assert len(state["current"]["params"]) == 48
-    np.testing.assert_array_equal(state["current"]["params"], before)
-    assert state["current"]["anatomy_layers"]["liver"]["opacity"] == 1.0
-    assert all(item["opacity"] == 0.0 for name, item in state["current"]["anatomy_layers"].items()
-               if name != "liver")
+    assert not np.array_equal(state["current"]["params"], before)
+    assert all(item["opacity"] == 1.0 for item in state["current"]["anatomy_layers"].values())
 
 
 def test_state_exposes_anatomy_availability(monkeypatch):
