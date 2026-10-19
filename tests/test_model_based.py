@@ -190,3 +190,49 @@ def test_load_data_pads_old_weight_layouts(tmp_path, monkeypatch):
     assert data["weights"].shape == (2, mb.INSTRUCTIONS_PER_START, len(goals.GOAL_CLASSES) + 1)
     assert np.all(data["weights"][0, :, -1] == 1.0)
     assert "volume" not in data
+
+
+def _plan_inputs(seed=0):
+    rng = np.random.default_rng(seed)
+    agg = _random_agg(rng)
+    goal = goals.goal_vector({"heart": {"vis": 0.4}, "lungs": {"vis": -0.3}})
+    return (goal, None, rng.uniform(0, 1, 16), rng.uniform(-3, 0, len(goals.GOAL_CLASSES)),
+            rng.uniform(-1, 1, ACTION_SIZE), agg)
+
+
+def test_plan_lowers_the_model_loss_and_stays_in_bounds():
+    torch.manual_seed(0)
+    ensemble = mb.DynamicsEnsemble().eval().requires_grad_(False)
+    goal, weights, histogram, solo, ctrl, agg = _plan_inputs()
+    action = np.zeros(ACTION_SIZE)
+    planned = mb.plan(ensemble, goal, weights, histogram, solo, ctrl, agg, action)
+
+    assert planned.shape == (ACTION_SIZE,)
+    assert np.all(np.abs(ctrl + planned) <= 1.0 + 1e-6)
+    T = lambda x: torch.as_tensor(np.asarray(x), dtype=torch.float32)[None]
+    context = T(np.concatenate([histogram, solo, ctrl, mb.state_vector(agg)]))
+    start = mb.goal_distance(T(goal), T(mb.weight_row(weights)), torch.zeros(1, mb.STATE_SIZE))[0]
+    loss = lambda a: float(mb.plan_loss(ensemble, context, T(goal), T(mb.weight_row(weights)), T(a), start))
+    assert loss(planned) < loss(action)
+
+
+def test_plan_leaves_an_instruction_already_at_its_goal_alone():
+    ensemble = mb.DynamicsEnsemble().eval()
+    _, weights, histogram, solo, ctrl, agg = _plan_inputs()
+    action = np.full(ACTION_SIZE, 0.2)
+    planned = mb.plan(ensemble, np.zeros(4 * len(goals.GOAL_CLASSES)), weights, histogram, solo, ctrl, agg, action)
+    np.testing.assert_allclose(planned, np.clip(ctrl + action, -1, 1) - ctrl, atol=1e-6)
+
+
+def test_loaded_policy_keeps_its_dynamics_for_planning(tmp_path):
+    with_dynamics = mb.ModelBasedPolicy(mb.ModelBasedPolicy.new_net()).save(str(tmp_path / "a"), mb.DynamicsEnsemble())
+    without = mb.ModelBasedPolicy(mb.ModelBasedPolicy.new_net()).save(str(tmp_path / "b"))
+    loaded = mb.ModelBasedPolicy.load(with_dynamics)
+    assert isinstance(loaded.dynamics, mb.DynamicsEnsemble)
+    assert not any(p.requires_grad for p in loaded.dynamics.parameters())
+    assert not hasattr(mb.ModelBasedPolicy.load(without), "dynamics")
+
+
+def test_vis_eval_planning_needs_the_dynamics_ensemble():
+    with pytest.raises(ValueError, match="dynamics"):
+        vis_eval._planned(object(), None, np.zeros(ACTION_SIZE))

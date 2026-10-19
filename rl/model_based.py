@@ -169,7 +169,13 @@ class ModelBasedPolicy:
         payload = torch.load(path, map_location="cpu", weights_only=False)
         net = cls.new_net(**payload.get("arch", {}))
         net.load_state_dict(payload["policy"])
-        return cls(net, payload.get("metadata"))
+        policy = cls(net, payload.get("metadata"))
+        if payload.get("dynamics") is not None:
+            # Kept with the policy so a caller can plan through it (`plan`).
+            policy.dynamics = DynamicsEnsemble()
+            policy.dynamics.load_state_dict(payload["dynamics"])
+            policy.dynamics.eval().requires_grad_(False)
+        return policy
 
 
 def load_dynamics(path: str) -> DynamicsEnsemble:
@@ -177,6 +183,72 @@ def load_dynamics(path: str) -> DynamicsEnsemble:
     ensemble = DynamicsEnsemble()
     ensemble.load_state_dict(payload["dynamics"])
     return ensemble.eval()
+
+
+# --- planning ---------------------------------------------------------------
+
+# Test-time planning: the policy's residual action refined by gradient descent
+# on the training loss (`train_policy`'s normalised goal distance + beta x
+# ensemble disagreement + useless-render probability) for this one
+# instruction, through the learned model -- no renders. Restarts are the
+# policy action plus noise of 0-0.3. Task v3, 300 val episodes, v3 seed 2
+# (median attainment): policy 0.51, planned 0.66; 300 steps 0.61 and 50 steps
+# 0.61 (more steps exploit model error), beta 0.3 0.59 / 3 0.64, a no-op
+# start 0.60 (docs/experiments/2026-10-19-task-v3.md).
+PLAN_STEPS, PLAN_RESTARTS, PLAN_BETA, PLAN_LR, PLAN_NOISE = 100, 16, 1.0, 0.05, 0.3
+
+
+def weight_row(weights) -> list:
+    """An instruction's `weights` dict as the n + 1 floats `goal_distance` takes."""
+    weights = weights or {}
+    return [weights.get(c, 1.0) for c in goals.GOAL_CLASSES] + [weights.get("other", 1.0)]
+
+
+def plan_loss(ensemble, context, goal, weights, residual, start, beta: float = PLAN_BETA):
+    """`plan`'s per-row objective (`train_policy`'s loss): model-predicted goal
+    distance over the start's, + `beta` x disagreement + P(useless render)."""
+    pred = ensemble(context, residual)
+    mean = pred.mean(0)
+    return (goal_distance(goal, weights, mean[:, :STATE_SIZE]) / start
+            + beta * pred[:, :, :STATE_SIZE].std(0).mean(1) + torch.sigmoid(mean[:, STATE_SIZE]))
+
+
+def plan(ensemble, goal, weights, histogram, solo_max_log, controllable, start_agg, action,
+         steps: int = PLAN_STEPS, restarts: int = PLAN_RESTARTS, beta: float = PLAN_BETA,
+         lr: float = PLAN_LR, seed: int = 0) -> np.ndarray:
+    """The residual `action` (as the policy proposes it, relative to
+    `controllable`) refined through `ensemble` for one instruction (`goal`,
+    `weights` dict or None) from `start_agg`. Returns the residual actually
+    applied, `clip(controllable + a) - controllable`, of the restart with the
+    lowest model loss. An instruction already at its goal returns `action`."""
+    ctrl = _tensor(controllable)
+    goal_row = _tensor(goal)[None]
+    weight = _tensor(weight_row(weights))[None]
+    context = _tensor(np.concatenate([np.asarray(histogram, np.float32), np.asarray(solo_max_log, np.float32),
+                                      np.asarray(controllable, np.float32), state_vector(start_agg)]))[None]
+    applied = (ctrl + _tensor(np.clip(action, -1, 1))).clamp(-1, 1) - ctrl
+    start = goal_distance(goal_row, weight, torch.zeros(1, STATE_SIZE))[0]
+    if float(start) <= 1e-6:
+        return applied.numpy()
+    generator = torch.Generator().manual_seed(seed)
+    noise = torch.randn(restarts, ACTION_SIZE, generator=generator) * torch.linspace(0, PLAN_NOISE, restarts)[:, None]
+    candidate = (applied[None] + noise).requires_grad_(True)
+    optimizer = torch.optim.Adam([candidate], lr=lr)
+    goal_row, weight, context = (x.expand(restarts, -1) for x in (goal_row, weight, context))
+
+    def loss_of(residual):
+        residual = (ctrl + residual).clamp(-1, 1) - ctrl
+        return plan_loss(ensemble, context, goal_row, weight, residual, start, beta), residual
+
+    with torch.enable_grad():
+        for _ in range(steps):
+            loss, _ = loss_of(candidate)
+            # Only the candidate's gradient: the ensemble's weights stay untouched.
+            candidate.grad, = torch.autograd.grad(loss.sum(), [candidate])
+            optimizer.step()
+    with torch.no_grad():
+        loss, residual = loss_of(candidate)
+    return residual[int(loss.argmin())].numpy()
 
 
 # --- data -------------------------------------------------------------------

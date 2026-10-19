@@ -320,7 +320,7 @@ def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera
     }
 
 
-def run_policy_arm(model, policy, instruction, start_agg, start_params, active_layers=None):
+def run_policy_arm(model, policy, instruction, start_agg, start_params, active_layers=None, plan=False):
     """Run the one-shot policy on an already-built goal.
 
     The caller owns `instruction` (`goals.goal_from_command`) and `start_agg`,
@@ -329,6 +329,9 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params, active_l
     arm's own timing, which is the one number the comparison panel exists to
     show. Builds the same observation layout `rl.candidates` builds for a
     standalone policy query (`rl.oneshot_env.build_observation`).
+
+    `plan` refines the residual action through the checkpoint's dynamics
+    ensemble (`rl.model_based.plan`, no renders) when it has one.
 
     Returns the new parameters. Raises `ValueError` when `policy` is None;
     `model.features`/`model.solo_max` may also raise `FileNotFoundError` or
@@ -343,6 +346,10 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params, active_l
                                      solo_max_log, controllable)
 
     action = _predict_action(policy, observation)
+    if plan and getattr(policy, "dynamics", None) is not None and getattr(policy, "action_mode", "") == "residual":
+        from rl.model_based import plan as plan_action
+        action = plan_action(policy.dynamics, instruction["goal"], instruction.get("weights"), model.histogram,
+                             solo_max_log, controllable, start_agg, action)
     if getattr(policy, "action_mode", "absolute") == "residual":
         # A residual policy (every model-based checkpoint, SAC v9) proposes a
         # change to the current values, as OneShotEnv.step applies it.
@@ -359,6 +366,9 @@ def run_policy_arm(model, policy, instruction, start_agg, start_params, active_l
 # arm stays the bare proposal; POLICY_REFINE_EVALUATIONS=30 answers in
 # ~0.7 s, 0 shows the pure policy.
 POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "200"))
+# Before the search, the policy's action is refined through the checkpoint's
+# own dynamics ensemble (rl.model_based.plan, ~0.2 s, no renders); 0 skips it.
+POLICY_PLAN = os.environ.get("POLICY_PLAN", "1") != "0"
 # The task the viewer runs (goals.TASK_VERSIONS). v2 opens on the transfer
 # function with the organs in view and scores a command the way the v2
 # policy was trained: occluders of a target are free to fade, targets are
@@ -655,6 +665,7 @@ class Session:
         self.policy_provider = policy_provider or _load_policy
         self.model_for_volume = model_for_volume
         self.policy_refine_evaluations = POLICY_REFINE_EVALUATIONS
+        self.policy_plan = POLICY_PLAN
         self.task_version = TASK_VERSION
         goals.use_task_version(self.task_version)
         self.policy_steps = POLICY_STEPS
@@ -803,7 +814,7 @@ class Session:
         layers = self.history[self.cursor].get("anatomy_layers", default_layers())
         start_agg, instruction = self.instruction_for(cmd, model, current_params, layers)
         proposal = run_policy_arm(model, policy, instruction, start_agg, current_params,
-                                  active_layers=layers)
+                                  active_layers=layers, plan=self.policy_plan)
         if self.policy_steps > 1:
             from rl.closed_loop import remaining_goal_for
             for _ in range(self.policy_steps - 1):

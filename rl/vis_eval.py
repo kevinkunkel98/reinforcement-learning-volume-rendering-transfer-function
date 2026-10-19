@@ -189,8 +189,21 @@ def _visible_pp(env, final_params):
                                 env._instruction.get("weights"))
 
 
+def _planned(model, env, action) -> np.ndarray:
+    """`action` refined through the checkpoint's own dynamics ensemble
+    (`rl.model_based.plan`), for the episode `env` is frozen into."""
+    from rl import model_based
+    dynamics = getattr(model, "dynamics", None)
+    if dynamics is None:
+        raise ValueError("planning needs a model-based checkpoint with its dynamics ensemble")
+    instruction = env._instruction
+    return model_based.plan(dynamics, instruction["goal"], instruction.get("weights"), env._model.histogram,
+                            env._solo_max_log(env._volume, env._model),
+                            env._controllable_values(env._start_params), env._start_agg, action)
+
+
 def run_policy(model_path: str, episodes: list, model_for_volume=None, load_model=None,
-               formulation: str = "multi_step", active_layers=None) -> list:
+               formulation: str = "multi_step", active_layers=None, plan: bool = False) -> list:
     """Run the policy at `model_path` (an SB3 checkpoint) on every episode
     with the deterministic action; return one `{"attainment", "kind"}` dict
     per episode, from the final step's info. For `formulation="multi_step"`
@@ -198,7 +211,8 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
     `MAX_STEPS` steps; for `"one_shot"`, a frozen `OneShotEnv` for exactly
     one step, since the action there already is the final transfer function.
     `load_model` lets tests inject a stub instead of loading a real
-    checkpoint."""
+    checkpoint. `plan` (one-shot only) refines each action through the
+    checkpoint's dynamics ensemble first (`_planned`)."""
     loader = load_model or _load_sac
     model = loader(model_path)
     policy_metadata = load_policy_metadata(model_path)
@@ -212,6 +226,8 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
                 episode["volume"], episode["start_params"], episode["instruction"],
                 active_layers=active_layers, policy_metadata=episode_metadata, **kwargs)
             action, _ = model.predict(obs, deterministic=True)
+            if plan:
+                action = _planned(model, env, action)
             obs, reward, terminated, truncated, info = env.step(action)
             visible_pp = _visible_pp(env, env._params)
         else:
@@ -237,7 +253,8 @@ REFINE_INITIAL_STEP = 0.1
 
 
 def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int = 3,
-                                model_for_volume=None, load_model=None, active_layers=None) -> list:
+                                model_for_volume=None, load_model=None, active_layers=None,
+                                plan: bool = False) -> list:
     """Run the one-shot policy's proposal (as `run_policy` does for
     `formulation="one_shot"`), then, when `evaluations > 0`, refine it with
     `rl.baselines.hill_climb`'s coordinate search -- the same search the
@@ -258,7 +275,9 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
     on top of the progress it already made -- which is what this function
     did before, so refinement chased past the goal and mostly kept the bare
     proposal. The result is still scored independently against the original
-    start and the better of {proposal, refined} kept, as a guard.
+    start and the better of {proposal, refined} kept, as a guard. `plan`
+    refines the proposal through the checkpoint's dynamics ensemble before
+    the search (`_planned`).
     """
     loader = load_model or _load_sac
     model = loader(model_path)
@@ -272,6 +291,8 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
             active_layers=active_layers,
             policy_metadata=_episode_policy_metadata(episode, policy_metadata), **kwargs)
         action, _ = model.predict(obs, deterministic=True)
+        if plan:
+            action = _planned(model, env, action)
         obs, reward, terminated, truncated, info = env.step(action)
         final_params = env._params
 
@@ -676,6 +697,10 @@ def parse_args(argv=None):
                         help="visibility-evaluation budget to refine the one-shot policy's proposal "
                              "with a hill_climb search (0 = off, default: %(default)s); adds a "
                              "policy_plus_refine row to the comparison")
+    parser.add_argument("--plan", action="store_true",
+                        help="also refine the one-shot proposal through the checkpoint's dynamics "
+                             "ensemble (rl.model_based.plan, no renders); adds a policy_planned row "
+                             "(and policy_planned_plus_refine with --refine)")
     parser.add_argument("--policy-steps", type=int, default=1,
                         help="with K > 1, also run the one-shot policy K times with a re-render in "
                              "between (rl.closed_loop.rollout); adds a policy_closed_loop row")
@@ -709,6 +734,12 @@ def main(argv=None, active_layers=None):
     if args.refine > 0:
         results["policy_plus_refine"] = run_policy_with_refinement(
             args.policy, episodes, evaluations=args.refine, active_layers=active_layers)
+    if args.plan and args.formulation == "one_shot":
+        results["policy_planned"] = run_policy(args.policy, episodes, formulation="one_shot",
+                                               active_layers=active_layers, plan=True)
+        if args.refine > 0:
+            results["policy_planned_plus_refine"] = run_policy_with_refinement(
+                args.policy, episodes, evaluations=args.refine, active_layers=active_layers, plan=True)
     for name in BASELINES:
         results[name] = run_baseline(name, episodes, active_layers=active_layers)
 
@@ -718,7 +749,7 @@ def main(argv=None, active_layers=None):
     # landed mid-run -- the fingerprint no longer matches the file on disk,
     # and the run says so before anyone quotes it.
     result = {"policy": args.policy, "split": args.split, "episodes": args.episodes,
-              "seed": args.seed, "formulation": args.formulation, "refine": args.refine,
+              "seed": args.seed, "formulation": args.formulation, "refine": args.refine, "plan": args.plan,
               "policy_steps": args.policy_steps,
               "provenance": provenance.result_provenance(active_layers),
               "episodes_detail": episodes_detail(results, episodes),
