@@ -182,6 +182,13 @@ def _episode_policy_metadata(episode: dict, checkpoint_metadata: dict) -> dict:
     return episode_metadata
 
 
+def _visible_pp(env, final_params):
+    """`goals.visible_change` of a frozen one-shot env's episode ending at `final_params`."""
+    final_agg = goals.aggregate(_features(env._model, final_params, env._active_layers), env._active_layers)
+    return goals.visible_change(env._instruction["goal"], env._start_agg, final_agg,
+                                env._instruction.get("weights"))
+
+
 def run_policy(model_path: str, episodes: list, model_for_volume=None, load_model=None,
                formulation: str = "multi_step", active_layers=None) -> list:
     """Run the policy at `model_path` (an SB3 checkpoint) on every episode
@@ -206,6 +213,7 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
                 active_layers=active_layers, policy_metadata=episode_metadata, **kwargs)
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
+            visible_pp = _visible_pp(env, env._params)
         else:
             env, obs, info = _frozen_episode_env(
                 episode["volume"], episode["start_params"], episode["instruction"],
@@ -215,7 +223,8 @@ def run_policy(model_path: str, episodes: list, model_for_volume=None, load_mode
                 obs, reward, terminated, truncated, info = env.step(action)
                 if terminated or truncated:
                     break
-        results.append({"attainment": info["attainment"], "kind": info["kind"]})
+            visible_pp = None
+        results.append({"attainment": info["attainment"], "kind": info["kind"], "visible_pp": visible_pp})
     return results
 
 
@@ -264,6 +273,7 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
             policy_metadata=_episode_policy_metadata(episode, policy_metadata), **kwargs)
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
+        final_params = env._params
 
         if evaluations > 0:
             search_kwargs = ({"active_layers": env._active_layers}
@@ -276,8 +286,10 @@ def run_policy_with_refinement(model_path: str, episodes: list, evaluations: int
             refined_attainment = env._attainment(refined_agg)
             if refined_attainment > info["attainment"]:
                 info = {**info, "attainment": refined_attainment}
+                final_params = refined_params
 
-        results.append({"attainment": info["attainment"], "kind": info["kind"]})
+        results.append({"attainment": info["attainment"], "kind": info["kind"],
+                        "visible_pp": _visible_pp(env, final_params)})
     return results
 
 
@@ -333,9 +345,11 @@ def run_baseline(name: str, episodes: list, model_for_volume=None, active_layers
             final_agg = goals.aggregate(_features(model, final_params, active_layers), active_layers)
             attainment = _attainment_or_zero(instruction["goal"], start_agg, final_agg,
                                              weights=instruction.get("weights"))
+            visible_pp = goals.visible_change(instruction["goal"], start_agg, final_agg,
+                                              instruction.get("weights"))
         except Exception:
-            attainment = None
-        results.append({"attainment": attainment, "kind": instruction["kind"]})
+            attainment, visible_pp = None, None
+        results.append({"attainment": attainment, "kind": instruction["kind"], "visible_pp": visible_pp})
     return results
 
 
@@ -439,7 +453,14 @@ def _summarize(rows: list) -> dict:
                          "mean": float(np.mean(array)),
                          "share_positive": float(np.mean(array > 0.0)),
                          "n": int(array.size)}
-    return {**stats, "by_kind": by_kind}
+    # On-screen size of the change (goals.visible_change), beside attainment.
+    visible = [row.get("visible_pp") for row in rows if row.get("visible_pp") is not None]
+    for kind in EVAL_KINDS:
+        values = [row.get("visible_pp") for row in rows
+                  if row["kind"] == kind and row.get("visible_pp") is not None]
+        by_kind[kind]["visible_pp_median"] = float(np.median(values)) if values else None
+    return {**stats, "by_kind": by_kind,
+            "visible_pp_median": float(np.median(visible)) if visible else None}
 
 
 def kind_stats(value) -> dict:
@@ -481,8 +502,8 @@ def episodes_detail(results: dict, episodes: list) -> dict:
             raise ValueError(
                 f"{name}: {len(rows)} rows for {len(episodes)} episodes -- "
                 "per-episode rows are paired by position and must match")
-        detail[name] = [{"attainment": row["attainment"], "kind": row["kind"],
-                         "volume": episode["volume"]}
+        detail[name] = [{"attainment": row["attainment"], "kind": row["kind"], "volume": episode["volume"],
+                         **({"visible_pp": row["visible_pp"]} if "visible_pp" in row else {})}
                         for row, episode in zip(rows, episodes)]
     return detail
 
@@ -598,11 +619,15 @@ def _print_table(comparison: dict, active_layers=None) -> None:
         print()
 
     summary = comparison["summary"]
-    print(f"{'method':22s} {'median':>8s} {'mean_clip':>10s} {'mean_raw':>10s} {'share+':>8s} {'n':>6s}")
+    # "visible pp": median percentage points of the image moved toward the
+    # goal (goals.visible_change), the on-screen size of what attainment scores.
+    print(f"{'method':22s} {'median':>8s} {'mean_clip':>10s} {'mean_raw':>10s} {'share+':>8s} {'n':>6s} "
+          f"{'visible pp':>10s}")
     for name in sorted(summary):
         entry = summary[name]
         print(f"{name:22s} {_fmt(entry['median']):>8s} {_fmt(entry['mean_clipped']):>10s} "
-              f"{_fmt(entry['mean_raw']):>10s} {_fmt(entry['share_positive']):>8s} {entry['n']:6d}")
+              f"{_fmt(entry['mean_raw']):>10s} {_fmt(entry['share_positive']):>8s} {entry['n']:6d} "
+              f"{_fmt(entry.get('visible_pp_median')):>10s}")
 
     # Per kind, median first: the mean is kept beside it (and is all an older
     # result file has), but it is the number that misreads a heavy negative

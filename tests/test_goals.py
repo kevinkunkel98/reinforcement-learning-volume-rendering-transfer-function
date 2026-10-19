@@ -943,3 +943,13 @@ def test_every_goal_class_has_a_command_label():
     # goal_from_command words its goal text with these; a missing organ made
     # "more liver" raise KeyError in the viewer's policy and search modes.
     assert set(goals._CLASS_LABEL) >= set(goals.GOAL_CLASSES)
+
+
+def test_visible_change_is_signed_percentage_points_of_the_image():
+    goal = goals.goal_vector({"liver": {"vis": 0.3}, "lungs": {"vis": -0.3}, "heart": {"bright": 0.2}})
+    start = {"vis": {"liver": 0.01, "lungs": 0.05, "heart": 0.02}}
+    final = {"vis": {"liver": 0.04, "lungs": 0.02, "heart": 0.5}}
+    # liver +3 pp toward "more", lungs -3 pp toward "less"; heart is brightness only.
+    assert goals.visible_change(goal, start, final) == pytest.approx(6.0)
+    assert goals.visible_change(goal, start, final, weights={"lungs": 0.0}) == pytest.approx(3.0)
+    assert goals.visible_change(goals.goal_vector({"heart": {"bright": 0.2}}), start, final) is None

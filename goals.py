@@ -193,6 +193,30 @@ def progress(start: dict, current: dict) -> tuple:
     return c, b
 
 
+def visible_change(goal, start: dict, final: dict, weights: dict = None):
+    """How much of the image moved the way the instruction asked, in
+    percentage points: over every class with a visibility target (and a
+    non-zero weight), (final - start) share of the image, signed so that
+    movement toward the target counts positive, summed. None when the
+    instruction has no visibility target (brightness).
+
+    Attainment is measured on log visibility, so +1 can be an organ going from
+    0.1 % to 0.4 % of the image -- complete on paper, barely visible on screen.
+    This is the on-screen size of the same change, reported beside it."""
+    goal = np.asarray(goal, dtype=np.float64)
+    n = len(GOAL_CLASSES)
+    total, any_target = 0.0, False
+    for i, goal_class in enumerate(GOAL_CLASSES):
+        if not goal[n + i] or goal[i] == 0.0:
+            continue
+        if weights is not None and weights.get(goal_class, 1.0) == 0.0:
+            continue
+        any_target = True
+        change = final["vis"].get(goal_class, 0.0) - start["vis"].get(goal_class, 0.0)
+        total += math.copysign(1.0, goal[i]) * change * 100.0
+    return total if any_target else None
+
+
 def vis_target_solvable(change: float, start_vis: float) -> bool:
     """Whether a requested log10 visibility `change` can be met at all from
     `start_vis`. A decrease is bounded by the EPSILON floor (vis cannot go

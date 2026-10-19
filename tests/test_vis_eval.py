@@ -601,7 +601,8 @@ def test_run_baseline_records_none_when_the_baseline_raises(monkeypatch):
     monkeypatch.setitem(vis_eval.BASELINES, "B_broken", _broken)
     results = vis_eval.run_baseline("B_broken", episodes, model_for_volume=_model_for_volume)
 
-    assert results == [{"attainment": None, "kind": row["instruction"]["kind"]} for row in episodes]
+    assert results == [{"attainment": None, "kind": row["instruction"]["kind"], "visible_pp": None}
+                       for row in episodes]
 
 
 def test_run_baseline_with_active_layers_returns_scored_results(monkeypatch):
