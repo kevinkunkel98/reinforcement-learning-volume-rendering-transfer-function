@@ -362,8 +362,11 @@ POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "200
 # The task the viewer runs (goals.TASK_VERSIONS). v2 opens on the transfer
 # function with the organs in view and scores a command the way the v2
 # policy was trained: occluders of a target are free to fade, targets are
-# clipped to what the class can reach. TASK_VERSION=v1 restores the original.
-TASK_VERSION = os.environ.get("TASK_VERSION", "v2")
+# clipped to what the class can reach. v3 (default) also fades the unlabelled
+# shell to 0.2 opacity and lets show_only hide the rest completely
+# (docs/experiments/2026-10-19-task-v3.md). TASK_VERSION=v2 or v1 restores an
+# earlier task; set POLICY_PATH to a policy trained on it.
+TASK_VERSION = os.environ.get("TASK_VERSION", "v3")
 # How many times the policy acts on one command: after each step the viewer
 # re-measures the render and the policy sees what is left of the goal
 # (rl.closed_loop.rollout's loop) -- still the policy alone, no search.

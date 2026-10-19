@@ -11,9 +11,9 @@ transfer function in one forward pass, and a short search polishes it.
 
 This is a master's thesis: can a transfer function be learned with RL well
 enough to follow instructions on a patient it has never seen? On six held-out
-patients the policy alone gets half-way to the goal of a typical instruction
-in one step, and as the starting point of a search it beats the same search
-from scratch at every budget.
+patients the policy alone gets close to half-way to the goal of a typical
+instruction in one step, and with a 200-evaluation search on top it reaches
+nearly 0.9, against 0.67 for the same search from scratch.
 
 ## Try it
 
@@ -31,10 +31,10 @@ same over twenty sampled instructions.
 
 | env var | default | |
 |---|---|---|
-| `POLICY_PATH` | `out/rl_mb_v2/clb_r3_seed1/checkpoint.pt` | policy checkpoint |
+| `POLICY_PATH` | `out/rl_mb_v3/clb_r3_seed2/checkpoint.pt` | policy checkpoint (must match the task version) |
 | `POLICY_REFINE_EVALUATIONS` | `200` | search on top of the policy; `30` ≈ 0.70 in ~0.7 s, `0` shows the pure policy |
 | `POLICY_STEPS` | `1` | times the policy acts per command (re-rendering in between) |
-| `TASK_VERSION` | `v2` | `v1` restores the original start TF and scoring |
+| `TASK_VERSION` | `v3` | `v2` (with `out/rl_mb_v2/clb_r3_seed1/checkpoint.pt`) or `v1` restores an earlier task |
 
 The same renderer runs flat in the browser and in a WebXR headset
 (`docs/experiments/2026-10-15-vr-lab-session.md`).
@@ -57,7 +57,7 @@ peak per class, and a labelled voxel is shaded by its own class's peak only
 soft 40, kidneys 45, heart 50, spleen 55, liver 65 HU — no longer light each
 other up. Unlabelled tissue (skin, fat, muscle) still sees peaks by HU.
 
-## The task: v1 and v2
+## The task: v1, v2, v3
 
 On the original task (v1) about 30 % of instructions could not be improved by
 any method, even a 1000-evaluation search. They were ill-posed, not hard:
@@ -75,6 +75,17 @@ available (`task_version="v1"`); results on the two tasks are reported side
 by side, never as one number improving on the other
 (`docs/experiments/2026-10-17-task-v2.md`).
 
+Task v3 is what the viewer runs. On v2 the unlabelled shell -- skin and fat lit
+by the soft-tissue peak -- still covered half the image, so a "more liver"
+scored as complete moved half a percent of it. v3 draws unlabelled tissue at
+0.2 opacity, asks brightness only of classes that are visible, and lets
+"show only" hide everything else completely. Policy + 200 evaluations reaches
+the goal as often as on v2 (0.89 val, 0.87-0.89 test) with about twice the
+on-screen change (median 2-2.8 percentage points of the image against 1); the
+policy alone is a little weaker (0.49-0.51 val, 0.43-0.46 test)
+(`docs/experiments/2026-10-19-task-v3.md`). Every evaluation also reports
+**visible pp**, the percentage points of the image moved toward the goal.
+
 ## The policy
 
 Model-based RL (`rl/model_based.py`). An ensemble of five MLPs learns what a
@@ -85,6 +96,16 @@ rounds render the policy's own proposals and refit the model where it was
 wrong. A closed-loop fine-tune (`rl/closed_loop.py`) trains through two-step
 rollouts, with every instruction kind drawn equally often. Model-free SAC on
 the same task stayed at a median of 0.00-0.09.
+
+Task v3, 300 episodes per split, median attainment (median visible pp);
+policy rows are three training seeds:
+
+| method | evaluations | val | **test** (run once) |
+|---|---|---|---|
+| **policy + search** (viewer default) | 200 | 0.89 / 0.88 / 0.89 (2.2-2.8) | **0.89 / 0.87 / 0.88 (2.0)** |
+| **policy + search** | 30 | 0.65 / 0.64 / 0.68 (1.8) | **0.67 / 0.64 / 0.65 (1.6)** |
+| search (hill climb) | 200 | 0.73 (1.9) | 0.67 (1.9) |
+| **policy alone** | 0 | 0.49 / 0.49 / 0.51 (1.5-1.6) | **0.43 / 0.45 / 0.46 (1.4-1.6)** |
 
 Task v2, 300 episodes per split, the same episodes for every method, median
 attainment; policy rows are three training seeds:
@@ -101,13 +122,15 @@ attainment; policy rows are three training seeds:
 | search | 10 | 0.04 | 0.05 |
 | rule executor | 0 | 0.03 | 0.01 |
 
+On v2:
+
 - The policy alone beats every baseline except the 200-evaluation search
   (paired Wilcoxon p < 1e-15) and generalises: val 0.51, test 0.50.
 - As a starting point it beats search from scratch at every budget
   (p < 1e-15). Policy + 30 evaluations is level with a 200-evaluation search;
   with 100 it is clearly ahead.
 
-By kind (test, seed 1):
+By kind (v2, test, seed 1):
 
 | kind | policy | + 30 | + 200 | search 200 |
 |---|---|---|---|---|
@@ -163,6 +186,8 @@ python -m tools.build_visibility_cache --splits train_extra
 ## Reproduce the policy
 
 ```bash
+# task v2 shown; task v3 is the same with --task-version v3
+# (docs/experiments/2026-10-19-scripts/pipeline_v3.sh)
 B="--splits train,train_extra --task-version v2"
 python -m rl.model_based collect --out out/rl_mb_v2/data_r0b.npz --starts 3000 --seed-base 7000000 $B
 python -m rl.model_based train --data out/rl_mb_v2/data_r0b.npz --out out/rl_mb_v2/r0b_seed0 --task-version v2
@@ -205,7 +230,7 @@ scored by `eval_parsers.py` (`docs/experiments/2026-10-18-instruction-parser.md`
 | `server.py`, `static/` | web UI, voice, WebXR viewer, compare panel, preference collection |
 | `commands.py`, `asr.py`, `eval_parsers.py` | instruction parsing, speech, parser evaluation |
 | `transfer.py`, `anatomy.py`, `anatomy_layers.py`, `render.py` | transfer functions, classes, rendering |
-| `visibility.py`, `goals.py` | what a render shows; instructions, task v1/v2, attainment |
+| `visibility.py`, `goals.py` | what a render shows; instructions, task v1/v2/v3, attainment, visible pp |
 | `rl/model_based.py`, `rl/closed_loop.py` | the policy: dynamics ensemble, training, Dyna, closed-loop fine-tune |
 | `rl/vis_eval.py`, `rl/baselines.py` | official evaluation, search and rule baselines |
 | `rl/oneshot_env.py`, `rl/oneshot_train.py`, `rl/pretrain.py` | the environment; SAC experiments |
@@ -215,6 +240,7 @@ scored by `eval_parsers.py` (`docs/experiments/2026-10-18-instruction-parser.md`
 
 ## Reading further
 
+- `docs/experiments/2026-10-19-task-v3.md` — task v3: the faded shell, show-only scoring, the camera fix.
 - `docs/experiments/2026-10-17-task-v2.md` — task v2, the policy, policy + search.
 - `docs/experiments/2026-10-16-overnight-results.md` — model-based RL on v1, why SAC stalled.
 - `docs/STATUS.md` — project snapshot as of 2026-10-14 (before model-based RL).

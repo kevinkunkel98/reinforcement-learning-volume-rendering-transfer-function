@@ -44,8 +44,13 @@ from rl.oneshot_env import (ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, load_
 # fine-tuning (rl.closed_loop --balance-kinds). rl.vis_eval, 300 val episodes,
 # policy alone: median 0.539 (absolute 0.62, show_only 0.44, both above the
 # 200-evaluation search) against 0.511 for the round-2 policy it replaces.
-# With TASK_VERSION=v1 set POLICY_PATH=out/rl_mb/r1_seed1/checkpoint.pt.
-POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb_v2/clb_r3_seed1/checkpoint.pt")
+#
+# Task v3 (2026-10-19, docs/experiments/2026-10-19-task-v3.md): the same recipe
+# on v3; seed 2, the best of three on val (policy alone 0.51, policy + 200
+# evaluations 0.89, with about twice the on-screen change of v2).
+# With TASK_VERSION=v2 set POLICY_PATH=out/rl_mb_v2/clb_r3_seed1/checkpoint.pt,
+# with TASK_VERSION=v1 POLICY_PATH=out/rl_mb/r1_seed1/checkpoint.pt.
+POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb_v3/clb_r3_seed2/checkpoint.pt")
 
 _state = {"policies": {}}
 
