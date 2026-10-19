@@ -54,6 +54,8 @@ TASK_VERSIONS = ("v1", "v2", "v3")
 # (docs/experiments/2026-10-19-task-v3.md). It changes what a render shows, so
 # it needs its own dynamics model and policy.
 UNLABELLED_OPACITY_BY_TASK = {"v1": 1.0, "v2": 1.0, "v3": 0.2}
+# Heights visibility.solo_max probes for a class's ceiling (transfer.SOLO_PROBE_HEIGHTS).
+SOLO_PROBE_HEIGHTS_BY_TASK = {"v1": (1.0,), "v2": (1.0,), "v3": (0.05, 0.1, 0.2, 0.4, 0.7, 1.0)}
 
 
 def use_task_version(task_version: str) -> None:
@@ -63,6 +65,7 @@ def use_task_version(task_version: str) -> None:
     if task_version not in TASK_VERSIONS:
         raise ValueError(f"unknown task version {task_version!r}")
     transfer.set_unlabelled_opacity(UNLABELLED_OPACITY_BY_TASK[task_version])
+    transfer.set_solo_probe_heights(SOLO_PROBE_HEIGHTS_BY_TASK[task_version])
 
 
 def starting_params(task_version: str = "v1") -> np.ndarray:

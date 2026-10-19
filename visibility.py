@@ -325,17 +325,22 @@ class VisibilityModel:
         ("fully shown"): what that means depends on how much of that class
         this volume contains and what sits in front of it.
         """
-        # Keyed by the shell opacity too: the shell occludes, so the ceiling
-        # depends on it (task v3 fades it).
-        key = (name, transfer.UNLABELLED_OPACITY)
+        # Keyed by the shell opacity and the probe heights too: the shell
+        # occludes, and task v3 fades it and probes several heights
+        # (transfer.SOLO_PROBE_HEIGHTS), so the ceiling depends on both.
+        key = (name, transfer.UNLABELLED_OPACITY, transfer.SOLO_PROBE_HEIGHTS)
         if key not in self._solo_max:
-            best = 0.0
+            best = collections.defaultdict(float)
             for peak in range(N_PEAKS):
-                params = anatomical_params().copy()
-                for i in range(N_PEAKS):
-                    params[i * PARAMS_PER_PEAK + 2] = 1.0 if i == peak else -1.0
-                best = max(best, self.features(params)["vis"][name])
-            self._solo_max[key] = best
+                for height in transfer.SOLO_PROBE_HEIGHTS:
+                    params = anatomical_params().copy()
+                    for i in range(N_PEAKS):
+                        params[i * PARAMS_PER_PEAK + 2] = 2.0 * height - 1.0 if i == peak else -1.0
+                    for measured, vis in self.features(params)["vis"].items():
+                        best[measured] = max(best[measured], vis)
+            for measured, vis in best.items():
+                self._solo_max[(measured, *key[1:])] = vis
+            self._solo_max.setdefault(key, 0.0)
         return self._solo_max[key]
 
     def cache_key(self, volume_version: str, label_identity: str = "",

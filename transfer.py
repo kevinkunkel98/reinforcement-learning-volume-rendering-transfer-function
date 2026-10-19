@@ -211,6 +211,23 @@ def set_unlabelled_opacity(scale: float) -> None:
     UNLABELLED_OPACITY = float(scale)
 
 
+# Peak heights `visibility.solo_max` probes for a class's ceiling. A class is
+# not always most visible at full height: at height 1 the soft-tissue peak
+# also lights the unlabelled muscle and fat in front of it, so soft tissue
+# shows 11-16 % of the image at height 0.05 and 0.2-2 % at height 1 (lungs
+# peak near 0.2). Task v3 probes several heights; v1 and v2 keep the original
+# full-height probe so their results reproduce.
+SOLO_PROBE_HEIGHTS = (1.0,)
+
+
+def set_solo_probe_heights(heights) -> None:
+    global SOLO_PROBE_HEIGHTS
+    heights = tuple(float(h) for h in heights)
+    if not heights or not all(0.0 < h <= 1.0 for h in heights):
+        raise ValueError(f"probe heights must be in (0, 1], got {heights}")
+    SOLO_PROBE_HEIGHTS = heights
+
+
 def check_transfer_mode(mode: str) -> str:
     if mode not in TRANSFER_MODES:
         raise ValueError(f"unknown transfer mode: {mode!r}")

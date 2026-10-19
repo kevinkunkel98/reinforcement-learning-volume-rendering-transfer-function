@@ -839,6 +839,36 @@ def test_run_policy_arm_matches_session_run_policy(ts_session):
         assert float(np.mean([direct_params[i] for i in group])) == pytest.approx(float(value), abs=1e-6)
 
 
+def test_run_policy_arm_plans_a_residual_policy_through_its_dynamics(ts_session, monkeypatch):
+    """With `plan`, the residual action goes through rl.model_based.plan
+    before it is applied; without it, or without dynamics, it does not."""
+    import rl.model_based as mb
+    s = ts_session
+    model = s.model_for_volume(server._dataset_name)
+    params = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    start_agg = goals.aggregate(model.features(params))
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    instruction = goals.goal_from_command(cmd, model, start_agg, volume=server._dataset_name)
+    controllable = np.array([np.mean([params[i] for i in group]) for group in CONTROLLABLE])
+    planned = np.clip(-controllable + 0.1, -1, 1)
+    calls = []
+    monkeypatch.setattr(mb, "plan", lambda *args, **kwargs: calls.append(args) or planned)
+
+    policy = _StubPolicy(np.zeros(len(CONTROLLABLE)))
+    policy.action_mode = "residual"
+    policy.dynamics = object()
+    out = server.run_policy_arm(model, policy, instruction, start_agg, params.copy(), plan=True)
+    assert len(calls) == 1
+    for group in CONTROLLABLE:
+        assert float(np.mean([out[i] for i in group])) == pytest.approx(0.1, abs=1e-6)
+
+    unplanned = server.run_policy_arm(model, policy, instruction, start_agg, params.copy())
+    del policy.dynamics
+    no_dynamics = server.run_policy_arm(model, policy, instruction, start_agg, params.copy(), plan=True)
+    assert len(calls) == 1
+    np.testing.assert_allclose(unplanned, no_dynamics)
+
+
 def test_run_policy_arm_without_a_checkpoint_raises_the_user_visible_message(ts_session):
     s = ts_session
     model = s.model_for_volume(server._dataset_name)
@@ -1175,7 +1205,7 @@ def test_compare_arms_warms_the_ceiling_before_timing_any_arm(ts_session, monkey
     real_arm = server.run_policy_arm
 
     def _spy(model_, policy_, instruction_, start_agg_, start_params_):
-        warm_at_arm["classes"] = {name for name, _ in model_._solo_max}
+        warm_at_arm["classes"] = {key[0] for key in model_._solo_max}
         return real_arm(model_, policy_, instruction_, start_agg_, start_params_)
 
     monkeypatch.setattr(server, "run_policy_arm", _spy)

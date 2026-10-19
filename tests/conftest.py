@@ -9,3 +9,4 @@ def _reset_unlabelled_opacity():
     no test may leak it into the next."""
     yield
     transfer.set_unlabelled_opacity(1.0)
+    transfer.set_solo_probe_heights((1.0,))

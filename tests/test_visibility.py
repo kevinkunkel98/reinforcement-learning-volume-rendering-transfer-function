@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pytest
 
+import transfer
 import visibility
 from anatomy import MEASURED_CLASSES
 from transfer import CENTER_RANGE, N_PEAKS, WIDTH_RANGE, default_params, PARAMS_PER_PEAK
@@ -410,7 +411,7 @@ def test_for_volume_returns_the_same_instance_so_solo_max_stays_warm(tmp_path, m
     second = visibility.for_volume("fake")
 
     assert second is first
-    assert ("skeleton", 1.0) in second._solo_max
+    assert ("skeleton", 1.0, (1.0,)) in second._solo_max
 
 
 def test_for_volume_rebuilds_when_the_volume_version_changes(tmp_path, monkeypatch):
@@ -598,3 +599,25 @@ def test_features_match_the_reference_algorithm(seed, layers):
     only = model.vis_only(params, layers)
     for name in ref_vis:
         assert only[name] == pytest.approx(ref_vis[name], rel=1e-5, abs=1e-8), name
+
+
+def test_solo_max_probes_lower_heights_when_the_task_asks():
+    """Soft tissue behind unlabelled tissue of the same HU: at full height the
+    peak lights the shell too and hides the core; a low peak leaves the shell
+    clear. Task v3 probes several heights, so its ceiling is the low peak's."""
+    import goals
+    volume = _core_volume(core_hu=50.0, shell_hu=50.0)
+    labels = _core_labels("soft")
+    full = visibility.VisibilityModel.from_volume(volume, (2.0, 2.0, 2.0), labels=labels).solo_max("soft")
+
+    goals.use_task_version("v3")
+    model = visibility.VisibilityModel.from_volume(volume, (2.0, 2.0, 2.0), labels=labels)
+    params = transfer.anatomical_params().copy()
+    for i in range(transfer.N_PEAKS):
+        params[i * transfer.PARAMS_PER_PEAK + 2] = -1.0
+    soft = transfer.ANATOMICAL_PEAK_INDEX["soft"]
+    params[soft * transfer.PARAMS_PER_PEAK + 2] = 2.0 * 0.05 - 1.0
+    low = model.features(params)["vis"]["soft"]
+
+    assert model.solo_max("soft") >= low - 1e-9
+    assert model.solo_max("soft") > full
