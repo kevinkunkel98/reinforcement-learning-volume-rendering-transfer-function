@@ -16,6 +16,20 @@ Re-run the `adb forward` after any USB reconnect. If a page load hangs at
 "Loading local volume...", the headset is asleep (`navigator.xr` checks never
 resolve then): `adb shell input keyevent KEYCODE_WAKEUP`.
 
+## URL flags
+
+A headset browser gets `renderer=custom down=2 xrscale=0.8 tex=f16 fovstep=2`
+without flags (`static/xr_logic.js`, `HEADSET_PERF_DEFAULTS`); any flag in the
+URL overrides its default:
+
+| Flag | Values | |
+|---|---|---|
+| `renderer` | `custom` \| `vtk` | custom WebGL2 ray marcher or vtk.js |
+| `down` | `1` \| `2` | volume resolution; `1` is too slow for the Focus 3 (restarts the runtime) |
+| `xrscale` | 0.1–2 | WebXR framebuffer scale |
+| `fovstep` | 1–4 | step multiplier at the edge of each eye's view (custom only) |
+| `tex`, `xrsample`, `adapt`, `crop` | | vtk.js path |
+
 ## Tools
 
 | File | Use |

@@ -3,7 +3,8 @@
 Speak to a CT scan and it renders what you asked for — "show only the
 skeleton," "a bit more kidneys." A rule parser or a local LLM turns the words
 into an instruction, a policy trained with reinforcement learning proposes the
-transfer function in one forward pass, and a short search polishes it.
+transfer function in one forward pass, planning through its own learned model
+refines it, and a short search polishes it.
 
 <p align="center">
   <img src="docs/screenshots/ui.png" width="85%" alt="The viewer mid-session: a render, the instruction history with each command's per-class visibility delta, and the histogram/transfer-function curve panel" />
@@ -11,9 +12,10 @@ transfer function in one forward pass, and a short search polishes it.
 
 This is a master's thesis: can a transfer function be learned with RL well
 enough to follow instructions on a patient it has never seen? On six held-out
-patients the policy alone gets close to half-way to the goal of a typical
-instruction in one step, and with a 200-evaluation search on top it reaches
-nearly 0.9, against 0.67 for the same search from scratch.
+patients the policy alone gets about half-way to the goal of a typical
+instruction in one step, 0.64 after planning (no renders), 0.77 with 30
+renders of search on top -- as good as 200 renders of search from scratch
+(0.70) -- and 0.91 with 200.
 
 ## Try it
 
@@ -22,8 +24,9 @@ python server.py      # http://127.0.0.1:8000
 ```
 
 Type or hold Space to talk. The viewer opens on a transfer function with the
-organs in view; every command is answered by the policy plus a 200-evaluation
-search (~5 s). Exact application of the parsed command and plain search are
+organs in view; every command is answered by the policy, refined by planning
+through its learned model (~0.2 s), then polished by a 200-evaluation search
+(~5 s). Exact application of the parsed command and plain search are
 one click away. **compare** answers one instruction four ways from the same
 start — applied directly, hill-climbed at 10 and 200 evaluations, and by the
 bare policy — with attainment and cost side by side; **sweep 20** does the
@@ -32,12 +35,29 @@ same over twenty sampled instructions.
 | env var | default | |
 |---|---|---|
 | `POLICY_PATH` | `out/rl_mb_v3c/clb_r3_seed1/checkpoint.pt` | policy checkpoint (must match the task version) |
-| `POLICY_REFINE_EVALUATIONS` | `200` | search on top of the policy; `30` ≈ 0.70 in ~0.7 s, `0` shows the pure policy |
+| `POLICY_PLAN` | `1` | `0` skips planning through the learned model |
+| `POLICY_REFINE_EVALUATIONS` | `200` | search on top of the policy; `30` ≈ 0.77 in ~0.7 s, `0` shows the policy (+ planning) alone |
 | `POLICY_STEPS` | `1` | times the policy acts per command (re-rendering in between) |
 | `TASK_VERSION` | `v3` | `v2` (with `out/rl_mb_v2/clb_r3_seed1/checkpoint.pt`) or `v1` restores an earlier task |
 
-The same renderer runs flat in the browser and in a WebXR headset
-(`docs/experiments/2026-10-15-vr-lab-session.md`).
+### In a VR headset
+
+```bash
+python server.py --host 0.0.0.0 --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
+# headset browser: https://<mac-lan-ip>:8000/   (certificate from mkcert, must cover that IP)
+```
+
+A standalone headset (tested: Vive Focus 3) gets a custom WebGL2 ray marcher
+instead of vtk.js: foveated step size, a longer stride through transparent
+samples, brick skipping when the TF leaves bricks sparse, and coarser steps
+while the volume turns -- 57-58 fps head-on and 84-88 fps while rotating on a
+523-slice body scan, at the same resolution. Hold the trigger to talk; the
+thumbstick turns the volume, a click resets it and brings it back in front of
+you; the panel above it lists what each command changed, as the chat does.
+URL flags (`renderer`, `down`, `xrscale`, `fovstep`, ...) and the debugging
+tools are in `tools/headset/README.md`; measurements in
+`docs/experiments/2026-10-19-vr-lab-session.md` and
+`docs/experiments/2026-10-15-vr-lab-session.md`.
 
 ## Why this is hard
 
@@ -238,17 +258,19 @@ scored by `eval_parsers.py` (`docs/experiments/2026-10-18-instruction-parser.md`
 | `commands.py`, `asr.py`, `eval_parsers.py` | instruction parsing, speech, parser evaluation |
 | `transfer.py`, `anatomy.py`, `anatomy_layers.py`, `render.py` | transfer functions, classes, rendering |
 | `visibility.py`, `goals.py` | what a render shows; instructions, task v1/v2/v3, attainment, visible pp |
-| `rl/model_based.py`, `rl/closed_loop.py` | the policy: dynamics ensemble, training, Dyna, closed-loop fine-tune |
+| `rl/model_based.py`, `rl/closed_loop.py` | the policy: dynamics ensemble, training, Dyna, closed-loop fine-tune, planning |
 | `rl/vis_eval.py`, `rl/baselines.py` | official evaluation, search and rule baselines |
 | `rl/oneshot_env.py`, `rl/oneshot_train.py`, `rl/pretrain.py` | the environment; SAC experiments |
 | `policy.py` | checkpoint loading for the viewer |
-| `datasets.py`, `totalseg.py`, `tools/` | volumes, splits, labels, caches |
+| `static/vr_renderer.js`, `static/xr.js`, `static/xr_logic.js` | VR: ray marcher, WebXR session and panel, pure logic (tested by `tests/js/`) |
+| `datasets.py`, `totalseg.py`, `tools/` | volumes, splits, labels, caches; `tools/headset/` drives the headset over adb |
 | `docs/experiments/` | one dated write-up per experiment, with scripts |
 
 ## Reading further
 
-- `docs/experiments/2026-10-19-task-v3.md` — task v3: the faded shell, show-only scoring, the camera fix.
+- `docs/experiments/2026-10-19-task-v3.md` — task v3: the faded shell, show-only scoring, the camera fix, the ceiling fix found by rendering, planning, the final results.
+- `docs/experiments/2026-10-19-vr-lab-session.md` — VR frame rate from 21 to 57 fps at the same resolution.
 - `docs/experiments/2026-10-17-task-v2.md` — task v2, the policy, policy + search.
 - `docs/experiments/2026-10-16-overnight-results.md` — model-based RL on v1, why SAC stalled.
-- `docs/STATUS.md` — project snapshot as of 2026-10-14 (before model-based RL).
+- `docs/STATUS.md` — project snapshot as of 2026-10-19: results, weaknesses, next steps.
 - `docs/system-documentation.typ`, `docs/transfer-function.typ` — the system and the transfer function in detail.
