@@ -130,7 +130,21 @@ on another.
 3. **Scripted VR benchmark** over 2–3 patients × 2 TFs with fixed placement.
 4. **Missing evaluation pieces for the thesis:** render-budget curve
    (10/30/100/200) on v3c with and without planning; per-stage training
-   ablation; per-patient table; planning ablation re-run on v3c.
+   ablation; per-patient table; planning ablation re-run on v3c. Plus the
+   two ablations that answer "why not supervised / why not just gradients"
+   (pending):
+   - **Planning from zero vs from the policy** (~1 h): `rl.model_based.plan`
+     started from a zero residual instead of the policy's action, same steps
+     and restarts, same 300 val/test episodes, paired Wilcoxon. If planning
+     from the policy wins clearly, the policy earns its place even in a pure
+     gradient-planning pipeline.
+   - **Behaviour cloning on v3c** (training run): same network and data
+     budget, labels from 200-eval search, same eval protocol. The only BC
+     evidence is from the SAC era on v1 (negative even as MSE fell -- several
+     valid answers averaged); this makes it a current ablation.
+   Also: report wall-clock time next to render counts (planning costs ~0.2 s,
+   about 8 renders), and cite differentiable volume rendering (DiffDVR, Weiss
+   & Westermann 2021) in related work as the per-query gradient alternative.
 5. **Write the thesis** — skeleton with tables and figure briefs exists
    (Overleaf), plus an architecture overview figure (`docs/figures/arch.pdf`, made by `docs/figures/make_arch.py`).
 6. Optional: start a ceiling-fix-style render audit for the remaining weak
