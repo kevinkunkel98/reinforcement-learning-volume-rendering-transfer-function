@@ -194,6 +194,15 @@ feasible. `/collect` shows two candidate renders per instruction, judged blind
 and reports their agreement — the ceiling for any reward model trained on
 them. Judgments collected before a rendering fix are kept apart as a pilot.
 
+Since 2026-10-19 `/collect` renders the way the viewer does (task v3,
+label-scoped, faded shell; six views, cropped rather than squeezed) and pairs
+two of the conditions the thesis compares: the policy alone, policy +
+planning, + 30 or + 200 renders of search, 200 renders of search from the
+start, and the rule executor. Rows go to `out/vis_preferences_v3.jsonl` with
+each candidate's source and attainment, so agreement with the objective can be
+measured per condition. An item takes ~5–9 s to prepare; the 40 shared anchor
+items are cached in `out/cache/anchor_items.json` (built on first use, ~minutes).
+
 ## Data
 
 TotalSegmentator CT (CC-BY-4.0): 20 train / 4 val / 6 test patients, plus 70

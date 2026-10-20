@@ -11,6 +11,14 @@ observation, rng, deterministic) -> action` or an SB3-style model exposing
 `.predict(observation, deterministic=...) -> (action, state)` -- so this
 module never hard-codes a checkpoint path, and `policy=None` still produces
 usable items from the non-policy sources alone.
+
+A checkpoint trained on task v2 or v3 (its metadata names the task) takes
+`_task_item` instead: the start and the instruction come from `OneShotEnv.reset`
+exactly as `rl.vis_eval` draws its episodes, and the candidates are the
+conditions the thesis compares (`TASK_SOURCES`) -- the policy's deterministic
+proposal, the proposal planned through its dynamics ensemble, that plan
+refined with 30 or 200 renders of search (the viewer's answer), 200 renders of
+search from the start, and the rule executor.
 """
 import json
 import math
@@ -20,12 +28,17 @@ import numpy as np
 
 import goals
 import transfer
-from rl.baselines import BASELINES, CONTROLLABLE, apply_controllable
+from rl.baselines import BASELINES, CONTROLLABLE, apply_controllable, hill_climb
 from rl.oneshot_env import build_observation, observation_metadata, resolve_policy_metadata
 from anatomy_layers import default_layers, normalize_layers
 
 SOURCES = ("policy", "policy", "B1_current_executor", "B3_hill_climb_10", "B5_occlusion_rule", "perturbation")
 NON_POLICY_SOURCES = tuple(source for source in dict.fromkeys(SOURCES) if source != "policy")
+# Task v2/v3 items (`_task_item`). Two distinct sources per item, uniformly.
+TASK_SOURCES = ("policy", "policy_plan", "policy_plan_30", "policy_plan_200",
+                "B4_hill_climb_200", "B1_current_executor")
+TASK_NON_POLICY_SOURCES = ("B4_hill_climb_200", "B1_current_executor", "perturbation")
+REFINE_INITIAL_STEP = 0.1           # rl.vis_eval.REFINE_INITIAL_STEP: search warm-started at a proposal
 
 ANCHOR_CACHE_PATH = "out/cache/anchor_items.json"
 ANCHOR_CACHE_SCHEMA_VERSION = 2
@@ -132,6 +145,82 @@ def _is_near_duplicate(agg_a: dict, agg_b: dict) -> bool:
     return vis_close and bright_close
 
 
+def _task_item(volume: str, model, rng: np.random.Generator, policy, policy_metadata: dict) -> dict:
+    """`sample_item` for a task v2/v3 checkpoint (see the module docstring).
+    Each source is computed at most once per item; a near-duplicate pair is
+    redrawn as another pair of sources, up to `MAX_ATTEMPTS` times."""
+    from rl.oneshot_env import OneShotEnv
+    env = OneShotEnv([volume], model_for_volume=lambda _name: model, **policy_metadata)
+    observation, _info = env.reset(seed=int(rng.integers(2 ** 31)))
+    start_params, instruction, start_agg = env._start_params.copy(), env._instruction, env._start_agg
+    weights = instruction.get("weights")
+    can_plan = getattr(policy, "dynamics", None) is not None and policy_metadata["action_mode"] == "residual"
+    if policy is None:
+        sources = TASK_NON_POLICY_SOURCES
+    else:
+        sources = tuple(s for s in TASK_SOURCES if can_plan or not s.startswith("policy_plan"))
+
+    params_by_source, agg_by_source = {}, {}
+
+    def agg_of(params):
+        return goals.aggregate(goals.features(model, params))
+
+    def attainment_of(agg):
+        return goals.attainment(instruction["goal"], start_agg, agg, weights=weights)
+
+    def params_for(source):
+        if source in params_by_source:
+            return params_by_source[source]
+        if source == "policy":
+            action = _predict(policy, observation, rng, deterministic=True)
+            params = _apply_action(start_params, action, policy_metadata["action_mode"])
+        elif source == "policy_plan":
+            from rl.model_based import plan
+            action = _predict(policy, observation, rng, deterministic=True)
+            planned = plan(policy.dynamics, instruction["goal"], weights, model.histogram,
+                           env._solo_max_log(volume, model), env._controllable_values(start_params),
+                           start_agg, action)
+            params = _apply_action(start_params, planned, "residual")
+        elif source.startswith("policy_plan_"):
+            proposal = params_for("policy_plan")
+            refined = hill_climb(model, proposal, instruction, evaluations=int(source.rsplit("_", 1)[1]),
+                                 initial_step=REFINE_INITIAL_STEP, reference_params=start_params)
+            # The viewer's contract (server.refine_policy_proposal): keep the better of the two.
+            better = attainment_of(agg_of(refined)) > attainment_of(agg_of(proposal))
+            params = refined if better else proposal
+        elif source == "perturbation":
+            params = _perturb(start_params, rng)
+        else:
+            params = np.asarray(BASELINES[source](model, start_params, instruction), dtype=np.float64)
+        params_by_source[source] = params
+        agg_by_source[source] = agg_of(params)
+        return params
+
+    near_duplicate = True
+    for _ in range(MAX_ATTEMPTS):
+        a_source, b_source = (str(s) for s in rng.choice(sources, size=2, replace=False))
+        params_for(a_source), params_for(b_source)
+        if not _is_near_duplicate(agg_by_source[a_source], agg_by_source[b_source]):
+            near_duplicate = False
+            break
+
+    a_agg, b_agg = agg_by_source[a_source], agg_by_source[b_source]
+    a_distance = goals.distance(instruction["goal"], start_agg, a_agg, weights=weights)
+    b_distance = goals.distance(instruction["goal"], start_agg, b_agg, weights=weights)
+    return {
+        "volume": volume,
+        "start_params": start_params,
+        "instruction": instruction,
+        "a": {"params": params_by_source[a_source], "source": a_source},
+        "b": {"params": params_by_source[b_source], "source": b_source},
+        "objective_choice": "a" if a_distance <= b_distance else "b",
+        "near_duplicate": near_duplicate,
+        "features": {"start": start_agg, "a": a_agg, "b": b_agg,
+                     "attainment": {"a": attainment_of(a_agg), "b": attainment_of(b_agg)}},
+        "metadata": observation_metadata(**policy_metadata),
+    }
+
+
 def sample_item(volume: str, model, rng: np.random.Generator, policy=None,
                 policy_metadata=None) -> dict:
     """One preference item: a start transfer function, an instruction, and
@@ -142,6 +231,8 @@ def sample_item(volume: str, model, rng: np.random.Generator, policy=None,
     `goals.distance` to the instruction -- is recorded for analysis but never
     shown to the rater."""
     policy_metadata = resolve_policy_metadata(policy_metadata)
+    if policy_metadata.get("task_version", "v1") != "v1":
+        return _task_item(volume, model, rng, policy, policy_metadata)
     start_params = goals.starting_params()
     start_layers = default_layers() if policy_metadata["policy_version"] == "oneshot-v8" else None
     start_agg = goals.aggregate(_features(model, start_params, start_layers), start_layers)
@@ -210,6 +301,8 @@ def _item_to_json(item: dict) -> dict:
             "text": item["instruction"]["text"],
             "targets": item["instruction"]["targets"],
             "goal": np.asarray(item["instruction"]["goal"], dtype=np.float64).tolist(),
+            **({"weights": {c: float(w) for c, w in item["instruction"]["weights"].items()}}
+               if item["instruction"].get("weights") else {}),
         },
         "a": {key: (np.asarray(value, dtype=np.float64).tolist() if key == "params" else value)
               for key, value in item["a"].items()},
@@ -234,6 +327,7 @@ def _item_from_json(data: dict) -> dict:
             "text": data["instruction"]["text"],
             "targets": data["instruction"]["targets"],
             "goal": np.asarray(data["instruction"]["goal"], dtype=np.float64),
+            **({"weights": data["instruction"]["weights"]} if data["instruction"].get("weights") else {}),
         },
         "a": {key: (np.asarray(value, dtype=np.float64) if key == "params" else value)
               for key, value in data["a"].items()},
@@ -287,7 +381,7 @@ def _cache_item_is_valid(item: dict, volumes: tuple, metadata=None) -> bool:
     if not _finite_vector(item["start_params"], transfer.TOTAL_PARAMS):
         return False
     instruction = item["instruction"]
-    if (not isinstance(instruction, dict) or set(instruction) != {"kind", "text", "targets", "goal"}
+    if (not isinstance(instruction, dict) or set(instruction) - {"weights"} != {"kind", "text", "targets", "goal"}
             or not isinstance(instruction["kind"], str)
             or instruction["kind"] not in INSTRUCTION_KINDS
             or not isinstance(instruction["text"], (str, type(None)))
@@ -309,12 +403,12 @@ def _cache_item_is_valid(item: dict, volumes: tuple, metadata=None) -> bool:
             return False
         if not _finite_vector(candidate["params"], transfer.TOTAL_PARAMS):
             return False
-        if candidate["source"] not in SOURCES:
+        if candidate["source"] not in SOURCES + TASK_SOURCES:
             return False
     return item["objective_choice"] in ("a", "b") and isinstance(item["near_duplicate"], bool)
 
 
-def _load_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple, metadata=None):
+def _load_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple, metadata=None, policy_id=None):
     if not os.path.exists(cache_path):
         return None
     try:
@@ -324,7 +418,7 @@ def _load_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple, m
         return None
     if not isinstance(data, dict) or data.get("schema_version") != ANCHOR_CACHE_SCHEMA_VERSION:
         return None
-    if data.get("seed") != seed or data.get("count") != count:
+    if data.get("seed") != seed or data.get("count") != count or data.get("policy_id") != policy_id:
         return None
     if data.get("volumes") != list(volumes) or not isinstance(data.get("items"), list):
         return None
@@ -335,16 +429,19 @@ def _load_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple, m
     return [_item_from_json(entry) for entry in data["items"]]
 
 
-def _save_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple, items: list) -> None:
+def _save_anchor_cache(cache_path: str, count: int, seed: int, volumes: tuple, items: list,
+                       policy_id=None) -> None:
     os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
     data = {"schema_version": ANCHOR_CACHE_SCHEMA_VERSION, "seed": seed, "count": count,
             "volumes": list(volumes), "items": [_item_to_json(item) for item in items]}
+    if policy_id is not None:
+        data["policy_id"] = policy_id
     with open(cache_path, "w") as f:
         json.dump(data, f)
 
 
 def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, model_for_volume=None,
-                  cache_path: str = ANCHOR_CACHE_PATH, policy_metadata=None) -> list:
+                  cache_path: str = ANCHOR_CACHE_PATH, policy_metadata=None, policy_id=None) -> list:
     """`count` items (see `sample_item`) generated deterministically from
     `seed` alone -- independent of any rater's history -- so every rater on
     every machine judging the same `cache_path` sees byte-identical items.
@@ -353,7 +450,9 @@ def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, mode
     checked-in cache is never silently invalidated by, say, a newer policy
     checkpoint (`policy` defaults to `None`, the same "baselines and
     perturbation only" fallback `sample_item` itself uses -- see its
-    docstring -- keeping the pool stable even as models change).
+    docstring -- keeping the pool stable even as models change). A caller
+    that does pass a policy names it with `policy_id` (its checkpoint path),
+    and a cache made with another `policy_id` is regenerated.
 
     `volumes`/`model_for_volume` default to the real dataset split and
     `visibility.for_volume` (imported lazily so importing this module never
@@ -365,7 +464,7 @@ def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, mode
         volumes = volumes_for_split("train") + volumes_for_split("val")
     sorted_volumes = tuple(sorted(volumes))
     metadata = resolve_policy_metadata(policy_metadata)
-    cached = _load_anchor_cache(cache_path, count, seed, sorted_volumes, metadata)
+    cached = _load_anchor_cache(cache_path, count, seed, sorted_volumes, metadata, policy_id)
     if cached is not None:
         return cached
 
@@ -384,5 +483,5 @@ def anchor_items(count: int = 40, seed: int = 0, policy=None, volumes=None, mode
             model_cache[volume] = model
         items.append(sample_item(volume, model, rng, policy=policy, policy_metadata=metadata))
 
-    _save_anchor_cache(cache_path, count, seed, sorted_volumes, items)
+    _save_anchor_cache(cache_path, count, seed, sorted_volumes, items, policy_id)
     return items

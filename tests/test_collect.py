@@ -404,3 +404,37 @@ def test_judge_route_invalid_choice_raises_http_400(monkeypatch, tmp_path):
 def test_collect_page_route_serves_the_static_file(monkeypatch, tmp_path):
     result = asyncio.run(collect.collect_page())
     assert result.path == "static/collect.html"
+
+
+def test_swap_sides_swaps_the_recorded_attainment_too():
+    item = {"a": {"params": 1, "source": "policy"}, "b": {"params": 2, "source": "policy_plan"},
+            "objective_choice": "a",
+            "features": {"start": {}, "a": "fa", "b": "fb", "attainment": {"a": 0.1, "b": 0.9}}}
+    swapped = collect._swap_sides(item)
+    assert swapped["features"]["attainment"] == {"a": 0.9, "b": 0.1}
+    assert swapped["features"]["a"] == "fb" and swapped["objective_choice"] == "b"
+
+
+def test_task_checkpoint_metadata_reaches_sampling_and_the_row(tmp_path, monkeypatch):
+    _patch_totalseg(monkeypatch)
+    model = _StubModel()
+    used = []
+    monkeypatch.setattr(collect.goals, "use_task_version", lambda version: used.append(version))
+    seen = {}
+
+    def fake_sample(volume, model, rng, policy=None, policy_metadata=None):
+        seen["metadata"] = policy_metadata
+        return sample_item(volume, model, rng, policy=None)
+
+    collector = Collector(pref_path=str(tmp_path / "prefs.jsonl"), volumes=["fake_a"],
+                          rng=np.random.default_rng(0), policy_provider=lambda: None,
+                          model_for_volume=lambda name: model, image_fn=_stub_image_fn,
+                          dataset_version_fn=lambda name: "v", sample_item_fn=fake_sample,
+                          anchor_items_fn=lambda **kwargs: [],
+                          policy_metadata_fn=lambda: {"task_version": "v3", "action_mode": "residual"})
+    response = collector.next_item("r1", "researcher")
+    assert seen["metadata"]["task_version"] == "v3" and used == ["v3"]
+    collector.judge(response["pair_id"], "a", 100.0)
+    with open(tmp_path / "prefs.jsonl") as f:
+        row = json.loads(f.readline())
+    assert row["task_version"] == "v3" and row["policy_path"] == collect.POLICY_PATH

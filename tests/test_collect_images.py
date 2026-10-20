@@ -77,3 +77,21 @@ def test_grid_data_url_is_a_base64_png_data_url(tmp_path, monkeypatch):
     url = grid_data_url("synthetic", goals.starting_params(), cache_dir=str(tmp_path))
 
     assert url.startswith("data:image/png;base64,")
+
+
+def test_crop_columns_cover_the_axial_diagonal_and_stay_centred():
+    volume = np.zeros((300, 200, 600))
+    left, right = collect_images._crop_columns(volume, (1.0, 1.0, 1.0), width=1024, height=800)
+    px_per_mm = 800 / (2 * collect_images.views.PARALLEL_SCALE_FACTOR * 600)
+    assert right - left >= np.hypot(300, 200) * px_per_mm
+    assert left + right == 1024
+    # a volume wider than the frame is clamped to it
+    assert collect_images._crop_columns(np.zeros((900, 900, 100)), (1.0, 1.0, 1.0), 1024, 800) == (0, 1024)
+
+
+def test_grid_keeps_the_frame_aspect_ratio(tmp_path, monkeypatch):
+    monkeypatch.setattr(collect_images, "_render_views",
+                        lambda volume_id, params: [np.zeros((200, 100, 3), dtype=np.uint8)] * 6)
+    image = Image.open(io.BytesIO(view_grid("synthetic", goals.starting_params(), size=320, columns=3,
+                                            cache_dir=str(tmp_path))))
+    assert image.size == (160 * 3, 320 * 2)

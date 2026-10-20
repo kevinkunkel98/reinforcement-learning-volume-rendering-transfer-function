@@ -497,3 +497,122 @@ def test_anchor_items_rejects_nonfinite_or_invalid_cached_payload(monkeypatch, t
                                 model_for_volume=lambda name: model, cache_path=cache_path)
 
     assert np.isfinite(regenerated[0]["start_params"]).all()
+
+
+# --- task v2/v3 items (_task_item) ---------------------------------------------
+
+TASK_METADATA = {"policy_version": "oneshot-v9", "action_mode": "residual", "reward_mode": "target",
+                 "transfer_mode": transfer.DEFAULT_TRANSFER_MODE, "task_version": "v3"}
+
+
+class _FakeTaskEnv:
+    """Stands in for OneShotEnv in _task_item: a seeded start and instruction
+    on the stub model, without the real task transforms."""
+
+    def __init__(self, volume_ids, model_for_volume, **_metadata):
+        self._model = model_for_volume(volume_ids[0])
+
+    def reset(self, seed=None, options=None):
+        self._start_params = goals.starting_params()
+        self._start_agg = goals.aggregate(self._model.features(self._start_params))
+        self._instruction = goals.sample_instruction("fake_a", self._model, self._start_agg,
+                                                     np.random.default_rng(seed))
+        return np.zeros(4, dtype=np.float32), {}
+
+    def _solo_max_log(self, volume, model):
+        return [0.0] * len(goals.GOAL_CLASSES)
+
+    def _controllable_values(self, params):
+        return [float(np.mean([params[i] for i in group])) for group in CONTROLLABLE]
+
+
+class _ResidualPolicy:
+    """Deterministic residual proposal; `dynamics` is set only when planning is wanted."""
+
+    def __init__(self, dynamics=None):
+        self.dynamics = dynamics
+
+    def predict(self, observation, deterministic=False):
+        action = np.zeros(len(CONTROLLABLE))
+        action[0] = 0.3
+        return action, None
+
+
+def _task_setup(monkeypatch):
+    import rl.oneshot_env
+    monkeypatch.setattr(rl.oneshot_env, "OneShotEnv", _FakeTaskEnv)
+    return _make_model(monkeypatch)
+
+
+def test_task_metadata_routes_sample_item_to_the_task_path(monkeypatch):
+    model = _task_setup(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(candidates, "_task_item",
+                        lambda volume, model, rng, policy, metadata: seen.setdefault("task", metadata["task_version"]))
+    sample_item("fake_a", model, np.random.default_rng(0), policy=_ResidualPolicy(), policy_metadata=TASK_METADATA)
+    assert seen == {"task": "v3"}
+
+
+def test_task_item_pairs_two_distinct_task_sources_and_records_attainment(monkeypatch):
+    model = _task_setup(monkeypatch)
+    planned = []
+    import rl.model_based
+    monkeypatch.setattr(rl.model_based, "plan", lambda *args, **kwargs: planned.append(1) or np.asarray(args[-1]))
+    for seed in range(12):
+        item = sample_item("fake_a", model, np.random.default_rng(seed), policy=_ResidualPolicy(dynamics=object()),
+                           policy_metadata=TASK_METADATA)
+        a, b = item["a"]["source"], item["b"]["source"]
+        assert a != b and {a, b} <= set(candidates.TASK_SOURCES)
+        assert set(item["features"]["attainment"]) == {"a", "b"}
+        assert item["metadata"]["task_version"] == "v3"
+    assert planned
+
+
+def test_task_item_policy_source_applies_the_action_as_residual(monkeypatch):
+    model = _task_setup(monkeypatch)
+    class _Rng:
+        def integers(self, n):
+            return 0
+
+        def choice(self, sources, size, replace):
+            return np.array(["policy", "B1_current_executor"])
+
+    item = candidates._task_item("fake_a", model, _Rng(), _ResidualPolicy(), resolve_policy_metadata_for_test())
+    start = item["start_params"]
+    expected = candidates._apply_action(start, _ResidualPolicy().predict(None)[0], "residual")
+    assert np.array_equal(item["a"]["params"], expected)
+
+
+def resolve_policy_metadata_for_test():
+    from rl.oneshot_env import resolve_policy_metadata
+    return resolve_policy_metadata(TASK_METADATA)
+
+
+def test_task_item_without_dynamics_never_offers_planning(monkeypatch):
+    model = _task_setup(monkeypatch)
+    for seed in range(12):
+        item = sample_item("fake_a", model, np.random.default_rng(seed), policy=_ResidualPolicy(),
+                           policy_metadata=TASK_METADATA)
+        assert not any(item[side]["source"].startswith("policy_plan") for side in ("a", "b"))
+
+
+def test_task_item_without_a_policy_uses_non_policy_sources(monkeypatch):
+    model = _task_setup(monkeypatch)
+    item = sample_item("fake_a", model, np.random.default_rng(0), policy=None, policy_metadata=TASK_METADATA)
+    assert {item["a"]["source"], item["b"]["source"]} <= set(candidates.TASK_NON_POLICY_SOURCES)
+
+
+def test_task_anchor_cache_keeps_weights_and_is_tied_to_the_policy(monkeypatch, tmp_path):
+    model = _task_setup(monkeypatch)
+    path = str(tmp_path / "anchors.json")
+    kwargs = dict(count=4, seed=0, policy=_ResidualPolicy(), volumes=["fake_a"],
+                  model_for_volume=lambda name: model, cache_path=path, policy_metadata=TASK_METADATA)
+    first = anchor_items(policy_id="ckpt-1", **kwargs)
+    with open(path) as f:
+        assert json.load(f)["policy_id"] == "ckpt-1"
+    calls = []
+    monkeypatch.setattr(candidates, "sample_item", lambda *a, **k: calls.append(1) or first[0])
+    anchor_items(policy_id="ckpt-1", **kwargs)
+    assert calls == []                      # same checkpoint: cached
+    anchor_items(policy_id="ckpt-2", **kwargs)
+    assert len(calls) == 4                  # another checkpoint: regenerated

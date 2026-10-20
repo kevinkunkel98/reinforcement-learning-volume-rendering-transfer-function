@@ -112,11 +112,26 @@ on another.
 1. **User study / preference collection** (needs people, best in the lab):
    rate before/after renders for policy + planning + search vs. search vs.
    rule executor; report agreement and the correlation with attainment.
-2. **Scripted VR benchmark** over 2–3 patients × 2 TFs with fixed placement.
-3. **Missing evaluation pieces for the thesis:** render-budget curve
+   `/collect` is ready for it (v3 renders, these conditions as candidate
+   sources, rows in `out/vis_preferences_v3.jsonl`); open: items take
+   ~5–9 s, so prefetching the next item would help raters.
+   Frame it as a human evaluation of the objective, not as RLHF.
+2. **Preference model on the study data** (pending, needs 1's data): logistic
+   regression on the judged pairs (equal/skip dropped, sides as recorded):
+   P(rater picks A) from the per-class differences A − B in log-visibility
+   and brightness relative to the goal (all in the rows' `features`), plus
+   the instruction kind. Baseline: attainment difference alone. Compare
+   held-out log-loss and accuracy (cross-validated by rater, and by patient),
+   against the inter-rater agreement on the anchors as the ceiling. If the
+   per-class model beats attainment, its weights show where the objective
+   diverges from people (e.g. keep-term weight, small organs, occluder
+   fading) → discussion chapter, and the bridge to RLHF as future work. If
+   not, that supports the objective as designed.
+3. **Scripted VR benchmark** over 2–3 patients × 2 TFs with fixed placement.
+4. **Missing evaluation pieces for the thesis:** render-budget curve
    (10/30/100/200) on v3c with and without planning; per-stage training
    ablation; per-patient table; planning ablation re-run on v3c.
-4. **Write the thesis** — skeleton with tables and figure briefs exists
+5. **Write the thesis** — skeleton with tables and figure briefs exists
    (Overleaf), plus an architecture overview figure (`docs/figures/arch.pdf`, made by `docs/figures/make_arch.py`).
-5. Optional: start a ceiling-fix-style render audit for the remaining weak
+6. Optional: start a ceiling-fix-style render audit for the remaining weak
    cases (strong increases, small-organ brightness).

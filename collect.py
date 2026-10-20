@@ -26,14 +26,20 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+import goals
 import visibility
 from collect_images import grid_data_url
 from datasets import _dataset_version, volumes_for_split
 from evaluate import jsonl_append
 import policy as policy_module
 from rl.candidates import anchor_items, sample_item
+from rl.oneshot_env import load_policy_metadata, resolve_policy_metadata
 
-PREF_PATH = "out/vis_preferences.jsonl"
+# Judgments on task-v3 renders (label-scoped, faded shell) with the
+# model-based candidates (rl.candidates.TASK_SOURCES), from 2026-10-19 on. The
+# 59 earlier rows in out/vis_preferences.jsonl compare v1-era renders and
+# SAC-era sources -- a pilot, kept in its own file and never mixed in.
+PREF_PATH = "out/vis_preferences_v3.jsonl"
 _WRITE_LOCK = threading.Lock()
 
 VALID_CHOICES = ("a", "b", "equal", "skip")
@@ -47,6 +53,15 @@ ANCHOR_RATE = 0.20          # share of items drawn from the shared anchor pool (
 # module's docstring.
 POLICY_PATH = policy_module.POLICY_PATH
 _load_policy = policy_module.load_policy
+
+
+def _policy_metadata():
+    """The shipped checkpoint's contract (task version, action mode), or the
+    v1 default when no checkpoint exists -- `rl.candidates.sample_item` picks
+    the task-v2/v3 item path from it."""
+    if os.path.exists(POLICY_PATH):
+        return load_policy_metadata(POLICY_PATH)
+    return resolve_policy_metadata()
 
 
 def _to_displayed(raw: dict) -> dict:
@@ -69,21 +84,26 @@ def _swap_sides(item: dict) -> dict:
     """The same item with displayed `a`/`b` exchanged -- used both to
     randomize which side a freshly sampled candidate lands on, and to show a
     repeat with sides swapped from the original."""
+    features = {**item["features"], "a": item["features"]["b"], "b": item["features"]["a"]}
+    if "attainment" in features:
+        features["attainment"] = {"a": features["attainment"]["b"], "b": features["attainment"]["a"]}
     return {
         **item,
         "a": item["b"],
         "b": item["a"],
         "objective_choice": {"a": "b", "b": "a"}[item["objective_choice"]],
-        "features": {"start": item["features"]["start"], "a": item["features"]["b"], "b": item["features"]["a"]},
+        "features": features,
     }
 
 
 def _instruction_json(instruction: dict) -> dict:
     return {
         "kind": instruction["kind"],
-        "text": instruction["text"],
+        "text": None if instruction["text"] is None else str(instruction["text"]),
         "targets": instruction["targets"],
         "goal": np.asarray(instruction["goal"], dtype=np.float64).tolist(),
+        **({"weights": {c: float(w) for c, w in instruction["weights"].items()}}
+           if instruction.get("weights") else {}),
     }
 
 
@@ -96,15 +116,17 @@ class Collector:
     `visibility.for_volume`), `image_fn` (default `collect_images.
     grid_data_url`), `dataset_version_fn` (default `datasets._dataset_
     version`), `sample_item_fn` (default `rl.candidates.sample_item`),
-    `anchor_items_fn` (default `rl.candidates.anchor_items`) and
+    `anchor_items_fn` (default `rl.candidates.anchor_items`),
     `policy_provider` (default `_load_policy`, called -- lazily -- on every
-    sampled item).
+    sampled item) and `policy_metadata_fn` (default `_policy_metadata`).
+    A checkpoint trained on task v2/v3 switches this process to that task
+    (`goals.use_task_version`), so the renders show what the policy saw.
     """
 
     def __init__(self, pref_path: str = PREF_PATH, volumes=None, rng: np.random.Generator = None,
                  policy_provider=None, model_for_volume=visibility.for_volume,
                  image_fn=grid_data_url, dataset_version_fn=_dataset_version,
-                 sample_item_fn=sample_item, anchor_items_fn=anchor_items):
+                 sample_item_fn=sample_item, anchor_items_fn=anchor_items, policy_metadata_fn=None):
         self.pref_path = pref_path
         self._volumes = list(volumes) if volumes is not None else None
         self.rng = rng if rng is not None else np.random.default_rng()
@@ -114,6 +136,8 @@ class Collector:
         self.dataset_version_fn = dataset_version_fn
         self.sample_item_fn = sample_item_fn
         self.anchor_items_fn = anchor_items_fn
+        self.policy_metadata_fn = policy_metadata_fn or (lambda: resolve_policy_metadata())
+        self._policy_metadata = None
 
         self._model_cache = {}
         self._items = {}                                  # pair_id -> displayed item, kept for repeats
@@ -140,6 +164,20 @@ class Collector:
             self._model_cache[volume] = model
         return model
 
+    def _get_policy_metadata(self) -> dict:
+        if self._policy_metadata is None:
+            self._policy_metadata = self.policy_metadata_fn()
+            task_version = self._policy_metadata.get("task_version", "v1")
+            if task_version != "v1":
+                goals.use_task_version(task_version)
+        return self._policy_metadata
+
+    def _sample_kwargs(self) -> dict:
+        # Only a task checkpoint adds the kwarg, so injected sample_item stubs
+        # with the original signature keep working.
+        metadata = self._get_policy_metadata()
+        return {} if metadata.get("task_version", "v1") == "v1" else {"policy_metadata": metadata}
+
     def _should_repeat(self, rater_id: str) -> bool:
         history = self._rater_history[rater_id]
         return len(history) >= REPEAT_MIN_GAP and self.rng.random() < REPEAT_RATE
@@ -150,8 +188,13 @@ class Collector:
         # caches to disk (see `rl.candidates.anchor_items`), so a restart is
         # cheap too.
         if self._anchor_pool is None:
+            # A task checkpoint's anchors include its own candidates, so the
+            # pool is tied to that checkpoint (`policy_id`).
+            kwargs = self._sample_kwargs()
+            if kwargs:
+                kwargs.update(policy=self.policy_provider(), policy_id=POLICY_PATH)
             self._anchor_pool = self.anchor_items_fn(volumes=self._get_volumes(),
-                                                       model_for_volume=self.model_for_volume)
+                                                       model_for_volume=self.model_for_volume, **kwargs)
         return self._anchor_pool
 
     def _next_anchor_index(self, rater_id: str):
@@ -185,7 +228,8 @@ class Collector:
         else:
             volume = str(self.rng.choice(self._get_volumes()))
             model = self._get_model(volume)
-            raw = self.sample_item_fn(volume, model, self.rng, policy=self.policy_provider())
+            raw = self.sample_item_fn(volume, model, self.rng, policy=self.policy_provider(),
+                                      **self._sample_kwargs())
             item = _to_displayed(raw)
             if self.rng.random() < 0.5:
                 item = _swap_sides(item)
@@ -201,7 +245,7 @@ class Collector:
         volume = item["volume"]
         return {
             "pair_id": pair_id,
-            "text": item["instruction"]["text"],
+            "text": None if item["instruction"]["text"] is None else str(item["instruction"]["text"]),
             "kind": item["instruction"]["kind"],
             "volume": volume,
             "a_image": self.image_fn(volume, item["a"]["params"]),
@@ -258,6 +302,8 @@ class Collector:
             "decision_ms": decision_ms,
             "repeat_of": self._repeat_of.get(pair_id),
             "anchor_id": self._anchor_id.get(pair_id),
+            "task_version": self._get_policy_metadata().get("task_version", "v1"),
+            "policy_path": POLICY_PATH,
         }
         with _WRITE_LOCK:
             os.makedirs(os.path.dirname(self.pref_path) or ".", exist_ok=True)
@@ -268,7 +314,7 @@ class Collector:
 
 
 router = APIRouter()
-collector = Collector()
+collector = Collector(policy_metadata_fn=_policy_metadata)
 
 
 class NextRequest(BaseModel):

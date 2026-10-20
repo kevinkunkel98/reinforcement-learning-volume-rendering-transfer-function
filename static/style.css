@@ -1161,8 +1161,8 @@ select:focus-visible {
   border-radius: var(--radius);
   border: 1px solid hsl(var(--border));
   background: #000;
-  aspect-ratio: 3 / 2;
-  object-fit: cover;
+  /* The grid keeps the renders' own aspect ratio (collect_images._compose_grid). */
+  height: auto;
 }
 
 #start-panel {
