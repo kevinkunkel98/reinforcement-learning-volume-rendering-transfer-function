@@ -9,7 +9,7 @@ stay fixed), not a delta, and the episode ends immediately. The reward is the
 attainment of the resulting transfer function (`goals.attainment`), clipped
 to `[-1, 1]`, minus a penalty when the result shows effectively nothing.
 
-See docs/superpowers/plans/2026-09-16-rl-v2-plan6-oneshot.md for why: the
+See docs/superpowers/plans/2026-09-16-rl-v2-plan6-oneshot.md (at tag pre-cleanup-2026-10-19) for why: the
 ten-step formulation asks the policy to learn a blind search procedure, which
 did not work, while amortising a single forward pass over the mapping from
 (instruction, start state) to transfer function does.

@@ -51,7 +51,7 @@ def test_collect_search_returns_aligned_samples():
 def test_collect_search_is_deterministic_and_independent_of_workers():
     # Inherits the same potential full-suite-only flakiness as
     # test_collect_is_deterministic_and_independent_of_workers (see that
-    # test and docs/superpowers/specs/2026-10-06-search-distilled-pretraining-design.md
+    # test and docs/superpowers/specs/2026-10-06-search-distilled-pretraining-design.md at tag pre-cleanup-2026-10-19
     # -- torch.set_num_threads(1) only reliably constrains intra-op
     # parallelism before the process has done other torch work, which the
     # workers=1 path can't guarantee inside a shared test-suite process).

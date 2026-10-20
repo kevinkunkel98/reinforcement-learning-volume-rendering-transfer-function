@@ -282,4 +282,9 @@ scored by `eval_parsers.py` (`docs/experiments/2026-10-18-instruction-parser.md`
 - `docs/experiments/2026-10-17-task-v2.md` — task v2, the policy, policy + search.
 - `docs/experiments/2026-10-16-overnight-results.md` — model-based RL on v1, why SAC stalled.
 - `docs/STATUS.md` — project snapshot as of 2026-10-19: results, weaknesses, next steps.
-- `docs/system-documentation.typ`, `docs/transfer-function.typ` — the system and the transfer function in detail.
+
+Design specs and plans (`docs/superpowers/`), the SAC-era system documents
+(`system-documentation`, `rl-v2-pipeline`, `transfer-function`,
+`rl-training-setup`) and the SAC-era tools and plots were removed on
+2026-10-19; `git checkout pre-cleanup-2026-10-19` restores them, and every experiment doc's
+reproduce command still runs there.

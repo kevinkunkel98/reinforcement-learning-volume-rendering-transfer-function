@@ -193,7 +193,7 @@
   }
 
   // Performance levers for headset testing, read from the page URL (see
-  // docs/superpowers/specs/2026-10-15-vr-performance-levers-design.md).
+  // docs/superpowers/specs/2026-10-15-vr-performance-levers-design.md, at tag pre-cleanup-2026-10-19).
   // The defaults reproduce the pre-flag behaviour; anything unparsable or out
   // of range falls back to its default instead of throwing.
   const PERF_DEFAULTS = Object.freeze({

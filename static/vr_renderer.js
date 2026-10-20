@@ -1,5 +1,5 @@
 // Custom WebGL2 volume ray marcher for VR (docs/superpowers/specs/
-// 2026-10-15-vr-raymarcher-design.md). Separate HU (R16F, linear) and label
+// 2026-10-15-vr-raymarcher-design.md, at tag pre-cleanup-2026-10-19). Separate HU (R16F, linear) and label
 // (R8, nearest) textures, the shared TF table, empty-space skipping over
 // 8^3-voxel bricks and early ray termination. The flat page stays on vtk.js.
 (() => {
