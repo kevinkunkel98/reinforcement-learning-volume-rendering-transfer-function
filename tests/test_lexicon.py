@@ -80,6 +80,7 @@ def test_normalize_fixes_transcription_errors(raw, fixed):
     "more aorta, less muscle",
     "how long is it",
     "spin left",
+    "check mate",
     "the heat is too strong",
     "I heard you",
     "a long way",

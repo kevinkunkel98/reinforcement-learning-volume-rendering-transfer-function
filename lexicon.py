@@ -174,7 +174,8 @@ def _fix_word(word: str, lex: dict):
     # A near-miss must sound alike and still be close in spelling, or be
     # very close in spelling alone ("brother" is not "broader").
     ratio = difflib.SequenceMatcher(None, w, best[0]).ratio()
-    if (ratio >= 0.75 and phonetic_key(w) == phonetic_key(best[0])) or ratio >= 0.9:
+    # 0.78, not 0.75: "mate" (0.75) became "mute", an opacity cue.
+    if (ratio >= 0.78 and phonetic_key(w) == phonetic_key(best[0])) or ratio >= 0.9:
         return best[0]
     return None
 
