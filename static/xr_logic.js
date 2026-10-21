@@ -214,8 +214,10 @@
   // ~20 % shorter frames than uniform steps on the flat benchmark and in VR,
   // no visible edge; 3 was no faster. Head-on at 0.9 m on a 523-slice body
   // scan: 21-22 fps. down=1 is out of reach: it restarted the VR runtime.
+  // 2026-10-21: xrscale=1 for a sharp panel, with adapt on; the volume then
+  // renders at 0.8-1.0 of that as load demands (splitLoad).
   const HEADSET_PERF_DEFAULTS = Object.freeze({
-    ...PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 0.8, renderer: "custom", fovstep: 2,
+    ...PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 1, adapt: true, renderer: "custom", fovstep: 2,
   });
 
   function parsePerfFlags(search, defaults = PERF_DEFAULTS) {
@@ -261,10 +263,15 @@
 
   // XR sample-distance controller tuning: hold 72 fps (the stage target),
   // coarsen fast after a few missed frames, refine slowly after ~1 s of
-  // on-time ones, so quality doesn't visibly pump.
+  // on-time ones, so quality doesn't visibly pump. A lone miss costs
+  // `missPenalty` on-time frames instead of all of them: on a 90 Hz display
+  // a few skipped refreshes a second are normal, and resetting on each one
+  // made the step only ever coarsen (2026-10-21 headset: 3.0 -> 5.86 mm, never back).
+  // Symmetrically an on-time frame shrinks the miss streak by a quarter instead of
+  // clearing it, so 45 fps (every other frame late) still coarsens.
   const ADAPT_DEFAULTS = Object.freeze({
     minMul: 1, maxMul: 4, targetMs: 1000 / 72, missFactor: 1.15,
-    coarsenAfter: 3, refineAfter: 90, coarsenStep: 1.25, refineStep: 1.1,
+    coarsenAfter: 3, refineAfter: 90, coarsenStep: 1.25, refineStep: 1.1, missPenalty: 30,
   });
   const ADAPT_INITIAL = Object.freeze({ multiplier: 1, missStreak: 0, okStreak: 0 });
 
@@ -274,12 +281,30 @@
     const o = { ...ADAPT_DEFAULTS, ...options };
     if (frameMs > o.targetMs * o.missFactor) {
       const missStreak = state.missStreak + 1;
-      if (missStreak < o.coarsenAfter) return { ...state, missStreak, okStreak: 0 };
+      if (missStreak < o.coarsenAfter) {
+        return { ...state, missStreak, okStreak: Math.max(0, state.okStreak - o.missPenalty) };
+      }
       return { multiplier: Math.min(o.maxMul, state.multiplier * o.coarsenStep), missStreak: 0, okStreak: 0 };
     }
     const okStreak = state.okStreak + 1;
-    if (okStreak < o.refineAfter) return { ...state, okStreak, missStreak: 0 };
+    const missStreak = state.missStreak * 0.75;
+    if (okStreak < o.refineAfter) return { ...state, okStreak, missStreak };
     return { multiplier: Math.max(o.minMul, state.multiplier / o.refineStep), missStreak: 0, okStreak: 0 };
+  }
+
+  // How the custom VR renderer spends a load multiplier (cost reduction
+  // asked of it, >= 1): volume resolution first, down to SPLIT_RES_MIN, then
+  // a longer ray step, capped at SPLIT_STEP_MAX. Headset benchmark
+  // 2026-10-21: 1.0 -> 0.8 resolution cut 28 %, 0.8 -> 0.6 nothing (texture
+  // cache), and steps beyond 2x look like grain, so neither goes further.
+  const SPLIT_RES_MIN = 0.8;
+  const SPLIT_STEP_MAX = 2;
+  const SPLIT_MAX_LOAD = SPLIT_STEP_MAX / (SPLIT_RES_MIN * SPLIT_RES_MIN);
+
+  function splitLoad(load) {
+    const res = Math.max(SPLIT_RES_MIN, Math.min(1, 1 / Math.sqrt(Math.max(1, load))));
+    const stepMul = Math.max(1, Math.min(SPLIT_STEP_MAX, load * res * res));
+    return { res, stepMul };
   }
 
   // ---------- volume reduction for the headset ----------
@@ -462,6 +487,6 @@
     PERF_DEFAULTS, HEADSET_PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
     physicalRotation, createStickRotator, centeredUserMatrix, rotatedPhysicalFrame,
     bodyBoundingBox, cropVolume, strideDownsample, toSixteenBit,
-    ADAPT_DEFAULTS, ADAPT_INITIAL, adaptSampleDistance,
+    ADAPT_DEFAULTS, ADAPT_INITIAL, adaptSampleDistance, SPLIT_MAX_LOAD, splitLoad,
   };
 });

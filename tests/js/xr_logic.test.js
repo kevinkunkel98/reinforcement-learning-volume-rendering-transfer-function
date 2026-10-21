@@ -447,7 +447,7 @@ test("toSixteenBit picks Int16 when the data goes negative", () => {
 
 test("parsePerfFlags takes per-device defaults, and explicit flags still win", () => {
   assert.deepEqual(xr.HEADSET_PERF_DEFAULTS, {
-    ...xr.PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 0.8, renderer: "custom", fovstep: 2,
+    ...xr.PERF_DEFAULTS, tex: "f16", down: 2, xrscale: 1, adapt: true, renderer: "custom", fovstep: 2,
   });
   assert.deepEqual(xr.parsePerfFlags("", xr.HEADSET_PERF_DEFAULTS), { ...xr.HEADSET_PERF_DEFAULTS });
   const explicit = xr.parsePerfFlags("?tex=f32&down=1&xrscale=1&crop=0&adapt=0&renderer=vtk", xr.HEADSET_PERF_DEFAULTS);
@@ -470,8 +470,14 @@ test("adaptSampleDistance coarsens after three consecutive missed frames", () =>
   assert.equal(runAdapt(xr.ADAPT_INITIAL, [MISS, MISS, MISS]).multiplier, 1.25);
 });
 
-test("adaptSampleDistance only counts consecutive misses", () => {
+test("adaptSampleDistance forgives a lone miss among on-time frames", () => {
   assert.equal(runAdapt(xr.ADAPT_INITIAL, [MISS, MISS, OK, MISS]).multiplier, 1);
+  assert.equal(runAdapt(xr.ADAPT_INITIAL, Array(10).fill([MISS, ...Array(29).fill(OK)]).flat()).multiplier, 1);
+});
+
+test("adaptSampleDistance coarsens when every other frame misses", () => {
+  // 45 fps on a 90 Hz display: misses never come three in a row.
+  assert.ok(runAdapt(xr.ADAPT_INITIAL, Array(10).fill([MISS, OK]).flat()).multiplier > 1);
 });
 
 test("adaptSampleDistance clamps coarsening at maxMul", () => {
@@ -483,6 +489,31 @@ test("adaptSampleDistance refines slowly after a sustained on-time run", () => {
   const state = { ...xr.ADAPT_INITIAL, multiplier: 2 };
   assert.equal(runAdapt(state, Array(89).fill(OK)).multiplier, 2);
   assert.equal(runAdapt(state, Array(90).fill(OK)).multiplier, 2 / 1.1);
+});
+
+test("adaptSampleDistance: isolated misses slow refinement instead of blocking it", () => {
+  // 87 fps on a 90 Hz display: one skipped refresh every 30 frames.
+  const second = (misses) => Array.from({ length: 90 }, (_, i) => (i % Math.floor(90 / misses) === 0 ? MISS : OK));
+  const state = { ...xr.ADAPT_INITIAL, multiplier: 2 };
+  // one miss a second still refines within ~2 s ...
+  assert.ok(runAdapt(state, [...second(1), ...second(1)]).multiplier < 2);
+  // ... three a second hold the step (no ratchet either way)
+  assert.equal(runAdapt(state, [...second(3), ...second(3), ...second(3)]).multiplier, 2);
+});
+
+test("splitLoad lowers the volume resolution before coarsening the step", () => {
+  assert.deepEqual(xr.splitLoad(1), { res: 1, stepMul: 1 });
+  const light = xr.splitLoad(1.21);
+  assert.equal(light.stepMul, 1);
+  assert.ok(Math.abs(light.res - 1 / 1.1) < 1e-9);
+  const heavy = xr.splitLoad(2.5);
+  assert.equal(heavy.res, 0.8);
+  assert.ok(Math.abs(heavy.stepMul - 2.5 * 0.64) < 1e-9);
+});
+
+test("splitLoad caps the step however high the load", () => {
+  assert.deepEqual(xr.splitLoad(100), { res: 0.8, stepMul: 2 });
+  assert.ok(Math.abs(xr.SPLIT_MAX_LOAD - 2 / 0.64) < 1e-9);
 });
 
 test("adaptSampleDistance never refines below minMul", () => {

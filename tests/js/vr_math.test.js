@@ -78,3 +78,24 @@ test("modelMatrix turns the placed volume by yaw about the room's vertical", () 
   // +x data (1000 mm) ends up along -z in the room after a 90° turn left
   assert.ok(close(m.transformPoint(M, [1000, 0, 0]), [0, 0, -1]), `${m.transformPoint(M, [1000, 0, 0])}`);
 });
+
+test("screenRect bounds the projected box in NDC", () => {
+  const P = m.perspective(Math.PI / 2, 1, 0.1, 100);
+  const V = m.lookAt([0, 0, 10], [0, 0, 0], [0, 1, 0]);
+  const rect = m.screenRect(m.multiply(P, V), [-1, -1, -1], [1, 1, 1]);
+  // nearest face at distance 9, 90 degree fov: half-width 1/9
+  assert.ok(close(rect, [-1 / 9, -1 / 9, 1 / 9, 1 / 9]));
+});
+
+test("screenRect clamps to the screen, and a box around the eye covers all of it", () => {
+  const P = m.perspective(Math.PI / 2, 1, 0.1, 100);
+  const V = m.lookAt([0, 0, 2], [0, 0, 0], [0, 1, 0]);
+  assert.deepEqual(m.screenRect(m.multiply(P, V), [-50, -50, -1], [50, 50, 1]), [-1, -1, 1, 1]);
+  assert.deepEqual(m.screenRect(m.multiply(P, V), [-1, -1, -1], [1, 1, 5]), [-1, -1, 1, 1]);
+});
+
+test("screenRect of a box behind the viewer is null", () => {
+  const P = m.perspective(Math.PI / 2, 1, 0.1, 100);
+  const V = m.lookAt([0, 0, 10], [0, 0, 20], [0, 1, 0]);
+  assert.equal(m.screenRect(m.multiply(P, V), [-1, -1, -1], [1, 1, 1]), null);
+});

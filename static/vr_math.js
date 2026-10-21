@@ -127,8 +127,31 @@
       -dot(x, eye), -dot(y, eye), -dot(z, eye), 1]);
   }
 
+  // NDC rectangle [x0, y0, x1, y1] covering box [lo, hi] under `mvp`,
+  // clamped to the screen; the whole screen if a corner is at or behind
+  // the eye plane (the projection folds there); null if the box is
+  // entirely behind the eye or off-screen. Lets the ray marcher scissor to
+  // the volume instead of running every pixel of the eye.
+  function screenRect(mvp, lo, hi) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    let behind = 0;
+    for (let c = 0; c < 8; c += 1) {
+      const p = [c & 1 ? hi[0] : lo[0], c & 2 ? hi[1] : lo[1], c & 4 ? hi[2] : lo[2]];
+      const w = mvp[3] * p[0] + mvp[7] * p[1] + mvp[11] * p[2] + mvp[15];
+      if (w <= 1e-6) { behind += 1; continue; }
+      const x = (mvp[0] * p[0] + mvp[4] * p[1] + mvp[8] * p[2] + mvp[12]) / w;
+      const y = (mvp[1] * p[0] + mvp[5] * p[1] + mvp[9] * p[2] + mvp[13]) / w;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+      y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    if (behind === 8) return null;
+    if (behind > 0) return [-1, -1, 1, 1];
+    const rect = [Math.max(-1, x0), Math.max(-1, y0), Math.min(1, x1), Math.min(1, y1)];
+    return rect[0] >= rect[2] || rect[1] >= rect[3] ? null : rect;
+  }
+
   return {
-    identity, multiply, invert, translation, scaling, fromRotation, transformPoint,
+    identity, multiply, invert, translation, scaling, fromRotation, transformPoint, screenRect,
     modelMatrix, placeInFront, rayBoxExit, perspective, lookAt,
   };
 });

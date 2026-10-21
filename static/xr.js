@@ -31,6 +31,8 @@
   let lastFrameTime = null;
   let frames = 0;
   let fpsSince = null;
+  let worstMs = 0; // longest frame interval this second
+  let lateFrames = 0; // intervals over 1.5 display refreshes this second
   let mapper = null; // fresh per session, so a trigger held at exit can't carry over
   let sticks = null; // thumbstick rotation, fresh per session
   let lastStickTime = null;
@@ -217,13 +219,21 @@
     if (!session) return;
     session.requestAnimationFrame(onXRFrame);
     if (adapt && lastFrameTime !== null) {
-      const next = logic.adaptSampleDistance(adapt, time - lastFrameTime);
+      const next = logic.adaptSampleDistance(adapt, time - lastFrameTime, target.adaptOptions);
       if (next.multiplier !== adapt.multiplier) target.setXRSampleMultiplier(next.multiplier);
       adapt = next;
     }
+    if (lastFrameTime !== null) {
+      const dt = time - lastFrameTime;
+      worstMs = Math.max(worstMs, dt);
+      if (dt > 1.5 * (1000 / 90)) lateFrames += 1;
+    }
     lastFrameTime = time;
-    // Frame rate on the panel, refreshed once a second (a redraw re-uploads
-    // the panel texture, so not every frame).
+    // Frame rate, measured once a second. Not redrawn onto the panel here:
+    // a redraw re-uploads the 2048x1520 panel texture with mipmaps, 30-35 ms
+    // on the Focus 3 -- a one-frame hitch every second (2026-10-21). The
+    // panel's debug lines show the numbers as of its last content change;
+    // the live record is the [xr-perf] line in logcat.
     frames += 1;
     if (fpsSince === null) fpsSince = time;
     if (time - fpsSince >= 1000) {
@@ -231,9 +241,10 @@
       frameMs = (time - fpsSince) / frames;
       frames = 0;
       fpsSince = time;
-      drawHud();
-      // Same record for remote DevTools / logcat captures.
-      console.info("[xr-perf]", ...logic.diagnosticLines(target.getXRDiagnostics(), fps, frameMs));
+      console.info("[xr-perf]", ...logic.diagnosticLines(target.getXRDiagnostics(), fps, frameMs),
+        `worst=${worstMs.toFixed(0)}ms late=${lateFrames}`);
+      worstMs = 0;
+      lateFrames = 0;
     }
     const sources = [];
     const stickSources = [];

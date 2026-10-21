@@ -11,11 +11,13 @@
   // than they skip: with the default TF (0.82 occupied) turning skipping off
   // was 8-10 % faster on the headset benchmark (2026-10-19).
   const SKIP_MAX_OCCUPIED = 0.6;
-  // While the stick turns the volume (and briefly after), rays step this much
-  // farther (3x felt smoother than 2x in the headset, no visible cost): turned end-on, a body scan's rays cross far more tissue and read
-  // it against the texture's cache layout, and motion hides the coarser
-  // sampling. The still image keeps the full rate.
-  const MOTION_STEP = 3;
+  // While the stick turns the volume (and briefly after), the load handed to
+  // xrLogic.splitLoad is this much higher: turned end-on, a body scan's rays
+  // cross far more tissue and read it against the texture's cache layout,
+  // and motion hides lower resolution better than coarse steps. (Until
+  // 2026-10-21 a flat 3x step, which on top of the adaptive step reached
+  // 36 mm and looked like mush.)
+  const MOTION_LOAD = 2;
   const MOTION_HOLD_MS = 250;
 
   const VOLUME_VS = `#version 300 es
@@ -46,10 +48,14 @@ uniform float uLit;        // 1 = gradient lighting on
 uniform float uFovStep;    // step multiplier at the view's edge (1 = uniform)
 uniform vec2 uFovCenter;   // NDC of the eye's optical axis
 uniform float uEmptyStride; // step multiplier after a fully transparent sample
+uniform vec2 uSurface;     // gradient (HU/mm) where lighting fades in / is full
 in vec2 vNdc;
 out vec4 outColor;
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+// Interleaved gradient noise (Jimenez 2014): neighbouring pixels get well
+// spread ray offsets, so step aliasing reads as fine even grain instead of
+// white-noise speckle.
+float hash(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 
 vec2 boxHit(vec3 ro, vec3 inv, vec3 lo, vec3 hi) {
   vec3 t0 = (lo - ro) * inv;
@@ -109,11 +115,17 @@ void main() {
         texture(uHu, tc + vec3(0.0, 0.0, texel.z)).r) - hu) / uSpacing;
       float glen = length(g);
       vec3 rgb = c.rgb * (uLight.x + uLight.y);
-      if (glen > 1e-3) {
+      // Inside homogeneous tissue the gradient is CT noise: its "normal"
+      // points anywhere and caught specular highlights as white dots that
+      // flickered as the volume turned. Light only real surfaces, fading in
+      // over uSurface.
+      float surface = smoothstep(uSurface.x, uSurface.y, glen);
+      if (surface > 0.0) {
         vec3 n = -g / glen;
         vec3 l = normalize(uEye - p);
         float ndl = abs(dot(n, l));
-        rgb = c.rgb * (uLight.x + uLight.y * ndl) + uLight.z * pow(ndl, uLight.w);
+        vec3 lit = c.rgb * (uLight.x + uLight.y * ndl) + uLight.z * pow(ndl, uLight.w);
+        rgb = mix(rgb, lit, surface);
       }
       acc.rgb += weight * rgb;
       acc.a += weight;
@@ -127,6 +139,15 @@ void main() {
   }
   outColor = acc;
 }`;
+
+  // Upscales the reduced-resolution volume image into one eye's viewport.
+  const UPSCALE_FS = `#version 300 es
+precision mediump float;
+uniform sampler2D uTex;
+uniform vec4 uRect;  // this eye's region in uTex: min uv, max uv (texel-inset)
+in vec2 vNdc;
+out vec4 outColor;
+void main() { outColor = texture(uTex, clamp(mix(uRect.xy, uRect.zw, vNdc * 0.5 + 0.5), uRect.xy, uRect.zw)); }`;
 
   const HUD_VS = `#version 300 es
 in vec3 aPos;
@@ -231,7 +252,10 @@ void main() { outColor = texture(uTex, vUv); }`;
     setTransferFunction(data.params, data.layers, Boolean(labels));
 
     const baseStep = Math.min(...spacing);
-    const state = { step: baseStep, skip: true, lit: true, fovStep: 1, emptyStride: 2, motion: 1 };
+    // surface: HU/mm gradient range over which lighting fades in (tuned in
+    // the headset 2026-10-21; soft-tissue noise at down=2 sits below it).
+    // stepMul: from xrLogic.splitLoad each frame (1 outside VR).
+    const state = { step: baseStep, skip: true, lit: true, fovStep: 1, emptyStride: 2, stepMul: 1, surface: [10, 60] };
 
     // Draw the volume for one view into the bound framebuffer/viewport.
     // `model`: data mm -> room m; `view`: room -> eye; `proj`: eye -> clip.
@@ -250,8 +274,8 @@ void main() { outColor = texture(uTex, vUv); }`;
       gl.uniformMatrix4fv(u.uInvMvp, false, invMvp);
       gl.uniform3fv(u.uDims, dims);
       gl.uniform3fv(u.uSpacing, spacing);
-      gl.uniform1f(u.uStep, state.step * state.motion);
-      gl.uniform1f(u.uOpacityExp, state.step * state.motion / data.unitDistance);
+      gl.uniform1f(u.uStep, state.step * state.stepMul);
+      gl.uniform1f(u.uOpacityExp, state.step * state.stepMul / data.unitDistance);
       gl.uniform1f(u.uRows, rowCount);
       gl.uniform2f(u.uHuRange, -1050, 2000);
       gl.uniform3fv(u.uEye, eye);
@@ -260,6 +284,7 @@ void main() { outColor = texture(uTex, vUv); }`;
       gl.uniform1f(u.uLit, state.lit ? 1 : 0);
       gl.uniform1f(u.uFovStep, state.fovStep);
       gl.uniform1f(u.uEmptyStride, state.emptyStride);
+      gl.uniform2fv(u.uSurface, state.surface);
       // Where the eye's forward axis lands on screen (asymmetric per-eye
       // frusta put it off-centre).
       const axis = window.vrMath.transformPoint(proj, [0, 0, -1]);
@@ -329,12 +354,50 @@ void main() { outColor = texture(uTex, vUv); }`;
     function dispose() {
       [huTex, labelTex, occTex, tfTex, hud?.tex].forEach((t) => t && gl.deleteTexture(t));
       [quadBuffer, hud?.buffer].forEach((b) => b && gl.deleteBuffer(b));
+      if (offscreen) { gl.deleteTexture(offscreen.tex); gl.deleteFramebuffer(offscreen.fbo); }
+      gl.deleteProgram(upscaleProgram.program);
       gl.deleteProgram(volumeProgram.program);
       gl.deleteProgram(hudProgram.program);
     }
 
+    // Reduced-resolution volume target: both eyes render into the
+    // lower-left `res` share of a texture the layer's size, then upscale.
+    const upscaleProgram = compile(gl, VOLUME_VS, UPSCALE_FS);
+    let offscreen = null;
+    function ensureOffscreen(w, h) {
+      if (offscreen && offscreen.w === w && offscreen.h === h) return offscreen;
+      if (offscreen) { gl.deleteTexture(offscreen.tex); gl.deleteFramebuffer(offscreen.fbo); }
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+      for (const p of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, p, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      offscreen = { w, h, tex, fbo };
+      return offscreen;
+    }
+    // `rect`: [x, y, w, h] in texels of the offscreen texture.
+    function upscale(rect) {
+      const { program, uniforms: u } = upscaleProgram;
+      gl.useProgram(program);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, offscreen.tex);
+      gl.uniform1i(u.uTex, 0);
+      const [x, y, w, h] = rect;
+      gl.uniform4f(u.uRect, (x + 0.5) / offscreen.w, (y + 0.5) / offscreen.h,
+        (x + w - 0.5) / offscreen.w, (y + h - 0.5) / offscreen.h);
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(quad);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindVertexArray(null);
+    }
+
     return {
-      dims, spacing, baseStep, state, drawVolume, drawHud, setHud, refreshHud,
+      dims, spacing, baseStep, state, drawVolume, drawHud, setHud, refreshHud, ensureOffscreen, upscale,
       setTransferFunction, dispose, get occupied() { return occupied; },
     };
   }
@@ -408,9 +471,13 @@ void main() { outColor = texture(uTex, vUv); }`;
     // Placed in front of the viewer on the first pose and on each recenter,
     // not at a fixed spot in the reference space.
     let placeNext = true;
+    // The box the shader marches, in data mm (downsampled grid).
+    const boxHi = scene.dims.map((d, i) => (d - 1) * scene.spacing[i]);
     const identity3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
     let rotation = identity3;
     let movedAt = -Infinity;
+    let load = 1; // from the adaptive controller (xr.js), via setXRSampleMultiplier
+    let split = { res: 1, stepMul: 1 };
     let background = [0, 0, 0];
     const unsubscribe = window.volumeViewer.onTransferFunctionChange((params, layers, labelled) =>
       scene.setTransferFunction(params, layers, labelled));
@@ -420,20 +487,64 @@ void main() { outColor = texture(uTex, vUv); }`;
       xrSession.requestAnimationFrame(onFrame);
       const pose = frame.getViewerPose(space);
       if (!pose) return;
-      scene.state.motion = time - movedAt < MOTION_HOLD_MS ? MOTION_STEP : 1;
+      // performance.now(), not the XR frame `time`: setRotation stamps
+      // movedAt with it, and Wolvic's XR time runs on another base, which
+      // left the motion load on for the rest of the session after one turn.
+      const moving = performance.now() - movedAt < MOTION_HOLD_MS;
+      split = window.xrLogic.splitLoad(Math.min(window.xrLogic.SPLIT_MAX_LOAD, load * (moving ? MOTION_LOAD : 1)));
+      scene.state.stepMul = split.stepMul;
       if (placeNext) {
         Object.assign(placement, window.vrMath.placeInFront(pose.transform.matrix, XR_DISTANCE_M));
         placeNext = false;
       }
+      const model = window.vrMath.modelMatrix({ ...placement, rotation });
+      const hudModel = window.vrMath.modelMatrix({ ...placement, rotation: identity3 });
+      // Below full resolution the volume goes through the offscreen
+      // target; the panel is always drawn at the layer's full resolution.
+      const reduced = split.res < 0.999;
+      // Volume passes are scissored to the box's projected rectangle: at
+      // 0.9 m the body covers a small part of each eye, and a full-eye pass
+      // ran the shader (and the upscale read) for every pixel.
+      const ndc = new Map(pose.views.map((view) => [view, window.vrMath.screenRect(
+        window.vrMath.multiply(view.projectionMatrix, window.vrMath.multiply(view.transform.inverse.matrix, model)),
+        [0, 0, 0], boxHi)]));
+      const scissorTo = (rect, [x, y, w, h]) => {
+        const x0 = Math.max(x, Math.floor(x + (rect[0] + 1) / 2 * w) - 2);
+        const y0 = Math.max(y, Math.floor(y + (rect[1] + 1) / 2 * h) - 2);
+        const x1 = Math.min(x + w, Math.ceil(x + (rect[2] + 1) / 2 * w) + 2);
+        const y1 = Math.min(y + h, Math.ceil(y + (rect[3] + 1) / 2 * h) + 2);
+        gl.scissor(x0, y0, x1 - x0, y1 - y0);
+      };
+      const rects = new Map();
+      if (reduced) {
+        const target = scene.ensureOffscreen(layer.framebufferWidth, layer.framebufferHeight);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+        gl.enable(gl.SCISSOR_TEST);
+        for (const view of pose.views) {
+          const vp = layer.getViewport(view);
+          const rect = [vp.x, vp.y, vp.width, vp.height].map((v) => Math.round(v * split.res));
+          rects.set(view, rect);
+          if (!ndc.get(view)) continue;
+          gl.viewport(...rect);
+          scissorTo(ndc.get(view), rect);
+          scene.drawVolume(model, view.transform.inverse.matrix, view.projectionMatrix);
+        }
+        gl.disable(gl.SCISSOR_TEST);
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
       gl.clearColor(...background, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      const model = window.vrMath.modelMatrix({ ...placement, rotation });
-      const hudModel = window.vrMath.modelMatrix({ ...placement, rotation: identity3 });
       for (const view of pose.views) {
         const vp = layer.getViewport(view);
-        gl.viewport(vp.x, vp.y, vp.width, vp.height);
-        scene.drawVolume(model, view.transform.inverse.matrix, view.projectionMatrix);
+        const full = [vp.x, vp.y, vp.width, vp.height];
+        gl.viewport(...full);
+        if (ndc.get(view)) {
+          gl.enable(gl.SCISSOR_TEST);
+          scissorTo(ndc.get(view), full);
+          if (reduced) scene.upscale(rects.get(view));
+          else scene.drawVolume(model, view.transform.inverse.matrix, view.projectionMatrix);
+          gl.disable(gl.SCISSOR_TEST);
+        }
         scene.drawHud(hudModel, view.transform.inverse.matrix, view.projectionMatrix);
       }
     }
@@ -443,6 +554,8 @@ void main() { outColor = texture(uTex, vUv); }`;
       setRotation(r) { rotation = r; movedAt = performance.now(); },
       recenter() { placeNext = true; },
       setBackground(rgb) { background = rgb; },
+      setLoad(m) { load = m; },
+      get split() { return split; },
     };
     xrSession.requestAnimationFrame(onFrame);
   }
@@ -461,14 +574,20 @@ void main() { outColor = texture(uTex, vUv); }`;
     getPhysicalRotation: () => session.base,
     setVolumeRotation: (rotation) => session?.setRotation(rotation),
     recenter: () => session?.recenter(),
-    setXRSampleMultiplier: (m) => { if (session) session.scene.state.step = session.scene.baseStep * m; },
+    // The adaptive controller's multiplier is a load for xrLogic.splitLoad
+    // here (resolution, then step), not a plain step multiplier.
+    setXRSampleMultiplier: (m) => session?.setLoad(m),
+    get adaptOptions() { return { maxMul: window.xrLogic.SPLIT_MAX_LOAD }; },
     setBackground: (rgb) => session?.setBackground(rgb),
+    // Live tuning from the debugger (tools/headset/page.py), e.g. surface.
+    get state() { return session?.scene.state; },
     getHudFrame: () => ({ bounds: session.bounds, up: session.up, dop: session.north }),
     setHud: (canvas, corners) => session?.scene.setHud(canvas, corners),
     refreshHud: () => session?.scene.refreshHud(),
     getXRDiagnostics: () => (session ? {
-      xrCapable: true, sampleDistance: session.scene.state.step, autoAdjust: false, shade: true,
-      dimensions: session.scene.dims, texture: `R16F+R8 occ=${session.scene.occupied.toFixed(2)}`,
+      xrCapable: true, sampleDistance: session.scene.state.step * session.split.stepMul, autoAdjust: false, shade: true,
+      dimensions: session.scene.dims,
+      texture: `R16F+R8 occ=${session.scene.occupied.toFixed(2)} res=${session.split.res.toFixed(2)}`,
       floatLinear: true, foveation: null, framebufferScale: window.volumeViewer.perfFlags.xrscale,
       flags: window.volumeViewer.perfFlags,
     } : {}),
