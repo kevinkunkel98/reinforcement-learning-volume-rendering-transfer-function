@@ -16,6 +16,7 @@ list when the phrase does not pin one down ("the lungs are barely visible").
 """
 import argparse
 import json
+import time
 
 import commands
 from commands import parse_command_llm, parse_command_rule
@@ -72,6 +73,15 @@ def matches(expected, actual, with_strength: bool = True) -> bool:
     return any(_canonical(option, with_strength) == got for option in _strength_options(expected))
 
 
+def percentile(values, q):
+    """Nearest-rank percentile (q in 0..100), None for no values."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(1, -(-q * len(ordered) // 100))  # ceil
+    return ordered[int(rank) - 1]
+
+
 def run_parser(fn, text):
     try:
         return fn(text)
@@ -80,14 +90,16 @@ def run_parser(fn, text):
 
 
 def score(rows, parsers: dict) -> dict:
-    """{parser: [(row, actual, exact_ok, intent_ok), ...]}"""
+    """{parser: [(row, actual, exact_ok, intent_ok, ms), ...]}"""
     results = {}
     for name, fn in parsers.items():
         results[name] = []
         for row in rows:
+            start = time.perf_counter()
             actual = run_parser(fn, row["text"])
+            ms = (time.perf_counter() - start) * 1000
             results[name].append((row, actual, matches(row["expected"], actual, True),
-                                  matches(row["expected"], actual, False)))
+                                  matches(row["expected"], actual, False), ms))
     return results
 
 
@@ -97,14 +109,19 @@ def main(argv=None):
     ap.add_argument("--parsers", default="rule,llm")
     ap.add_argument("--split", default="dev,heldout")
     ap.add_argument("--show-heldout", action="store_true", help="also list held-out failures")
+    ap.add_argument("--set", default="base", choices=sorted(EVAL_SETS))
+    ap.add_argument("--format", default=None, choices=["json", "schema"],
+                    help="LLM output format (default: commands.LLM_FORMAT)")
     args = ap.parse_args(argv)
+    if args.format:
+        commands.LLM_FORMAT = args.format
 
     available = {"rule": parse_command_rule,
                  "llm": lambda t: parse_command_llm(t, model=args.llm_model)}
     parsers = {name: available[name] for name in args.parsers.split(",")}
     # The request log is a record of real viewer use; evaluation calls stay out of it.
     commands.LLM_LOG_PATH = "out/llm_requests_eval.jsonl"
-    with open(EVAL_SET_PATH) as f:
+    with open(EVAL_SETS[args.set]) as f:
         rows = [r for r in json.load(f) if r["split"] in args.split.split(",")]
     results = score(rows, parsers)
 
@@ -112,20 +129,25 @@ def main(argv=None):
         for split in args.split.split(","):
             if split == "heldout" and not args.show_heldout:
                 continue
-            failures = [(r, a) for r, a, ok, _ in rs if r["split"] == split and not ok]
+            failures = [(r, a) for r, a, ok, _, _ in rs if r["split"] == split and not ok]
             if failures:
                 print(f"\n{name} failures ({split}):")
                 for r, a in failures:
                     print(f"  {r['text']!r}\n     expected {r['expected']}\n     got      {a}")
 
-    print(f"\n{'parser':<6} {'split':<8} {'n':>3}  {'exact':>6}  {'intent':>6}")
+    print(f"\n{'parser':<7} {'split':<8} {'source':<15} {'n':>3}  {'exact':>6}  {'intent':>6}  {'p50ms':>6}  {'p90ms':>6}")
     for name, rs in results.items():
         for split in args.split.split(","):
             part = [x for x in rs if x[0]["split"] == split]
-            if part:
-                n = len(part)
-                print(f"{name:<6} {split:<8} {n:>3}  {sum(x[2] for x in part) / n:6.0%}  "
-                      f"{sum(x[3] for x in part) / n:6.0%}")
+            groups = [("all", part)] + [(s, [x for x in part if x[0]["source"] == s])
+                                        for s in sorted({x[0]["source"] for x in part})]
+            for source, rows_ in groups:
+                if not rows_ or (source != "all" and len(groups) == 2):
+                    continue
+                n = len(rows_)
+                ms = [x[4] for x in rows_]
+                print(f"{name:<7} {split:<8} {source:<15} {n:>3}  {sum(x[2] for x in rows_) / n:6.0%}  "
+                      f"{sum(x[3] for x in rows_) / n:6.0%}  {percentile(ms, 50):6.0f}  {percentile(ms, 90):6.0f}")
 
 
 if __name__ == "__main__":
