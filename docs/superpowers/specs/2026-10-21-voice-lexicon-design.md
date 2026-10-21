@@ -128,8 +128,8 @@ colleagues, and variants written by Claude and reviewed by the author. Split
 `dev` (lexicon work is done against it) and `heldout` (written before any
 lexicon work, reporting only).
 
-**Audio set**: a server switch saves each recording with its transcript to
-`out/audio/`. The author records 30–40 commands once; reference text per clip.
+**Audio set**: `/api/transcribe` already saves each recording with its
+transcript to `out/audio/`. The author records 30–40 commands once; reference text per clip.
 Measured: word error rate and end-to-end command accuracy for faster-whisper
 vs mlx-whisper, small vs turbo, with and without the lexicon `initial_prompt`.
 
@@ -142,6 +142,12 @@ realistic held-out with LLM p90 within its budget.
 ≤ 4 s, measured in the headset.
 
 ## Error handling
+
+- Whisper hallucinations: the 2026-10-21 recordings contain "You" eleven times
+  and two invented sentences from silence or noise. Voice-activity filtering
+  (faster-whisper `vad_filter`) plus a filter for known hallucination phrases
+  and over-long transcripts; a filtered recording is reported as "No speech
+  recognised" and never reaches the parser.
 
 - Server start: check Ollama is reachable and the model is present; warn
   loudly if not; preload the model (`keep_alive`) so the first command has no
