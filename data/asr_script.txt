@@ -1,0 +1,36 @@
+show only bones
+add kidneys
+make the liver translucent
+mute the bones
+solo vessels
+darken the skeleton
+lighten the lungs
+highlight the heart
+reveal the skeleton
+fade out the soft tissue
+ghost the muscles a bit
+crank up the lungs
+dial the heart down a touch
+make the ribcage pop
+alpha up on the vessels
+make the lungs see-through
+narrower peak for the skeleton
+shift the bone peak up
+brighten the kidneys a lot
+the spleen is way too dark
+back to default
+turn off the soft tissue
+show me just the heart please
+more aorta, less muscle
+hide the bones and brighten the liver
+show only the kidneys
+make the liver more visible
+rotate left
+zoom in a bit
+focus on the vessels
+the backbone is barely visible
+set the heart to high
+make the vessels a little more solid
+everything except the skeleton should go away
+I can't see the kidneys
+reset
