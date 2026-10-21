@@ -1144,3 +1144,54 @@ def test_hybrid_still_parses_when_the_utterance_log_cannot_be_written(monkeypatc
     cmd, meta = commands.parse_command_hybrid("add kidneys")
     assert cmd["target"] == "kidneys" and meta["path"] == "rule"
     assert "utterance log" in capsys.readouterr().out
+
+
+def test_llm_prompt_lists_lexicon_cue_phrases():
+    assert '"fade out"' in commands._SYSTEM_PROMPT
+    assert "see-through" in commands._SYSTEM_PROMPT
+
+
+def test_command_schema_allows_each_command_shape():
+    schema = commands.command_schema()
+    shapes = schema["anyOf"]
+    assert len(shapes) == 4
+    single = shapes[0]
+    assert single["properties"]["target"]["anyOf"][0]["enum"] == list(commands.CLASS_SYNONYMS)
+
+
+def _capture_body(monkeypatch):
+    sent = {}
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"response": json.dumps({"target": "liver", "attribute": "opacity",
+                                                       "direction": "increase", "strength": "moderately"})}).encode()
+
+    def fake_urlopen(req, timeout=None):
+        sent.update(json.loads(req.data.decode()))
+        return Resp()
+    monkeypatch.setattr(commands, "urlopen", fake_urlopen)
+    return sent
+
+
+def test_llm_request_uses_the_schema_and_turns_thinking_off_for_thinking_models(monkeypatch):
+    sent = _capture_body(monkeypatch)
+    commands.parse_command_llm("add liver", model="qwen3.5:4b")
+    assert sent["format"] == commands.command_schema()
+    assert sent["think"] is False
+    sent.clear()
+    commands.parse_command_llm("add liver", model="qwen2.5:7b")
+    assert "think" not in sent
+
+
+def test_llm_format_json_is_still_available(monkeypatch):
+    sent = _capture_body(monkeypatch)
+    monkeypatch.setattr(commands, "LLM_FORMAT", "json")
+    commands.parse_command_llm("add liver")
+    assert sent["format"] == "json"

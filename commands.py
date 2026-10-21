@@ -638,6 +638,32 @@ VALID_CAMERA_ACTIONS = {
     "zoom": {"in", "out"},
 }
 VALID_CAMERA_STRENGTHS = set(STRENGTH_WORDS)  # camera strength has no null case, unlike top-level strength (reset/show_only)
+LLM_FORMAT = "schema"  # "schema": constrained decoding to command_schema(); "json": any JSON
+THINKING_MODEL_PREFIXES = ("qwen3", "deepseek-r1", "magistral", "gpt-oss")
+
+
+def command_schema() -> dict:
+    """JSON schema of every answer shape, for Ollama's constrained decoding.
+    Validation after decoding stays (_validate_cmd): the schema only keeps
+    the model from producing shapes that can never be right."""
+    cls = {"enum": list(CLASS_SYNONYMS)}
+    strength = {"enum": ["slightly", "moderately", "strongly", None]}
+    single = {"type": "object", "properties": {
+        "target": {"anyOf": [cls, {"type": "array", "items": cls}, {"type": "null"}]},
+        "attribute": {"enum": ["opacity", "width", "brightness", "center", None]},
+        "direction": {"enum": ["increase", "decrease", "show_only", "reset", "set"]},
+        "strength": strength,
+        "level": {"enum": ["low", "medium", "high"]},
+    }, "required": ["target", "attribute", "direction"]}
+    compound = {"type": "object", "properties": {"compound": {"type": "array", "items": single, "minItems": 1}},
+                "required": ["compound"]}
+    camera = {"type": "object", "properties": {"camera": {"type": "object", "properties": {
+        "action": {"enum": ["rotate", "tilt", "zoom"]},
+        "direction": {"enum": ["left", "right", "up", "down", "in", "out"]},
+        "strength": {"enum": ["slightly", "moderately", "strongly"]},
+    }, "required": ["action", "direction", "strength"]}}, "required": ["camera"]}
+    none = {"type": "object", "properties": {"none": {"type": "boolean"}}, "required": ["none"]}
+    return {"anyOf": [single, compound, camera, none]}
 
 
 def _validate_camera_cmd(obj) -> bool:
@@ -665,6 +691,14 @@ def _class_synonym_lines() -> str:
     return "\n".join(lines)
 
 
+def _cue_lines() -> str:
+    lines = []
+    for entry in _LEX["phrases"]:
+        fields = ", ".join(f"{k} {v}" for k, v in entry["sets"].items())
+        lines.append(f"- {', '.join(_json.dumps(p) for p in entry['say'])}: {fields}")
+    return "\n".join(lines)
+
+
 _SYSTEM_PROMPT = f"""You convert one spoken instruction about a volume-rendering \
 transfer function into strict JSON, nothing else.
 
@@ -675,6 +709,10 @@ these back to the exact class name on the left, never invent a different one:
 Promoted anatomy has dedicated classes: heart/cardiac, liver, kidney(s)/renal,
 and spleen. "vessels" includes vessel, aorta, and vena cava. "soft" covers
 unpromoted organs and muscle. "fat", "air" and "spongy" are not supported.
+
+Phrases people use, and the command fields they mean (strength "moderately"
+unless the phrase or a modifier says otherwise):
+{_cue_lines()}
 
 Output schema -- the usual case is a single command:
 {{"target": "<class>|[<class>, ...]|null", "attribute": "opacity"|"width"|"brightness"|"center"|null,
@@ -931,11 +969,11 @@ def parse_command_llm(text: str, model: str = DEFAULT_LLM_MODEL, host: str = Non
     # deployment) that points OLLAMA_HOST somewhere else is honoured by
     # callers that never pass it explicitly.
     host = host if host is not None else OLLAMA_HOST
-    body = _json.dumps({
+    request = {
         "model": model,
         "system": _SYSTEM_PROMPT,
         "prompt": text,
-        "format": "json",
+        "format": command_schema() if LLM_FORMAT == "schema" else "json",
         "stream": False,
         # Keep the model resident between commands -- Ollama's default 5-minute
         # idle unload means any gap between commands pays an 8-10s reload cost
@@ -948,7 +986,11 @@ def parse_command_llm(text: str, model: str = DEFAULT_LLM_MODEL, host: str = Non
         # the next -- two of the seven "failures" in the first evaluation of
         # this parser were only sampling noise.
         "options": {"temperature": 0, "seed": 0},
-    }).encode()
+    }
+    if model.startswith(THINKING_MODEL_PREFIXES):
+        # Thinking adds seconds of hidden tokens to a one-line answer.
+        request["think"] = False
+    body = _json.dumps(request).encode()
     req = Request(f"{host}/api/generate", data=body,
                    headers={"Content-Type": "application/json"})
     try:
