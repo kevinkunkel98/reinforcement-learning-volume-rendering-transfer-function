@@ -1083,3 +1083,17 @@ def test_with_meta_hybrid_carries_the_path(monkeypatch):
     cmd, meta = commands.parse_command_with_meta("add kidneys", parser="hybrid")
     assert meta["parser_requested"] == "hybrid" and meta["parser_used"] == "rule"
     assert meta["normalized"] == "add kidneys"
+
+
+@pytest.mark.parametrize("text, attribute, direction", [
+    ("make the lungs less transparent", "opacity", "increase"),
+    ("the bones are too transparent", "opacity", "increase"),
+    ("the bones are too solid", "opacity", "decrease"),
+    ("make the liver less dim", "brightness", "increase"),
+    ("the liver is too dim", "brightness", "increase"),
+    ("make the lungs more transparent", "opacity", "decrease"),
+    ("less opaque bones", "opacity", "decrease"),
+])
+def test_negators_before_a_cue_flip_its_direction(text, attribute, direction):
+    cmd = parse_command_rule(text)
+    assert (cmd["attribute"], cmd["direction"]) == (attribute, direction)

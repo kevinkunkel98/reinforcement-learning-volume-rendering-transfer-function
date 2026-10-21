@@ -83,16 +83,25 @@ def load(path: str = LEXICON_PATH) -> dict:
 def _cue_patterns(lex: dict):
     pairs = [(phrase, entry["sets"]) for entry in lex["phrases"] for phrase in entry["say"]]
     pairs.sort(key=lambda p: -len(p[0]))
-    return [(re.compile(rf"\b{re.escape(p)}(?:s|es|ed|ing)?\b"), sets) for p, sets in pairs]
+    return [(re.compile(rf"\b{re.escape(p)}(?:s|es|ed|ing)?\b"), sets, p) for p, sets in pairs]
+
+
+def find_cue_match(text: str, lex: dict):
+    """(sets, start, phrase) for the longest lexicon phrase in `text`
+    (lowercase): its command fields, where it starts and which phrase it was;
+    or None."""
+    for pattern, sets, phrase in _cached(lex, "cues", _cue_patterns):
+        m = pattern.search(text)
+        if m:
+            return dict(sets), m.start(), phrase
+    return None
 
 
 def find_cue(text: str, lex: dict):
     """The command fields of the longest lexicon phrase in `text` (lowercase),
     or None."""
-    for pattern, sets in _cached(lex, "cues", _cue_patterns):
-        if pattern.search(text):
-            return dict(sets)
-    return None
+    match = find_cue_match(text, lex)
+    return match[0] if match else None
 
 
 @functools.cache

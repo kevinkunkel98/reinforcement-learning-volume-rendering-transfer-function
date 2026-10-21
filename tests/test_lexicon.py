@@ -93,3 +93,11 @@ def test_uncovered_words_lists_content_words_outside_the_lexicon():
     assert lexicon.uncovered_words("show only the bones please", lex) == []
     assert lexicon.uncovered_words("make the lungs see-through", lex) == []
     assert lexicon.uncovered_words("everything except the skeleton should go away", lex) == ["except", "go", "away"]
+
+
+def test_find_cue_match_reports_where_and_which_phrase_matched():
+    lex = lexicon.load()
+    sets, start, phrase = lexicon.find_cue_match("make the lungs less transparent", lex)
+    assert sets["direction"] == "decrease" and phrase == "transparent"
+    assert "make the lungs less transparent"[start:].startswith("transparent")
+    assert lexicon.find_cue_match("add kidneys", lex) is None

@@ -267,6 +267,9 @@ def _free_direction(clause: str, attribute: str):
     return None
 
 
+_NEGATOR_RE = re.compile(r"\b(less|too|not|no longer)\b")
+
+
 def _parse_free_clause(clause: str, previous_target=None):
     """A clause in everyday words: a class (named, misspelt, or "it"/"them"
     for the previous clause's class) plus a cue for what should happen to it --
@@ -283,11 +286,18 @@ def _parse_free_clause(clause: str, previous_target=None):
     if level:
         return [{"target": c, "attribute": attribute, "direction": "set", "level": level.group(1)}
                 for c in classes]
-    cue = lexicon.find_cue(clause, _LEX)
-    if cue and cue.get("direction") in ("increase", "decrease"):
+    match = lexicon.find_cue_match(clause, _LEX)
+    if match and match[0].get("direction") in ("increase", "decrease"):
+        cue, start, phrase = match
+        direction = cue["direction"]
+        # "less transparent", "too dim", "no longer solid" mean the opposite
+        # of the cue -- unless the phrase carries its own comparative
+        # ("less opaque", "more transparent").
+        if _NEGATOR_RE.search(clause[:start]) and not re.search(r"\b(less|more)\b", phrase):
+            direction = "increase" if direction == "decrease" else "decrease"
         attribute = cue.get("attribute", attribute)
         strength = _strength_in(clause, cue.get("strength", "moderately"))
-        return [{"target": c, "attribute": attribute, "direction": cue["direction"], "strength": strength}
+        return [{"target": c, "attribute": attribute, "direction": direction, "strength": strength}
                 for c in classes]
     direction = _free_direction(clause, attribute)
     if direction is None:
