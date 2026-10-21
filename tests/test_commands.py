@@ -1000,3 +1000,23 @@ def test_new_strength_words_from_the_lexicon():
 def test_retired_class_raises_its_own_error_type():
     with pytest.raises(commands.RetiredClassError, match="no longer a supported class"):
         parse_command_rule("show more fat")
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("mute the bones", ("skeleton", "opacity", "decrease", "strongly")),
+    ("make the liver translucent", ("liver", "opacity", "decrease", "moderately")),
+    ("tighter peak on the skeleton", ("skeleton", "width", "decrease", "moderately")),
+    ("crisper kidneys", ("kidneys", "width", "decrease", "moderately")),
+    ("bring back the lungs", ("lungs", "opacity", "increase", "moderately")),
+    ("kill the soft tissue", ("soft", "opacity", "decrease", "strongly")),
+    ("ghost the muscles a bit", ("soft", "opacity", "decrease", "slightly")),
+])
+def test_lexicon_cue_phrases(text, expected):
+    cmd = parse_command_rule(text)
+    assert (cmd["target"], cmd["attribute"], cmd["direction"], cmd["strength"]) == expected
+
+
+def test_show_only_and_reset_cues():
+    assert parse_command_rule("solo vessels")["direction"] == "show_only"
+    assert parse_command_rule("focus on the liver")["target"] == "liver"
+    assert parse_command_rule("undo everything")["direction"] == "reset"

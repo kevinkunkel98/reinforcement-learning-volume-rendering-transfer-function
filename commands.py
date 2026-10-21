@@ -280,6 +280,12 @@ def _parse_free_clause(clause: str, previous_target=None):
     if level:
         return [{"target": c, "attribute": attribute, "direction": "set", "level": level.group(1)}
                 for c in classes]
+    cue = lexicon.find_cue(clause, _LEX)
+    if cue and cue.get("direction") in ("increase", "decrease"):
+        attribute = cue.get("attribute", attribute)
+        strength = _strength_in(clause, cue.get("strength", "moderately"))
+        return [{"target": c, "attribute": attribute, "direction": cue["direction"], "strength": strength}
+                for c in classes]
     direction = _free_direction(clause, attribute)
     if direction is None:
         return None
@@ -289,10 +295,15 @@ def _parse_free_clause(clause: str, previous_target=None):
             for c in classes]
 
 
+def _cue_direction(t: str):
+    cue = lexicon.find_cue(t, _LEX)
+    return cue.get("direction") if cue else None
+
+
 def _parse_show_only(t: str):
     """"show only the heart", "just the kidneys", "isolate the liver", "I only
     want to see the vessels" -> show_only over every class named."""
-    if not _SHOW_ONLY_RE.search(t) or _RELATIVE_CUE_RE.search(t):
+    if not (_SHOW_ONLY_RE.search(t) or _cue_direction(t) == "show_only") or _RELATIVE_CUE_RE.search(t):
         return None
     classes = _find_classes(t) or _fuzzy_classes(t)
     if not classes:
@@ -402,7 +413,7 @@ def parse_command_rule(text: str) -> dict:
 
     _check_retired(t)
 
-    if _RESET_RE.search(t):
+    if _RESET_RE.search(t) or _cue_direction(t) == "reset":
         return {"target": None, "attribute": None, "direction": "reset", "strength": None}
 
     camera = _parse_camera(t)

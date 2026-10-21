@@ -50,3 +50,11 @@ def test_strength_pattern_matches_whole_words_and_keeps_very_well_out():
     assert not strong.search("farther")
     slight = lexicon.strength_pattern(lex, "slightly")
     assert slight.search("a smidge more")
+
+
+def test_find_cue_prefers_the_longest_phrase():
+    lex = lexicon.load()
+    assert lexicon.find_cue("make the bones more opaque", lex) == {"attribute": "opacity", "direction": "increase"}
+    assert lexicon.find_cue("softer edges on the bones", lex) == {"attribute": "width", "direction": "increase"}
+    assert lexicon.find_cue("make the lungs see-through", lex)["direction"] == "decrease"
+    assert lexicon.find_cue("add kidneys", lex) is None

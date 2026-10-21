@@ -79,6 +79,21 @@ def load(path: str = LEXICON_PATH) -> dict:
         return validate(json.load(f))
 
 
+def _cue_patterns(lex: dict):
+    pairs = [(phrase, entry["sets"]) for entry in lex["phrases"] for phrase in entry["say"]]
+    pairs.sort(key=lambda p: -len(p[0]))
+    return [(re.compile(rf"\b{re.escape(p)}(?:s|es|ed|ing)?\b"), sets) for p, sets in pairs]
+
+
+def find_cue(text: str, lex: dict):
+    """The command fields of the longest lexicon phrase in `text` (lowercase),
+    or None."""
+    for pattern, sets in _cached(lex, "cues", _cue_patterns):
+        if pattern.search(text):
+            return dict(sets)
+    return None
+
+
 @functools.cache
 def get() -> dict:
     """The shipped lexicon, loaded once per process."""
