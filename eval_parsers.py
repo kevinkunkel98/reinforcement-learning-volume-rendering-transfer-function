@@ -21,6 +21,7 @@ import commands
 from commands import parse_command_llm, parse_command_rule
 
 EVAL_SET_PATH = "data/parser_eval_set.json"
+EVAL_SETS = {"base": EVAL_SET_PATH, "realistic": "data/parser_eval_realistic.json"}
 
 
 def _canonical_single(cmd: dict, with_strength: bool):

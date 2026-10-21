@@ -35,3 +35,15 @@ def test_eval_set_is_well_formed():
         rows = json.load(f)
     assert {r["split"] for r in rows} == {"dev", "heldout"}
     assert len({r["text"] for r in rows}) == len(rows)
+
+
+def test_realistic_eval_set_is_well_formed():
+    with open(eval_parsers.EVAL_SETS["realistic"]) as f:
+        rows = json.load(f)
+    assert {r["split"] for r in rows} == {"dev", "heldout"}
+    assert len({r["text"] for r in rows}) == len(rows)
+    assert all(set(r) == {"text", "expected", "split", "source"} for r in rows)
+    assert {r["source"] for r in rows} <= {"log-2026-10-21", "claude", "author", "colleague"}
+    # both outcomes are represented: commands and refusals
+    assert any(r["expected"] is None for r in rows if r["split"] == "heldout")
+    assert any(r["expected"] is not None for r in rows if r["split"] == "heldout")
