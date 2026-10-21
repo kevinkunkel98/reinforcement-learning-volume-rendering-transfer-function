@@ -70,13 +70,22 @@ def validate(lex: dict) -> dict:
     return lex
 
 
+# Derived tables per lexicon dict, keyed by id(lex). The entry keeps the dict
+# itself so a reused id (the dict was freed, a new one took its address) is
+# never served the old dict's tables. Kept out of the dict so it stays plain
+# JSON and a deepcopy gets tables of its own.
+_DERIVED: dict[int, tuple[dict, dict]] = {}
+
+
 def _cached(lex: dict, name: str, build):
-    """Derived tables, built once per lexicon dict and stored on it (under
-    "_cache", which validate() ignores)."""
-    cache = lex.setdefault("_cache", {})
-    if name not in cache:
-        cache[name] = build(lex)
-    return cache[name]
+    """Derived table `name` of `lex`, built once per lexicon dict."""
+    entry = _DERIVED.get(id(lex))
+    if entry is None or entry[0] is not lex:
+        entry = _DERIVED[id(lex)] = (lex, {})
+    tables = entry[1]
+    if name not in tables:
+        tables[name] = build(lex)
+    return tables[name]
 
 
 def load(path: str = LEXICON_PATH) -> dict:
@@ -144,10 +153,10 @@ def _vocab(lex: dict):
                      + [w for ws in lex["strengths"].values() for w in ws])
     known = content | _words([t for ts in lex["retired"].values() for t in ts]) \
         | _words(lex["filler"]) | _words(lex["grammar"]) | _words(lex["asr_fixes"].values())
-    return sorted(w for w in content if len(w) >= 4), known
+    return sorted(w for w in content if len(w) >= 4), frozenset(known)
 
 
-def known_words(lex: dict) -> set:
+def known_words(lex: dict) -> frozenset:
     return _cached(lex, "vocab", _vocab)[1]
 
 
@@ -182,11 +191,13 @@ def normalize(text: str, lex: dict) -> str:
 
 def uncovered_words(text: str, lex: dict) -> list:
     """Words of `text` the lexicon does not account for, in order. A word
-    counts as covered with a plural/verb suffix too ("lungs", "hiding")."""
+    counts as covered with a plural/verb suffix too ("lungs", "hiding"), as
+    long as at least three letters are left ("ones" is not "on" + "es")."""
     known = known_words(lex)
     left = []
     for w in re.findall(r"[a-z]+(?:'[a-z]+)?", text.lower()):
-        stems = {w} | {w[: -len(s)] for s in ("s", "es", "ed", "ing", "ly", "er") if w.endswith(s)}
+        stems = {w} | {w[: -len(s)] for s in ("s", "es", "ed", "ing")
+                       if w.endswith(s) and len(w) - len(s) >= 3}
         if not stems & known:
             left.append(w)
     return left

@@ -1,4 +1,5 @@
 import copy
+import json
 
 import pytest
 
@@ -121,3 +122,29 @@ def test_validate_rejects_keep_words_that_are_not_lowercase_and_trimmed():
     lex["keep"].append("Heard ")
     with pytest.raises(lexicon.LexiconError, match="Heard"):
         lexicon.validate(lex)
+
+
+def test_derived_tables_stay_out_of_the_lexicon_dict():
+    lex = lexicon.get()
+    lexicon.find_cue("make the bones solid", lex)
+    lexicon.known_words(lex)
+    dumped = json.dumps(lex)
+    assert "_cache" not in json.loads(dumped)
+    assert isinstance(lexicon.known_words(lex), frozenset)
+
+
+def test_a_modified_copy_gets_its_own_derived_tables():
+    lex = lexicon.get()
+    lexicon.find_cue("anything", lex)
+    other = copy.deepcopy(lex)
+    other["phrases"][0]["say"].append("vaporize")
+    assert lexicon.find_cue("vaporize the bones", other)["direction"] == "decrease"
+    assert lexicon.find_cue("vaporize the bones", lex) is None
+
+
+@pytest.mark.parametrize("word, covered", [
+    ("ones", False), ("used", False), ("shower", False),
+    ("lungs", True), ("hiding", True), ("bones", True),
+])
+def test_suffix_stripping_needs_a_real_stem(word, covered):
+    assert (lexicon.uncovered_words(word, lexicon.load()) == []) == covered
