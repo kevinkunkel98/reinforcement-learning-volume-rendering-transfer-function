@@ -1034,10 +1034,14 @@ def parse_command_llm(text: str, model: str = DEFAULT_LLM_MODEL, host: str = Non
 def _log_utterance(text, meta, cmd, error, start):
     meta["parse_ms"] = round((time.perf_counter() - start) * 1000, 1)
     from evaluate import jsonl_append  # same lazy import as _log_llm_request
-    os.makedirs(os.path.dirname(UTTERANCE_LOG_PATH) or ".", exist_ok=True)
-    jsonl_append(UTTERANCE_LOG_PATH, {
-        "timestamp": _dt.datetime.now().isoformat(), "text": text, **meta, "cmd": cmd, "error": error,
-    })
+    # Best effort: a log that cannot be written must never fail a parse.
+    try:
+        os.makedirs(os.path.dirname(UTTERANCE_LOG_PATH) or ".", exist_ok=True)
+        jsonl_append(UTTERANCE_LOG_PATH, {
+            "timestamp": _dt.datetime.now().isoformat(), "text": text, **meta, "cmd": cmd, "error": error,
+        })
+    except OSError as exc:
+        print(f"[hybrid-parser] could not write utterance log: {exc}")
 
 
 def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
@@ -1079,7 +1083,7 @@ def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
             return rule_cmd, meta
         meta["path"], meta["fallback"] = "rejected", reason
         message = (f"LLM offline and the rule parser cannot parse {text!r}"
-                   if reason.startswith("request failed") else f"could not parse {text!r}")
+                   if reason.startswith("request failed") else f"could not parse {text!r} ({reason})")
         _log_utterance(text, meta, None, message, start)
         raise ValueError(message) from exc
     if reasons and rule_cmd is not None:

@@ -1117,3 +1117,30 @@ def test_hybrid_prefers_its_normalized_rule_parse_when_the_llm_falls_back(monkey
     monkeypatch.setattr(commands, "parse_command_llm", fake)
     cmd, meta = commands.parse_command_hybrid("Leitenlangs please brother")
     assert cmd["target"] == "lungs" and meta["path"] == "rule" and meta["fallback"] == "invalid schema: {}"
+
+
+def test_hybrid_reports_llm_offline_when_the_request_really_fails():
+    with patch("commands.urlopen", side_effect=OSError("refused")):
+        with pytest.raises(ValueError, match="LLM offline"):
+            commands.parse_command_hybrid("everything except the skeleton should go away")
+    rows = [json.loads(line) for line in open("out/llm_requests.jsonl")]
+    assert len(rows) == 1
+    assert rows[0]["final_cmd"] is None and rows[0]["fell_back"]
+    assert rows[0]["fallback_reason"].startswith("request failed")
+
+
+def test_hybrid_rejection_message_keeps_the_reason(monkeypatch):
+    def fake(text, model=None, host=None, _on_fallback=None):
+        _on_fallback("model: not an instruction")
+        return commands.parse_command_rule(text)
+    monkeypatch.setattr(commands, "parse_command_llm", fake)
+    with pytest.raises(ValueError, match=r"could not parse 'thank you for watching' \(model: not an instruction\)"):
+        commands.parse_command_hybrid("thank you for watching")
+
+
+def test_hybrid_still_parses_when_the_utterance_log_cannot_be_written(monkeypatch, tmp_path, capsys):
+    _llm_stub(monkeypatch)
+    monkeypatch.setattr(commands, "UTTERANCE_LOG_PATH", str(tmp_path))  # a directory: open() fails
+    cmd, meta = commands.parse_command_hybrid("add kidneys")
+    assert cmd["target"] == "kidneys" and meta["path"] == "rule"
+    assert "utterance log" in capsys.readouterr().out
