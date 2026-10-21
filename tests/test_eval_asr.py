@@ -1,11 +1,6 @@
-import json
-import sys
-
 import pytest
 
-sys.path.insert(0, "tools")
-import eval_asr  # noqa: E402
-import pair_asr_recordings  # noqa: E402
+from tools import eval_asr, pair_asr_recordings
 
 
 def test_word_error_rate():
