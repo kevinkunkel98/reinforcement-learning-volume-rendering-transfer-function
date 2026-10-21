@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from asr import _transcribe_path as asr_transcribe_path
+from asr import ASR_MODEL, _transcribe_path as asr_transcribe_path, is_hallucination
 from camera import DEFAULT_CAMERA, apply_camera_command
 import collect
 import commands
@@ -37,6 +37,7 @@ from datasets import (_dataset_version, dataset_metadata, default_camera_for, ge
                       get_volume_chunk, label_metadata, list_datasets, load_dataset)
 from evaluate import jsonl_append
 import goals
+import lexicon
 import policy as policy_module
 import render as render_module
 from render import features, grab, render
@@ -1241,11 +1242,14 @@ async def transcribe(audio: UploadFile = File(...)):
         f.write(await audio.read())
 
     start = time.time()
-    text = asr_transcribe_path(wav_path, "en", "small")
+    text = asr_transcribe_path(wav_path, "en", ASR_MODEL, initial_prompt=lexicon.get()["asr_prompt"])
     duration = time.time() - start
 
     with open(os.path.join(AUDIO_DIR, f"{stamp}.txt"), "w") as f:
         f.write(text)
+    if is_hallucination(text):
+        # The client shows "No speech recognised" for an empty text.
+        return {"text": "", "heard": text, "duration": duration}
     return {"text": text, "duration": duration}
 
 
