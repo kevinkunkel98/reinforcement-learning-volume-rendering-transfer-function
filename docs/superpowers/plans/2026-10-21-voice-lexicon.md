@@ -1008,6 +1008,8 @@ Expected: existing LLM tests still pass.
 
 Add `import time` at the top. Below `OLLAMA_HOST = ...`:
 
+The LLM gets the raw text (the normalized text is only for the rule parser and the coverage check); since `parse_command_llm` falls back to `parse_command_rule(raw)` itself, when the LLM falls back or raises and the normalized rule parse succeeded, the router returns that normalized rule command (path "rule", with the fallback reason).
+
 ```python
 DEFAULT_LLM_MODEL = "qwen2.5:7b"
 UTTERANCE_LOG_PATH = "out/utterances.jsonl"
@@ -1053,7 +1055,7 @@ def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
 
     reasons = []
     try:
-        cmd = parse_command_llm(normalized, model=model, _on_fallback=reasons.append)
+        cmd = parse_command_llm(text, model=model, _on_fallback=reasons.append)
     except ValueError as exc:
         reason = reasons[0] if reasons else str(exc)
         meta["path"], meta["fallback"] = "rejected", reason

@@ -58,6 +58,10 @@ def validate(lex: dict) -> dict:
             claim(word, f"strengths.{strength}")
     for wrong in lex["asr_fixes"]:
         claim(wrong, "asr_fixes")
+    # Ordinary English that sounds like a lexicon word ("long", "heat"):
+    # never rewritten, and not command vocabulary either (stays uncovered).
+    for word in lex.get("keep", []):
+        claim(word, "keep")
     for key in ("filler", "grammar"):
         for word in lex[key]:
             _check_phrase(word, key)
@@ -153,13 +157,15 @@ def _fix_word(word: str, lex: dict):
     if w in lex["asr_fixes"]:
         return lex["asr_fixes"][w]
     targets, known = _cached(lex, "vocab", _vocab)
-    if w in known or len(w) < 4:
+    if w in known or w in lex.get("keep", ()) or len(w) < 4:
         return None
     best = difflib.get_close_matches(w, targets, n=1, cutoff=0.7)
     if not best:
         return None
+    # A near-miss must sound alike and still be close in spelling, or be
+    # very close in spelling alone ("brother" is not "broader").
     ratio = difflib.SequenceMatcher(None, w, best[0]).ratio()
-    if ratio >= 0.88 or phonetic_key(w) == phonetic_key(best[0]):
+    if (ratio >= 0.75 and phonetic_key(w) == phonetic_key(best[0])) or ratio >= 0.9:
         return best[0]
     return None
 

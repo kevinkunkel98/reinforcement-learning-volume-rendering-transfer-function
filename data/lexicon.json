@@ -51,6 +51,8 @@
                  "far", "very", "massively", "heavily"]
   },
   "asr_fixes": {"darkin": "darken", "leitenlangs": "lighten lungs"},
+  "keep": ["heard", "hard", "heat", "long", "longs", "lounge", "spin", "issue", "skill", "host", "sole", "soil",
+           "silo", "border", "timer", "torn", "lover"],
   "filler": ["please", "can", "could", "would", "you", "the", "a", "an", "now", "again", "even", "just", "me", "i",
              "want", "to", "see", "make", "let's", "let", "us", "okay", "ok", "um", "uh", "it", "them", "they",
              "those", "these", "that", "this", "is", "are", "be", "should", "some", "bit", "lot"],

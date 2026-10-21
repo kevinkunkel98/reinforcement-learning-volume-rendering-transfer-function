@@ -77,6 +77,11 @@ def test_normalize_fixes_transcription_errors(raw, fixed):
     "can you show me just the heart please",
     "the muscles are hiding everything, get rid of them",
     "more aorta, less muscle",
+    "how long is it",
+    "spin left",
+    "the heat is too strong",
+    "I heard you",
+    "a long way",
 ])
 def test_normalize_leaves_ordinary_sentences_alone(text):
     assert lexicon.normalize(text, lexicon.load()) == text
@@ -101,3 +106,18 @@ def test_find_cue_match_reports_where_and_which_phrase_matched():
     assert sets["direction"] == "decrease" and phrase == "transparent"
     assert "make the lungs less transparent"[start:].startswith("transparent")
     assert lexicon.find_cue_match("add kidneys", lex) is None
+
+
+def test_keep_words_are_never_rewritten_and_stay_uncovered():
+    lex = lexicon.load()
+    for word in ["heard", "long", "spin", "border", "lover"]:
+        assert word in lex["keep"]
+        assert lexicon.normalize(word, lex) == word
+        assert lexicon.uncovered_words(word, lex) == [word]
+
+
+def test_validate_rejects_keep_words_that_are_not_lowercase_and_trimmed():
+    lex = copy.deepcopy(lexicon.load())
+    lex["keep"].append("Heard ")
+    with pytest.raises(lexicon.LexiconError, match="Heard"):
+        lexicon.validate(lex)

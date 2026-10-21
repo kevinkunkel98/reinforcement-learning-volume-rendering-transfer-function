@@ -1097,3 +1097,23 @@ def test_with_meta_hybrid_carries_the_path(monkeypatch):
 def test_negators_before_a_cue_flip_its_direction(text, attribute, direction):
     cmd = parse_command_rule(text)
     assert (cmd["attribute"], cmd["direction"]) == (attribute, direction)
+
+
+def test_hybrid_sends_raw_text_to_the_llm_and_keeps_its_own_rule_parse_on_fallback(monkeypatch):
+    # The raw text does not parse ("Leitenlangs"), the normalized one does,
+    # but "brother" stays uncovered -- so the LLM is asked, with the raw text.
+    calls = _llm_stub(monkeypatch, fail=True)
+    cmd, meta = commands.parse_command_hybrid("Leitenlangs please brother")
+    assert calls == ["Leitenlangs please brother"]
+    assert meta["normalized"] == "lighten lungs please brother" and meta["uncovered"] == ["brother"]
+    assert cmd["target"] == "lungs" and cmd["attribute"] == "brightness" and cmd["direction"] == "increase"
+    assert meta["path"] == "rule" and meta["fallback"].startswith("request failed")
+
+
+def test_hybrid_prefers_its_normalized_rule_parse_when_the_llm_falls_back(monkeypatch):
+    def fake(text, model=None, host=None, _on_fallback=None):
+        _on_fallback("invalid schema: {}")
+        return {"target": "heart", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+    monkeypatch.setattr(commands, "parse_command_llm", fake)
+    cmd, meta = commands.parse_command_hybrid("Leitenlangs please brother")
+    assert cmd["target"] == "lungs" and meta["path"] == "rule" and meta["fallback"] == "invalid schema: {}"

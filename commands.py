@@ -1064,16 +1064,26 @@ def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
         _log_utterance(text, meta, rule_cmd, None, start)
         return rule_cmd, meta
 
+    # The LLM gets the raw text (normalization is tuned for the rule parser
+    # and may rewrite a word the model would have understood). Its own
+    # fallback parses that raw text, so when it falls back, our rule parse of
+    # the normalized text is the better answer.
     reasons = []
     try:
-        cmd = parse_command_llm(normalized, model=model, _on_fallback=reasons.append)
+        cmd = parse_command_llm(text, model=model, _on_fallback=reasons.append)
     except ValueError as exc:
         reason = reasons[0] if reasons else str(exc)
+        if rule_cmd is not None:
+            meta["path"], meta["fallback"] = "rule", reason
+            _log_utterance(text, meta, rule_cmd, None, start)
+            return rule_cmd, meta
         meta["path"], meta["fallback"] = "rejected", reason
         message = (f"LLM offline and the rule parser cannot parse {text!r}"
                    if reason.startswith("request failed") else f"could not parse {text!r}")
         _log_utterance(text, meta, None, message, start)
         raise ValueError(message) from exc
+    if reasons and rule_cmd is not None:
+        cmd = rule_cmd
     meta["path"] = "rule" if reasons else "llm"
     meta["fallback"] = reasons[0] if reasons else None
     _log_utterance(text, meta, cmd, None, start)
