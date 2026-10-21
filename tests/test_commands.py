@@ -1195,3 +1195,23 @@ def test_llm_format_json_is_still_available(monkeypatch):
     monkeypatch.setattr(commands, "LLM_FORMAT", "json")
     commands.parse_command_llm("add liver")
     assert sent["format"] == "json"
+
+
+def test_check_llm_reports_unreachable_and_missing_models(monkeypatch):
+    def refused(req, timeout=None):
+        raise commands.URLError("refused")
+    monkeypatch.setattr(commands, "urlopen", refused)
+    assert "not reachable" in commands.check_llm("qwen2.5:7b")
+
+    class Tags:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"models": [{"name": "llama3.2:latest"}]}).encode()
+    monkeypatch.setattr(commands, "urlopen", lambda req, timeout=None: Tags())
+    assert "not pulled" in commands.check_llm("qwen2.5:7b")
+    assert commands.check_llm("llama3.2:latest") is None

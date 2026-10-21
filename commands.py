@@ -1134,3 +1134,25 @@ def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
     meta["fallback"] = reasons[0] if reasons else None
     _log_utterance(text, meta, cmd, None, start)
     return cmd, meta
+
+
+def check_llm(model: str = DEFAULT_LLM_MODEL, host: str = None):
+    """None when Ollama answers and has `model`, else what is wrong."""
+    host = host if host is not None else OLLAMA_HOST
+    try:
+        with urlopen(Request(f"{host}/api/tags"), timeout=3) as resp:
+            names = {m["name"] for m in _json.loads(resp.read().decode()).get("models", [])}
+    except (URLError, OSError, ValueError) as exc:
+        return f"Ollama not reachable at {host} ({exc}) -- start it with `ollama serve`"
+    if model not in names and f"{model}:latest" not in names:
+        return f"model {model!r} not pulled -- run `ollama pull {model}`"
+    return None
+
+
+def warm_llm(model: str = DEFAULT_LLM_MODEL, host: str = None) -> None:
+    """Load the model now so the first voice command has no cold start."""
+    host = host if host is not None else OLLAMA_HOST
+    body = _json.dumps({"model": model, "prompt": "", "keep_alive": "30m"}).encode()
+    with urlopen(Request(f"{host}/api/generate", data=body, headers={"Content-Type": "application/json"}),
+                 timeout=60) as resp:
+        resp.read()

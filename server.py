@@ -1084,10 +1084,16 @@ class LayerRequest(BaseModel):
 
 @app.post("/api/command")
 async def command(req: CommandRequest):
+    start = time.perf_counter()
     try:
-        return session.command(req.text, req.parser, req.model, req.search, req.steps, req.mode)
+        result = session.command(req.text, req.parser, req.model, req.search, req.steps, req.mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    total_ms = round((time.perf_counter() - start) * 1000, 1)
+    # The parser meta (parse_ms, parser_used, ...) is spread into the step
+    # (_render_step), i.e. result["current"].
+    result["timings"] = {"parse_ms": (result.get("current") or {}).get("parse_ms"), "total_ms": total_ms}
+    return result
 
 
 @app.post("/api/layers")
@@ -1270,5 +1276,15 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     print(f"[server] dataset: {_dataset_name}")
+    import threading
+
+    def _llm_ready():
+        problem = commands.check_llm()
+        if problem:
+            print(f"\n[llm-parser] WARNING: {problem}\n[llm-parser] voice commands use the rule parser only\n")
+            return
+        commands.warm_llm()
+        print(f"[llm-parser] {commands.DEFAULT_LLM_MODEL} loaded")
+    threading.Thread(target=_llm_ready, daemon=True).start()
     uvicorn.run(app, host=args.host, port=args.port,
                 ssl_certfile=args.ssl_certfile, ssl_keyfile=args.ssl_keyfile)

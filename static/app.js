@@ -544,7 +544,9 @@ async function sendCommandImpl(text) {
   if (r.status !== 200) {
     const err = await r.json();
     showToast(`Could not parse that: ${err.detail}`, "destructive");
-    return;
+    // The VR panel listens for app:error; without this a rejection was silent there.
+    emitAppEvent("error", { message: `Didn't understand "${text}"` });
+    return null;
   }
   const data = await r.json();
   await refresh(data);
@@ -556,6 +558,7 @@ async function sendCommandImpl(text) {
     deltas: classDeltas(data.current.class_visibility, before),
     dataset: state.dataset,
   });
+  return data;
 }
 
 function autoResize() {
@@ -761,6 +764,7 @@ async function startRecording() {
   chunks = [];
   mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
   mediaRecorder.onstop = async () => {
+    const t0 = performance.now();
     micBtn.classList.remove("recording");
     micWaveform.hidden = true;
     micIcon.style.display = "";
@@ -777,9 +781,14 @@ async function startRecording() {
       await withLoading(async () => {
         const r = await fetch("/api/transcribe", { method: "POST", body: form });
         const data = await r.json();
+        const t1 = performance.now();
         if (data.text) {
           emitAppEvent("transcript", { text: data.text });
-          await sendCommand(data.text);
+          const reply = await sendCommandImpl(data.text);
+          const t2 = performance.now();
+          // Same line in the desktop console and the headset's logcat.
+          console.info(`[voice-timing] asr=${Math.round(t1 - t0)}ms command+render=${Math.round(t2 - t1)}ms `
+            + `total=${Math.round(t2 - t0)}ms parse=${reply?.timings?.parse_ms ?? "-"}ms path=${reply?.current?.parser_used ?? "-"}`);
         } else {
           emitAppEvent("error", { message: "No speech recognised" });
         }

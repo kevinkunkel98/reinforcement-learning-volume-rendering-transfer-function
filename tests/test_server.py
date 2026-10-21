@@ -1630,3 +1630,13 @@ def test_load_policy_marks_the_checkpoints_action_mode(tmp_path):
         assert server.policy_module.load_policy(path).action_mode == "residual"
     finally:
         server.policy_module.reset_cache()
+
+
+def test_command_route_adds_timings(monkeypatch):
+    import asyncio
+    import server
+    monkeypatch.setattr(server.session, "command",
+                        lambda *a, **k: {"current": {"parse_ms": 12.0, "parser_used": "rule"}})
+    out = asyncio.run(server.command(server.CommandRequest(text="add kidneys")))
+    assert out["timings"]["parse_ms"] == 12.0
+    assert out["timings"]["total_ms"] >= 0
