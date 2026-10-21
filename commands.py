@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 
 import anatomy
+import lexicon
 from anatomy_layers import default_layers, normalize_layers
 from transfer import (
     ANATOMICAL_CENTRES_HU, ANATOMICAL_WIDTHS_HU, CENTER_RANGE, N_PEAKS,
@@ -17,19 +18,10 @@ from transfer import (
     WIDTH_RANGE, _from_range, _from_unit, default_params, peak_internal,
 )
 
-CLASS_SYNONYMS = {
-    "skeleton": ["bone", "bones", "skeleton", "ribs", "rib", "spine", "vertebrae",
-                 "hip", "femur", "skull"],
-    "lungs": ["lung", "lungs", "pulmonary", "pulmonary tissue", "lung tissue"],
-    "heart": ["heart", "cardiac"],
-    "vessels": ["vessel", "vessels", "artery", "arteries", "vein", "veins",
-                 "blood vessel", "aorta", "vena cava", "contrast"],
-    "liver": ["liver"],
-    "kidneys": ["kidney", "kidneys", "renal"],
-    "spleen": ["spleen"],
-    "soft": ["soft tissue", "soft", "tissue", "organs", "organ", "muscle", "muscles"],
-}
-CLASS_SYNONYMS = {name: CLASS_SYNONYMS[name] for name in anatomy.CANONICAL_CLASSES}
+# Vocabulary lives in data/lexicon.json (lexicon.py), shared with speech
+# recognition and the LLM prompt.
+_LEX = lexicon.get()
+CLASS_SYNONYMS = {name: list(_LEX["classes"][name]) for name in anatomy.CANONICAL_CLASSES}
 _CLASS_LOOKUP = sorted(
     ((phrase, cls) for cls, phrases in CLASS_SYNONYMS.items() for phrase in phrases),
     key=lambda t: -len(t[0]),
@@ -38,21 +30,21 @@ _CLASS_LOOKUP = sorted(
 # fat/air/spongy are retired -- no goal class isolates them any more, and
 # silently remapping them to something else would corrupt collected
 # preference data. The rule parser rejects them outright.
-RETIRED_CLASS_WORDS = {
-    "fat": ["fatty", "fat", "adipose"],
-    "air": ["air", "background"],
-    "spongy": ["spongy bone", "spongy", "cancellous", "trabecular"],
-}
+RETIRED_CLASS_WORDS = {name: list(words) for name, words in _LEX["retired"].items()}
 _RETIRED_LOOKUP = sorted(
     ((phrase, name) for name, phrases in RETIRED_CLASS_WORDS.items() for phrase in phrases),
     key=lambda t: -len(t[0]),
 )
 
 
+class RetiredClassError(ValueError):
+    """A retired class (fat/air/spongy) was named: refused, never remapped."""
+
+
 def _check_retired(t: str) -> None:
     for phrase, name in _RETIRED_LOOKUP:
         if re.search(rf"\b{re.escape(phrase)}\b", t):
-            raise ValueError(
+            raise RetiredClassError(
                 f"{name!r} is no longer a supported class -- the supported "
                 f"classes are: {', '.join(CLASS_SYNONYMS)}"
             )
@@ -188,9 +180,8 @@ def _normalise_text(text: str) -> str:
     return re.sub(r"[.!?]+$", "", t).strip()
 
 
-_SLIGHT_RE = re.compile(r"\b(a bit|a little|a touch|slightly|somewhat|little)\b")
-_STRONG_RE = re.compile(r"\b(a lot|much|strongly|extremely|completely|totally|fully|really|way|far|"
-                        r"very(?! well))\b")
+_SLIGHT_RE = lexicon.strength_pattern(_LEX, "slightly")
+_STRONG_RE = lexicon.strength_pattern(_LEX, "strongly")
 
 
 def _strength_in(text: str, default: str = "moderately") -> str:

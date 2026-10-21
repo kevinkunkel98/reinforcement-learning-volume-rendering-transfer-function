@@ -39,3 +39,14 @@ def test_validate_rejects_phrases_that_are_not_lowercase_and_trimmed():
     lex["strengths"]["slightly"].append(" A Bit More")
     with pytest.raises(lexicon.LexiconError, match="A Bit More"):
         lexicon.validate(lex)
+
+
+def test_strength_pattern_matches_whole_words_and_keeps_very_well_out():
+    lex = lexicon.load()
+    strong = lexicon.strength_pattern(lex, "strongly")
+    assert strong.search("hide it completely")
+    assert strong.search("very bright")
+    assert not strong.search("works very well")
+    assert not strong.search("farther")
+    slight = lexicon.strength_pattern(lex, "slightly")
+    assert slight.search("a smidge more")

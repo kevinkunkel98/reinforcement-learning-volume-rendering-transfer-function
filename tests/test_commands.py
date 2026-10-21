@@ -985,3 +985,18 @@ def test_parse_command_llm_refuses_a_command_the_text_does_not_ask_for(text, pay
         with pytest.raises(ValueError):
             parse_command_llm(text, _on_fallback=reasons.append)
     assert reasons and reasons[0].startswith("ungrounded")
+
+
+def test_lay_anatomy_words_from_the_lexicon_name_classes():
+    assert parse_command_rule("show only the ribcage")["target"] == "skeleton"
+    assert parse_command_rule("less guts")["target"] == "soft"
+    assert parse_command_rule("add vasculature")["target"] == "vessels"
+
+
+def test_new_strength_words_from_the_lexicon():
+    assert parse_command_rule("a smidge more spleen")["strength"] == "slightly"
+
+
+def test_retired_class_raises_its_own_error_type():
+    with pytest.raises(commands.RetiredClassError, match="no longer a supported class"):
+        parse_command_rule("show more fat")

@@ -4,10 +4,12 @@ parser's word lists and the coverage check. One file, so speech recognition,
 the rule parser and the LLM can never drift onto different vocabularies."""
 import functools
 import json
+import os
+import re
 
 import anatomy
 
-LEXICON_PATH = "data/lexicon.json"
+LEXICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "lexicon.json")
 COMMAND_FIELDS = {
     "attribute": {"opacity", "width", "brightness", "center"},
     "direction": {"increase", "decrease", "show_only", "reset"},
@@ -81,3 +83,11 @@ def load(path: str = LEXICON_PATH) -> dict:
 def get() -> dict:
     """The shipped lexicon, loaded once per process."""
     return load()
+
+
+def strength_pattern(lex: dict, strength: str) -> re.Pattern:
+    """Whole-word regex over a strength's words, longest first. "very" is
+    kept out of "very well" (as the hand-written regex did)."""
+    words = sorted(lex["strengths"][strength], key=len, reverse=True)
+    alternatives = [r"very(?! well)" if w == "very" else re.escape(w) for w in words]
+    return re.compile(rf"\b({'|'.join(alternatives)})\b")
