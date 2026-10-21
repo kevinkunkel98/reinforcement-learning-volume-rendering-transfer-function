@@ -153,8 +153,9 @@ realistic held-out with LLM p90 within its budget.
 ## Success criteria
 
 1. `data/parser_eval_set.json` stays at 100 % for the rule parser.
-2. Realistic held-out exact accuracy clearly above both baselines (today's
-   rule parser, today's LLM parser), measured before any lexicon work.
+2. Realistic held-out: at least 90 % exact accuracy for the full pipeline,
+   and above both baselines (today's rule parser, today's LLM parser), which
+   are measured before any lexicon work.
 3. p90 voice-to-render ≤ 4 s in the headset.
 
 ## Out of scope
