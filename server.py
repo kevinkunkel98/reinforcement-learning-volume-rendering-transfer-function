@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from asr import _transcribe_path as asr_transcribe_path
 from camera import DEFAULT_CAMERA, apply_camera_command
 import collect
+import commands
 from commands import COMMAND_REFERENCE, apply_command, apply_command_state, parse_command_with_meta
 from datasets import (_dataset_version, dataset_metadata, default_camera_for, get_label_chunk,
                       get_volume_chunk, label_metadata, list_datasets, load_dataset)
@@ -842,7 +843,7 @@ class Session:
         return run_search_arm(model, current_params, instruction, steps,
                               active_layers=layers), instruction["text"]
 
-    def command(self, text, parser="rule", model="qwen2.5:7b", search=False, steps=10, mode=None):
+    def command(self, text, parser="rule", model=commands.DEFAULT_LLM_MODEL, search=False, steps=10, mode=None):
         cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)  # raises ValueError on failure
 
         current_params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
@@ -1061,14 +1062,14 @@ async def dataset_switch(req: DatasetRequest):
 
 class CommandRequest(BaseModel):
     text: str
-    # LLM is the default: it handles phrasings the rule grammar can't (which
-    # matters most for voice, where phrasing varies most), and falls back to
-    # the rule parser automatically when Ollama is down (parse_command_with_meta).
-    # static/app.js already defaults its own `config.parser` to "llm" for the
+    # hybrid is the default: rule parser for fully covered sentences, LLM for
+    # the rest (which matters most for voice, where phrasing varies most); the
+    # LLM falls back to the rule parser when Ollama is down.
+    # static/app.js defaults its own `config.parser` to "hybrid" for the
     # same reason; this is the same default for any caller that hits the API
     # directly instead of through the viewer.
-    parser: str = "llm"
-    model: str = "qwen2.5:7b"
+    parser: str = "hybrid"
+    model: str = commands.DEFAULT_LLM_MODEL
     search: bool = False
     steps: int = 10
     mode: str | None = None  # "exact" | "search" | "policy"; overrides `search` when given
@@ -1100,8 +1101,8 @@ async def update_layer(req: LayerRequest):
 
 class CompareRequest(BaseModel):
     text: str
-    parser: str = "llm"  # see CommandRequest.parser
-    model: str = "qwen2.5:7b"
+    parser: str = "hybrid"  # see CommandRequest.parser
+    model: str = commands.DEFAULT_LLM_MODEL
     # Bounded because these handlers run on the event loop: a hill-climb of
     # 100000 evaluations would freeze every other route, the UI and the state
     # poll for minutes, with no way to cancel it.

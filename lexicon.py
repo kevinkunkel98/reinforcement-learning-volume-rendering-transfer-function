@@ -163,3 +163,15 @@ def normalize(text: str, lex: dict) -> str:
         return fixed if fixed is not None else m.group(0)
 
     return re.sub(r"[A-Za-z]+(?:'[A-Za-z]+)?'?", repl, text)
+
+
+def uncovered_words(text: str, lex: dict) -> list:
+    """Words of `text` the lexicon does not account for, in order. A word
+    counts as covered with a plural/verb suffix too ("lungs", "hiding")."""
+    known = known_words(lex)
+    left = []
+    for w in re.findall(r"[a-z]+(?:'[a-z]+)?", text.lower()):
+        stems = {w} | {w[: -len(s)] for s in ("s", "es", "ed", "ing", "ly", "er") if w.endswith(s)}
+        if not stems & known:
+            left.append(w)
+    return left

@@ -105,8 +105,8 @@ def score(rows, parsers: dict) -> dict:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--llm-model", default="qwen2.5:7b")
-    ap.add_argument("--parsers", default="rule,llm")
+    ap.add_argument("--llm-model", default=commands.DEFAULT_LLM_MODEL)
+    ap.add_argument("--parsers", default="rule,llm,hybrid")
     ap.add_argument("--split", default="dev,heldout")
     ap.add_argument("--show-heldout", action="store_true", help="also list held-out failures")
     ap.add_argument("--set", default="base", choices=sorted(EVAL_SETS))
@@ -117,10 +117,12 @@ def main(argv=None):
         commands.LLM_FORMAT = args.format
 
     available = {"rule": parse_command_rule,
-                 "llm": lambda t: parse_command_llm(t, model=args.llm_model)}
+                 "llm": lambda t: parse_command_llm(t, model=args.llm_model),
+                 "hybrid": lambda t: commands.parse_command_hybrid(t, model=args.llm_model)[0]}
     parsers = {name: available[name] for name in args.parsers.split(",")}
     # The request log is a record of real viewer use; evaluation calls stay out of it.
     commands.LLM_LOG_PATH = "out/llm_requests_eval.jsonl"
+    commands.UTTERANCE_LOG_PATH = "out/utterances_eval.jsonl"
     with open(EVAL_SETS[args.set]) as f:
         rows = [r for r in json.load(f) if r["split"] in args.split.split(",")]
     results = score(rows, parsers)

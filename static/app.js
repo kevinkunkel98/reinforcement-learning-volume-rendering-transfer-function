@@ -2,15 +2,16 @@ const state = { current: null, cursor: 0, total: 1, dataset: null };
 // mode is the source of truth for which of the three ways a command is
 // answered ("exact" | "search" | "policy"); `search` is kept in sync for the
 // request body / UI toggle state the search-options panel reads.
-// The LLM parser is the default (it handles phrasings the rule grammar can't,
-// and falls back to the rule parser when Ollama is down), and the command is
+// The hybrid parser is the default (rule parser for fully covered sentences,
+// LLM for the rest; the LLM falls back to the rule parser when Ollama is
+// down), and the command is
 // answered by the trained policy by default: the model-based checkpoint
 // (rl/model_based.py) proposes a transfer function and the server polishes it
 // with a 200-evaluation search started there (POLICY_REFINE_EVALUATIONS) --
 // 0.89 median attainment on task v2 val, against 0.66 for the same search
 // from the start. Without a checkpoint the server falls back to
 // exact application and says so. Exact and search stay one click away.
-const config = { parser: "llm", search: false, mode: "policy" };
+const config = { parser: "hybrid", search: false, mode: "policy" };
 
 const el = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"']/g, (char) => ({

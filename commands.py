@@ -4,6 +4,7 @@ import difflib
 import json as _json
 import os
 import re
+import time
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -154,6 +155,8 @@ COMMAND_REFERENCE = [
     },
 ]
 
+DEFAULT_LLM_MODEL = "qwen2.5:7b"
+UTTERANCE_LOG_PATH = "out/utterances.jsonl"
 STRENGTH_WORDS = {"slightly": 0.15, "moderately": 0.35, "strongly": 0.6}
 NEAR_THRESHOLD_HU = 300.0
 
@@ -444,7 +447,7 @@ def parse_command_rule(text: str) -> dict:
     return unique[0] if len(unique) == 1 else {"compound": unique}
 
 
-def parse_command_with_meta(text: str, parser: str = "rule", model: str = "qwen2.5:7b"):
+def parse_command_with_meta(text: str, parser: str = "rule", model: str = DEFAULT_LLM_MODEL):
     """`parse_command`, plus which parser actually produced the command.
 
     `parse_command_llm` falls back to the rule parser whenever Ollama is
@@ -455,6 +458,11 @@ def parse_command_with_meta(text: str, parser: str = "rule", model: str = "qwen2
     `parser_fallback` is the reason string when llm was asked for and rule
     answered, and None otherwise."""
     meta = {"parser_requested": parser, "parser_used": parser, "parser_fallback": None}
+    if parser == "hybrid":
+        cmd, hmeta = parse_command_hybrid(text, model=model)
+        return cmd, {"parser_requested": "hybrid", "parser_used": hmeta["path"],
+                     "parser_fallback": hmeta["fallback"], "normalized": hmeta["normalized"],
+                     "uncovered": hmeta["uncovered"], "parse_ms": hmeta["parse_ms"]}
     if parser != "llm":
         return parse_command_rule(text), meta
 
@@ -907,7 +915,7 @@ def _log_llm_request(text, model, host, raw_response, parsed_cmd, final_cmd, fal
     })
 
 
-def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = None,
+def parse_command_llm(text: str, model: str = DEFAULT_LLM_MODEL, host: str = None,
                        _on_fallback=None) -> dict:
     # `host` defaults at call time, not at import time, so a test (or a
     # deployment) that points OLLAMA_HOST somewhere else is honoured by
@@ -945,11 +953,15 @@ def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = None,
         cmd = _json.loads(raw_response)
     except (URLError, OSError, ValueError, KeyError) as exc:
         print(f"[llm-parser] falling back to rule parser: {exc}")
-        final = parse_command_rule(text)
         reason = f"request failed: {exc}"
-        _log_llm_request(text, model, host, None, None, final, reason)
         if _on_fallback:
             _on_fallback(reason)
+        try:
+            final = parse_command_rule(text)
+        except ValueError:
+            _log_llm_request(text, model, host, None, None, None, reason)
+            raise
+        _log_llm_request(text, model, host, None, None, final, reason)
         return final
 
     # The model sometimes echoes an alias ("bones") instead of the canonical
@@ -1007,3 +1019,52 @@ def parse_command_llm(text: str, model: str = "qwen2.5:7b", host: str = None,
     cmd = _normalise_cmd(cmd)
     _log_llm_request(text, model, host, raw_response, cmd, cmd, None)
     return cmd
+
+
+def _log_utterance(text, meta, cmd, error, start):
+    meta["parse_ms"] = round((time.perf_counter() - start) * 1000, 1)
+    from evaluate import jsonl_append  # same lazy import as _log_llm_request
+    os.makedirs(os.path.dirname(UTTERANCE_LOG_PATH) or ".", exist_ok=True)
+    jsonl_append(UTTERANCE_LOG_PATH, {
+        "timestamp": _dt.datetime.now().isoformat(), "text": text, **meta, "cmd": cmd, "error": error,
+    })
+
+
+def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
+    """The lexicon pipeline: normalize, answer with the rule parser when it
+    parses and every word is accounted for, else ask the LLM (which falls back
+    to the rule parser itself). Returns (cmd, meta) with meta = {"normalized",
+    "uncovered", "path" ("rule"|"llm"), "fallback", "parse_ms"}; raises
+    ValueError (RetiredClassError for fat/air/spongy) when nothing parses."""
+    start = time.perf_counter()
+    normalized = lexicon.normalize(text, _LEX)
+    meta = {"normalized": normalized, "uncovered": lexicon.uncovered_words(normalized, _LEX),
+            "path": None, "fallback": None}
+    rule_cmd = None
+    try:
+        rule_cmd = parse_command_rule(normalized)
+    except RetiredClassError as exc:
+        meta["path"] = "rejected"
+        _log_utterance(text, meta, None, str(exc), start)
+        raise
+    except ValueError:
+        pass
+    if rule_cmd is not None and not meta["uncovered"]:
+        meta["path"] = "rule"
+        _log_utterance(text, meta, rule_cmd, None, start)
+        return rule_cmd, meta
+
+    reasons = []
+    try:
+        cmd = parse_command_llm(normalized, model=model, _on_fallback=reasons.append)
+    except ValueError as exc:
+        reason = reasons[0] if reasons else str(exc)
+        meta["path"], meta["fallback"] = "rejected", reason
+        message = (f"LLM offline and the rule parser cannot parse {text!r}"
+                   if reason.startswith("request failed") else f"could not parse {text!r}")
+        _log_utterance(text, meta, None, message, start)
+        raise ValueError(message) from exc
+    meta["path"] = "rule" if reasons else "llm"
+    meta["fallback"] = reasons[0] if reasons else None
+    _log_utterance(text, meta, cmd, None, start)
+    return cmd, meta

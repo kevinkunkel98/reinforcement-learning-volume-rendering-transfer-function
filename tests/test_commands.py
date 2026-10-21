@@ -1020,3 +1020,66 @@ def test_show_only_and_reset_cues():
     assert parse_command_rule("solo vessels")["direction"] == "show_only"
     assert parse_command_rule("focus on the liver")["target"] == "liver"
     assert parse_command_rule("undo everything")["direction"] == "reset"
+
+
+def _llm_stub(monkeypatch, answer=None, fail=False):
+    calls = []
+
+    def fake(text, model=None, host=None, _on_fallback=None):
+        calls.append(text)
+        if fail:
+            if _on_fallback:
+                _on_fallback("request failed: <urlopen error refused>")
+            return commands.parse_command_rule(text)
+        return answer
+    monkeypatch.setattr(commands, "parse_command_llm", fake)
+    return calls
+
+
+def test_hybrid_answers_covered_sentences_without_the_llm(monkeypatch):
+    calls = _llm_stub(monkeypatch)
+    cmd, meta = commands.parse_command_hybrid("Darkin' Skeleton")
+    assert cmd["target"] == "skeleton" and cmd["direction"] == "decrease"
+    assert meta["path"] == "rule" and meta["normalized"] == "darken Skeleton"
+    assert calls == []
+
+
+def test_hybrid_asks_the_llm_when_words_are_left_over(monkeypatch):
+    answer = {"target": "skeleton", "attribute": "opacity", "direction": "show_only", "strength": None}
+    calls = _llm_stub(monkeypatch, answer=answer)
+    cmd, meta = commands.parse_command_hybrid("everything except the skeleton should go away")
+    assert cmd == answer and meta["path"] == "llm"
+    assert meta["uncovered"] == ["except", "go", "away"]
+    assert len(calls) == 1
+
+
+def test_hybrid_reports_llm_offline_when_nothing_parses(monkeypatch):
+    _llm_stub(monkeypatch, fail=True)
+    with pytest.raises(ValueError, match="LLM offline"):
+        commands.parse_command_hybrid("everything except the skeleton should go away")
+
+
+def test_hybrid_refuses_retired_classes_without_the_llm(monkeypatch):
+    calls = _llm_stub(monkeypatch)
+    with pytest.raises(commands.RetiredClassError):
+        commands.parse_command_hybrid("show more fat")
+    assert calls == []
+
+
+def test_hybrid_logs_every_utterance(monkeypatch):
+    _llm_stub(monkeypatch)
+    commands.parse_command_hybrid("add kidneys")
+    with pytest.raises(ValueError):
+        commands.parse_command_hybrid("show more fat")
+    rows = [json.loads(line) for line in open(commands.UTTERANCE_LOG_PATH)]
+    assert [r["text"] for r in rows] == ["add kidneys", "show more fat"]
+    assert rows[0]["path"] == "rule" and rows[0]["cmd"]["target"] == "kidneys"
+    assert rows[1]["cmd"] is None and "no longer a supported class" in rows[1]["error"]
+    assert rows[0]["parse_ms"] >= 0
+
+
+def test_with_meta_hybrid_carries_the_path(monkeypatch):
+    _llm_stub(monkeypatch)
+    cmd, meta = commands.parse_command_with_meta("add kidneys", parser="hybrid")
+    assert meta["parser_requested"] == "hybrid" and meta["parser_used"] == "rule"
+    assert meta["normalized"] == "add kidneys"

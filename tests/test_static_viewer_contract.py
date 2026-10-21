@@ -320,7 +320,7 @@ def test_viewer_parses_with_the_llm_and_answers_with_the_policy():
     # The model-based policy is the default answer (+0.18 median alone, every
     # instruction kind positive); exact and search stay one click away.
     app = read("app.js")
-    assert re.search(r"config\s*=\s*\{[^}]*parser:\s*\"llm\"", app)
+    assert re.search(r"config\s*=\s*\{[^}]*parser:\s*\"hybrid\"", app)
     assert re.search(r"config\s*=\s*\{[^}]*mode:\s*\"policy\"", app)
     html = read("index.html")
     assert re.search(r'id="policy-toggle-btn"[^>]*data-active="true"', html)

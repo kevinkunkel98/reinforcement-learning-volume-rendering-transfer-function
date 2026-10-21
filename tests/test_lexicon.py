@@ -86,3 +86,10 @@ def test_phonetic_key_merges_voiced_and_voiceless_consonants():
     assert lexicon.phonetic_key("sgeleton") == lexicon.phonetic_key("skeleton")
     assert lexicon.phonetic_key("kitneys") == lexicon.phonetic_key("kidneys")
     assert lexicon.phonetic_key("lever") == lexicon.phonetic_key("liver")
+
+
+def test_uncovered_words_lists_content_words_outside_the_lexicon():
+    lex = lexicon.load()
+    assert lexicon.uncovered_words("show only the bones please", lex) == []
+    assert lexicon.uncovered_words("make the lungs see-through", lex) == []
+    assert lexicon.uncovered_words("everything except the skeleton should go away", lex) == ["except", "go", "away"]
