@@ -58,3 +58,31 @@ def test_find_cue_prefers_the_longest_phrase():
     assert lexicon.find_cue("softer edges on the bones", lex) == {"attribute": "width", "direction": "increase"}
     assert lexicon.find_cue("make the lungs see-through", lex)["direction"] == "decrease"
     assert lexicon.find_cue("add kidneys", lex) is None
+
+
+@pytest.mark.parametrize("raw, fixed", [
+    ("Darkin' Skeleton", "darken skeleton"),
+    ("Leitenlangs", "lighten lungs"),
+    ("darken the sgeleton", "darken the skeleton"),
+    ("show only the kitneys", "show only the kidneys"),
+    ("make the lever more visible", "make the liver more visible"),
+])
+def test_normalize_fixes_transcription_errors(raw, fixed):
+    assert lexicon.normalize(raw, lexicon.load()).lower() == fixed
+
+
+@pytest.mark.parametrize("text", [
+    "make it look cool",
+    "thank you for watching",
+    "can you show me just the heart please",
+    "the muscles are hiding everything, get rid of them",
+    "more aorta, less muscle",
+])
+def test_normalize_leaves_ordinary_sentences_alone(text):
+    assert lexicon.normalize(text, lexicon.load()) == text
+
+
+def test_phonetic_key_merges_voiced_and_voiceless_consonants():
+    assert lexicon.phonetic_key("sgeleton") == lexicon.phonetic_key("skeleton")
+    assert lexicon.phonetic_key("kitneys") == lexicon.phonetic_key("kidneys")
+    assert lexicon.phonetic_key("lever") == lexicon.phonetic_key("liver")

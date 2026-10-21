@@ -2,6 +2,7 @@
 derive what each stage needs -- the Whisper prompt, normalization, the rule
 parser's word lists and the coverage check. One file, so speech recognition,
 the rule parser and the LLM can never drift onto different vocabularies."""
+import difflib
 import functools
 import json
 import os
@@ -106,3 +107,59 @@ def strength_pattern(lex: dict, strength: str) -> re.Pattern:
     words = sorted(lex["strengths"][strength], key=len, reverse=True)
     alternatives = [r"very(?! well)" if w == "very" else re.escape(w) for w in words]
     return re.compile(rf"\b({'|'.join(alternatives)})\b")
+
+
+_PHONETIC = str.maketrans({"k": "g", "c": "g", "q": "g", "t": "d", "p": "b", "f": "v", "w": "v",
+                           "z": "s", "x": "s"})
+
+
+def phonetic_key(word: str) -> str:
+    """Crude sound key: voiced/voiceless pairs merged, vowels after the first
+    letter dropped, doubled letters collapsed ("sgeleton" == "skeleton")."""
+    w = word.lower().translate(_PHONETIC)
+    key = w[:1] + re.sub(r"[aeiouyh']", "", w[1:])
+    return re.sub(r"(.)\1+", r"\1", key)
+
+
+def _words(phrases):
+    return {w for p in phrases for w in re.findall(r"[a-z]+(?:'[a-z]+)?", p)}
+
+
+def _vocab(lex: dict):
+    content = _words([t for terms in lex["classes"].values() for t in terms]
+                     + [p for e in lex["phrases"] for p in e["say"]]
+                     + [w for ws in lex["strengths"].values() for w in ws])
+    known = content | _words([t for ts in lex["retired"].values() for t in ts]) \
+        | _words(lex["filler"]) | _words(lex["grammar"]) | _words(lex["asr_fixes"].values())
+    return sorted(w for w in content if len(w) >= 4), known
+
+
+def known_words(lex: dict) -> set:
+    return _cached(lex, "vocab", _vocab)[1]
+
+
+def _fix_word(word: str, lex: dict):
+    """The lexicon word `word` was most likely meant as, or None to keep it."""
+    w = word.lower().strip("'")
+    if w in lex["asr_fixes"]:
+        return lex["asr_fixes"][w]
+    targets, known = _cached(lex, "vocab", _vocab)
+    if w in known or len(w) < 4:
+        return None
+    best = difflib.get_close_matches(w, targets, n=1, cutoff=0.7)
+    if not best:
+        return None
+    ratio = difflib.SequenceMatcher(None, w, best[0]).ratio()
+    if ratio >= 0.88 or phonetic_key(w) == phonetic_key(best[0]):
+        return best[0]
+    return None
+
+
+def normalize(text: str, lex: dict) -> str:
+    """Rewrite known transcription errors and near-misses of lexicon words;
+    everything else, including punctuation, stays as it was."""
+    def repl(m):
+        fixed = _fix_word(m.group(0), lex)
+        return fixed if fixed is not None else m.group(0)
+
+    return re.sub(r"[A-Za-z]+(?:'[A-Za-z]+)?'?", repl, text)
