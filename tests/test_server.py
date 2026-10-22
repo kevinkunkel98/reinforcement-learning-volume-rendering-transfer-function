@@ -1640,3 +1640,37 @@ def test_command_route_adds_timings(monkeypatch):
     out = asyncio.run(server.command(server.CommandRequest(text="add kidneys")))
     assert out["timings"]["parse_ms"] == 12.0
     assert out["timings"]["total_ms"] >= 0
+
+
+def _upload(data: bytes):
+    import io
+    from fastapi import UploadFile
+    return UploadFile(file=io.BytesIO(data), filename="clip.webm")
+
+
+def test_transcribe_empty_upload_returns_no_speech_without_asr(monkeypatch):
+    def must_not_run(*a, **k):
+        raise AssertionError("asr must not run on an empty upload")
+    monkeypatch.setattr(server, "asr_transcribe_path", must_not_run)
+    out = asyncio.run(server.transcribe(_upload(b"")))
+    assert out["text"] == "" and out["heard"] == ""
+    assert out["duration"] >= 0
+
+
+def test_transcribe_undecodable_upload_returns_no_speech(monkeypatch):
+    import av
+
+    def broken(*a, **k):
+        raise av.error.EOFError(541478725, "End of file")
+    monkeypatch.setattr(server, "asr_transcribe_path", broken)
+    out = asyncio.run(server.transcribe(_upload(b"\x1a\x45\xdf\xa3" * 500)))
+    assert out["text"] == "" and out["heard"] == ""
+    assert out["duration"] >= 0
+
+
+def test_transcribe_mlx_ffmpeg_failure_returns_no_speech(monkeypatch):
+    def broken(*a, **k):
+        raise RuntimeError("Failed to load audio: ffmpeg exited with 1")
+    monkeypatch.setattr(server, "asr_transcribe_path", broken)
+    out = asyncio.run(server.transcribe(_upload(b"\x00" * 2000)))
+    assert out["text"] == "" and out["heard"] == ""

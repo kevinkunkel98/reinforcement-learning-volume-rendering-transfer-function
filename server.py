@@ -1239,16 +1239,36 @@ async def scene_transition_route(payload: dict):
     return transition
 
 
+MIN_AUDIO_BYTES = 1000
+try:
+    import av as _av
+    # faster-whisper decodes with PyAV (av.error.FFmpegError and subclasses);
+    # mlx-whisper runs ffmpeg in a subprocess and raises RuntimeError.
+    _AUDIO_DECODE_ERRORS = (_av.error.FFmpegError, RuntimeError)
+except ImportError:
+    _AUDIO_DECODE_ERRORS = (RuntimeError,)
+
+
 @app.post("/api/transcribe")
 async def transcribe(audio: UploadFile = File(...)):
     os.makedirs(AUDIO_DIR, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     wav_path = os.path.join(AUDIO_DIR, f"{stamp}.wav")
+    data = await audio.read()
     with open(wav_path, "wb") as f:
-        f.write(await audio.read())
+        f.write(data)
 
     start = time.time()
-    text = asr_transcribe_path(wav_path, "en", ASR_MODEL, initial_prompt=lexicon.get()["asr_prompt"])
+    # A trigger tap uploads an empty or near-empty clip; the decoders fail on it
+    # (PyAV: EOFError). The client shows "No speech recognised" for empty text.
+    if len(data) < MIN_AUDIO_BYTES:
+        print(f"[asr] skipped {wav_path}: only {len(data)} bytes")
+        return {"text": "", "heard": "", "duration": time.time() - start}
+    try:
+        text = asr_transcribe_path(wav_path, "en", ASR_MODEL, initial_prompt=lexicon.get()["asr_prompt"])
+    except _AUDIO_DECODE_ERRORS as e:
+        print(f"[asr] could not decode {wav_path}: {type(e).__name__}: {e}")
+        return {"text": "", "heard": "", "duration": time.time() - start}
     duration = time.time() - start
 
     with open(os.path.join(AUDIO_DIR, f"{stamp}.txt"), "w") as f:
