@@ -24,7 +24,7 @@ a real speaker's; read the ASR rows as a lower bound on errors, not a measure.
 | rule parser answered | 27 | 24 |
 | LLM answered | 4 | 9 |
 | rejected | 5 | 3 |
-| right command (by hand) | 30 / 36 | 28 / 36 |
+| right command (counted by hand) | 29 / 36 | 30 / 36 |
 
 Latency (p50 / p90): ASR 0.90 / 0.96 s; LLM, when used, 1.38 / 1.55 s; rule
 parser < 3 ms; **policy path 3.53 / 3.75 s**, of which the 200-evaluation
