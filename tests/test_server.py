@@ -707,6 +707,8 @@ def ts_session(monkeypatch):
     # The tests below pin what the policy itself proposes; the viewer's warm
     # search on top of it has its own tests (test_policy_mode_refinement_*).
     s.policy_refine_evaluations = 0
+    # ... and so is the keep repair after it (test_policy_mode_keep_repair_*).
+    s.keep_repair = False
     try:
         yield s
     finally:
@@ -749,6 +751,54 @@ def test_policy_mode_refinement_improves_a_poor_proposal(ts_session):
     s.back()
 
     assert _command_attainment(s, "more bone", refined) > _command_attainment(s, "more bone", bare)
+
+
+def test_viewer_repairs_the_policys_side_effects_by_default():
+    assert server.KEEP_REPAIR is True
+    assert _fresh_session().keep_repair is True
+
+
+def _policy_mode_params(s, text):
+    params = np.array(s.command(text, mode="policy")["current"]["params"], dtype=np.float64)
+    s.back()
+    return params
+
+
+def test_policy_mode_keep_repair_reverts_unhelpful_side_effects(ts_session):
+    """With the switch on, policy mode returns `keep_repair` of what it
+    returned with the switch off, scored against the command's own start."""
+    from rl.keep_repair import keep_repair
+    s = ts_session
+    s.policy_provider = lambda: _StubPolicy(np.linspace(-0.4, 0.4, len(CONTROLLABLE)))
+    start = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    bare = _policy_mode_params(s, "more bone")
+    s.keep_repair = True
+    repaired = _policy_mode_params(s, "more bone")
+
+    cmd, _ = server.parse_command_with_meta("more bone", parser="rule")
+    model = s.model_for_volume(server._dataset_name)
+    layers = s.history[s.cursor].get("anatomy_layers")
+    start_agg, instruction = s.instruction_for(cmd, model, start, layers)
+    expected, _ = keep_repair(model, instruction["goal"], start, bare, layers=layers,
+                              weights=instruction.get("weights"), start_agg=start_agg)
+    np.testing.assert_allclose(repaired, expected)
+    assert not np.array_equal(repaired, bare)          # something was reverted
+    skeleton = slice(goals.PEAK_INDEX["skeleton"] * 6, goals.PEAK_INDEX["skeleton"] * 6 + 6)
+    np.testing.assert_allclose(repaired[skeleton], bare[skeleton])   # the mentioned peak stays
+
+
+def test_policy_mode_keep_repair_off_is_the_bare_policy(ts_session, monkeypatch):
+    s = ts_session
+    action = np.linspace(-0.4, 0.4, len(CONTROLLABLE))
+    s.policy_provider = lambda: _StubPolicy(action)
+    called = []
+    monkeypatch.setattr(server, "keep_repair", lambda *a, **k: called.append(1))
+
+    params = _policy_mode_params(s, "more bone")
+
+    assert called == []
+    start = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    np.testing.assert_allclose(params, server.apply_controllable(start, action))
 
 
 def test_viewer_polishes_the_policy_with_a_short_search_by_default():
@@ -1026,13 +1076,27 @@ def policy_stub():
     return _StubPolicy(np.zeros(len(CONTROLLABLE)))
 
 
+def test_compare_arms_policy_keep_is_the_policy_arm_after_keep_repair(ts_session):
+    from rl.keep_repair import keep_repair
+    model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
+
+    arms = server.compare_arms(model, policy, cmd, instruction, params, camera, cheap=4, thorough=8)
+
+    start_agg = goals.aggregate(model.features(params))
+    expected, n_evals = keep_repair(model, instruction["goal"], params, np.array(arms["policy"]["params"]),
+                                    weights=instruction.get("weights"), start_agg=start_agg)
+    np.testing.assert_allclose(arms["policy_keep"]["params"], expected)
+    assert arms["policy_keep"]["evaluations"] == n_evals > 0
+    assert arms["policy_keep"]["attainment"] is not None
+
+
 def test_compare_arms_runs_four_arms_from_the_same_start(ts_session):
     model, policy, cmd, instruction, params, camera = _compare_inputs(ts_session)
 
     arms = server.compare_arms(model, policy, cmd, instruction, params, camera,
                                 cheap=4, thorough=8)
 
-    assert set(arms) == {"exact", "search_cheap", "search_thorough", "policy"}
+    assert set(arms) == {"exact", "search_cheap", "search_thorough", "policy", "policy_keep"}
     assert arms["exact"]["evaluations"] == 0
     assert arms["search_cheap"]["evaluations"] == 4
     assert arms["search_thorough"]["evaluations"] == 8
@@ -1384,7 +1448,7 @@ def test_compare_route_leaves_session_history_untouched(ts_session, monkeypatch)
         server.CompareRequest(text="more bone", parser="rule", cheap=4, thorough=8)))
 
     assert result["applicable"] is True
-    assert set(result["arms"]) == {"exact", "search_cheap", "search_thorough", "policy"}
+    assert set(result["arms"]) == {"exact", "search_cheap", "search_thorough", "policy", "policy_keep"}
     assert len(s.history) == before_len
     assert s.cursor == before_cursor
 

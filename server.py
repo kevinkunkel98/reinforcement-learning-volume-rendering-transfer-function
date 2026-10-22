@@ -42,6 +42,7 @@ import policy as policy_module
 import render as render_module
 from render import features, grab, render
 from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
+from rl.keep_repair import keep_repair
 from rl.oneshot_env import build_observation
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
 from transfer import TOTAL_PARAMS, TISSUE_BANDS, _opacity_and_color_at, default_params, opacity_mass
@@ -383,6 +384,12 @@ TASK_VERSION = os.environ.get("TASK_VERSION", "v3")
 # re-measures the render and the policy sees what is left of the goal
 # (rl.closed_loop.rollout's loop) -- still the policy alone, no search.
 POLICY_STEPS = int(os.environ.get("POLICY_STEPS", "1"))
+# After the policy (and its search), revert every peak of a class the command
+# never mentioned to where the command started, wherever that costs at most
+# 0.01 attainment (rl.keep_repair, ~one evaluation per changed peak). The
+# keep term lets unmentioned classes drift 0.15 per command for free; chained
+# in the viewer that drift added up (heart rendered black after 7 commands).
+KEEP_REPAIR = os.environ.get("KEEP_REPAIR", "1") != "0"
 
 
 def initial_params(task_version: str = None) -> np.ndarray:
@@ -456,11 +463,13 @@ COMPARE_BUDGET_THOROUGH = 200
 def compare_arms(model, policy, cmd, instruction, start_params, camera,
                  cheap=COMPARE_BUDGET_CHEAP, thorough=COMPARE_BUDGET_THOROUGH,
                  layers=None):
-    """Answer one parsed command four ways from the same start state.
+    """Answer one parsed command five ways from the same start state.
 
     `exact` applies the command directly (0 evaluations), `search_cheap` and
     `search_thorough` run the hill-climb the thesis measures as B3 and B4, and
-    `policy` runs the trained one-shot policy (0 evaluations). Every arm is
+    `policy` runs the trained one-shot policy (0 evaluations); `policy_keep`
+    is that proposal after `rl.keep_repair` (its evaluations are the
+    repair's). The web panel shows the first four (static/app.js ARM_ORDER). Every arm is
     scored with `goals.attainment` against the *shared* start aggregate, which
     is what makes these numbers mean what the held-out table means.
 
@@ -576,6 +585,20 @@ def compare_arms(model, policy, cmd, instruction, start_params, camera,
         functools.partial(run_policy_arm, model, policy, instruction, start_agg, start_params,
                           **({} if layers is None else {"active_layers": layers})),
         0, "no trained policy checkpoint is loaded, so this arm has no answer")
+    repair_evals = []
+
+    def _policy_keep():
+        proposal = run_policy_arm(model, policy, instruction, start_agg, start_params,
+                                  **({} if layers is None else {"active_layers": layers}))
+        repaired, n_evals = keep_repair(model, instruction["goal"], start_params, proposal, layers=layers,
+                                        weights=instruction.get("weights"), start_agg=start_agg)
+        repair_evals.append(n_evals)
+        return repaired
+
+    arms["policy_keep"] = _arm(_policy_keep, None,
+                               "no trained policy checkpoint is loaded, so this arm has no answer")
+    if repair_evals:
+        arms["policy_keep"]["evaluations"] = repair_evals[0]
     return arms
 
 
@@ -671,6 +694,7 @@ class Session:
         self.task_version = TASK_VERSION
         goals.use_task_version(self.task_version)
         self.policy_steps = POLICY_STEPS
+        self.keep_repair = KEEP_REPAIR
         self._load_or_init()
 
     def _load_or_init(self):
@@ -827,6 +851,10 @@ class Session:
         if self.policy_refine_evaluations > 0:
             proposal = refine_policy_proposal(model, proposal, current_params, instruction, start_agg,
                                               self.policy_refine_evaluations, active_layers=layers)
+        if self.keep_repair:
+            proposal, _n_evals = keep_repair(model, instruction["goal"], current_params, proposal,
+                                             layers=layers, weights=instruction.get("weights"),
+                                             start_agg=start_agg)
         return proposal, instruction["text"]
 
     def _run_search(self, cmd, current_params, steps):
