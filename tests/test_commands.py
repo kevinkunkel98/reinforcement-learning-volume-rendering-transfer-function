@@ -1406,3 +1406,84 @@ def test_rule_parser_class_reset_keeps_other_clause_kinds():
 def test_rule_parser_class_reset_does_not_swallow_an_unparsed_clause():
     with pytest.raises(ValueError):
         parse_command_rule("reset the skeleton and the lungs glow somehow")
+
+
+def _sub(target, attribute="opacity", direction="increase", strength="moderately"):
+    return {"target": target, "attribute": attribute, "direction": direction, "strength": strength}
+
+
+@pytest.mark.parametrize("cmd, text", [
+    (_sub("liver"), "more liver"),
+    (_sub("liver", strength="slightly"), "a bit more liver"),
+    (_sub("skeleton", direction="decrease", strength="strongly"), "a lot less skeleton"),
+    (_sub("soft", direction="decrease"), "less soft tissue"),
+    (_sub("heart", "brightness", "decrease", "slightly"), "darken the heart slightly"),
+    (_sub("heart", "brightness", "increase", "strongly"), "brighten the heart a lot"),
+    (_sub("kidneys", "width", "decrease"), "sharpen the kidneys"),
+    (_sub("kidneys", "width", "increase"), "soften the kidneys"),
+    (_sub("skeleton", "center", "increase"), "shift the skeleton up"),
+    (_sub("skeleton", "center", "decrease"), "shift the skeleton down"),
+    ({"target": "heart", "attribute": "opacity", "direction": "set", "level": "high"}, "heart opacity high"),
+    ({"target": "soft", "attribute": "brightness", "direction": "set", "level": "low"}, "soft tissue brightness low"),
+    ({"target": "liver", "attribute": "opacity", "direction": "show_only", "strength": None}, "show only liver"),
+    ({"target": ["liver", "spleen"], "attribute": "opacity", "direction": "show_only", "strength": None},
+     "show only liver and spleen"),
+    ({"target": ["liver", "spleen", "heart"], "attribute": "opacity", "direction": "show_only", "strength": None},
+     "show only liver, spleen and heart"),
+    ({"target": None, "attribute": None, "direction": "reset", "strength": None}, "reset everything"),
+    ({"target": "skeleton", "attribute": None, "direction": "reset", "strength": None}, "reset the skeleton"),
+    ({"target": ["lungs", "liver"], "attribute": None, "direction": "reset", "strength": None},
+     "reset the lungs and liver"),
+    ({"compound": [_sub("liver"), _sub("lungs", direction="decrease")]}, "more liver + less lungs"),
+    ({"camera": {"action": "rotate", "direction": "left", "strength": "moderately"}}, "rotate left"),
+    ({"camera": {"action": "zoom", "direction": "in", "strength": "slightly"}}, "zoom in a bit"),
+    ({"camera": {"action": "tilt", "direction": "up", "strength": "strongly"}}, "tilt up a lot"),
+])
+def test_describe_command_reads_each_shape_in_plain_english(cmd, text):
+    assert commands.describe_command(cmd) == text
+
+
+def test_describe_command_covers_what_the_rule_parser_produces():
+    assert commands.describe_command(parse_command_rule("darken the heart slightly")) == "darken the heart slightly"
+    assert commands.describe_command(parse_command_rule("show only the liver and the spleen")) == \
+        "show only liver and spleen"
+    assert commands.describe_command(parse_command_rule("more liver and less lungs")) == "more liver + less lungs"
+
+
+def test_hybrid_warns_when_the_llm_drops_a_clause(monkeypatch):
+    _llm_stub(monkeypatch, answer=_sub("soft", direction="decrease"))
+    cmd, meta = commands.parse_command_hybrid("Moriorta, less muscle")
+    assert meta["path"] == "llm"
+    assert meta["warning"] == "may have missed: 'moriorta'"
+    assert meta["understood"] == "less soft tissue"
+
+
+def test_hybrid_does_not_warn_when_every_clause_is_answered(monkeypatch):
+    answer = {"compound": [_sub("liver"), _sub("lungs", direction="decrease")]}
+    _llm_stub(monkeypatch, answer=answer)
+    cmd, meta = commands.parse_command_hybrid("more liver and fewer lungs ehm")
+    assert meta["path"] == "llm" and meta["warning"] is None
+    assert meta["understood"] == "more liver + less lungs"
+
+
+def test_hybrid_does_not_warn_when_one_command_names_every_clause(monkeypatch):
+    # "liver" and "the spleen ..." are two clauses, one show_only answers both.
+    answer = {"target": ["liver", "spleen"], "attribute": "opacity", "direction": "show_only", "strength": None}
+    _llm_stub(monkeypatch, answer=answer)
+    _, meta = commands.parse_command_hybrid("I wanna look at the liver and the spleen ehm")
+    assert meta["path"] == "llm" and meta["warning"] is None
+
+
+def test_hybrid_rule_path_has_understood_and_no_warning(monkeypatch):
+    _llm_stub(monkeypatch)
+    _, meta = commands.parse_command_hybrid("add kidneys")
+    assert meta["understood"] == "more kidneys" and meta["warning"] is None
+
+
+def test_with_meta_hybrid_carries_understood_and_the_warning(monkeypatch):
+    _llm_stub(monkeypatch, answer=_sub("soft", direction="decrease"))
+    _, meta = commands.parse_command_with_meta("Moriorta, less muscle", parser="hybrid")
+    assert meta["understood"] == "less soft tissue"
+    assert meta["parse_warning"] == "may have missed: 'moriorta'"
+    _, meta = commands.parse_command_with_meta("add kidneys", parser="hybrid")
+    assert meta["understood"] == "more kidneys" and meta["parse_warning"] is None

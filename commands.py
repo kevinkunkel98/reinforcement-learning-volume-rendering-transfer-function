@@ -513,13 +513,15 @@ def parse_command_with_meta(text: str, parser: str = "rule", model: str = DEFAUL
     parse and call it an LLM one. Returns `(cmd, meta)` with meta =
     {"parser_requested", "parser_used", "parser_fallback"}, where
     `parser_fallback` is the reason string when llm was asked for and rule
-    answered, and None otherwise."""
+    answered, and None otherwise. Hybrid adds "normalized", "uncovered",
+    "parse_ms", "understood" and "parse_warning" (see parse_command_hybrid)."""
     meta = {"parser_requested": parser, "parser_used": parser, "parser_fallback": None}
     if parser == "hybrid":
         cmd, hmeta = parse_command_hybrid(text, model=model)
         return cmd, {"parser_requested": "hybrid", "parser_used": hmeta["path"],
                      "parser_fallback": hmeta["fallback"], "normalized": hmeta["normalized"],
-                     "uncovered": hmeta["uncovered"], "parse_ms": hmeta["parse_ms"]}
+                     "uncovered": hmeta["uncovered"], "parse_ms": hmeta["parse_ms"],
+                     "understood": hmeta["understood"], "parse_warning": hmeta["warning"]}
     if parser != "llm":
         return parse_command_rule(text), meta
 
@@ -1180,7 +1182,9 @@ def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
     """The lexicon pipeline: normalize, answer with the rule parser when it
     parses and every word is accounted for, else ask the LLM (which falls back
     to the rule parser itself). Returns (cmd, meta) with meta = {"normalized",
-    "uncovered", "path" ("rule"|"llm"), "fallback", "parse_ms"}; raises
+    "uncovered", "path" ("rule"|"llm"), "fallback", "parse_ms", "understood"
+    (describe_command), "warning" (LLM path only: clauses the answer seems to
+    have dropped, see _missed_clauses; else None)}; raises
     ValueError (RetiredClassError for fat/air/spongy) when nothing parses."""
     start = time.perf_counter()
     normalized = lexicon.normalize(text, _LEX)
@@ -1197,6 +1201,7 @@ def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
         pass
     if rule_cmd is not None and not meta["uncovered"]:
         meta["path"] = "rule"
+        meta["understood"], meta["warning"] = describe_command(rule_cmd), None
         _log_utterance(text, meta, rule_cmd, None, start)
         return rule_cmd, meta
 
@@ -1211,6 +1216,7 @@ def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
         reason = reasons[0] if reasons else str(exc)
         if rule_cmd is not None:
             meta["path"], meta["fallback"] = "rule", reason
+            meta["understood"], meta["warning"] = describe_command(rule_cmd), None
             _log_utterance(text, meta, rule_cmd, None, start)
             return rule_cmd, meta
         meta["path"], meta["fallback"] = "rejected", reason
@@ -1222,8 +1228,90 @@ def parse_command_hybrid(text: str, model: str = DEFAULT_LLM_MODEL):
         cmd = rule_cmd
     meta["path"] = "rule" if reasons else "llm"
     meta["fallback"] = reasons[0] if reasons else None
+    meta["understood"] = describe_command(cmd)
+    missed = _missed_clauses(cmd, normalized) if meta["path"] == "llm" else []
+    meta["warning"] = ("may have missed: " + ", ".join(f"'{c}'" for c in missed)) if missed else None
     _log_utterance(text, meta, cmd, None, start)
     return cmd, meta
+
+
+# Display names, as the viewer shows them (ANATOMY_CLASSES in static/app.js).
+CLASS_LABEL = {name: name for name in anatomy.CANONICAL_CLASSES} | {"soft": "soft tissue"}
+_STRENGTH_SAID = {"slightly": "a bit", "moderately": "", "strongly": "a lot"}  # "a bit more liver"
+_VERB_STRENGTH_SAID = {"slightly": "slightly", "strongly": "a lot"}  # "darken the heart slightly"
+ATTRIBUTE_SAID = {"center": "position"}
+
+
+def _labels(target) -> list:
+    targets = target if isinstance(target, list) else [target]
+    return [CLASS_LABEL.get(t, str(t)) for t in targets]
+
+
+def _and_list(words: list) -> str:
+    return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
+
+
+def _describe_single(cmd: dict) -> str:
+    direction, attribute = cmd.get("direction"), cmd.get("attribute")
+    if direction == "reset":
+        return "reset everything" if cmd.get("target") is None else f"reset the {_and_list(_labels(cmd['target']))}"
+    target = _and_list(_labels(cmd.get("target")))
+    if direction == "show_only":
+        return f"show only {target}"
+    if direction == "set":
+        return f"{target} {ATTRIBUTE_SAID.get(attribute, attribute)} {cmd.get('level')}"
+    said = _STRENGTH_SAID.get(cmd.get("strength"), "")
+    up = direction == "increase"
+    if attribute == "opacity":
+        text = f"{'more' if up else 'less'} {target}"
+        return f"{said} {text}" if said else text
+    said = _VERB_STRENGTH_SAID.get(cmd.get("strength"), "")
+    verb = {"brightness": ("brighten", "darken"), "width": ("soften", "sharpen")}.get(attribute)
+    text = (f"{verb[0 if up else 1]} the {target}" if verb
+            else f"shift the {target} {'up' if up else 'down'}")
+    return f"{text} {said}" if said else text
+
+
+def describe_command(cmd) -> str:
+    """Short plain English for a parsed command ("darken the heart slightly",
+    "show only liver and spleen", "more liver + less lungs"), so a listener can
+    check what was understood."""
+    if isinstance(cmd, dict) and isinstance(cmd.get("compound"), list):
+        return " + ".join(describe_command(sub) for sub in cmd["compound"])
+    if isinstance(cmd, dict) and isinstance(cmd.get("camera"), dict):
+        cam = cmd["camera"]
+        said = _STRENGTH_SAID.get(cam.get("strength"), "")
+        return " ".join(w for w in (cam.get("action"), cam.get("direction"), said) if w)
+    if isinstance(cmd, dict) and "direction" in cmd:
+        return _describe_single(cmd)
+    return str(cmd)
+
+
+def _missed_clauses(cmd, normalized: str) -> list:
+    """The clauses of `normalized` an LLM answer does not obviously cover.
+
+    Heuristic: split like the rule parser (purpose clause dropped, then
+    `_split_clauses`) and drop clauses that are only filler. Nothing is missed
+    while the answer has at least as many sub-commands as there are clauses.
+    Otherwise a clause counts as answered when a class it names (exactly or
+    fuzzily) is a target of the answer, or -- for a camera answer -- when it
+    parses to that same camera move; every other clause, including those
+    naming no class, is reported."""
+    t = _PURPOSE_RE.sub("", _normalise_text(normalized)) or _normalise_text(normalized)
+    clauses = [c for c in _split_clauses(t) if _FILLER_RE.sub(" ", c).strip()]
+    subs = cmd["compound"] if isinstance(cmd, dict) and isinstance(cmd.get("compound"), list) else [cmd]
+    if len(subs) >= len(clauses):
+        return []
+    targets = set(_command_targets(cmd))
+    missed = []
+    for clause in clauses:
+        named = _find_classes(clause) or _fuzzy_classes(clause)
+        if any(c in targets for c in named):
+            continue
+        if not named and isinstance(cmd, dict) and "camera" in cmd and _parse_camera(clause) == cmd:
+            continue
+        missed.append(clause)
+    return missed
 
 
 def check_llm(model: str = DEFAULT_LLM_MODEL, host: str = None):
