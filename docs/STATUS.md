@@ -106,6 +106,15 @@ on another.
 - **Parser held-out set written by the developer** — optimistic until
   phrases from other people are tested.
 - **VR numbers come from one scan, one sitting**, and depend ~3× on the TF.
+- **Drift accumulates over a session** (found 2026-10-22, live VR session on
+  ts_s0477). Each policy step keeps unmentioned classes within
+  `KEEP_TOLERANCE` (0.15) of *that step's* start, so a single step looks
+  clean, but replaying seven commands drifted never-mentioned classes far
+  beyond it: heart brightness −0.36 (renders black), vessels +0.46, the
+  unlabelled shell +0.37 log-visibility (a bluish box with vertical streaks).
+  The metric has no anchor to the session's origin, and later steps start
+  from states the one-shot policy never trained on. Mitigation in progress:
+  an inference-time keep repair (see Next).
 
 ## Next, in order
 
@@ -145,7 +154,19 @@ on another.
    Also: report wall-clock time next to render counts (planning costs ~0.2 s,
    about 8 renders), and cite differentiable volume rendering (DiffDVR, Weiss
    & Westermann 2021) in related work as the per-query gradient alternative.
-5. **Write the thesis** — skeleton with tables and figure briefs exists
+5. **Multi-step sessions** (inference fix in progress, retraining optional):
+   - *Keep repair (now):* after each policy step, revert every changed peak of
+     an unmentioned class to its pre-step value when attainment does not
+     drop (~8 visibility evaluations, ~0.1 s). Report as its own arm
+     ("policy + keep") next to policy and policy + planning.
+   - *Retraining (possible feature):* train on multi-step episodes (starts
+     drawn from the policy's own earlier outputs, not only the task's start
+     TF) and charge drift against the episode origin, with a smaller
+     `KEEP_TOLERANCE` and a brightness keep term for the unlabelled shell
+     ("other" is charged for visibility only today). Only if the keep repair
+     does not close the gap -- it changes the objective, so every reported
+     number would have to be re-run.
+6. **Write the thesis** — skeleton with tables and figure briefs exists
    (Overleaf), plus an architecture overview figure (`docs/figures/arch.pdf`, made by `docs/figures/make_arch.py`).
-6. Optional: start a ceiling-fix-style render audit for the remaining weak
+7. Optional: start a ceiling-fix-style render audit for the remaining weak
    cases (strong increases, small-organ brightness).
