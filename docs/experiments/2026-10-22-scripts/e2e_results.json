@@ -1,0 +1,3642 @@
+[
+ {
+  "i": 0,
+  "line": "show only bones",
+  "voice": "en",
+  "asr_ms": 870,
+  "heard": "show only bones.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3559,
+  "mode": "policy+keep",
+  "goal": "show only the skeleton",
+  "attainment": 0.59,
+  "drift": {
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "heart": [
+    -3.86,
+    -0.36
+   ],
+   "vessels": [
+    -0.12,
+    0.13
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "kidneys": [
+    -1.27,
+    0.22
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -0.19,
+    null
+   ]
+  }
+ },
+ {
+  "i": 0,
+  "line": "show only bones",
+  "voice": "de",
+  "asr_ms": 870,
+  "heard": "Show only bones.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3590,
+  "mode": "policy+keep",
+  "goal": "show only the skeleton",
+  "attainment": 0.59,
+  "drift": {
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "heart": [
+    -3.86,
+    -0.36
+   ],
+   "vessels": [
+    -0.12,
+    0.13
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "kidneys": [
+    -1.27,
+    0.22
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -0.19,
+    null
+   ]
+  }
+ },
+ {
+  "i": 1,
+  "line": "add kidneys",
+  "voice": "en",
+  "asr_ms": 802,
+  "heard": "Add kidneys.",
+  "cmd": {
+   "target": "kidneys",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3725,
+  "mode": "policy+keep",
+  "goal": "more the kidneys",
+  "attainment": 1.0,
+  "drift": {
+   "skeleton": [
+    0.01,
+    0.05
+   ],
+   "lungs": [
+    -0.11,
+    -0.06
+   ],
+   "heart": [
+    -0.1,
+    -0.04
+   ],
+   "vessels": [
+    -0.13,
+    0.02
+   ],
+   "liver": [
+    0.08,
+    -0.04
+   ],
+   "spleen": [
+    -0.19,
+    -0.04
+   ],
+   "soft": [
+    0.04,
+    0.01
+   ],
+   "other": [
+    -0.36,
+    null
+   ]
+  }
+ },
+ {
+  "i": 1,
+  "line": "add kidneys",
+  "voice": "de",
+  "asr_ms": 823,
+  "heard": "Cut kidneys.",
+  "cmd": {
+   "target": "kidneys",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "path": "llm",
+  "parse_ms": 1545.5,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3616,
+  "mode": "policy+keep",
+  "goal": "a lot less the kidneys",
+  "attainment": 1.0,
+  "drift": {
+   "skeleton": [
+    -0.13,
+    -0.0
+   ],
+   "lungs": [
+    -0.08,
+    -0.0
+   ],
+   "heart": [
+    -0.08,
+    0.0
+   ],
+   "vessels": [
+    -0.12,
+    0.0
+   ],
+   "liver": [
+    -0.06,
+    -0.0
+   ],
+   "spleen": [
+    -0.08,
+    0.0
+   ],
+   "soft": [
+    -0.02,
+    -0.1
+   ],
+   "other": [
+    0.12,
+    null
+   ]
+  }
+ },
+ {
+  "i": 2,
+  "line": "make the liver translucent",
+  "voice": "en",
+  "asr_ms": 933,
+  "heard": "Make the liver translucent.",
+  "cmd": {
+   "target": "liver",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3490,
+  "mode": "policy+keep",
+  "goal": "less the liver",
+  "attainment": 0.99,
+  "drift": {
+   "skeleton": [
+    -0.02,
+    -0.04
+   ],
+   "lungs": [
+    -0.06,
+    -0.02
+   ],
+   "heart": [
+    0.12,
+    -0.0
+   ],
+   "vessels": [
+    0.18,
+    -0.0
+   ],
+   "kidneys": [
+    0.13,
+    -0.0
+   ],
+   "spleen": [
+    0.03,
+    -0.0
+   ],
+   "soft": [
+    0.06,
+    0.03
+   ],
+   "other": [
+    -0.07,
+    null
+   ]
+  }
+ },
+ {
+  "i": 2,
+  "line": "make the liver translucent",
+  "voice": "de",
+  "asr_ms": 922,
+  "heard": "make the liver translucent.",
+  "cmd": {
+   "target": "liver",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3557,
+  "mode": "policy+keep",
+  "goal": "less the liver",
+  "attainment": 0.99,
+  "drift": {
+   "skeleton": [
+    -0.02,
+    -0.04
+   ],
+   "lungs": [
+    -0.06,
+    -0.02
+   ],
+   "heart": [
+    0.12,
+    -0.0
+   ],
+   "vessels": [
+    0.18,
+    -0.0
+   ],
+   "kidneys": [
+    0.13,
+    -0.0
+   ],
+   "spleen": [
+    0.03,
+    -0.0
+   ],
+   "soft": [
+    0.06,
+    0.03
+   ],
+   "other": [
+    -0.07,
+    null
+   ]
+  }
+ },
+ {
+  "i": 3,
+  "line": "mute the bones",
+  "voice": "en",
+  "asr_ms": 842,
+  "heard": "Mute the bones.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3701,
+  "mode": "policy+keep",
+  "goal": "a lot less the skeleton",
+  "attainment": 0.99,
+  "drift": {
+   "lungs": [
+    -0.02,
+    0.0
+   ],
+   "heart": [
+    -0.05,
+    0.0
+   ],
+   "vessels": [
+    0.19,
+    0.05
+   ],
+   "liver": [
+    -0.05,
+    0.0
+   ],
+   "kidneys": [
+    -0.14,
+    -0.0
+   ],
+   "spleen": [
+    -0.03,
+    0.0
+   ],
+   "soft": [
+    0.04,
+    -0.0
+   ],
+   "other": [
+    0.09,
+    null
+   ]
+  }
+ },
+ {
+  "i": 3,
+  "line": "mute the bones",
+  "voice": "de",
+  "asr_ms": 880,
+  "heard": "Mute the bones.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3562,
+  "mode": "policy+keep",
+  "goal": "a lot less the skeleton",
+  "attainment": 0.99,
+  "drift": {
+   "lungs": [
+    -0.02,
+    0.0
+   ],
+   "heart": [
+    -0.05,
+    0.0
+   ],
+   "vessels": [
+    0.19,
+    0.05
+   ],
+   "liver": [
+    -0.05,
+    0.0
+   ],
+   "kidneys": [
+    -0.14,
+    -0.0
+   ],
+   "spleen": [
+    -0.03,
+    0.0
+   ],
+   "soft": [
+    0.04,
+    -0.0
+   ],
+   "other": [
+    0.09,
+    null
+   ]
+  }
+ },
+ {
+  "i": 4,
+  "line": "solo vessels",
+  "voice": "en",
+  "asr_ms": 803,
+  "heard": "Solo vessels.",
+  "cmd": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 149,
+  "mode": "exact (vessels is not a goal on 'ts_s0477' -- it has no contrast)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    -4.71,
+    -0.95
+   ],
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "heart": [
+    -3.86,
+    -0.36
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "kidneys": [
+    -3.59,
+    -0.58
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -5.28,
+    null
+   ]
+  }
+ },
+ {
+  "i": 4,
+  "line": "solo vessels",
+  "voice": "de",
+  "asr_ms": 865,
+  "heard": "solo the vessels.",
+  "cmd": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 149,
+  "mode": "exact (vessels is not a goal on 'ts_s0477' -- it has no contrast)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    -4.71,
+    -0.95
+   ],
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "heart": [
+    -3.86,
+    -0.36
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "kidneys": [
+    -3.59,
+    -0.58
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -5.28,
+    null
+   ]
+  }
+ },
+ {
+  "i": 5,
+  "line": "darken the skeleton",
+  "voice": "en",
+  "asr_ms": 883,
+  "heard": "darken the skeleton.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "brightness",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3514,
+  "mode": "policy+keep",
+  "goal": "darken the skeleton",
+  "attainment": 0.97,
+  "drift": {
+   "lungs": [
+    -0.06,
+    -0.0
+   ],
+   "heart": [
+    -0.05,
+    0.0
+   ],
+   "vessels": [
+    -0.07,
+    0.0
+   ],
+   "liver": [
+    -0.03,
+    0.0
+   ],
+   "kidneys": [
+    -0.04,
+    0.0
+   ],
+   "spleen": [
+    -0.04,
+    0.0
+   ],
+   "soft": [
+    -0.03,
+    -0.0
+   ],
+   "other": [
+    0.04,
+    null
+   ]
+  }
+ },
+ {
+  "i": 5,
+  "line": "darken the skeleton",
+  "voice": "de",
+  "asr_ms": 869,
+  "heard": "darken the skeleton.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "brightness",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3526,
+  "mode": "policy+keep",
+  "goal": "darken the skeleton",
+  "attainment": 0.97,
+  "drift": {
+   "lungs": [
+    -0.06,
+    -0.0
+   ],
+   "heart": [
+    -0.05,
+    0.0
+   ],
+   "vessels": [
+    -0.07,
+    0.0
+   ],
+   "liver": [
+    -0.03,
+    0.0
+   ],
+   "kidneys": [
+    -0.04,
+    0.0
+   ],
+   "spleen": [
+    -0.04,
+    0.0
+   ],
+   "soft": [
+    -0.03,
+    -0.0
+   ],
+   "other": [
+    0.04,
+    null
+   ]
+  }
+ },
+ {
+  "i": 6,
+  "line": "lighten the lungs",
+  "voice": "en",
+  "asr_ms": 886,
+  "heard": "Lighten the lungs.",
+  "cmd": {
+   "target": "lungs",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3457,
+  "mode": "policy+keep",
+  "goal": "brighten the lungs",
+  "attainment": 0.97,
+  "drift": {
+   "skeleton": [
+    -0.11,
+    -0.0
+   ],
+   "heart": [
+    -0.01,
+    0.0
+   ],
+   "vessels": [
+    -0.06,
+    0.0
+   ],
+   "liver": [
+    -0.06,
+    -0.0
+   ],
+   "kidneys": [
+    -0.15,
+    -0.0
+   ],
+   "spleen": [
+    -0.07,
+    0.0
+   ],
+   "soft": [
+    0.02,
+    -0.1
+   ],
+   "other": [
+    0.06,
+    null
+   ]
+  }
+ },
+ {
+  "i": 6,
+  "line": "lighten the lungs",
+  "voice": "de",
+  "asr_ms": 811,
+  "heard": "Lighten the lungs.",
+  "cmd": {
+   "target": "lungs",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3463,
+  "mode": "policy+keep",
+  "goal": "brighten the lungs",
+  "attainment": 0.97,
+  "drift": {
+   "skeleton": [
+    -0.11,
+    -0.0
+   ],
+   "heart": [
+    -0.01,
+    0.0
+   ],
+   "vessels": [
+    -0.06,
+    0.0
+   ],
+   "liver": [
+    -0.06,
+    -0.0
+   ],
+   "kidneys": [
+    -0.15,
+    -0.0
+   ],
+   "spleen": [
+    -0.07,
+    0.0
+   ],
+   "soft": [
+    0.02,
+    -0.1
+   ],
+   "other": [
+    0.06,
+    null
+   ]
+  }
+ },
+ {
+  "i": 7,
+  "line": "highlight the heart",
+  "voice": "en",
+  "asr_ms": 897,
+  "heard": "Highlight the art.",
+  "outcome": "rejected: could not parse 'Highlight the art.' (model: not an instruction)"
+ },
+ {
+  "i": 7,
+  "line": "highlight the heart",
+  "voice": "de",
+  "asr_ms": 875,
+  "heard": "Highlight the heart.",
+  "cmd": {
+   "target": "heart",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.3,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3781,
+  "mode": "policy+keep",
+  "goal": "more the heart",
+  "attainment": 0.99,
+  "drift": {
+   "skeleton": [
+    0.07,
+    0.05
+   ],
+   "lungs": [
+    -0.05,
+    -0.05
+   ],
+   "vessels": [
+    0.11,
+    -0.01
+   ],
+   "liver": [
+    0.15,
+    -0.0
+   ],
+   "kidneys": [
+    -0.2,
+    -0.05
+   ],
+   "spleen": [
+    0.02,
+    -0.02
+   ],
+   "soft": [
+    -0.04,
+    0.03
+   ],
+   "other": [
+    -0.46,
+    null
+   ]
+  }
+ },
+ {
+  "i": 8,
+  "line": "reveal the skeleton",
+  "voice": "en",
+  "asr_ms": 928,
+  "heard": "Reveal the skeleton.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3674,
+  "mode": "policy+keep",
+  "goal": "more the skeleton",
+  "attainment": 0.99,
+  "drift": {
+   "lungs": [
+    0.07,
+    -0.01
+   ],
+   "heart": [
+    -0.13,
+    0.0
+   ],
+   "vessels": [
+    0.01,
+    -0.0
+   ],
+   "liver": [
+    0.05,
+    -0.0
+   ],
+   "kidneys": [
+    -0.18,
+    0.0
+   ],
+   "spleen": [
+    0.07,
+    0.0
+   ],
+   "soft": [
+    -0.34,
+    -0.12
+   ],
+   "other": [
+    -0.03,
+    null
+   ]
+  }
+ },
+ {
+  "i": 8,
+  "line": "reveal the skeleton",
+  "voice": "de",
+  "asr_ms": 880,
+  "heard": "Reveal the skeleton.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3793,
+  "mode": "policy+keep",
+  "goal": "more the skeleton",
+  "attainment": 0.99,
+  "drift": {
+   "lungs": [
+    0.07,
+    -0.01
+   ],
+   "heart": [
+    -0.13,
+    0.0
+   ],
+   "vessels": [
+    0.01,
+    -0.0
+   ],
+   "liver": [
+    0.05,
+    -0.0
+   ],
+   "kidneys": [
+    -0.18,
+    0.0
+   ],
+   "spleen": [
+    0.07,
+    0.0
+   ],
+   "soft": [
+    -0.34,
+    -0.12
+   ],
+   "other": [
+    -0.03,
+    null
+   ]
+  }
+ },
+ {
+  "i": 9,
+  "line": "fade out the soft tissue",
+  "voice": "en",
+  "asr_ms": 927,
+  "heard": "fade out the soft tissue.",
+  "cmd": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3471,
+  "mode": "policy+keep",
+  "goal": "a lot less soft tissue",
+  "attainment": 0.91,
+  "drift": {
+   "skeleton": [
+    0.3,
+    0.05
+   ],
+   "lungs": [
+    -0.1,
+    0.0
+   ],
+   "heart": [
+    -0.13,
+    -0.0
+   ],
+   "vessels": [
+    0.0,
+    -0.0
+   ],
+   "liver": [
+    -0.01,
+    0.0
+   ],
+   "kidneys": [
+    0.17,
+    0.0
+   ],
+   "spleen": [
+    0.03,
+    0.0
+   ],
+   "other": [
+    0.09,
+    null
+   ]
+  }
+ },
+ {
+  "i": 9,
+  "line": "fade out the soft tissue",
+  "voice": "de",
+  "asr_ms": 974,
+  "heard": "fade out the soft tissue.",
+  "cmd": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3523,
+  "mode": "policy+keep",
+  "goal": "a lot less soft tissue",
+  "attainment": 0.91,
+  "drift": {
+   "skeleton": [
+    0.3,
+    0.05
+   ],
+   "lungs": [
+    -0.1,
+    0.0
+   ],
+   "heart": [
+    -0.13,
+    -0.0
+   ],
+   "vessels": [
+    0.0,
+    -0.0
+   ],
+   "liver": [
+    -0.01,
+    0.0
+   ],
+   "kidneys": [
+    0.17,
+    0.0
+   ],
+   "spleen": [
+    0.03,
+    0.0
+   ],
+   "other": [
+    0.09,
+    null
+   ]
+  }
+ },
+ {
+  "i": 10,
+  "line": "ghost the muscles a bit",
+  "voice": "en",
+  "asr_ms": 874,
+  "heard": "Ghost the muscles a bit.",
+  "cmd": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "slightly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3438,
+  "mode": "policy+keep",
+  "goal": "a bit less soft tissue",
+  "attainment": 0.84,
+  "drift": {
+   "skeleton": [
+    0.09,
+    0.05
+   ],
+   "lungs": [
+    -0.05,
+    -0.03
+   ],
+   "heart": [
+    -0.26,
+    -0.0
+   ],
+   "vessels": [
+    0.09,
+    -0.03
+   ],
+   "liver": [
+    -0.06,
+    0.0
+   ],
+   "kidneys": [
+    -0.07,
+    0.0
+   ],
+   "spleen": [
+    -0.1,
+    0.0
+   ],
+   "other": [
+    0.15,
+    null
+   ]
+  }
+ },
+ {
+  "i": 10,
+  "line": "ghost the muscles a bit",
+  "voice": "de",
+  "asr_ms": 980,
+  "heard": "Post the muscless abit.",
+  "cmd": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "slightly"
+  },
+  "path": "llm",
+  "parse_ms": 1282.6,
+  "uncovered": [
+   "post",
+   "abit"
+  ],
+  "fallback": null,
+  "apply_ms": 3753,
+  "mode": "policy+keep",
+  "goal": "a bit more soft tissue",
+  "attainment": 0.46,
+  "drift": {
+   "skeleton": [
+    -0.14,
+    -0.11
+   ],
+   "lungs": [
+    -0.09,
+    -0.09
+   ],
+   "heart": [
+    0.15,
+    0.03
+   ],
+   "vessels": [
+    -0.17,
+    0.06
+   ],
+   "liver": [
+    -0.09,
+    -0.09
+   ],
+   "kidneys": [
+    -0.2,
+    0.06
+   ],
+   "spleen": [
+    -0.11,
+    0.05
+   ],
+   "other": [
+    -0.1,
+    null
+   ]
+  }
+ },
+ {
+  "i": 11,
+  "line": "crank up the lungs",
+  "voice": "en",
+  "asr_ms": 892,
+  "heard": "Crank up the lungs.",
+  "cmd": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3779,
+  "mode": "policy+keep",
+  "goal": "a lot more the lungs",
+  "attainment": 0.91,
+  "drift": {
+   "skeleton": [
+    -0.15,
+    -0.08
+   ],
+   "heart": [
+    -0.12,
+    -0.01
+   ],
+   "vessels": [
+    -0.13,
+    0.06
+   ],
+   "liver": [
+    -0.11,
+    0.0
+   ],
+   "kidneys": [
+    0.01,
+    0.05
+   ],
+   "spleen": [
+    -0.05,
+    0.03
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -0.29,
+    null
+   ]
+  }
+ },
+ {
+  "i": 11,
+  "line": "crank up the lungs",
+  "voice": "de",
+  "asr_ms": 898,
+  "heard": "Crank up the lungs.",
+  "cmd": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3736,
+  "mode": "policy+keep",
+  "goal": "a lot more the lungs",
+  "attainment": 0.91,
+  "drift": {
+   "skeleton": [
+    -0.15,
+    -0.08
+   ],
+   "heart": [
+    -0.12,
+    -0.01
+   ],
+   "vessels": [
+    -0.13,
+    0.06
+   ],
+   "liver": [
+    -0.11,
+    0.0
+   ],
+   "kidneys": [
+    0.01,
+    0.05
+   ],
+   "spleen": [
+    -0.05,
+    0.03
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -0.29,
+    null
+   ]
+  }
+ },
+ {
+  "i": 12,
+  "line": "dial the heart down a touch",
+  "voice": "en",
+  "asr_ms": 910,
+  "heard": "Dial the arc down the touch.",
+  "outcome": "rejected: could not parse 'Dial the arc down the touch.' (model: not an instruction)"
+ },
+ {
+  "i": 12,
+  "line": "dial the heart down a touch",
+  "voice": "de",
+  "asr_ms": 911,
+  "heard": "Dial the heart down a touch.",
+  "cmd": {
+   "target": "heart",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "slightly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3491,
+  "mode": "policy+keep",
+  "goal": "a bit less the heart",
+  "attainment": 1.0,
+  "drift": {
+   "skeleton": [
+    -0.05,
+    0.02
+   ],
+   "lungs": [
+    0.0,
+    -0.04
+   ],
+   "vessels": [
+    -0.02,
+    -0.01
+   ],
+   "liver": [
+    0.02,
+    -0.0
+   ],
+   "kidneys": [
+    0.05,
+    -0.0
+   ],
+   "spleen": [
+    0.04,
+    0.0
+   ],
+   "soft": [
+    0.07,
+    0.02
+   ],
+   "other": [
+    -0.12,
+    null
+   ]
+  }
+ },
+ {
+  "i": 13,
+  "line": "make the ribcage pop",
+  "voice": "en",
+  "asr_ms": 870,
+  "heard": "Make the ripsage pop.",
+  "outcome": "rejected: could not parse 'Make the ripsage pop.' (model: not an instruction)"
+ },
+ {
+  "i": 13,
+  "line": "make the ribcage pop",
+  "voice": "de",
+  "asr_ms": 895,
+  "heard": "Make the ribcage pop.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3685,
+  "mode": "policy+keep",
+  "goal": "more the skeleton",
+  "attainment": 0.99,
+  "drift": {
+   "lungs": [
+    0.07,
+    -0.01
+   ],
+   "heart": [
+    -0.13,
+    0.0
+   ],
+   "vessels": [
+    0.01,
+    -0.0
+   ],
+   "liver": [
+    0.05,
+    -0.0
+   ],
+   "kidneys": [
+    -0.18,
+    0.0
+   ],
+   "spleen": [
+    0.07,
+    0.0
+   ],
+   "soft": [
+    -0.34,
+    -0.12
+   ],
+   "other": [
+    -0.03,
+    null
+   ]
+  }
+ },
+ {
+  "i": 14,
+  "line": "alpha up on the vessels",
+  "voice": "en",
+  "asr_ms": 884,
+  "heard": "Alpha upon the vessels.",
+  "cmd": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "llm",
+  "parse_ms": 1381.0,
+  "uncovered": [
+   "upon"
+  ],
+  "fallback": null,
+  "apply_ms": 165,
+  "mode": "exact (vessels is not a goal on 'ts_s0477' -- it has no contrast)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    -0.0,
+    0.0
+   ],
+   "lungs": [
+    -0.0,
+    0.0
+   ],
+   "heart": [
+    -0.01,
+    -0.0
+   ],
+   "liver": [
+    -0.0,
+    -0.0
+   ],
+   "kidneys": [
+    -0.0,
+    -0.0
+   ],
+   "spleen": [
+    -0.0,
+    -0.0
+   ],
+   "soft": [
+    -0.0,
+    -0.0
+   ],
+   "other": [
+    -0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 14,
+  "line": "alpha up on the vessels",
+  "voice": "de",
+  "asr_ms": 906,
+  "heard": "Alpha, up on the vessels.",
+  "cmd": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "llm",
+  "parse_ms": 1405.6,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 158,
+  "mode": "exact (vessels is not a goal on 'ts_s0477' -- it has no contrast)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    -0.0,
+    0.0
+   ],
+   "lungs": [
+    -0.0,
+    0.0
+   ],
+   "heart": [
+    -0.01,
+    -0.0
+   ],
+   "liver": [
+    -0.0,
+    -0.0
+   ],
+   "kidneys": [
+    -0.0,
+    -0.0
+   ],
+   "spleen": [
+    -0.0,
+    -0.0
+   ],
+   "soft": [
+    -0.0,
+    -0.0
+   ],
+   "other": [
+    -0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 15,
+  "line": "make the lungs see-through",
+  "voice": "en",
+  "asr_ms": 934,
+  "heard": "Make the lungs see through.",
+  "cmd": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3473,
+  "mode": "policy+keep",
+  "goal": "less the lungs",
+  "attainment": 1.0,
+  "drift": {
+   "skeleton": [
+    0.12,
+    0.05
+   ],
+   "heart": [
+    0.15,
+    -0.0
+   ],
+   "vessels": [
+    -0.08,
+    -0.01
+   ],
+   "liver": [
+    -0.02,
+    0.0
+   ],
+   "kidneys": [
+    -0.03,
+    -0.0
+   ],
+   "spleen": [
+    -0.01,
+    0.0
+   ],
+   "soft": [
+    0.02,
+    0.04
+   ],
+   "other": [
+    -0.02,
+    null
+   ]
+  }
+ },
+ {
+  "i": 15,
+  "line": "make the lungs see-through",
+  "voice": "de",
+  "asr_ms": 983,
+  "heard": "Make the lungs see throoves.",
+  "cmd": {
+   "target": "lungs",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "path": "llm",
+  "parse_ms": 1410.1,
+  "uncovered": [
+   "throoves"
+  ],
+  "fallback": null,
+  "apply_ms": 3463,
+  "mode": "policy+keep",
+  "goal": "less the lungs",
+  "attainment": 1.0,
+  "drift": {
+   "skeleton": [
+    0.12,
+    0.05
+   ],
+   "heart": [
+    0.15,
+    -0.0
+   ],
+   "vessels": [
+    -0.08,
+    -0.01
+   ],
+   "liver": [
+    -0.02,
+    0.0
+   ],
+   "kidneys": [
+    -0.03,
+    -0.0
+   ],
+   "spleen": [
+    -0.01,
+    0.0
+   ],
+   "soft": [
+    0.02,
+    0.04
+   ],
+   "other": [
+    -0.02,
+    null
+   ]
+  }
+ },
+ {
+  "i": 16,
+  "line": "narrower peak for the skeleton",
+  "voice": "en",
+  "asr_ms": 934,
+  "heard": "Barrow or peak for the skeleton.",
+  "outcome": "rejected: could not parse 'Barrow or peak for the skeleton.' (invalid schema: {'compound': [{'target': 'skeleton', 'attribute': 'center', 'direction': 'set', 'level': 'high'}]})"
+ },
+ {
+  "i": 16,
+  "line": "narrower peak for the skeleton",
+  "voice": "de",
+  "asr_ms": 909,
+  "heard": "Narrow a peak for the skeleton.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "width",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "path": "llm",
+  "parse_ms": 1362.7,
+  "uncovered": [
+   "narrow"
+  ],
+  "fallback": null,
+  "apply_ms": 156,
+  "mode": "exact ({'target': 'skeleton', 'attribute': 'width', 'direction': 'd)",
+  "goal": null,
+  "drift": {
+   "lungs": [
+    0.06,
+    0.0
+   ],
+   "heart": [
+    0.03,
+    -0.0
+   ],
+   "vessels": [
+    0.08,
+    -0.0
+   ],
+   "liver": [
+    0.02,
+    -0.0
+   ],
+   "kidneys": [
+    0.03,
+    -0.0
+   ],
+   "spleen": [
+    0.04,
+    0.0
+   ],
+   "soft": [
+    0.03,
+    -0.0
+   ],
+   "other": [
+    -0.01,
+    null
+   ]
+  }
+ },
+ {
+  "i": 17,
+  "line": "shift the bone peak up",
+  "voice": "en",
+  "asr_ms": 883,
+  "heard": "Shift the bone peak up.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "center",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 150,
+  "mode": "exact ({'target': 'skeleton', 'attribute': 'center', 'direction': ')",
+  "goal": null,
+  "drift": {
+   "lungs": [
+    0.07,
+    0.0
+   ],
+   "heart": [
+    0.04,
+    -0.0
+   ],
+   "vessels": [
+    0.09,
+    -0.0
+   ],
+   "liver": [
+    0.02,
+    -0.0
+   ],
+   "kidneys": [
+    0.03,
+    -0.0
+   ],
+   "spleen": [
+    0.04,
+    0.0
+   ],
+   "soft": [
+    0.04,
+    -0.0
+   ],
+   "other": [
+    -0.01,
+    null
+   ]
+  }
+ },
+ {
+  "i": 17,
+  "line": "shift the bone peak up",
+  "voice": "de",
+  "asr_ms": 846,
+  "heard": "Shift the bone peak up.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "center",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 160,
+  "mode": "exact ({'target': 'skeleton', 'attribute': 'center', 'direction': ')",
+  "goal": null,
+  "drift": {
+   "lungs": [
+    0.07,
+    0.0
+   ],
+   "heart": [
+    0.04,
+    -0.0
+   ],
+   "vessels": [
+    0.09,
+    -0.0
+   ],
+   "liver": [
+    0.02,
+    -0.0
+   ],
+   "kidneys": [
+    0.03,
+    -0.0
+   ],
+   "spleen": [
+    0.04,
+    0.0
+   ],
+   "soft": [
+    0.04,
+    -0.0
+   ],
+   "other": [
+    -0.01,
+    null
+   ]
+  }
+ },
+ {
+  "i": 18,
+  "line": "brighten the kidneys a lot",
+  "voice": "en",
+  "asr_ms": 926,
+  "heard": "Brighten the kidneys a lot.",
+  "cmd": {
+   "target": "kidneys",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3614,
+  "mode": "policy+keep",
+  "goal": "brighten the kidneys",
+  "attainment": 0.97,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    -0.0
+   ],
+   "liver": [
+    0.0,
+    -0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    -0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 18,
+  "line": "brighten the kidneys a lot",
+  "voice": "de",
+  "asr_ms": 900,
+  "heard": "Brighten the kidneys a lot.",
+  "cmd": {
+   "target": "kidneys",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3502,
+  "mode": "policy+keep",
+  "goal": "brighten the kidneys",
+  "attainment": 0.97,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    -0.0
+   ],
+   "liver": [
+    0.0,
+    -0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    -0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 19,
+  "line": "the spleen is way too dark",
+  "voice": "en",
+  "asr_ms": 911,
+  "heard": "The spleen is way too dark.",
+  "cmd": {
+   "target": "spleen",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3480,
+  "mode": "policy+keep",
+  "goal": "brighten the spleen",
+  "attainment": 0.99,
+  "drift": {
+   "skeleton": [
+    -0.0,
+    0.0
+   ],
+   "lungs": [
+    -0.0,
+    0.0
+   ],
+   "heart": [
+    -0.0,
+    -0.0
+   ],
+   "vessels": [
+    -0.0,
+    0.0
+   ],
+   "liver": [
+    -0.0,
+    -0.0
+   ],
+   "kidneys": [
+    -0.0,
+    0.0
+   ],
+   "soft": [
+    -0.0,
+    -0.0
+   ],
+   "other": [
+    -0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 19,
+  "line": "the spleen is way too dark",
+  "voice": "de",
+  "asr_ms": 957,
+  "heard": "The spleen is way too dark.",
+  "cmd": {
+   "target": "spleen",
+   "attribute": "brightness",
+   "direction": "increase",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3521,
+  "mode": "policy+keep",
+  "goal": "brighten the spleen",
+  "attainment": 0.99,
+  "drift": {
+   "skeleton": [
+    -0.0,
+    0.0
+   ],
+   "lungs": [
+    -0.0,
+    0.0
+   ],
+   "heart": [
+    -0.0,
+    -0.0
+   ],
+   "vessels": [
+    -0.0,
+    0.0
+   ],
+   "liver": [
+    -0.0,
+    -0.0
+   ],
+   "kidneys": [
+    -0.0,
+    0.0
+   ],
+   "soft": [
+    -0.0,
+    -0.0
+   ],
+   "other": [
+    -0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 20,
+  "line": "back to default",
+  "voice": "en",
+  "asr_ms": 841,
+  "heard": "Back to default.",
+  "cmd": {
+   "target": null,
+   "attribute": null,
+   "direction": "reset",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 158,
+  "mode": "exact (reset is not a goal -- apply it exactly via commands.apply_c)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    0.0
+   ],
+   "liver": [
+    0.0,
+    0.0
+   ],
+   "kidneys": [
+    0.0,
+    0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 20,
+  "line": "back to default",
+  "voice": "de",
+  "asr_ms": 814,
+  "heard": "back to default.",
+  "cmd": {
+   "target": null,
+   "attribute": null,
+   "direction": "reset",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 147,
+  "mode": "exact (reset is not a goal -- apply it exactly via commands.apply_c)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    0.0
+   ],
+   "liver": [
+    0.0,
+    0.0
+   ],
+   "kidneys": [
+    0.0,
+    0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 21,
+  "line": "turn off the soft tissue",
+  "voice": "en",
+  "asr_ms": 977,
+  "heard": "Turn off the soft tissue.",
+  "cmd": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3508,
+  "mode": "policy+keep",
+  "goal": "a lot less soft tissue",
+  "attainment": 0.91,
+  "drift": {
+   "skeleton": [
+    0.3,
+    0.05
+   ],
+   "lungs": [
+    -0.1,
+    0.0
+   ],
+   "heart": [
+    -0.13,
+    -0.0
+   ],
+   "vessels": [
+    0.0,
+    -0.0
+   ],
+   "liver": [
+    -0.01,
+    0.0
+   ],
+   "kidneys": [
+    0.17,
+    0.0
+   ],
+   "spleen": [
+    0.03,
+    0.0
+   ],
+   "other": [
+    0.09,
+    null
+   ]
+  }
+ },
+ {
+  "i": 21,
+  "line": "turn off the soft tissue",
+  "voice": "de",
+  "asr_ms": 907,
+  "heard": "Turn off the soft tissue.",
+  "cmd": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "strongly"
+  },
+  "path": "rule",
+  "parse_ms": 0.3,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3489,
+  "mode": "policy+keep",
+  "goal": "a lot less soft tissue",
+  "attainment": 0.91,
+  "drift": {
+   "skeleton": [
+    0.3,
+    0.05
+   ],
+   "lungs": [
+    -0.1,
+    0.0
+   ],
+   "heart": [
+    -0.13,
+    -0.0
+   ],
+   "vessels": [
+    0.0,
+    -0.0
+   ],
+   "liver": [
+    -0.01,
+    0.0
+   ],
+   "kidneys": [
+    0.17,
+    0.0
+   ],
+   "spleen": [
+    0.03,
+    0.0
+   ],
+   "other": [
+    0.09,
+    null
+   ]
+  }
+ },
+ {
+  "i": 22,
+  "line": "show me just the heart please",
+  "voice": "en",
+  "asr_ms": 943,
+  "heard": "Show me just the art, please.",
+  "outcome": "rejected: could not parse 'Show me just the art, please.' (model: not an instruction)"
+ },
+ {
+  "i": 22,
+  "line": "show me just the heart please",
+  "voice": "de",
+  "asr_ms": 963,
+  "heard": "Show me that's the heart, please.",
+  "cmd": {
+   "target": "heart",
+   "attribute": null,
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "llm",
+  "parse_ms": 1202.7,
+  "uncovered": [
+   "that's"
+  ],
+  "fallback": null,
+  "apply_ms": 3460,
+  "mode": "policy+keep",
+  "goal": "show only the heart",
+  "attainment": 0.64,
+  "drift": {
+   "skeleton": [
+    -2.44,
+    0.05
+   ],
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "vessels": [
+    -0.07,
+    0.1
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "kidneys": [
+    -0.42,
+    0.22
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -4.84,
+    null
+   ]
+  }
+ },
+ {
+  "i": 23,
+  "line": "more aorta, less muscle",
+  "voice": "en",
+  "asr_ms": 941,
+  "heard": "Moriorta, less muscle.",
+  "cmd": {
+   "target": "soft",
+   "attribute": "opacity",
+   "direction": "decrease",
+   "strength": "moderately"
+  },
+  "path": "llm",
+  "parse_ms": 1525.0,
+  "uncovered": [
+   "moriorta"
+  ],
+  "fallback": null,
+  "apply_ms": 3475,
+  "mode": "policy+keep",
+  "goal": "less soft tissue",
+  "attainment": 0.82,
+  "drift": {
+   "skeleton": [
+    0.18,
+    0.05
+   ],
+   "lungs": [
+    -0.04,
+    -0.06
+   ],
+   "heart": [
+    -0.36,
+    0.0
+   ],
+   "vessels": [
+    0.13,
+    -0.05
+   ],
+   "liver": [
+    -0.06,
+    -0.0
+   ],
+   "kidneys": [
+    0.04,
+    0.0
+   ],
+   "spleen": [
+    -0.08,
+    -0.0
+   ],
+   "other": [
+    0.15,
+    null
+   ]
+  }
+ },
+ {
+  "i": 23,
+  "line": "more aorta, less muscle",
+  "voice": "de",
+  "asr_ms": 902,
+  "heard": "More allotter, less muscle.",
+  "outcome": "rejected: could not parse 'More allotter, less muscle.' (ungrounded: target(s) ['liver'] not named in the text: {'compound': [{'target': 'soft', 'attribute': 'opacity', 'direction': 'increase', 'strength': 'moderately'}, {'target': 'liver', 'attribute': 'opacity', 'direction': 'decrease', 'strength': 'moderately'}]})"
+ },
+ {
+  "i": 24,
+  "line": "hide the bones and brighten the liver",
+  "voice": "en",
+  "asr_ms": 937,
+  "heard": "Hide the bones and brighten the liver.",
+  "cmd": {
+   "compound": [
+    {
+     "target": "skeleton",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "strongly"
+    },
+    {
+     "target": "liver",
+     "attribute": "brightness",
+     "direction": "increase",
+     "strength": "moderately"
+    }
+   ]
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3561,
+  "mode": "policy+keep",
+  "goal": "a lot less the skeleton, brighten the liver",
+  "attainment": 0.99,
+  "drift": {
+   "lungs": [
+    -0.05,
+    -0.02
+   ],
+   "heart": [
+    -0.0,
+    -0.0
+   ],
+   "vessels": [
+    -0.0,
+    0.0
+   ],
+   "kidneys": [
+    -0.16,
+    -0.0
+   ],
+   "spleen": [
+    -0.03,
+    0.0
+   ],
+   "soft": [
+    0.03,
+    -0.03
+   ],
+   "other": [
+    0.09,
+    null
+   ]
+  }
+ },
+ {
+  "i": 24,
+  "line": "hide the bones and brighten the liver",
+  "voice": "de",
+  "asr_ms": 1030,
+  "heard": "Hide the bones, entbreiten the liver.",
+  "cmd": {
+   "compound": [
+    {
+     "target": "skeleton",
+     "attribute": "opacity",
+     "direction": "decrease",
+     "strength": "strongly"
+    },
+    {
+     "target": "liver",
+     "attribute": "brightness",
+     "direction": "increase",
+     "strength": "moderately"
+    }
+   ]
+  },
+  "path": "llm",
+  "parse_ms": 2636.8,
+  "uncovered": [
+   "entbreiten"
+  ],
+  "fallback": null,
+  "apply_ms": 3476,
+  "mode": "policy+keep",
+  "goal": "a lot less the skeleton, brighten the liver",
+  "attainment": 0.99,
+  "drift": {
+   "lungs": [
+    -0.05,
+    -0.02
+   ],
+   "heart": [
+    -0.0,
+    -0.0
+   ],
+   "vessels": [
+    -0.0,
+    0.0
+   ],
+   "kidneys": [
+    -0.16,
+    -0.0
+   ],
+   "spleen": [
+    -0.03,
+    0.0
+   ],
+   "soft": [
+    0.03,
+    -0.03
+   ],
+   "other": [
+    0.09,
+    null
+   ]
+  }
+ },
+ {
+  "i": 25,
+  "line": "show only the kidneys",
+  "voice": "en",
+  "asr_ms": 857,
+  "heard": "Show only the kidneys.",
+  "cmd": {
+   "target": "kidneys",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3463,
+  "mode": "policy+keep",
+  "goal": "show only the kidneys",
+  "attainment": 0.67,
+  "drift": {
+   "skeleton": [
+    -2.09,
+    0.05
+   ],
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "heart": [
+    -3.86,
+    -0.36
+   ],
+   "vessels": [
+    -0.16,
+    0.1
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -4.5,
+    null
+   ]
+  }
+ },
+ {
+  "i": 25,
+  "line": "show only the kidneys",
+  "voice": "de",
+  "asr_ms": 854,
+  "heard": "Show only the kidneys.",
+  "cmd": {
+   "target": "kidneys",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3530,
+  "mode": "policy+keep",
+  "goal": "show only the kidneys",
+  "attainment": 0.67,
+  "drift": {
+   "skeleton": [
+    -2.09,
+    0.05
+   ],
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "heart": [
+    -3.86,
+    -0.36
+   ],
+   "vessels": [
+    -0.16,
+    0.1
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -4.5,
+    null
+   ]
+  }
+ },
+ {
+  "i": 26,
+  "line": "make the liver more visible",
+  "voice": "en",
+  "asr_ms": 891,
+  "heard": "Make the liver more visible.",
+  "cmd": {
+   "target": "liver",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3701,
+  "mode": "policy+keep",
+  "goal": "more the liver",
+  "attainment": 0.89,
+  "drift": {
+   "skeleton": [
+    -0.15,
+    -0.07
+   ],
+   "lungs": [
+    -0.09,
+    -0.0
+   ],
+   "heart": [
+    0.13,
+    -0.02
+   ],
+   "vessels": [
+    -0.19,
+    -0.05
+   ],
+   "kidneys": [
+    0.03,
+    0.01
+   ],
+   "spleen": [
+    -0.15,
+    -0.07
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -1.34,
+    null
+   ]
+  }
+ },
+ {
+  "i": 26,
+  "line": "make the liver more visible",
+  "voice": "de",
+  "asr_ms": 915,
+  "heard": "Make the liver more visible.",
+  "cmd": {
+   "target": "liver",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3700,
+  "mode": "policy+keep",
+  "goal": "more the liver",
+  "attainment": 0.89,
+  "drift": {
+   "skeleton": [
+    -0.15,
+    -0.07
+   ],
+   "lungs": [
+    -0.09,
+    -0.0
+   ],
+   "heart": [
+    0.13,
+    -0.02
+   ],
+   "vessels": [
+    -0.19,
+    -0.05
+   ],
+   "kidneys": [
+    0.03,
+    0.01
+   ],
+   "spleen": [
+    -0.15,
+    -0.07
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -1.34,
+    null
+   ]
+  }
+ },
+ {
+  "i": 27,
+  "line": "rotate left",
+  "voice": "en",
+  "asr_ms": 834,
+  "heard": "Rotate left.",
+  "cmd": {
+   "camera": {
+    "action": "rotate",
+    "direction": "left",
+    "strength": "moderately"
+   }
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 0,
+  "mode": "camera",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    0.0
+   ],
+   "liver": [
+    0.0,
+    0.0
+   ],
+   "kidneys": [
+    0.0,
+    0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 27,
+  "line": "rotate left",
+  "voice": "de",
+  "asr_ms": 834,
+  "heard": "Rotate lift.",
+  "cmd": {
+   "camera": {
+    "action": "tilt",
+    "direction": "up",
+    "strength": "moderately"
+   }
+  },
+  "path": "llm",
+  "parse_ms": 1227.6,
+  "uncovered": [
+   "lift"
+  ],
+  "fallback": null,
+  "apply_ms": 0,
+  "mode": "camera",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    0.0
+   ],
+   "liver": [
+    0.0,
+    0.0
+   ],
+   "kidneys": [
+    0.0,
+    0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 28,
+  "line": "zoom in a bit",
+  "voice": "en",
+  "asr_ms": 866,
+  "heard": "Zoom in a bit.",
+  "cmd": {
+   "camera": {
+    "action": "zoom",
+    "direction": "in",
+    "strength": "slightly"
+   }
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 0,
+  "mode": "camera",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    0.0
+   ],
+   "liver": [
+    0.0,
+    0.0
+   ],
+   "kidneys": [
+    0.0,
+    0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 28,
+  "line": "zoom in a bit",
+  "voice": "de",
+  "asr_ms": 840,
+  "heard": "Zoom in a bit.",
+  "cmd": {
+   "camera": {
+    "action": "zoom",
+    "direction": "in",
+    "strength": "slightly"
+   }
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 0,
+  "mode": "camera",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    0.0
+   ],
+   "liver": [
+    0.0,
+    0.0
+   ],
+   "kidneys": [
+    0.0,
+    0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 29,
+  "line": "focus on the vessels",
+  "voice": "en",
+  "asr_ms": 894,
+  "heard": "Focus on the vessels.",
+  "cmd": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 149,
+  "mode": "exact (vessels is not a goal on 'ts_s0477' -- it has no contrast)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    -4.71,
+    -0.95
+   ],
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "heart": [
+    -3.86,
+    -0.36
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "kidneys": [
+    -3.59,
+    -0.58
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -5.28,
+    null
+   ]
+  }
+ },
+ {
+  "i": 29,
+  "line": "focus on the vessels",
+  "voice": "de",
+  "asr_ms": 891,
+  "heard": "Focus on the Vsits.",
+  "outcome": "rejected: could not parse 'Focus on the Vsits.' (ungrounded: target(s) ['vessels'] not named in the text: {'compound': [{'target': 'vessels', 'attribute': None, 'direction': 'show_only', 'strength': None}]})"
+ },
+ {
+  "i": 30,
+  "line": "the backbone is barely visible",
+  "voice": "en",
+  "asr_ms": 937,
+  "heard": "The backbone is barely visible.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3698,
+  "mode": "policy+keep",
+  "goal": "more the skeleton",
+  "attainment": 0.99,
+  "drift": {
+   "lungs": [
+    0.07,
+    -0.01
+   ],
+   "heart": [
+    -0.13,
+    0.0
+   ],
+   "vessels": [
+    0.01,
+    -0.0
+   ],
+   "liver": [
+    0.05,
+    -0.0
+   ],
+   "kidneys": [
+    -0.18,
+    0.0
+   ],
+   "spleen": [
+    0.07,
+    0.0
+   ],
+   "soft": [
+    -0.34,
+    -0.12
+   ],
+   "other": [
+    -0.03,
+    null
+   ]
+  }
+ },
+ {
+  "i": 30,
+  "line": "the backbone is barely visible",
+  "voice": "de",
+  "asr_ms": 926,
+  "heard": "The backbone is barely visible.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3755,
+  "mode": "policy+keep",
+  "goal": "more the skeleton",
+  "attainment": 0.99,
+  "drift": {
+   "lungs": [
+    0.07,
+    -0.01
+   ],
+   "heart": [
+    -0.13,
+    0.0
+   ],
+   "vessels": [
+    0.01,
+    -0.0
+   ],
+   "liver": [
+    0.05,
+    -0.0
+   ],
+   "kidneys": [
+    -0.18,
+    0.0
+   ],
+   "spleen": [
+    0.07,
+    0.0
+   ],
+   "soft": [
+    -0.34,
+    -0.12
+   ],
+   "other": [
+    -0.03,
+    null
+   ]
+  }
+ },
+ {
+  "i": 31,
+  "line": "set the heart to high",
+  "voice": "en",
+  "asr_ms": 897,
+  "heard": "Set the heart to ight.",
+  "cmd": {
+   "target": "heart",
+   "attribute": "brightness",
+   "direction": "set",
+   "level": "high"
+  },
+  "path": "llm",
+  "parse_ms": 1385.0,
+  "uncovered": [
+   "ight"
+  ],
+  "fallback": null,
+  "apply_ms": 154,
+  "mode": "exact ({'target': 'heart', 'attribute': 'brightness', 'direction': )",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    0.0
+   ],
+   "liver": [
+    0.0,
+    0.0
+   ],
+   "kidneys": [
+    0.0,
+    0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 31,
+  "line": "set the heart to high",
+  "voice": "de",
+  "asr_ms": 881,
+  "heard": "Set the heart high.",
+  "cmd": {
+   "target": "heart",
+   "attribute": "opacity",
+   "direction": "set",
+   "level": "high"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3684,
+  "mode": "policy+keep",
+  "goal": "high opacity for the heart",
+  "attainment": 1.0,
+  "drift": {
+   "skeleton": [
+    -0.02,
+    0.05
+   ],
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "vessels": [
+    -0.15,
+    0.03
+   ],
+   "liver": [
+    0.04,
+    0.12
+   ],
+   "kidneys": [
+    -0.04,
+    0.07
+   ],
+   "spleen": [
+    0.02,
+    -0.07
+   ],
+   "soft": [
+    0.02,
+    0.01
+   ],
+   "other": [
+    -0.48,
+    null
+   ]
+  }
+ },
+ {
+  "i": 32,
+  "line": "make the vessels a little more solid",
+  "voice": "en",
+  "asr_ms": 903,
+  "heard": "Make the vessels a little more solid.",
+  "cmd": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "slightly"
+  },
+  "path": "rule",
+  "parse_ms": 0.3,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 152,
+  "mode": "exact (vessels is not a goal on 'ts_s0477' -- it has no contrast)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    -0.0,
+    0.0
+   ],
+   "lungs": [
+    -0.0,
+    0.0
+   ],
+   "heart": [
+    -0.0,
+    -0.0
+   ],
+   "liver": [
+    -0.0,
+    0.0
+   ],
+   "kidneys": [
+    -0.0,
+    -0.0
+   ],
+   "spleen": [
+    -0.0,
+    0.0
+   ],
+   "soft": [
+    -0.0,
+    -0.0
+   ],
+   "other": [
+    -0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 32,
+  "line": "make the vessels a little more solid",
+  "voice": "de",
+  "asr_ms": 973,
+  "heard": "Make the vessels a little more solid.",
+  "cmd": {
+   "target": "vessels",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "slightly"
+  },
+  "path": "rule",
+  "parse_ms": 0.3,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 146,
+  "mode": "exact (vessels is not a goal on 'ts_s0477' -- it has no contrast)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    -0.0,
+    0.0
+   ],
+   "lungs": [
+    -0.0,
+    0.0
+   ],
+   "heart": [
+    -0.0,
+    -0.0
+   ],
+   "liver": [
+    -0.0,
+    0.0
+   ],
+   "kidneys": [
+    -0.0,
+    -0.0
+   ],
+   "spleen": [
+    -0.0,
+    0.0
+   ],
+   "soft": [
+    -0.0,
+    -0.0
+   ],
+   "other": [
+    -0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 33,
+  "line": "everything except the skeleton should go away",
+  "voice": "en",
+  "asr_ms": 949,
+  "heard": "Everything except the skeleton should go away.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "llm",
+  "parse_ms": 1200.0,
+  "uncovered": [
+   "except",
+   "go",
+   "away"
+  ],
+  "fallback": null,
+  "apply_ms": 3493,
+  "mode": "policy+keep",
+  "goal": "show only the skeleton",
+  "attainment": 0.59,
+  "drift": {
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "heart": [
+    -3.86,
+    -0.36
+   ],
+   "vessels": [
+    -0.12,
+    0.13
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "kidneys": [
+    -1.27,
+    0.22
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -0.19,
+    null
+   ]
+  }
+ },
+ {
+  "i": 33,
+  "line": "everything except the skeleton should go away",
+  "voice": "de",
+  "asr_ms": 952,
+  "heard": "Everything except the skeleton should go away.",
+  "cmd": {
+   "target": "skeleton",
+   "attribute": "opacity",
+   "direction": "show_only",
+   "strength": null
+  },
+  "path": "llm",
+  "parse_ms": 1079.7,
+  "uncovered": [
+   "except",
+   "go",
+   "away"
+  ],
+  "fallback": null,
+  "apply_ms": 3484,
+  "mode": "policy+keep",
+  "goal": "show only the skeleton",
+  "attainment": 0.59,
+  "drift": {
+   "lungs": [
+    -4.67,
+    -0.69
+   ],
+   "heart": [
+    -3.86,
+    -0.36
+   ],
+   "vessels": [
+    -0.12,
+    0.13
+   ],
+   "liver": [
+    -4.36,
+    -0.39
+   ],
+   "kidneys": [
+    -1.27,
+    0.22
+   ],
+   "spleen": [
+    -3.69,
+    -0.34
+   ],
+   "soft": [
+    -4.98,
+    -0.46
+   ],
+   "other": [
+    -0.19,
+    null
+   ]
+  }
+ },
+ {
+  "i": 34,
+  "line": "I can't see the kidneys",
+  "voice": "en",
+  "asr_ms": 866,
+  "heard": "I can't see the kidneys.",
+  "cmd": {
+   "target": "kidneys",
+   "attribute": "opacity",
+   "direction": "increase",
+   "strength": "moderately"
+  },
+  "path": "rule",
+  "parse_ms": 0.2,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 3673,
+  "mode": "policy+keep",
+  "goal": "more the kidneys",
+  "attainment": 1.0,
+  "drift": {
+   "skeleton": [
+    0.01,
+    0.05
+   ],
+   "lungs": [
+    -0.11,
+    -0.06
+   ],
+   "heart": [
+    -0.1,
+    -0.04
+   ],
+   "vessels": [
+    -0.13,
+    0.02
+   ],
+   "liver": [
+    0.08,
+    -0.04
+   ],
+   "spleen": [
+    -0.19,
+    -0.04
+   ],
+   "soft": [
+    0.04,
+    0.01
+   ],
+   "other": [
+    -0.36,
+    null
+   ]
+  }
+ },
+ {
+  "i": 34,
+  "line": "I can't see the kidneys",
+  "voice": "de",
+  "asr_ms": 909,
+  "heard": "The account sees a kidneys.",
+  "outcome": "rejected: could not parse 'The account sees a kidneys.' (model: not an instruction)"
+ },
+ {
+  "i": 35,
+  "line": "reset",
+  "voice": "en",
+  "asr_ms": 781,
+  "heard": "Reset.",
+  "cmd": {
+   "target": null,
+   "attribute": null,
+   "direction": "reset",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 149,
+  "mode": "exact (reset is not a goal -- apply it exactly via commands.apply_c)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    0.0
+   ],
+   "liver": [
+    0.0,
+    0.0
+   ],
+   "kidneys": [
+    0.0,
+    0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ },
+ {
+  "i": 35,
+  "line": "reset",
+  "voice": "de",
+  "asr_ms": 826,
+  "heard": "reset.",
+  "cmd": {
+   "target": null,
+   "attribute": null,
+   "direction": "reset",
+   "strength": null
+  },
+  "path": "rule",
+  "parse_ms": 0.1,
+  "uncovered": [],
+  "fallback": null,
+  "apply_ms": 147,
+  "mode": "exact (reset is not a goal -- apply it exactly via commands.apply_c)",
+  "goal": null,
+  "drift": {
+   "skeleton": [
+    0.0,
+    0.0
+   ],
+   "lungs": [
+    0.0,
+    0.0
+   ],
+   "heart": [
+    0.0,
+    0.0
+   ],
+   "vessels": [
+    0.0,
+    0.0
+   ],
+   "liver": [
+    0.0,
+    0.0
+   ],
+   "kidneys": [
+    0.0,
+    0.0
+   ],
+   "spleen": [
+    0.0,
+    0.0
+   ],
+   "soft": [
+    0.0,
+    0.0
+   ],
+   "other": [
+    0.0,
+    null
+   ]
+  }
+ }
+]
