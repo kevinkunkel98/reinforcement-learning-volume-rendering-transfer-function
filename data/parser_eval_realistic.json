@@ -6,6 +6,7 @@
  {"text": "REVERT", "expected": {"target": null, "attribute": null, "direction": "reset", "strength": null}, "split": "dev", "source": "log-2026-10-21"},
  {"text": "Remove soft tissue.", "expected": {"target": "soft", "attribute": "opacity", "direction": "decrease", "strength": "strongly"}, "split": "dev", "source": "log-2026-10-21"},
  {"text": "Extremely dark and skeleton.", "expected": {"target": "skeleton", "attribute": "brightness", "direction": "decrease", "strength": "strongly"}, "split": "dev", "source": "log-2026-10-21"},
+ {"text": "Okay, revert the skeleton back, instead darken the lungs a bit.", "expected": {"compound": [{"target": "skeleton", "attribute": null, "direction": "reset", "strength": null}, {"target": "lungs", "attribute": "brightness", "direction": "decrease", "strength": "slightly"}]}, "split": "dev", "source": "log-2026-10-22"},
  {"text": "Darkin' Skeleton", "expected": {"target": "skeleton", "attribute": "brightness", "direction": "decrease", "strength": "moderately"}, "split": "dev", "source": "log-2026-10-21"},
  {"text": "Leitenlangs", "expected": {"target": "lungs", "attribute": "brightness", "direction": "increase", "strength": "moderately"}, "split": "dev", "source": "log-2026-10-21"},
  {"text": "Highlight heart.", "expected": {"target": "heart", "attribute": "opacity", "direction": "increase", "strength": "moderately"}, "split": "dev", "source": "log-2026-10-21"},

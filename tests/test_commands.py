@@ -1215,3 +1215,194 @@ def test_check_llm_reports_unreachable_and_missing_models(monkeypatch):
     monkeypatch.setattr(commands, "urlopen", lambda req, timeout=None: Tags())
     assert "not pulled" in commands.check_llm("qwen2.5:7b")
     assert commands.check_llm("llama3.2:latest") is None
+
+
+# ---------- per-class reset ("revert the skeleton") ----------
+
+def _class_reset(target):
+    return {"target": target, "attribute": None, "direction": "reset", "strength": None}
+
+
+def _peak_slice(idx):
+    from transfer import PARAMS_PER_PEAK
+    return slice(idx * PARAMS_PER_PEAK, (idx + 1) * PARAMS_PER_PEAK)
+
+
+def test_class_reset_restores_only_that_class_peak():
+    start = default_params()
+    changed = apply_command({"compound": [
+        {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "strongly"},
+        {"target": "skeleton", "attribute": "brightness", "direction": "decrease", "strength": "strongly"},
+        {"target": "lungs", "attribute": "opacity", "direction": "decrease", "strength": "strongly"},
+    ]}, start)
+    _, skel = commands._find_or_create_peak(start, "skeleton")
+    _, lungs = commands._find_or_create_peak(start, "lungs")
+    out = apply_command(_class_reset("skeleton"), changed, reset_params=start)
+    np.testing.assert_array_equal(out[_peak_slice(skel)], start[_peak_slice(skel)])
+    np.testing.assert_array_equal(out[_peak_slice(lungs)], changed[_peak_slice(lungs)])
+    mask = np.ones_like(out, dtype=bool)
+    mask[_peak_slice(skel)] = False
+    np.testing.assert_array_equal(out[mask], changed[mask])
+
+
+def test_class_reset_without_reset_params_uses_defaults():
+    other = apply_command({"target": "skeleton", "attribute": "opacity", "direction": "increase",
+                           "strength": "strongly"}, default_params())
+    changed = apply_command({"target": "liver", "attribute": "opacity", "direction": "increase",
+                             "strength": "strongly"}, other)
+    out = apply_command(_class_reset("liver"), changed)
+    np.testing.assert_array_equal(out, other)
+
+
+def test_class_reset_of_a_list_restores_each_class():
+    start = default_params()
+    changed = apply_command({"compound": [
+        {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "strongly"},
+        {"target": "lungs", "attribute": "opacity", "direction": "decrease", "strength": "strongly"},
+    ]}, start)
+    other = apply_command({"target": "liver", "attribute": "opacity", "direction": "increase",
+                           "strength": "strongly"}, start)
+    changed = apply_command({"target": "liver", "attribute": "opacity", "direction": "increase",
+                             "strength": "strongly"}, changed)
+    np.testing.assert_array_equal(apply_command(_class_reset(["skeleton", "lungs"]), changed, start), other)
+
+
+def test_class_reset_removes_a_peak_a_command_created():
+    # A reset TF with no peak near the liver: "more liver" reseeds the
+    # weakest peak there; resetting the liver puts that slot back.
+    from transfer import PARAMS_PER_PEAK, CENTER_RANGE
+    start = default_params().copy()
+    _, liver = commands._find_or_create_peak(start, "liver")
+    for i in range(N_PEAKS):
+        if abs(commands._peak_center_hu(start, i) - commands.CLASS_HU["liver"]) <= commands.NEAR_THRESHOLD_HU:
+            start[i * PARAMS_PER_PEAK] = commands._from_range(-500.0, *CENTER_RANGE)
+    other = apply_command({"target": "skeleton", "attribute": "opacity", "direction": "increase",
+                           "strength": "strongly"}, start)
+    changed = apply_command({"target": "liver", "attribute": "opacity", "direction": "increase",
+                             "strength": "strongly"}, other)
+    assert not np.array_equal(changed, other)
+    np.testing.assert_array_equal(apply_command(_class_reset("liver"), changed, start), other)
+
+
+def test_class_reset_restores_the_reset_tf_peak_when_current_has_none_near():
+    from transfer import PARAMS_PER_PEAK, CENTER_RANGE
+    start = default_params()
+    _, liver = commands._find_or_create_peak(start, "liver")
+    moved = start.copy()
+    for i in range(N_PEAKS):
+        if abs(commands._peak_center_hu(start, i) - commands.CLASS_HU["liver"]) <= commands.NEAR_THRESHOLD_HU:
+            moved[i * PARAMS_PER_PEAK] = commands._from_range(-500.0, *CENTER_RANGE)
+    out = apply_command(_class_reset("liver"), moved, start)
+    np.testing.assert_array_equal(out[_peak_slice(liver)], start[_peak_slice(liver)])
+
+
+def test_full_reset_unchanged_by_class_reset():
+    start = default_params() * 0.5
+    full = {"target": None, "attribute": None, "direction": "reset", "strength": None}
+    np.testing.assert_array_equal(apply_command(full, default_params() * 0.1, reset_params=start), start)
+
+
+@pytest.mark.parametrize("text", ["revert the skeleton", "reset the skeleton", "put the skeleton back to default"])
+def test_rule_parser_class_reset(text):
+    assert parse_command_rule(text) == _class_reset("skeleton")
+
+
+def test_rule_parser_class_reset_of_two_classes():
+    assert parse_command_rule("reset the lungs and the liver") == _class_reset(["lungs", "liver"])
+
+
+@pytest.mark.parametrize("text", [
+    "okay, revert the skeleton back, instead darken the lungs a bit",
+    "Okay, revert the skeleton back, instead darken the lungs a bit.",
+])
+def test_rule_parser_class_reset_with_another_clause(text):
+    assert parse_command_rule(text) == {"compound": [
+        _class_reset("skeleton"),
+        {"target": "lungs", "attribute": "brightness", "direction": "decrease", "strength": "slightly"},
+    ]}
+
+
+@pytest.mark.parametrize("text", ["reset", "start over", "revert", "undo everything", "back to default"])
+def test_rule_parser_full_reset_still_full(text):
+    assert parse_command_rule(text) == {"target": None, "attribute": None, "direction": "reset", "strength": None}
+
+
+def test_llm_validation_accepts_a_class_reset():
+    from commands import _validate_cmd, _repair_cmd, _ungrounded_reason
+    raw = {"target": "skeleton", "attribute": "opacity", "direction": "reset", "strength": None}
+    cmd = _repair_cmd(raw, "revert the skeleton")
+    assert cmd == _class_reset("skeleton")
+    assert _validate_cmd(cmd)
+    assert _ungrounded_reason(cmd, "revert the skeleton") is None
+
+
+def test_llm_validation_accepts_a_class_reset_in_a_compound():
+    from commands import _validate_cmd, _repair_cmd, _ungrounded_reason
+    text = "Okay, revert the skeleton back, instead darken the lungs a bit."
+    raw = {"compound": [
+        {"target": "skeleton", "attribute": "opacity", "direction": "reset", "strength": None},
+        {"target": "lungs", "attribute": "brightness", "direction": "decrease", "strength": "slightly"},
+    ]}
+    cmd = _repair_cmd(raw, text)
+    assert _validate_cmd(cmd)
+    assert _ungrounded_reason(cmd, text) is None
+    assert cmd["compound"][0] == _class_reset("skeleton")
+
+
+def test_llm_grounding_refuses_a_class_reset_without_a_reset_word():
+    from commands import _ungrounded_reason
+    text = "skeleton and darken the lungs"
+    cmd = {"compound": [
+        _class_reset("skeleton"),
+        {"target": "lungs", "attribute": "brightness", "direction": "decrease", "strength": "slightly"},
+    ]}
+    assert _ungrounded_reason(cmd, text) == "reset without a reset word"
+
+
+def test_llm_validation_rejects_a_full_reset_inside_a_compound():
+    from commands import _validate_cmd
+    assert not _validate_cmd({"compound": [
+        {"target": None, "attribute": None, "direction": "reset", "strength": None},
+        {"target": "lungs", "attribute": "brightness", "direction": "decrease", "strength": "slightly"},
+    ]})
+
+
+def test_parse_command_llm_returns_the_class_reset_compound():
+    payload = {"compound": [
+        {"target": "skeleton", "attribute": "opacity", "direction": "reset", "strength": None},
+        {"target": "lungs", "attribute": "brightness", "direction": "decrease", "strength": "slightly"},
+    ]}
+    reasons = []
+    with patch("commands.urlopen", return_value=_fake_response(payload)):
+        cmd = parse_command_llm("Okay, revert the skeleton back, instead darken the lungs a bit.",
+                                _on_fallback=reasons.append)
+    assert not reasons
+    assert cmd["compound"][0] == _class_reset("skeleton")
+
+
+def test_system_prompt_explains_class_reset():
+    assert "revert the skeleton" in commands._SYSTEM_PROMPT
+
+
+def test_command_schema_allows_a_class_reset():
+    single = commands.command_schema()["anyOf"][0]["properties"]
+    assert "reset" in single["direction"]["enum"]
+    assert any(opt.get("enum") for opt in single["target"]["anyOf"])
+
+
+def test_rule_parser_put_a_class_back_is_a_class_reset():
+    assert parse_command_rule("put the liver back") == _class_reset("liver")
+    from commands import _ungrounded_reason
+    assert _ungrounded_reason(_class_reset("liver"), "put the liver back") is None
+
+
+def test_rule_parser_class_reset_keeps_other_clause_kinds():
+    assert parse_command_rule("reset the skeleton and show only the lungs") == {"compound": [
+        _class_reset("skeleton"),
+        {"target": "lungs", "attribute": "opacity", "direction": "show_only", "strength": None},
+    ]}
+
+
+def test_rule_parser_class_reset_does_not_swallow_an_unparsed_clause():
+    with pytest.raises(ValueError):
+        parse_command_rule("reset the skeleton and the lungs glow somehow")

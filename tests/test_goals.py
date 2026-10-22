@@ -704,6 +704,16 @@ def test_goal_from_command_compound_merges_subcommands(monkeypatch):
 
 @pytest.mark.parametrize("cmd", [
     {"target": None, "attribute": None, "direction": "reset", "strength": None},
+    {"target": "skeleton", "attribute": None, "direction": "reset", "strength": None},
+    # a class reset inside a compound makes the whole compound exact
+    {"compound": [
+        {"target": "skeleton", "attribute": None, "direction": "reset", "strength": None},
+        {"target": "lungs", "attribute": "brightness", "direction": "decrease", "strength": "slightly"},
+    ]},
+    {"compound": [
+        {"target": "lungs", "attribute": "opacity", "direction": "increase", "strength": "slightly"},
+        {"target": "skeleton", "attribute": None, "direction": "reset", "strength": None},
+    ]},
     {"target": "skeleton", "attribute": "width", "direction": "increase", "strength": "strongly"},
     {"target": "skeleton", "attribute": "center", "direction": "increase", "strength": "slightly"},
     {"camera": {"action": "rotate", "direction": "left", "strength": "moderately"}},

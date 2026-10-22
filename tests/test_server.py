@@ -816,6 +816,22 @@ def test_policy_mode_non_goal_command_falls_back_with_message(ts_session):
     assert state["current"]["message"]
 
 
+def test_policy_mode_class_reset_compound_falls_back_to_exact(ts_session):
+    s = ts_session
+    s.policy_provider = lambda: _StubPolicy(np.zeros(len(CONTROLLABLE)))
+    s.command("more bone", mode="exact")
+    before = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    text = "okay, revert the skeleton back, instead darken the lungs a bit"
+
+    state = s.command(text, mode="policy")
+
+    assert state["current"]["mode"] == "exact"
+    assert state["current"]["message"]
+    cmd, _ = server.parse_command_with_meta(text, parser="rule")
+    expected = server.apply_command(cmd, before, reset_params=server.initial_params(s.task_version))
+    np.testing.assert_allclose(state["current"]["params"], expected)
+
+
 def test_run_policy_arm_matches_session_run_policy(ts_session):
     """`Session._run_policy` is a thin delegation to `run_policy_arm` -- call
     both with the same inputs and pin that they cannot drift apart."""

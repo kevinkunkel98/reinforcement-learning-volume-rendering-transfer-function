@@ -234,7 +234,8 @@ def _fuzzy_classes(text: str) -> list:
     return classes
 
 
-_RESET_RE = re.compile(r"\b(reset|revert|start over|start again|from scratch|defaults?|original settings)\b")
+_RESET_RE = re.compile(r"\b(reset|revert|start over|start again|from scratch|defaults?|original settings)\b"
+                       r"|\bput (?:\w+ ){1,3}back\b")
 _PRONOUN_RE = re.compile(r"\b(it|them|they|those|these|that|this)\b")
 _RELATIVE_CUE_RE = re.compile(r"\b(more|less|increase\w*|decrease\w*|brighte\w*|darke\w*|lighte\w*)\b")
 _SHOW_ONLY_RE = re.compile(r"\b(only|isolate|nothing but|exclusively)\b|^just\b|\b(show|display)\b(?! (more|less)\b)")
@@ -381,10 +382,11 @@ def _parse_grammar_clause(t: str):
 
 
 _PURPOSE_RE = re.compile(r"\s*\b(so that|so|in order to|because)\b.*$")
-_CLAUSE_SPLIT_RE = re.compile(r"\s*(?:[,;+]|\band\b|\bbut\b|\bthen\b|\bplus\b|\bwhile\b)\s*")
+_CLAUSE_SPLIT_RE = re.compile(
+    r"\s*(?:[,;+]|\band\b|\bbut\b|\bthen\b|\bplus\b|\bwhile\b|\binstead\b(?!\s+of\b))\s*")
 
 
-_FILLER_RE = re.compile(r"\b(please|again|even|the|a|an|just)\b")
+_FILLER_RE = re.compile(r"\b(please|again|even|the|a|an|just|okay|ok)\b")
 
 
 def _is_modifier_only(clause: str) -> bool:
@@ -413,6 +415,29 @@ def _merge_modifier_clauses(clauses: list) -> list:
     return merged
 
 
+def _is_reset(t: str) -> bool:
+    return bool(_RESET_RE.search(t)) or _cue_direction(t) == "reset"
+
+
+def _class_reset(classes: list) -> dict:
+    return {"target": classes[0] if len(classes) == 1 else classes,
+            "attribute": None, "direction": "reset", "strength": None}
+
+
+def _is_class_list(clause: str) -> bool:
+    """Nothing but class names and filler ("the liver", "lungs")."""
+    if not _find_classes(clause):
+        return False
+    rest = clause
+    for phrase, _ in _CLASS_LOOKUP:
+        rest = re.sub(rf"\b{re.escape(phrase)}(?:s|es)?\b", " ", rest)
+    return not _FILLER_RE.sub(" ", rest).strip()
+
+
+def _split_clauses(t: str) -> list:
+    return _merge_modifier_clauses([c for c in _CLAUSE_SPLIT_RE.split(t) if c])
+
+
 def parse_command_rule(text: str) -> dict:
     """Text -> command, without a language model.
 
@@ -426,28 +451,50 @@ def parse_command_rule(text: str) -> dict:
 
     _check_retired(t)
 
-    if _RESET_RE.search(t) or _cue_direction(t) == "reset":
-        return {"target": None, "attribute": None, "direction": "reset", "strength": None}
+    # A reset word resets everything, unless a clause pairs it with classes
+    # ("revert the skeleton"): then that clause resets those classes and the
+    # other clauses parse as usual ("..., instead darken the lungs").
+    reset_clauses = None
+    if _is_reset(t):
+        reset_clauses = _split_clauses(t)
+        if not any(_is_reset(c) and _find_classes(c) for c in reset_clauses):
+            return {"target": None, "attribute": None, "direction": "reset", "strength": None}
 
-    camera = _parse_camera(t)
-    if camera:
-        return camera
+    if reset_clauses is not None:
+        clauses = reset_clauses
+    else:
+        camera = _parse_camera(t)
+        if camera:
+            return camera
 
-    t = _PURPOSE_RE.sub("", t) or t
-    show_only = _parse_show_only(t)
-    if show_only:
-        return show_only
+        t = _PURPOSE_RE.sub("", t) or t
+        show_only = _parse_show_only(t)
+        if show_only:
+            return show_only
 
-    clauses = _merge_modifier_clauses([c for c in _CLAUSE_SPLIT_RE.split(t) if c])
+        clauses = _split_clauses(t)
     subcommands, previous = [], None
     for clause in clauses:
-        parsed = _parse_grammar_clause(clause) or _parse_free_clause(clause, previous)
+        if _is_reset(clause) and _find_classes(clause):
+            parsed = [_class_reset(_find_classes(clause))]
+        elif reset_clauses is not None and _parse_show_only(clause):
+            parsed = [_parse_show_only(clause)]
+        else:
+            parsed = _parse_grammar_clause(clause) or _parse_free_clause(clause, previous)
+        if not parsed and subcommands and subcommands[-1]["direction"] == "reset" and _is_class_list(clause):
+            # "reset the lungs and the liver": a bare class list continues the reset.
+            last = subcommands[-1]["target"]
+            last = last if isinstance(last, list) else [last]
+            subcommands[-1] = _class_reset(last + [c for c in _find_classes(clause) if c not in last])
+            continue
         if not parsed:
             if len(clauses) > 1:
                 raise ValueError(f"could not parse clause {clause!r} in compound command: {text!r}")
             raise ValueError(f"rule parser cannot parse: {text!r}")
         subcommands.extend(parsed)
         previous = parsed[-1]["target"]
+        if isinstance(previous, list):
+            previous = previous[-1]
     # "the heart is too strong, tone it down" says one thing twice.
     unique = []
     for sub in subcommands:
@@ -500,16 +547,22 @@ CLASS_BANDS = {**TISSUE_BANDS, **{
 _LEGACY_APPLY_PEAK_INDEX = {"bone": 3, "spongy": 2, "fat": 1, "air": 0}
 
 
+def _class_peak_index(params: np.ndarray, tissue: str):
+    """The peak `_find_or_create_peak` would change for `tissue`, or None
+    when no peak is near enough (it would reseed one)."""
+    if tissue in _LEGACY_APPLY_PEAK_INDEX:
+        return _LEGACY_APPLY_PEAK_INDEX[tissue]
+    distances = [abs(_peak_center_hu(params, i) - CLASS_HU[tissue]) for i in range(N_PEAKS)]
+    idx = int(np.argmin(distances))
+    return idx if distances[idx] <= NEAR_THRESHOLD_HU else None
+
+
 def _find_or_create_peak(params: np.ndarray, tissue: str):
     """Nearest peak to the tissue's HU; reseed the weakest peak if none is near."""
     target_hu = CLASS_HU[tissue]
-    if tissue in _LEGACY_APPLY_PEAK_INDEX:
-        return params.copy(), _LEGACY_APPLY_PEAK_INDEX[tissue]
-    centers = [_peak_center_hu(params, i) for i in range(N_PEAKS)]
-    distances = [abs(c - target_hu) for c in centers]
-    idx = int(np.argmin(distances))
+    idx = _class_peak_index(params, tissue)
     params = params.copy()
-    if distances[idx] > NEAR_THRESHOLD_HU:
+    if idx is None:
         heights = [peak_internal(params, i)["height"] for i in range(N_PEAKS)]
         idx = int(np.argmin(heights))
         base = idx * PARAMS_PER_PEAK
@@ -546,7 +599,8 @@ def _center_band_clip(ext_value: float, tissue: str) -> float:
 
 def apply_command(cmd: dict, params: np.ndarray, reset_params=None) -> np.ndarray:
     """`cmd` applied to `params`. "reset" returns `reset_params` (the viewer's
-    start TF for its task version), `default_params()` when not given."""
+    start TF for its task version), `default_params()` when not given; a
+    "reset" with a class target restores only that class's peak from it."""
     if "compound" in cmd:
         # Multiple tissues set to different absolute levels in one utterance
         # ("high opacity spongy, low opacity bone") -- fold each sub-command
@@ -559,7 +613,19 @@ def apply_command(cmd: dict, params: np.ndarray, reset_params=None) -> np.ndarra
     params = params.copy()
 
     if cmd["direction"] == "reset":
-        return default_params() if reset_params is None else np.array(reset_params, dtype=np.float64)
+        reference = default_params() if reset_params is None else np.array(reset_params, dtype=np.float64)
+        if cmd.get("target") is None:
+            return reference
+        # A class reset ("revert the skeleton") restores that class's peak and
+        # nothing else. The class's slot can differ between the two TFs (a
+        # command reseeded a peak for it, or the reset TF has none near), so
+        # every slot holding the class in either one goes back.
+        targets = cmd["target"] if isinstance(cmd["target"], list) else [cmd["target"]]
+        for tissue in targets:
+            for idx in {_class_peak_index(params, tissue), _class_peak_index(reference, tissue)} - {None}:
+                peak = slice(idx * PARAMS_PER_PEAK, (idx + 1) * PARAMS_PER_PEAK)
+                params[peak] = reference[peak]
+        return params
 
     if cmd["direction"] == "show_only":
         targets = cmd["target"] if isinstance(cmd["target"], list) else [cmd["target"]]
@@ -735,7 +801,11 @@ be visible) even if the sentence itself sounds negative ("barely there" ->
 increase). If something is hiding, dominating, or should be reduced, that is
 "decrease".
 
-Never output numeric values. "reset" has target=null, attribute=null, strength=null.
+Never output numeric values. "reset" has attribute=null, strength=null. With
+target=null it resets everything ("reset", "start over"); with a class target
+it resets only that class ("revert the skeleton", "put the liver back") and can
+be a sub-command of a compound ("revert the skeleton, instead darken the lungs"
+-> a skeleton reset plus a lungs brightness decrease).
 "show_only" has strength=null.
 
 strength comes from the user's modifier words: "a bit", "a little", "slightly"
@@ -809,6 +879,8 @@ def _repair_single(obj, text: str):
     if direction in ("show_only", "reset"):
         obj["strength"] = None
         obj.setdefault("attribute", None)
+        if direction == "reset":
+            obj["attribute"] = None  # a reset restores the whole peak, not one attribute
         return obj
     if direction in ("increase", "decrease"):
         if obj.get("attribute") is None:
@@ -844,7 +916,8 @@ def _ungrounded_reason(cmd, text: str):
     more skeleton); a command is only kept when every class it changes is
     named in the text and a reset was actually asked for."""
     t = _normalise_text(text)
-    if isinstance(cmd, dict) and cmd.get("direction") == "reset" and not _RESET_RE.search(t):
+    subs = cmd["compound"] if isinstance(cmd, dict) and isinstance(cmd.get("compound"), list) else [cmd]
+    if any(isinstance(sub, dict) and sub.get("direction") == "reset" for sub in subs) and not _is_reset(t):
         return "reset without a reset word"
     named = set(_find_classes(t)) | set(_fuzzy_classes(t))
     missing = [c for c in _command_targets(cmd) if c not in named]
@@ -871,8 +944,9 @@ def _validate_set_cmd(obj) -> bool:
 
 def _validate_relative_cmd(obj) -> bool:
     # A compound sub-command's relative-change shape -- same fields as a
-    # top-level single command, but restricted to increase/decrease (no
-    # reset/show_only/null target inside a compound).
+    # top-level single command, but restricted to increase/decrease (a class
+    # reset is `_validate_class_reset_cmd`; no show_only/null target inside a
+    # compound).
     if not isinstance(obj, dict):
         return False
     if set(obj.keys()) != {"target", "attribute", "direction", "strength"}:
@@ -886,6 +960,19 @@ def _validate_relative_cmd(obj) -> bool:
     return True
 
 
+def _validate_class_reset_cmd(obj) -> bool:
+    # "revert the skeleton": a reset of named classes, the only reset a
+    # compound may hold (a full reset would undo the other sub-commands).
+    if not isinstance(obj, dict):
+        return False
+    if set(obj.keys()) != {"target", "attribute", "direction", "strength"}:
+        return False
+    if obj["direction"] != "reset" or obj["attribute"] is not None or obj["strength"] is not None:
+        return False
+    targets = obj["target"] if isinstance(obj["target"], list) else [obj["target"]]
+    return bool(targets) and all(isinstance(t, str) and t in CLASS_SYNONYMS for t in targets)
+
+
 def _validate_single_cmd(obj) -> bool:
     if not isinstance(obj, dict):
         return False
@@ -893,6 +980,8 @@ def _validate_single_cmd(obj) -> bool:
         return False
     if obj["direction"] not in VALID_DIRECTIONS:
         return False
+    if obj["direction"] == "reset" and obj["target"] is not None:
+        return _validate_class_reset_cmd(obj)
     if obj["direction"] == "show_only":
         targets = obj["target"] if isinstance(obj["target"], list) else [obj["target"]]
         if not targets or any(t is None or t not in CLASS_SYNONYMS for t in targets):
@@ -937,7 +1026,8 @@ def _validate_cmd(obj) -> bool:
         if len(subs) == 1:
             return _validate_single_cmd(subs[0]) or _validate_set_cmd(subs[0]) \
                 or _validate_relative_cmd(subs[0])
-        return all(_validate_set_cmd(sub) or _validate_relative_cmd(sub) for sub in subs)
+        return all(_validate_set_cmd(sub) or _validate_relative_cmd(sub) or _validate_class_reset_cmd(sub)
+                   for sub in subs)
     if isinstance(obj, dict) and set(obj.keys()) == {"camera"}:
         return _validate_camera_cmd(obj)
     return _validate_single_cmd(obj)
