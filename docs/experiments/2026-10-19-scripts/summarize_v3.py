@@ -2,6 +2,9 @@
 
 Every tag scores the same fixed 300 episodes per split, so a tag evaluated
 without --cold borrows cold200 from the COLD tag for its paired tests.
+A tag evaluated with --keep also gets a keep-repair table: attainment
+median / mean / share >= 0.5, median drift of the unmentioned classes, and
+the repair's mean evaluations and milliseconds.
 """
 import json
 import os
@@ -15,6 +18,7 @@ from rl.vis_eval import EVAL_KINDS, wilcoxon  # noqa: E402
 O = os.environ.get("O", "out/rl_mb_v3/eval")
 COLD = os.environ.get("COLD")
 METHODS = ("policy", "warm30", "warm200", "plan", "plan_warm30", "plan_warm200", "cold200")
+KEEP_BASES = ("policy", "plan", "warm30", "warm200", "plan_warm30", "plan_warm200")
 
 
 def load(tag, split):
@@ -56,3 +60,17 @@ for tag, split in zip(args[::2], args[1::2]):
         for m in [m for m in METHODS[:-1] if m in rows[0]]:
             p = wilcoxon([r[m] for r in rows], [r["cold200"] for r in rows])["p_value"]
             print(f"  {m} vs cold200: p = {p:.2g}")
+    keep_bases = [m for m in KEEP_BASES if m + "_keep" in rows[0]]
+    if keep_bases:
+        print(f"  {'keep repair':18s} {'median':>7s} {'mean':>7s} {'>=0.5':>6s} {'drift':>6s} {'bdrift':>6s}"
+              f" {'evals':>6s} {'ms':>6s}  p(vs without)")
+        for m in keep_bases:
+            for name in (m, m + "_keep"):
+                att = np.array([r[name] for r in rows])
+                extra = (f" {np.mean([r[m + '_keep_evals'] for r in rows]):6.1f}"
+                         f" {np.mean([r[m + '_keep_ms'] for r in rows]):6.0f}"
+                         f"  {wilcoxon([r[name] for r in rows], [r[m] for r in rows])['p_value']:.2g}"
+                         if name.endswith("_keep") else "")
+                print(f"  {name:18s} {np.median(att):+7.3f} {np.mean(att):+7.3f} {np.mean(att >= 0.5):6.2f}"
+                      f" {np.median([r[name + '_drift'] for r in rows]):6.2f}"
+                      f" {np.median([r[name + '_bdrift'] for r in rows]):6.2f}" + extra)
