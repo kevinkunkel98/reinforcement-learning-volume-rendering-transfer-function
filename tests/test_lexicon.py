@@ -64,6 +64,10 @@ def test_find_cue_prefers_the_longest_phrase():
 @pytest.mark.parametrize("raw, fixed", [
     ("Darkin' Skeleton", "darken skeleton"),
     ("Leitenlangs", "lighten lungs"),
+    ("Highlight the art.", "highlight the heart."),
+    ("Dial the arc down the touch.", "dial the heart down the touch."),
+    ("Make the ripsage pop.", "make the ribcage pop."),
+    ("leiten lungs", "lighten lungs"),
     ("darken the sgeleton", "darken the skeleton"),
     ("show only the kitneys", "show only the kidneys"),
     ("make the lever more visible", "make the liver more visible"),

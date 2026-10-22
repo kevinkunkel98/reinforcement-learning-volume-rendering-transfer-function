@@ -50,7 +50,8 @@
     "strongly": ["strongly", "a lot", "much", "extremely", "completely", "totally", "fully", "really", "way",
                  "far", "very", "massively", "heavily"]
   },
-  "asr_fixes": {"darkin": "darken", "leitenlangs": "lighten lungs"},
+  "asr_fixes": {"darkin": "darken", "leitenlangs": "lighten lungs", "leiten": "lighten",
+                "art": "heart", "arc": "heart", "ripsage": "ribcage"},
   "keep": ["heard", "hard", "heat", "long", "longs", "lounge", "spin", "issue", "skill", "host", "sole", "soil",
            "silo", "border", "timer", "torn", "lover"],
   "filler": ["please", "can", "could", "would", "you", "the", "a", "an", "now", "again", "even", "just", "me", "i",
