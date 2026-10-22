@@ -123,7 +123,12 @@
     ctx.font = "italic 44px system-ui, sans-serif";
     ctx.fillText(wrapLine(ctx, transcript, max), pad, 124);
     ctx.fillStyle = "#a1a1aa";
-    ctx.font = "40px system-ui, sans-serif";
+    // "Understood: … · ⚠ may have missed: …" is longer than a method line:
+    // shrink the font a little before cutting it off.
+    for (const size of [40, 34, 30]) {
+      ctx.font = `${size}px system-ui, sans-serif`;
+      if (ctx.measureText(summary).width <= max) break;
+    }
     ctx.fillText(wrapLine(ctx, summary, max), pad, 190);
     drawDeltas(ctx, hudState.deltas, pad, 250, max);
     ctx.fillStyle = "#71717a";

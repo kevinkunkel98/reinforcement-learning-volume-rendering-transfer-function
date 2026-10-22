@@ -466,6 +466,16 @@ function appendReply(step, before) {
   method.textContent = METHOD_SAID[step.mode] || METHOD_SAID.exact;
   div.appendChild(method);
 
+  // The LLM's reading of the sentence (it guesses on garbled speech) and any
+  // clause it seems to have dropped; nothing for exact rule-parser answers.
+  const note = window.xrLogic.parseNote(step);
+  for (const line of note ? [note.understood, note.warning].filter(Boolean) : []) {
+    const row = document.createElement("div");
+    row.className = "reply-note";
+    row.textContent = line;
+    div.appendChild(row);
+  }
+
   // A fallback or a search that found nothing is the most useful thing the
   // system can say, so it belongs in the thread, not only in a toast that
   // disappears.
@@ -554,6 +564,7 @@ async function sendCommandImpl(text) {
   appendMessage(data.current);
   appendReply(data.current, before);
   emitAppEvent("applied", {
+    // Leads with "Understood: …" / the dropped-clause warning (parseNote) when the LLM parsed.
     summary: window.xrLogic.summarizeStep(data.current, before, CLASS_ORDER, CLASS_LABEL, METHOD_SAID),
     deltas: classDeltas(data.current.class_visibility, before),
     dataset: state.dataset,

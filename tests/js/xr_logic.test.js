@@ -525,3 +525,29 @@ test("parsePerfFlags reads the renderer, defaulting to vtk", () => {
   assert.equal(xr.parsePerfFlags("?renderer=custom").renderer, "custom");
   assert.equal(xr.parsePerfFlags("?renderer=webgpu").renderer, "vtk");
 });
+
+test("parseNote shows what the LLM understood and what it may have missed", () => {
+  assert.deepEqual(xr.parseNote({ parser_used: "llm", understood: "heart brightness high", parse_warning: null }), {
+    understood: "Understood: heart brightness high", warning: "",
+  });
+  assert.deepEqual(xr.parseNote({
+    parser_used: "llm", understood: "less soft tissue", parse_warning: "may have missed: 'moriorta'",
+  }), { understood: "Understood: less soft tissue", warning: "⚠ may have missed: 'moriorta'" });
+});
+
+test("parseNote stays silent for exact rule-parser answers", () => {
+  assert.equal(xr.parseNote({ parser_used: "rule", understood: "more kidneys", parse_warning: null }), null);
+  assert.equal(xr.parseNote({ mode: "policy" }), null);
+  assert.equal(xr.parseNote({ parser_used: "llm" }), null);
+  // A warning is shown whichever parser answered.
+  assert.deepEqual(xr.parseNote({ parser_used: "rule", understood: "more liver", parse_warning: "may have missed: 'x'" }),
+    { understood: "Understood: more liver", warning: "⚠ may have missed: 'x'" });
+});
+
+test("summarizeStep leads with the LLM's reading, then the method", () => {
+  const text = xr.summarizeStep(
+    { mode: "policy", parser_used: "llm", understood: "less soft tissue", parse_warning: "may have missed: 'moriorta'",
+      class_visibility: { lungs: 0.5 } },
+    { lungs: 0.1 }, CLASSES, LABELS, SAID);
+  assert.equal(text, "Understood: less soft tissue · ⚠ may have missed: 'moriorta' · the policy answered");
+});

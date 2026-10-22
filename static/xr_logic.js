@@ -116,10 +116,25 @@
       }));
   }
 
-  // The chat reply's header line for the VR panel: how the command was
-  // answered, the server's note, or that nothing moved.
+  // What the parser made of the sentence, when that is worth showing: the
+  // LLM interpreted it (it may have guessed on a garbled transcript), or the
+  // parser thinks a clause was dropped. Rule-parser answers are exact, so they
+  // get null. `understood` / `parse_warning` come from the hybrid parser meta
+  // the server spreads into each step.
+  function parseNote(step) {
+    const warning = step.parse_warning ? `⚠ ${step.parse_warning}` : "";
+    if (step.parser_used !== "llm" && !warning) return null;
+    const understood = step.understood ? `Understood: ${step.understood}` : "";
+    return understood || warning ? { understood, warning } : null;
+  }
+
+  // The chat reply's header line for the VR panel: the parser's reading (see
+  // parseNote), how the command was answered, the server's note, or that
+  // nothing moved.
   function summarizeStep(step, before, classOrder, classLabel, methodSaid) {
-    const parts = [methodSaid[step.mode] || methodSaid.exact];
+    const note = parseNote(step);
+    const parts = note ? [note.understood, note.warning].filter(Boolean) : [];
+    parts.push(methodSaid[step.mode] || methodSaid.exact);
     if (step.message) parts.push(step.message);
     const moved = stepDeltas(step.class_visibility, before, classOrder, classLabel, {});
     if (!moved.length && !step.message) parts.push("nothing moved measurably");
@@ -483,7 +498,7 @@
 
   return {
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
-    summarizeStep, stepDeltas, hudPlacement, withXRLayerContext, xrPlacement,
+    summarizeStep, parseNote, stepDeltas, hudPlacement, withXRLayerContext, xrPlacement,
     PERF_DEFAULTS, HEADSET_PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
     physicalRotation, createStickRotator, centeredUserMatrix, rotatedPhysicalFrame,
     bodyBoundingBox, cropVolume, strideDownsample, toSixteenBit,
