@@ -295,6 +295,47 @@ def _scene_event_id(before, after, event_id=None):
     return "scene-event:" + hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
+# A targeted class whose share of the rendered image is below this reads as
+# "nothing happened" to the viewer. `visibility.py` floors "invisible" at
+# goals.EPSILON = 1e-3 (0.1 %), so 1 % is ten times that floor: a class this
+# small is a sliver of pixels, not something a brighten/darken can show.
+HIDDEN_TARGET_SHARE = 0.01
+_TARGET_LABELS = {"soft": "soft tissue"}
+
+
+def _target_classes(cmd):
+    """Goal classes a command singles out, in order. Camera, layers, reset and
+    show_only name none for this purpose (show_only already clears occluders)."""
+    subs = cmd["compound"] if "compound" in cmd else [cmd]
+    found = []
+    for sub in subs:
+        if sub.get("direction") in ("show_only", "reset"):
+            continue
+        target = sub.get("target")
+        for name in (target if isinstance(target, list) else [target]):
+            if name in goals.GOAL_CLASSES and name not in found:
+                found.append(name)
+    return found
+
+
+def _hidden_target_hint(cmd, class_visibility):
+    """Why a targeted class may look unchanged: it is occluded (below
+    HIDDEN_TARGET_SHARE) or the volume cannot measure it (None). None when
+    every target is visible."""
+    hints = []
+    for name in _target_classes(cmd):
+        label = _TARGET_LABELS.get(name, name)
+        if name not in class_visibility:
+            continue
+        share = class_visibility[name]
+        if share is None:
+            hints.append(f"{label} cannot be measured on this scan")
+        elif share < HIDDEN_TARGET_SHARE:
+            hints.append(f"{label} is hidden behind other tissue -- try "
+                         f"'show only {label}' or 'less soft tissue'")
+    return " · ".join(hints) or None
+
+
 def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera,
                   mode="exact", message=None, parser_meta=None, layers=None):
     layers = normalize_layers(layers or default_layers())
@@ -942,6 +983,10 @@ class Session:
             # The viewer asked for the LLM parser and got a rule parse; say so
             # in the same channel policy-mode fallbacks already use.
             message = f"LLM parse rejected, used the rule parser -- {parser_meta['parser_fallback']}"
+
+        hint = _hidden_target_hint(cmd, _class_visibility(new_params))
+        if hint:
+            message = f"{message} · {hint}" if message else hint
 
         step = _render_step(new_params, text, cmd, search_flag,
                              self.history[-1]["id"] + 1, self.session_id, current_camera,

@@ -806,8 +806,11 @@ def test_viewer_polishes_the_policy_with_a_short_search_by_default():
     assert _fresh_session().policy_refine_evaluations == 200
 
 
-def test_policy_mode_applies_the_policys_action(ts_session):
+def test_policy_mode_applies_the_policys_action(ts_session, monkeypatch):
     s = ts_session
+    # No hidden-target hint: this test is about the absence of a fallback note.
+    monkeypatch.setattr(server, "_class_visibility",
+                        lambda params: {c: 0.2 for c in server.goals.GOAL_CLASSES})
     # Stays clear of ±1 so no colour channel saturates: a peak's channels sit
     # at their hue offsets around the group mean, and clipping one of them
     # would shift that mean off the action value (see the clipping test).
@@ -1754,3 +1757,73 @@ def test_transcribe_mlx_ffmpeg_failure_returns_no_speech(monkeypatch):
     monkeypatch.setattr(server, "asr_transcribe_path", broken)
     out = asyncio.run(server.transcribe(_upload(b"\x00" * 2000)))
     assert out["text"] == "" and out["heard"] == ""
+
+
+def _visibility_stub(monkeypatch, **shares):
+    full = {name: 0.2 for name in server.goals.GOAL_CLASSES}
+    full.update(shares)
+    monkeypatch.setattr(server, "_class_visibility", lambda params: dict(full))
+
+
+def test_hidden_target_gets_a_hint(ts_session, monkeypatch):
+    _visibility_stub(monkeypatch, kidneys=0.001)
+
+    state = ts_session.command("brighten the kidneys a lot", mode="exact")
+
+    assert state["current"]["message"] == (
+        "kidneys is hidden behind other tissue -- try 'show only kidneys' or 'less soft tissue'")
+
+
+def test_soft_target_uses_the_display_label(ts_session, monkeypatch):
+    _visibility_stub(monkeypatch, soft=0.0)
+
+    state = ts_session.command("darken the soft tissue", mode="exact")
+
+    assert "soft tissue is hidden behind other tissue" in state["current"]["message"]
+    assert "'show only soft tissue'" in state["current"]["message"]
+
+
+def test_visible_target_gets_no_hint(ts_session, monkeypatch):
+    _visibility_stub(monkeypatch, kidneys=server.HIDDEN_TARGET_SHARE)
+
+    state = ts_session.command("brighten the kidneys a lot", mode="exact")
+
+    assert state["current"]["message"] is None
+
+
+def test_show_only_gets_no_hint(ts_session, monkeypatch):
+    _visibility_stub(monkeypatch, kidneys=0.0)
+
+    state = ts_session.command("show only the kidneys", mode="exact")
+
+    assert state["current"]["message"] is None
+
+
+def test_unsupported_target_says_it_cannot_be_measured(ts_session, monkeypatch):
+    _visibility_stub(monkeypatch, vessels=None)
+
+    state = ts_session.command("make the vessels a little more solid", mode="exact")
+
+    assert state["current"]["message"] == "vessels cannot be measured on this scan"
+
+
+def test_hint_joins_an_existing_message(ts_session, monkeypatch):
+    _visibility_stub(monkeypatch, kidneys=0.0)
+    ts_session.policy_provider = lambda: None  # policy unavailable -> fallback message
+
+    state = ts_session.command("brighten the kidneys", mode="policy")
+
+    message = state["current"]["message"]
+    assert message.startswith(server.NO_POLICY_CHECKPOINT_MESSAGE)
+    assert message.endswith("kidneys is hidden behind other tissue -- try "
+                            "'show only kidneys' or 'less soft tissue'")
+    assert " · " in message
+
+
+def test_compound_hints_each_hidden_target(ts_session, monkeypatch):
+    _visibility_stub(monkeypatch, kidneys=0.0)
+
+    state = ts_session.command("brighten the kidneys and darken the lungs", mode="exact")
+
+    message = state["current"]["message"]
+    assert "kidneys is hidden" in message and "lungs" not in message
