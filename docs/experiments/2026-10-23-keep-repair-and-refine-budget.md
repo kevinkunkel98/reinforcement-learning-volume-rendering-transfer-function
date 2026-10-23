@@ -70,7 +70,10 @@ for S in 0 1 2 and SPLIT in val, test (~90 min for all six on the M1 Pro).
 
 - Occluders as keep-repair candidates: "more lungs" still erases soft tissue
   completely and leaves the shell bluish over a session (occluders are
-  mentioned with weight 0, so never reverted).
+  mentioned with weight 0, so never reverted). Tried in
+  `2026-10-23-keep-repair-occluders.md`: the attainment check refuses every
+  such revert (the erasure is what the goal asks for), so it needs a goal
+  change, not a repair.
 - `ts_s0477` is flagged no-contrast (`contrast` = "angiography" in the study
   type) but its vessel voxels have median 127 HU (p90 152), i.e. a contrast
   phase; `ts_s0358` is native (median 40 HU), `ts_s1379` angiographic (214).

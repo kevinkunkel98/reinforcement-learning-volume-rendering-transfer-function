@@ -65,8 +65,9 @@ for tag, split in zip(args[::2], args[1::2]):
     suffixes = [s for s in ("_keep", "_keepocc") if any(m + s in rows[0] for m in KEEP_BASES)]
     keep_bases = [m for m in KEEP_BASES if any(m + s in rows[0] for s in suffixes)]
     occ = "_keepocc" in suffixes
+    width = 20 if occ else 18
     if keep_bases:
-        print(f"  {'keep repair':18s} {'median':>7s} {'mean':>7s} {'>=0.5':>6s} {'drift':>6s} {'bdrift':>6s}"
+        print(f"  {'keep repair':{width}s} {'median':>7s} {'mean':>7s} {'>=0.5':>6s} {'drift':>6s} {'bdrift':>6s}"
               + (f" {'odrift':>6s} {'obdrft':>6s}" if occ else "")
               + f" {'evals':>6s} {'ms':>6s}  p(vs without)" + ("  p(vs keep)" if occ else ""))
         for m in keep_bases:
@@ -82,6 +83,6 @@ for tag, split in zip(args[::2], args[1::2]):
                         extra += f"  {wilcoxon([r[name] for r in rows], [r[m + '_keep'] for r in rows])['p_value']:.2g}"
                 odrift = (f" {np.median([r[name + '_odrift'] for r in rows]):6.2f}"
                           f" {np.median([r[name + '_obdrift'] for r in rows]):6.2f}" if occ else "")
-                print(f"  {name:18s} {np.median(att):+7.3f} {np.mean(att):+7.3f} {np.mean(att >= 0.5):6.2f}"
+                print(f"  {name:{width}s} {np.median(att):+7.3f} {np.mean(att):+7.3f} {np.mean(att >= 0.5):6.2f}"
                       f" {np.median([r[name + '_drift'] for r in rows]):6.2f}"
                       f" {np.median([r[name + '_bdrift'] for r in rows]):6.2f}" + odrift + extra)
