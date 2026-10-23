@@ -4,7 +4,9 @@ Every tag scores the same fixed 300 episodes per split, so a tag evaluated
 without --cold borrows cold200 from the COLD tag for its paired tests.
 A tag evaluated with --keep also gets a keep-repair table: attainment
 median / mean / share >= 0.5, median drift of the unmentioned classes, and
-the repair's mean evaluations and milliseconds.
+the repair's mean evaluations and milliseconds. A tag evaluated with
+--keep-occ adds the `_keepocc` rows (repair with include_occluders=True),
+the occluders' median drift (odrift, obdrift) and keepocc's p against keep.
 """
 import json
 import os
@@ -60,17 +62,26 @@ for tag, split in zip(args[::2], args[1::2]):
         for m in [m for m in METHODS[:-1] if m in rows[0]]:
             p = wilcoxon([r[m] for r in rows], [r["cold200"] for r in rows])["p_value"]
             print(f"  {m} vs cold200: p = {p:.2g}")
-    keep_bases = [m for m in KEEP_BASES if m + "_keep" in rows[0]]
+    suffixes = [s for s in ("_keep", "_keepocc") if any(m + s in rows[0] for m in KEEP_BASES)]
+    keep_bases = [m for m in KEEP_BASES if any(m + s in rows[0] for s in suffixes)]
+    occ = "_keepocc" in suffixes
     if keep_bases:
         print(f"  {'keep repair':18s} {'median':>7s} {'mean':>7s} {'>=0.5':>6s} {'drift':>6s} {'bdrift':>6s}"
-              f" {'evals':>6s} {'ms':>6s}  p(vs without)")
+              + (f" {'odrift':>6s} {'obdrft':>6s}" if occ else "")
+              + f" {'evals':>6s} {'ms':>6s}  p(vs without)" + ("  p(vs keep)" if occ else ""))
         for m in keep_bases:
-            for name in (m, m + "_keep"):
+            for name in [m] + [m + s for s in suffixes if m + s in rows[0]]:
                 att = np.array([r[name] for r in rows])
-                extra = (f" {np.mean([r[m + '_keep_evals'] for r in rows]):6.1f}"
-                         f" {np.mean([r[m + '_keep_ms'] for r in rows]):6.0f}"
-                         f"  {wilcoxon([r[name] for r in rows], [r[m] for r in rows])['p_value']:.2g}"
-                         if name.endswith("_keep") else "")
+                suffix = name[len(m):]
+                extra = ""
+                if suffix:
+                    extra = (f" {np.mean([r[name + '_evals'] for r in rows]):6.1f}"
+                             f" {np.mean([r[name + '_ms'] for r in rows]):6.0f}"
+                             f"  {wilcoxon([r[name] for r in rows], [r[m] for r in rows])['p_value']:.2g}")
+                    if suffix == "_keepocc" and m + "_keep" in rows[0]:
+                        extra += f"  {wilcoxon([r[name] for r in rows], [r[m + '_keep'] for r in rows])['p_value']:.2g}"
+                odrift = (f" {np.median([r[name + '_odrift'] for r in rows]):6.2f}"
+                          f" {np.median([r[name + '_obdrift'] for r in rows]):6.2f}" if occ else "")
                 print(f"  {name:18s} {np.median(att):+7.3f} {np.mean(att):+7.3f} {np.mean(att >= 0.5):6.2f}"
                       f" {np.median([r[name + '_drift'] for r in rows]):6.2f}"
-                      f" {np.median([r[name + '_bdrift'] for r in rows]):6.2f}" + extra)
+                      f" {np.median([r[name + '_bdrift'] for r in rows]):6.2f}" + odrift + extra)

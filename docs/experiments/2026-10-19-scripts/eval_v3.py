@@ -7,10 +7,14 @@ With --keep also every answer after rl.keep_repair (`<name>_keep`, plus its
 evaluations and milliseconds), and for every answer the drift of the classes
 the instruction does not mention (`<name>_drift`: sum of |log10 vis change|
 over them and the unlabelled tissue, `<name>_bdrift`: sum of |brightness
-change|). --no-search skips the + 30 / 200 searches. Without the new flags
-the output is what it was.
+change|). With --keep-occ also every answer after rl.keep_repair with
+include_occluders=True (`<name>_keepocc`, same extras), and the drift
+(`<name>_odrift`, sum of |log10 vis change|; `<name>_obdrift`, of
+|brightness change|) of the instruction's weight-0 occluders, which `_drift`
+does not cover. --no-search skips the + 30 / 200
+searches. Without the new flags the output is what it was.
 
-    eval_v3.py CKPT OUT.json SPLIT LO HI [--cold] [--plan] [--keep] [--no-search]
+    eval_v3.py CKPT OUT.json SPLIT LO HI [--cold] [--plan] [--keep] [--keep-occ] [--no-search]
 """
 import json
 import sys
@@ -23,12 +27,15 @@ sys.path.insert(0, ".")
 import goals  # noqa: E402
 from rl import vis_eval as ve  # noqa: E402
 from rl.baselines import hill_climb  # noqa: E402
-from rl.keep_repair import keep_repair, mentioned_classes  # noqa: E402
+from rl.keep_repair import keep_repair, mentioned_classes, occluder_classes  # noqa: E402
 
 ckpt, out, split, lo, hi = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
 cold = "--cold" in sys.argv
 planning = "--plan" in sys.argv
-keep = "--keep" in sys.argv
+keep_occ = "--keep-occ" in sys.argv
+keep = "--keep" in sys.argv or keep_occ
+repairs = [(suffix, include) for suffix, include, on in (("_keep", False, "--keep" in sys.argv),
+                                                          ("_keepocc", True, keep_occ)) if on]
 search = "--no-search" not in sys.argv
 meta = ve.load_policy_metadata(ckpt)
 episodes = ve.fixed_episodes(split, 300, seed=0, formulation="one_shot", policy_metadata=meta)[lo:hi]
@@ -48,6 +55,7 @@ for i, ep in enumerate(episodes, start=lo):
 
     row = {"i": i, "kind": info["kind"], "volume": ep["volume"]}
     unmentioned = [c for c in goals.GOAL_CLASSES if c not in mentioned_classes(env._instruction["goal"])]
+    occluders = sorted(occluder_classes(env._instruction["goal"], env._instruction.get("weights")))
 
     def record(name, params):
         row[name], row[name + "_pp"] = scored(params)
@@ -55,16 +63,19 @@ for i, ep in enumerate(episodes, start=lo):
             c, b = goals.progress(env._start_agg, goals.aggregate(ve._features(env._model, params)))
             row[name + "_drift"] = sum(abs(c[k]) for k in unmentioned + ["other"])
             row[name + "_bdrift"] = sum(abs(b[k]) for k in unmentioned)
+            if keep_occ:
+                row[name + "_odrift"] = sum(abs(c[k]) for k in occluders)
+                row[name + "_obdrift"] = sum(abs(b[k]) for k in occluders)
 
     def repaired(name, params):
-        if not keep:
-            return
-        started = time.perf_counter()
-        fixed, n_evals = keep_repair(env._model, env._instruction["goal"], start, params,
-                                     weights=env._instruction.get("weights"), start_agg=env._start_agg)
-        row[name + "_keep_ms"] = (time.perf_counter() - started) * 1000.0
-        row[name + "_keep_evals"] = n_evals
-        record(name + "_keep", fixed)
+        for suffix, include in repairs:
+            started = time.perf_counter()
+            fixed, n_evals = keep_repair(env._model, env._instruction["goal"], start, params,
+                                         weights=env._instruction.get("weights"), start_agg=env._start_agg,
+                                         include_occluders=include)
+            row[name + suffix + "_ms"] = (time.perf_counter() - started) * 1000.0
+            row[name + suffix + "_evals"] = n_evals
+            record(name + suffix, fixed)
 
     def proposal_and_search(name, params):
         record(name, params)
