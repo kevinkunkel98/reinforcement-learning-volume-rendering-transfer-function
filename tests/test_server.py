@@ -1829,3 +1829,161 @@ def test_hint_joins_an_existing_message(ts_session, monkeypatch):
 
     message = state["current"]["message"]
     assert message.startswith(server.NO_POLICY_CHECKPOINT_MESSAGE + " · no visible change")
+
+
+# --- two-stage policy answer -------------------------------------------------
+# The viewer's route answers a policy command twice: a fast stage (policy +
+# keep_repair, no warm search) rendered at once, then the 200-evaluation
+# refine computed in a worker thread and swapped in place on the loop thread.
+# `Session.command` stays synchronous unless asked to defer the refine.
+
+@pytest.fixture
+def two_stage(ts_session):
+    s = ts_session
+    s.policy_provider = lambda: _StubPolicy(np.linspace(-0.4, 0.4, len(CONTROLLABLE)))
+    s.policy_refine_evaluations = 30
+    s.keep_repair = True
+    return s
+
+
+def test_viewer_answers_policy_commands_in_two_stages_by_default():
+    assert server.POLICY_TWO_STAGE is True
+
+
+def test_fast_stage_marks_the_step_refining_and_skips_the_refine(two_stage, monkeypatch):
+    s = two_stage
+    calls = []
+    real = server.refine_policy_proposal
+    monkeypatch.setattr(server, "refine_policy_proposal", lambda *a, **k: calls.append(1) or real(*a, **k))
+    before = len(s.history)
+
+    state = s.command("more bone", mode="policy", defer_refine=True)
+
+    assert calls == []
+    assert state["current"]["mode"] == "policy"
+    assert state["current"]["refining"] is True
+    assert len(s.history) == before + 1
+    assert state["current"]["id"] in s._pending_refines
+
+
+def test_synchronous_command_has_no_refining_flag(two_stage, monkeypatch):
+    s = two_stage
+    calls = []
+    real = server.refine_policy_proposal
+    monkeypatch.setattr(server, "refine_policy_proposal", lambda *a, **k: calls.append(1) or real(*a, **k))
+
+    state = s.command("more bone", mode="policy")
+
+    assert calls == [1]
+    assert "refining" not in state["current"]
+    assert s._pending_refines == {}
+
+
+def test_refine_stage_gives_the_synchronous_answer_and_swaps_in_place(two_stage):
+    s = two_stage
+    sync = s.command("more bone", mode="policy")["current"]["params"]
+    s.back()
+
+    fast = s.command("more bone", mode="policy", defer_refine=True)["current"]
+    total = len(s.history)
+    params = s._refine_policy(s._pending_refines[fast["id"]])
+    np.testing.assert_allclose(params, sync)
+
+    assert s._apply_refined(fast["id"], params) is True
+    current = s.state()["current"]
+    assert current["id"] == fast["id"]
+    assert len(s.history) == total and s.cursor == total - 1
+    assert current["refining"] is False and current["refined"] is True
+    np.testing.assert_allclose(current["params"], sync)
+    assert current["cmd_text"] == "more bone" and current["mode"] == "policy"
+    assert fast["id"] not in s._pending_refines
+    with open(TEST_SESSION_PATH) as f:
+        assert json.load(f)["history"][-1]["refined"] is True
+
+
+def test_apply_refined_discards_when_a_newer_step_exists(two_stage):
+    s = two_stage
+    fast = s.command("more bone", mode="policy", defer_refine=True)["current"]
+    params = s._refine_policy(s._pending_refines[fast["id"]])
+    newer = s.command("more bone", mode="exact")["current"]
+
+    assert s._apply_refined(fast["id"], params) is False
+    assert s.state()["current"]["params"] == newer["params"]
+    old = next(step for step in s.history if step["id"] == fast["id"])
+    assert old["refining"] is False and old["refine_discarded"] is True
+    assert old["params"] == fast["params"]
+
+
+def test_apply_refined_discards_after_stepping_back(two_stage):
+    s = two_stage
+    fast = s.command("more bone", mode="policy", defer_refine=True)["current"]
+    params = s._refine_policy(s._pending_refines[fast["id"]])
+    s.back()
+
+    assert s._apply_refined(fast["id"], params) is False
+    assert s.history[-1]["params"] == fast["params"]
+    assert s.history[-1]["refine_discarded"] is True
+
+
+def test_apply_refined_discards_after_a_dataset_switch(two_stage):
+    s = two_stage
+    fast = s.command("more bone", mode="policy", defer_refine=True)["current"]
+    params = s._refine_policy(s._pending_refines[fast["id"]])
+    s.switch_dataset("ts_s1379")
+
+    assert s._apply_refined(fast["id"], params) is False
+    assert len(s.history) == 1
+
+
+def test_reloaded_session_does_not_keep_a_step_refining(two_stage):
+    s = two_stage
+    s.command("more bone", mode="policy", defer_refine=True)
+
+    reloaded = Session(TEST_SESSION_PATH)
+
+    assert reloaded.history[-1]["refining"] is False
+    assert reloaded.history[-1]["refine_discarded"] is True
+
+
+def test_command_route_schedules_the_refine_and_long_poll_returns_it(two_stage, monkeypatch):
+    s = two_stage
+    monkeypatch.setattr(server, "session", s)
+    monkeypatch.setattr(server, "POLICY_TWO_STAGE", True)
+    sync = s.command("more bone", mode="policy")["current"]["params"]
+    s.back()
+
+    async def scenario():
+        first = await server.command(server.CommandRequest(text="more bone", parser="rule", mode="policy"))
+        assert first["current"]["refining"] is True
+        final = await server.refined_route(first["current"]["id"])
+        return first, final
+
+    first, final = asyncio.run(scenario())
+
+    assert final["refined"] is True
+    assert final["current"]["id"] == first["current"]["id"]
+    np.testing.assert_allclose(final["current"]["params"], sync)
+    assert server._refine_events == {}
+
+
+def test_command_route_with_two_stage_off_is_synchronous(two_stage, monkeypatch):
+    s = two_stage
+    monkeypatch.setattr(server, "session", s)
+    monkeypatch.setattr(server, "POLICY_TWO_STAGE", False)
+
+    out = asyncio.run(server.command(server.CommandRequest(text="more bone", parser="rule", mode="policy")))
+
+    assert "refining" not in out["current"]
+    assert server._refine_events == {}
+
+
+def test_refined_route_returns_at_once_for_an_unknown_step(monkeypatch):
+    s = _fresh_session()
+    monkeypatch.setattr(server, "session", s)
+    start = time.perf_counter()
+
+    out = asyncio.run(server.refined_route(9999))
+
+    assert time.perf_counter() - start < 1.0
+    assert out["refined"] is False
+    assert out["current"]["id"] == 0

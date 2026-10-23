@@ -8,6 +8,7 @@ event loop from the main thread, async handlers keep every render() call there t
 `Session` itself has no FastAPI/threading dependency, so it's also directly unit
 testable in-process without going anywhere near that constraint.
 """
+import asyncio
 import base64
 import datetime
 import functools
@@ -765,6 +766,9 @@ class Session:
         goals.use_task_version(self.task_version)
         self.policy_steps = POLICY_STEPS
         self.keep_repair = KEEP_REPAIR
+        # step id -> what `_refine_policy`/`_apply_refined` need to finish a
+        # two-stage policy answer (see `command(defer_refine=True)`).
+        self._pending_refines = {}
         self._load_or_init()
 
     def _load_or_init(self):
@@ -790,6 +794,10 @@ class Session:
                     raise ValueError("label_layout is stale and cannot be reinterpreted")
                 step["anatomy_layers"] = normalize_layers(
                     step.get("anatomy_layers", default_layers()))
+                if step.get("refining"):
+                    # Its refine died with the process that started it.
+                    step["refining"] = False
+                    step["refine_discarded"] = True
             self.session_id = data.get("session_id") or self._new_session_id()
             return
         self.session_id = self._new_session_id()
@@ -892,9 +900,11 @@ class Session:
         return start_agg, goals.for_task_version(instruction, model, params, start_agg,
                                                  self.task_version, layers)
 
-    def _run_policy(self, cmd, current_params):
-        """mode="policy": resolve the checkpoint and the volume model, build
-        the goal, and hand them to `run_policy_arm`.
+    def _policy_proposal(self, cmd, current_params):
+        """The policy's proposal for `cmd` (policy, planning, closed-loop
+        steps) before the warm search and the keep repair, plus everything the
+        later stages need to finish it (`job`): the model, goal, start
+        aggregate and layers it was built against.
 
         The `policy is None` check stays ahead of `model_for_volume`: that call
         is not total (`visibility.for_volume` raises `FileNotFoundError` when a
@@ -918,14 +928,104 @@ class Session:
                 remaining = {**instruction, "goal": remaining_goal_for(
                     instruction["goal"], start_agg, agg, instruction.get("weights"))}
                 proposal = run_policy_arm(model, policy, remaining, agg, proposal, active_layers=layers)
-        if self.policy_refine_evaluations > 0:
-            proposal = refine_policy_proposal(model, proposal, current_params, instruction, start_agg,
-                                              self.policy_refine_evaluations, active_layers=layers)
-        if self.keep_repair:
-            proposal, _n_evals = keep_repair(model, instruction["goal"], current_params, proposal,
-                                             layers=layers, weights=instruction.get("weights"),
-                                             start_agg=start_agg)
-        return proposal, instruction["text"]
+        job = {"model": model, "instruction": instruction, "start_agg": start_agg,
+               "layers": layers, "start_params": current_params.copy(),
+               "proposal": proposal.copy(), "keep_repair": self.keep_repair,
+               "evaluations": self.policy_refine_evaluations}
+        return proposal, job
+
+    @staticmethod
+    def _keep_repaired(job, params):
+        if not job["keep_repair"]:
+            return params
+        instruction = job["instruction"]
+        repaired, _n_evals = keep_repair(job["model"], instruction["goal"], job["start_params"], params,
+                                         layers=job["layers"], weights=instruction.get("weights"),
+                                         start_agg=job["start_agg"])
+        return repaired
+
+    def _run_policy(self, cmd, current_params):
+        """mode="policy": the policy's proposal (`_policy_proposal`), the warm
+        search from it (`_refine_policy`) and the keep repair -- the whole
+        synchronous answer."""
+        _proposal, job = self._policy_proposal(cmd, current_params)
+        return self._refine_policy(job), job["instruction"]["text"]
+
+    def _fast_policy(self, cmd, current_params):
+        """The two-stage answer's first stage: the policy's proposal with the
+        keep repair but without the warm search. Returns the params and the
+        `job` `_refine_policy` finishes later."""
+        proposal, job = self._policy_proposal(cmd, current_params)
+        return self._keep_repaired(job, proposal), job
+
+    @staticmethod
+    def _refine_policy(job):
+        """The warm search and keep repair from the policy's proposal -- the
+        same functions in the same order the synchronous `_run_policy` ends
+        with, so the final params match it exactly. Pure visibility-model
+        work (no rendering, no session state), so it may run in a worker
+        thread."""
+        proposal = job["proposal"]
+        if job["evaluations"] > 0:
+            proposal = refine_policy_proposal(job["model"], proposal, job["start_params"],
+                                              job["instruction"], job["start_agg"], job["evaluations"],
+                                              active_layers=job["layers"])
+        return Session._keep_repaired(job, proposal)
+
+    def _step_index(self, step_id):
+        return next((i for i, step in enumerate(self.history) if step["id"] == step_id), None)
+
+    def _discard_refine(self, step_id, job=None):
+        """Drop a pending refine (e.g. its search raised); the step, if it is
+        still in the history, stops saying it is refining."""
+        if job is not None and self._pending_refines.get(step_id) is not job:
+            return
+        popped = self._pending_refines.pop(step_id, None)
+        if popped is not None and popped["session_id"] != self.session_id:
+            return
+        index = self._step_index(step_id)
+        if index is not None and self.history[index].get("refining"):
+            self.history[index]["refining"] = False
+            self.history[index]["refine_discarded"] = True
+            self.save()
+
+    def _apply_refined(self, step_id, params, job=None):
+        """Render the refined `params` and swap them into step `step_id` in
+        place (same id, same position). Only when that step is still the
+        cursor step of the same session with the fast params it was given;
+        otherwise the result is discarded. `job` (default: the one pending
+        for `step_id`) guards against a newer refine that reused the id after
+        a dataset switch. Renders, so it must run on the main/event-loop
+        thread. Returns whether the step was replaced."""
+        pending = self._pending_refines.get(step_id)
+        if pending is None or (job is not None and pending is not job):
+            return False
+        job = self._pending_refines.pop(step_id)
+        if job["session_id"] != self.session_id:
+            return False
+        index = self._step_index(step_id)
+        fast = self.history[index] if index is not None else None
+        if (index != self.cursor or not fast.get("refining")
+                or fast["params"] != job["fast_params"]):
+            if fast is not None and fast.get("refining"):
+                fast["refining"] = False
+                fast["refine_discarded"] = True
+                self.save()
+            return False
+        params = np.asarray(params, dtype=np.float64)
+        step = _render_step(params, fast["cmd_text"], fast["cmd_dict"], fast["search"], step_id,
+                            self.session_id, fast["camera"], mode=fast["mode"],
+                            message=job["message"], parser_meta=job["parser_meta"],
+                            layers=fast["anatomy_layers"])
+        if index > 0:
+            hint = _no_visible_change_hint(fast["cmd_dict"], self.history[index - 1], step)
+            if hint:
+                step["message"] = f"{step['message']} · {hint}" if step["message"] else hint
+        step["refining"] = False
+        step["refined"] = True
+        self.history[index] = step
+        self.save()
+        return True
 
     def _run_search(self, cmd, current_params, steps):
         """mode="search": resolve the volume model, build the goal, and hand
@@ -942,7 +1042,15 @@ class Session:
         return run_search_arm(model, current_params, instruction, steps,
                               active_layers=layers), instruction["text"]
 
-    def command(self, text, parser="rule", model=commands.DEFAULT_LLM_MODEL, search=False, steps=10, mode=None):
+    def command(self, text, parser="rule", model=commands.DEFAULT_LLM_MODEL, search=False, steps=10, mode=None,
+                defer_refine=False):
+        """Parse `text`, answer it and append the step.
+
+        `defer_refine` (policy mode with a warm search only): answer with the
+        fast stage (`_fast_policy`) and mark the step `refining`; the caller
+        then runs `_refine_policy` on `self._pending_refines[step_id]` and
+        hands the result to `_apply_refined`. The route does that in the
+        background (`_schedule_refine`)."""
         cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)  # raises ValueError on failure
 
         current_params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
@@ -977,9 +1085,13 @@ class Session:
         effective_mode = mode or ("search" if search else "exact")
 
         message = None
+        refine_job = None
         if effective_mode == "policy":
             try:
-                new_params, _goal_text = self._run_policy(cmd, current_params)
+                if defer_refine and self.policy_refine_evaluations > 0:
+                    new_params, refine_job = self._fast_policy(cmd, current_params)
+                else:
+                    new_params, _goal_text = self._run_policy(cmd, current_params)
                 actual_mode, search_flag = "policy", False
             except ValueError as exc:
                 message = str(exc)
@@ -1021,6 +1133,11 @@ class Session:
         hint = _no_visible_change_hint(cmd, self.history[self.cursor], step)
         if hint:
             step["message"] = f"{step['message']} · {hint}" if step["message"] else hint
+        if refine_job is not None:
+            step["refining"] = True
+            self._pending_refines[step["id"]] = {
+                **refine_job, "session_id": self.session_id, "fast_params": step["params"],
+                "message": message, "parser_meta": parser_meta}
 
         if actual_mode == "exact":
             self._log_command(cmd, current_params, new_params, step)
@@ -1184,18 +1301,80 @@ class LayerRequest(BaseModel):
     rgb: list[float] | None = None
 
 
+# Two-stage policy answers: /api/command renders the fast stage (policy +
+# keep repair, ~0.6 s) and returns; the 200-evaluation warm search (~3 s)
+# then runs in a worker thread and its render swaps into the same step on
+# the event-loop thread (VTK must stay on the main thread -- see the module
+# docstring). The client long-polls /api/refined/{step_id} for it.
+# POLICY_TWO_STAGE=0 restores the single synchronous answer.
+POLICY_TWO_STAGE = os.environ.get("POLICY_TWO_STAGE", "1") != "0"
+REFINE_WAIT_SECONDS = 20.0
+_refine_events = {}   # step id -> asyncio.Event, set when its refine settles
+_refine_tasks = set()  # strong references, so pending tasks are not collected
+
+
+async def _finish_refine(sess, step_id, job, event):
+    try:
+        loop = asyncio.get_running_loop()
+        params = await loop.run_in_executor(None, sess._refine_policy, job)
+        # Back on the loop (main) thread: render and swap.
+        sess._apply_refined(step_id, params, job)
+    except Exception as exc:  # a failed refine must not leave the step "refining"
+        print(f"[refine] step {step_id} failed: {exc!r}", file=sys.stderr)
+        sess._discard_refine(step_id, job)
+    finally:
+        event.set()
+        if _refine_events.get(step_id) is event:
+            del _refine_events[step_id]
+
+
+def _schedule_refine(sess, step_id):
+    """Start the background refine of a step `Session.command(defer_refine=True)`
+    answered with its fast stage. Must be called from the event loop."""
+    job = sess._pending_refines.get(step_id)
+    if job is None:
+        return None
+    event = asyncio.Event()
+    _refine_events[step_id] = event
+    task = asyncio.create_task(_finish_refine(sess, step_id, job, event))
+    _refine_tasks.add(task)
+    task.add_done_callback(_refine_tasks.discard)
+    return task
+
+
 @app.post("/api/command")
 async def command(req: CommandRequest):
     start = time.perf_counter()
     try:
-        result = session.command(req.text, req.parser, req.model, req.search, req.steps, req.mode)
+        result = session.command(req.text, req.parser, req.model, req.search, req.steps, req.mode,
+                                 defer_refine=POLICY_TWO_STAGE)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    current = result.get("current") or {}
+    if current.get("refining"):
+        _schedule_refine(session, current["id"])
     total_ms = round((time.perf_counter() - start) * 1000, 1)
     # The parser meta (parse_ms, parser_used, ...) is spread into the step
     # (_render_step), i.e. result["current"].
     result["timings"] = {"parse_ms": (result.get("current") or {}).get("parse_ms"), "total_ms": total_ms}
     return result
+
+
+@app.get("/api/refined/{step_id}")
+async def refined_route(step_id: int):
+    """Long-poll for a two-stage step's refined answer: waits (up to
+    REFINE_WAIT_SECONDS) while its refine is pending, then returns the session
+    state plus `refined` -- whether the cursor step is that step, refined.
+    Returns at once when nothing is pending for `step_id`."""
+    event = _refine_events.get(step_id)
+    if event is not None:
+        try:
+            await asyncio.wait_for(event.wait(), REFINE_WAIT_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+    state = session.state()
+    current = state["current"]
+    return {**state, "refined": current["id"] == step_id and bool(current.get("refined"))}
 
 
 @app.post("/api/layers")
