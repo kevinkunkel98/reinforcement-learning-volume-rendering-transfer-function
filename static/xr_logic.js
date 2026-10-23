@@ -135,6 +135,8 @@
     const note = parseNote(step);
     const parts = note ? [note.understood, note.warning].filter(Boolean) : [];
     parts.push(methodSaid[step.mode] || methodSaid.exact);
+    if (step.refining) parts.push("refining…");
+    else if (step.refined) parts.push("refined");
     if (step.message) parts.push(step.message);
     const moved = stepDeltas(step.class_visibility, before, classOrder, classLabel, {});
     if (!moved.length && !step.message) parts.push("nothing moved measurably");
@@ -496,7 +498,26 @@
     return m;
   }
 
+  // Whether a /api/refined/{id} reply should replace what is on screen: the
+  // server refined that step, it is still the server's cursor step, and the
+  // viewer still shows that step of the same dataset (no newer command,
+  // back/forward or dataset switch since the fast answer).
+  function refinedStepApplies(shownStep, shownDataset, reply, stepId) {
+    return Boolean(reply && reply.refined === true && reply.current && reply.current.id === stepId
+      && shownStep && shownStep.id === stepId && reply.dataset === shownDataset);
+  }
+
+  // The console line a voice command logs once its answer settles: `first`
+  // is when the fast answer was on screen, `final` when the refined one was
+  // (the fast one when there was no refine), all from the end of recording.
+  function voiceTimingLine({ asr, first, final, parse, path }) {
+    const ms = (value) => `${Math.round(value)}ms`;
+    return `[voice-timing] asr=${ms(asr)} first=${ms(first)} final=${ms(final ?? first)} `
+      + `parse=${parse ?? "-"}ms path=${path ?? "-"}`;
+  }
+
   return {
+    refinedStepApplies, voiceTimingLine,
     xrSampleDistance, createControllerMapper, HUD_INITIAL, hudReduce, hudLines,
     summarizeStep, parseNote, stepDeltas, hudPlacement, withXRLayerContext, xrPlacement,
     PERF_DEFAULTS, HEADSET_PERF_DEFAULTS, parsePerfFlags, diagnosticLines,

@@ -551,3 +551,32 @@ test("summarizeStep leads with the LLM's reading, then the method", () => {
     { lungs: 0.1 }, CLASSES, LABELS, SAID);
   assert.equal(text, "Understood: less soft tissue · ⚠ may have missed: 'moriorta' · the policy answered");
 });
+
+test("refinedStepApplies only when the refined step is still the one on screen", () => {
+  const shown = { id: 7, params: [0] };
+  const reply = { refined: true, dataset: "ts_s0477", current: { id: 7, params: [1] } };
+  assert.equal(xr.refinedStepApplies(shown, "ts_s0477", reply, 7), true);
+  assert.equal(xr.refinedStepApplies(shown, "ts_s0477", { ...reply, refined: false }, 7), false);
+  assert.equal(xr.refinedStepApplies({ id: 8 }, "ts_s0477", reply, 7), false);
+  assert.equal(xr.refinedStepApplies(shown, "ts_s0477", { ...reply, current: { id: 8 } }, 7), false);
+  assert.equal(xr.refinedStepApplies(shown, "ct_chest", reply, 7), false);
+  assert.equal(xr.refinedStepApplies(null, "ts_s0477", reply, 7), false);
+  assert.equal(xr.refinedStepApplies(shown, "ts_s0477", null, 7), false);
+});
+
+test("voiceTimingLine reports the first and the final answer", () => {
+  assert.equal(
+    xr.voiceTimingLine({ asr: 812.4, first: 1650.2, final: 4890.7, parse: 12, path: "rule" }),
+    "[voice-timing] asr=812ms first=1650ms final=4891ms parse=12ms path=rule");
+  assert.equal(
+    xr.voiceTimingLine({ asr: 800, first: 1500, final: null }),
+    "[voice-timing] asr=800ms first=1500ms final=1500ms parse=-ms path=-");
+});
+
+test("summarizeStep says a policy answer is still refining, then that it was refined", () => {
+  const step = { mode: "policy", class_visibility: { lungs: 0.5 } };
+  assert.equal(xr.summarizeStep({ ...step, refining: true }, { lungs: 0.1 }, CLASSES, LABELS, SAID),
+    "the policy answered · refining…");
+  assert.equal(xr.summarizeStep({ ...step, refining: false, refined: true }, { lungs: 0.1 }, CLASSES, LABELS, SAID),
+    "the policy answered · refined");
+});

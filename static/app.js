@@ -458,6 +458,13 @@ const METHOD_SAID = {
 };
 
 function appendReply(step, before) {
+  const div = buildReply(step, before);
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+function buildReply(step, before) {
   const div = document.createElement("div");
   div.className = "msg-reply";
 
@@ -512,8 +519,47 @@ function appendReply(step, before) {
     div.appendChild(none);
   }
 
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  // Two-stage policy answers: the fast answer says it is still being
+  // refined; the refined one replaces this reply in place (awaitRefinement).
+  if (step.refining || step.refined) {
+    const stage = document.createElement("div");
+    stage.className = "reply-note";
+    stage.textContent = step.refining ? "Refining…" : "Refined with a short search.";
+    div.appendChild(stage);
+  }
+  return div;
+}
+
+// The second stage of a two-stage policy answer: long-poll the server for
+// the refined step and, if the viewer still shows that step, update the
+// render, the TF and this command's reply in place (no second chat message).
+// Resolves to whether the refined answer was applied.
+async function awaitRefinement(stepId, before, replyDiv) {
+  let reply = null;
+  try {
+    reply = await (await fetch(`/api/refined/${stepId}`)).json();
+  } catch (err) {
+    reply = null;
+  }
+  if (!window.xrLogic.refinedStepApplies(state.current, state.dataset, reply, stepId)) {
+    // Superseded, timed out or discarded: drop the "Refining…" line if the
+    // fast answer is still the one on screen.
+    if (state.current && state.current.id === stepId) {
+      const settled = { ...state.current, refining: false };
+      replyDiv.replaceWith(buildReply(settled, before));
+    }
+    return false;
+  }
+  await refresh(reply);
+  await postSceneTransition(reply, { carried_forward: true, parent_step_id: stepId });
+  const updated = buildReply(reply.current, before);
+  replyDiv.replaceWith(updated);
+  emitAppEvent("applied", {
+    summary: window.xrLogic.summarizeStep(reply.current, before, CLASS_ORDER, CLASS_LABEL, METHOD_SAID),
+    deltas: classDeltas(reply.current.class_visibility, before),
+    dataset: state.dataset,
+  });
+  return true;
 }
 
 async function loadState() {
@@ -562,13 +608,17 @@ async function sendCommandImpl(text) {
   await refresh(data);
   await postSceneTransition(data);
   appendMessage(data.current);
-  appendReply(data.current, before);
+  const replyDiv = appendReply(data.current, before);
   emitAppEvent("applied", {
     // Leads with "Understood: …" / the dropped-clause warning (parseNote) when the LLM parsed.
     summary: window.xrLogic.summarizeStep(data.current, before, CLASS_ORDER, CLASS_LABEL, METHOD_SAID),
     deltas: classDeltas(data.current.class_visibility, before),
     dataset: state.dataset,
   });
+  // Not awaited: the loading state ends with the fast answer on screen.
+  data.refinement = data.current.refining
+    ? awaitRefinement(data.current.id, before, replyDiv)
+    : Promise.resolve(false);
   return data;
 }
 
@@ -797,9 +847,17 @@ async function startRecording() {
           emitAppEvent("transcript", { text: data.text });
           const reply = await sendCommandImpl(data.text);
           const t2 = performance.now();
-          // Same line in the desktop console and the headset's logcat.
-          console.info(`[voice-timing] asr=${Math.round(t1 - t0)}ms command+render=${Math.round(t2 - t1)}ms `
-            + `total=${Math.round(t2 - t0)}ms parse=${reply?.timings?.parse_ms ?? "-"}ms path=${reply?.current?.parser_used ?? "-"}`);
+          // Same line in the desktop console and the headset's logcat, once
+          // the refined answer (if any) is on screen too; times from the end
+          // of recording.
+          const timing = {
+            asr: t1 - t0, first: t2 - t0,
+            parse: reply?.timings?.parse_ms, path: reply?.current?.parser_used,
+          };
+          Promise.resolve(reply?.refinement).then((refined) => {
+            console.info(window.xrLogic.voiceTimingLine(
+              { ...timing, final: refined ? performance.now() - t0 : null }));
+          });
         } else {
           emitAppEvent("error", { message: "No speech recognised" });
         }
