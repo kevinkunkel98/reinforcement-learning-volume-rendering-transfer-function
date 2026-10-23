@@ -804,6 +804,29 @@ def test_policy_mode_keep_repair_off_is_the_bare_policy(ts_session, monkeypatch)
     np.testing.assert_allclose(params, server.apply_controllable(start, action))
 
 
+def test_viewer_leaves_occluders_out_of_the_keep_repair_by_default():
+    assert server.KEEP_REPAIR_OCCLUDERS is False
+    assert _fresh_session().keep_repair_occluders is False
+
+
+@pytest.mark.parametrize("include", [False, True])
+def test_both_policy_stages_pass_the_occluder_switch_to_keep_repair(ts_session, monkeypatch, include):
+    s = ts_session
+    s.policy_provider = lambda: _StubPolicy(np.linspace(-0.4, 0.4, len(CONTROLLABLE)))
+    s.policy_refine_evaluations = 30
+    s.keep_repair = True
+    s.keep_repair_occluders = include
+    seen = []
+    real = server.keep_repair
+    monkeypatch.setattr(server, "keep_repair",
+                        lambda *a, **k: seen.append(k.get("include_occluders")) or real(*a, **k))
+
+    fast = s.command("more bone", mode="policy", defer_refine=True)["current"]
+    s._refine_policy(s._pending_refines[fast["id"]])
+
+    assert seen == [include, include]
+
+
 def test_viewer_polishes_the_policy_with_a_short_search_by_default():
     assert server.POLICY_REFINE_EVALUATIONS == 200
     assert _fresh_session().policy_refine_evaluations == 200

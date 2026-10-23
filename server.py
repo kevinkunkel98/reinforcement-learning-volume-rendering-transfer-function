@@ -461,6 +461,11 @@ POLICY_STEPS = int(os.environ.get("POLICY_STEPS", "1"))
 # keep term lets unmentioned classes drift 0.15 per command for free; chained
 # in the viewer that drift added up (heart rendered black after 7 commands).
 KEEP_REPAIR = os.environ.get("KEEP_REPAIR", "1") != "0"
+# Also try reverting the instruction's occluders (task v2/v3: mentioned with
+# weight 0, e.g. soft tissue for "more lungs"), with the same 0.01 bar
+# (`keep_repair(include_occluders=True)`). Off until the measurement in
+# docs/experiments/2026-10-23-keep-repair-occluders.md decides it.
+KEEP_REPAIR_OCCLUDERS = os.environ.get("KEEP_REPAIR_OCCLUDERS", "0") == "1"
 
 
 def initial_params(task_version: str = None) -> np.ndarray:
@@ -766,6 +771,7 @@ class Session:
         goals.use_task_version(self.task_version)
         self.policy_steps = POLICY_STEPS
         self.keep_repair = KEEP_REPAIR
+        self.keep_repair_occluders = KEEP_REPAIR_OCCLUDERS
         # step id -> what `_refine_policy`/`_apply_refined` need to finish a
         # two-stage policy answer (see `command(defer_refine=True)`).
         self._pending_refines = {}
@@ -931,6 +937,7 @@ class Session:
         job = {"model": model, "instruction": instruction, "start_agg": start_agg,
                "layers": layers, "start_params": current_params.copy(),
                "proposal": proposal.copy(), "keep_repair": self.keep_repair,
+               "keep_repair_occluders": self.keep_repair_occluders,
                "evaluations": self.policy_refine_evaluations}
         return proposal, job
 
@@ -941,7 +948,8 @@ class Session:
         instruction = job["instruction"]
         repaired, _n_evals = keep_repair(job["model"], instruction["goal"], job["start_params"], params,
                                          layers=job["layers"], weights=instruction.get("weights"),
-                                         start_agg=job["start_agg"])
+                                         start_agg=job["start_agg"],
+                                         include_occluders=job.get("keep_repair_occluders", False))
         return repaired
 
     def _run_policy(self, cmd, current_params):
