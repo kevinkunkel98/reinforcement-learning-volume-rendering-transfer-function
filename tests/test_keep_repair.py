@@ -274,3 +274,28 @@ def test_occluder_classes_are_the_weight_zero_mentioned_ones():
     goal, weights = _with_occluders({"heart": {"vis": 0.3}}, {"lungs", "soft", "other"})
     assert occluder_classes(goal, weights) == {"lungs", "soft"}
     assert occluder_classes(goal, None) == set()
+
+
+def test_occluders_are_tried_after_the_unmentioned_peaks_against_the_better_score():
+    """The occluder pass runs on keep's result and must stay within eps of the
+    better of the proposal and that result: reverting the kidneys lifts the
+    score from -0.75 to 0.05, and the lungs revert, which would cost 0.05 of
+    that, is refused although it stays above the proposal's bar."""
+    model = _OcclusionModel()
+    start = _start()
+    _set(start, "lungs", 2, 0.4)
+    goal, weights = _with_occluders({"heart": {"vis": 0.3}}, {"lungs"})
+    params = start.copy()
+    _set(params, "lungs", 2, 0.38)         # a slight fade that helps the heart a little
+    _set(params, "kidneys", 2, -0.9)       # unmentioned side effect, charged by the keep term
+
+    keep, _ = keep_repair(model, goal, start, params, weights=weights)
+    model.calls = 0
+    occ, n_evals = keep_repair(model, goal, start, params, weights=weights, include_occluders=True)
+
+    np.testing.assert_array_equal(occ, keep)
+    np.testing.assert_array_equal(_peak(occ, "lungs"), _peak(params, "lungs"))
+    np.testing.assert_array_equal(_peak(occ, "kidneys"), _peak(start, "kidneys"))
+    assert n_evals == model.calls == 1 + 1 + 2
+    assert (_attainment(model, goal, start, occ, weights)
+            >= _attainment(model, goal, start, keep, weights) - 0.01)

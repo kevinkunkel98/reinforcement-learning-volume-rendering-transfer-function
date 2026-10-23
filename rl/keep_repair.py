@@ -67,14 +67,18 @@ def keep_repair(model, goal, start_params, params, layers=None, weights=None, ep
     already met at the start (zero start distance, attainment undefined)
     returns `params` unchanged.
 
-    `include_occluders=True` also tries the peaks of the instruction's
-    occluders (`occluder_classes`: mentioned, weight 0), with the same rule.
-    They are mentioned only so the keep term does not charge fading them, so
-    `distance` sees them solely through what they hide: when the fade is what
-    reveals the target, reverting it costs the target's term and fails the
-    `eps` bar; when it bought nothing ("more lungs" erasing soft tissue that
-    was not in front of them, or more than needed) the revert is free and
-    stays. Classes with a non-zero weight are never touched."""
+    `include_occluders=True` then tries the peaks of the instruction's
+    occluders (`occluder_classes`: mentioned, weight 0) in a second pass on
+    that result, same order, against the better of the proposal's and the
+    first pass's score minus `eps`. The first pass is exactly what the call
+    returns without the flag, so the answer stays within `eps` of both the
+    proposal and the plain keep repair (tried first, an occluder revert would
+    change what the later reverts gain: up to -0.17 against keep on v3c val).
+    Occluders are mentioned only so the keep term does not charge fading
+    them, so `distance` sees them solely through what they hide: when the
+    fade is what reveals the target, reverting it costs the target's term and
+    fails the bar; when it bought nothing, the revert is free and stays.
+    Classes with a non-zero weight are never touched."""
     start_params = np.asarray(start_params, dtype=np.float64)
     params = np.asarray(params, dtype=np.float64).copy()
     kwargs = {} if weights is None else {"weights": weights}
@@ -93,21 +97,35 @@ def keep_repair(model, goal, start_params, params, layers=None, weights=None, ep
     def score(p):
         return goals.attainment(goal, start_agg, measure(p), **kwargs)
 
-    untouchable = mentioned_classes(goal)
+    def candidates(classes):
+        changes = []
+        for index, goal_class in PEAK_CLASS.items():
+            if goal_class not in classes:
+                continue
+            span = slice(index * P, (index + 1) * P)
+            size = float(np.linalg.norm(params[span] - start_params[span]))
+            if size > 0.0:
+                changes.append((size, index, span))
+        return [span for _size, _index, span in sorted(changes, key=lambda item: (-item[0], item[1]))]
+
+    def revert(spans, bar):
+        """Each span reverted in turn where the score stays >= bar; returns
+        the score of the last accepted state (None if none was accepted)."""
+        nonlocal params
+        last = None
+        for span in spans:
+            candidate = params.copy()
+            candidate[span] = start_params[span]
+            value = score(candidate)
+            if value >= bar:
+                params, last = candidate, value
+        return last
+
+    unmentioned = set(PEAK_CLASS.values()) - mentioned_classes(goal)
+    proposal_score = score(params)
+    bar = proposal_score - eps
+    kept_score = revert(candidates(unmentioned), bar)
     if include_occluders:
-        untouchable -= occluder_classes(goal, weights)
-    changes = []
-    for index, goal_class in PEAK_CLASS.items():
-        if goal_class in untouchable:
-            continue
-        span = slice(index * P, (index + 1) * P)
-        size = float(np.linalg.norm(params[span] - start_params[span]))
-        if size > 0.0:
-            changes.append((size, index, span))
-    bar = score(params) - eps
-    for _size, _index, span in sorted(changes, key=lambda item: (-item[0], item[1])):
-        candidate = params.copy()
-        candidate[span] = start_params[span]
-        if score(candidate) >= bar:
-            params = candidate
+        reached = proposal_score if kept_score is None else max(proposal_score, kept_score)
+        revert(candidates(occluder_classes(goal, weights)), reached - eps)
     return params, n_evals
