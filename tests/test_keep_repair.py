@@ -193,3 +193,84 @@ def test_scores_with_the_instruction_weights(weights):
     repaired, _ = keep_repair(model, goal, start, params, weights=weights)
 
     np.testing.assert_array_equal(_peak(repaired, "spleen"), _peak(start, "spleen"))
+
+
+def _with_occluders(targets, occluders):
+    """An instruction for `targets` with `occluders` marked the way task v2/v3
+    marks them (`goals.occlusion_aware`): mentioned, weight 0."""
+    instruction = {"targets": targets, "goal": goals.goal_vector(targets)}
+    instruction = goals.occlusion_aware(instruction, set(occluders))
+    return instruction["goal"], instruction["weights"]
+
+
+def test_reverts_an_occluder_fade_the_goal_does_not_need_only_when_asked():
+    """The soft peak is marked as an occluder of the skeleton but hides
+    nothing in the stub, so fading it is a free side effect: reverted with
+    include_occluders=True, left alone (it counts as mentioned) without."""
+    model = _OcclusionModel()
+    start = _start()
+    goal, weights = _with_occluders({"skeleton": {"vis": 0.3}}, {"soft"})
+    params = start.copy()
+    _set(params, "skeleton", 2, 0.4)
+    _set(params, "soft", 2, -0.9)          # occluder erased, for nothing
+
+    default, _ = keep_repair(model, goal, start, params, weights=weights)
+    model.calls = 0
+    repaired, n_evals = keep_repair(model, goal, start, params, weights=weights, include_occluders=True)
+
+    np.testing.assert_array_equal(default, params)
+    np.testing.assert_array_equal(_peak(repaired, "soft"), _peak(start, "soft"))
+    np.testing.assert_array_equal(_peak(repaired, "skeleton"), _peak(params, "skeleton"))
+    assert n_evals == model.calls == 1 + 1 + 1
+
+
+def test_keeps_an_occluder_fade_the_goal_needs():
+    """Fading the lungs is what reveals the heart: reverting it costs far more
+    than eps, so the attainment check keeps it with or without the flag."""
+    model = _OcclusionModel()
+    start = _start()
+    _set(start, "lungs", 2, 0.4)           # lungs at height 0.7 hide most of the heart
+    goal, weights = _with_occluders({"heart": {"vis": 0.3}}, {"lungs"})
+    params = start.copy()
+    _set(params, "lungs", 2, -0.3)
+
+    for include in (False, True):
+        repaired, _ = keep_repair(model, goal, start, params, weights=weights, include_occluders=include)
+        np.testing.assert_array_equal(repaired, params)
+
+
+def test_include_occluders_never_touches_weighted_mentioned_classes():
+    model = _OcclusionModel()
+    start = _start()
+    goal, weights = _with_occluders({"skeleton": {"vis": 0.3}, "liver": {"bright": 0.2}}, {"soft"})
+    params = start.copy()
+    _set(params, "skeleton", 2, -0.9)      # the wrong way, but weighted and mentioned
+    _set(params, "liver", 3, -0.9)
+    _set(params, "soft", 2, -0.9)
+
+    repaired, _ = keep_repair(model, goal, start, params, weights=weights, include_occluders=True)
+
+    np.testing.assert_array_equal(_peak(repaired, "skeleton"), _peak(params, "skeleton"))
+    np.testing.assert_array_equal(_peak(repaired, "liver"), _peak(params, "liver"))
+    np.testing.assert_array_equal(_peak(repaired, "soft"), _peak(start, "soft"))
+
+
+def test_include_occluders_without_weights_has_no_occluders():
+    """Without `weights` every mentioned class weighs 1.0: nothing new to try."""
+    model = _OcclusionModel()
+    start = _start()
+    goal = goals.goal_vector({"skeleton": {"vis": 0.3}, "soft": {"vis": -0.3}})
+    params = start.copy()
+    _set(params, "soft", 2, -0.9)
+
+    repaired, n_evals = keep_repair(model, goal, start, params, include_occluders=True)
+
+    np.testing.assert_array_equal(repaired, params)
+    assert n_evals == 1 + 1
+
+
+def test_occluder_classes_are_the_weight_zero_mentioned_ones():
+    from rl.keep_repair import occluder_classes
+    goal, weights = _with_occluders({"heart": {"vis": 0.3}}, {"lungs", "soft", "other"})
+    assert occluder_classes(goal, weights) == {"lungs", "soft"}
+    assert occluder_classes(goal, None) == set()

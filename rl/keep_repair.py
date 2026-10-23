@@ -39,8 +39,17 @@ def mentioned_classes(goal) -> set:
     return {c for i, c in enumerate(goals.GOAL_CLASSES) if goal[n + i] or goal[3 * n + i]}
 
 
+def occluder_classes(goal, weights) -> set:
+    """Mentioned classes the instruction weighs 0: task v2/v3's occluders of a
+    target (`goals.occlusion_aware`). No `weights`, no occluders. "other" is
+    not a peak and never in the set."""
+    if not weights:
+        return set()
+    return {c for c in mentioned_classes(goal) if weights.get(c, 1.0) == 0.0}
+
+
 def keep_repair(model, goal, start_params, params, layers=None, weights=None, eps=DEFAULT_EPS,
-                start_agg=None):
+                start_agg=None, include_occluders=False):
     """Revert unmentioned peaks of `params` to `start_params` where that
     costs at most `eps` attainment. Returns (params, n_evals).
 
@@ -56,7 +65,16 @@ def keep_repair(model, goal, start_params, params, layers=None, weights=None, ep
     otherwise measured. `n_evals` counts the visibility evaluations this call
     made: the start (unless given), the proposal, one per candidate. A goal
     already met at the start (zero start distance, attainment undefined)
-    returns `params` unchanged."""
+    returns `params` unchanged.
+
+    `include_occluders=True` also tries the peaks of the instruction's
+    occluders (`occluder_classes`: mentioned, weight 0), with the same rule.
+    They are mentioned only so the keep term does not charge fading them, so
+    `distance` sees them solely through what they hide: when the fade is what
+    reveals the target, reverting it costs the target's term and fails the
+    `eps` bar; when it bought nothing ("more lungs" erasing soft tissue that
+    was not in front of them, or more than needed) the revert is free and
+    stays. Classes with a non-zero weight are never touched."""
     start_params = np.asarray(start_params, dtype=np.float64)
     params = np.asarray(params, dtype=np.float64).copy()
     kwargs = {} if weights is None else {"weights": weights}
@@ -75,10 +93,12 @@ def keep_repair(model, goal, start_params, params, layers=None, weights=None, ep
     def score(p):
         return goals.attainment(goal, start_agg, measure(p), **kwargs)
 
-    mentioned = mentioned_classes(goal)
+    untouchable = mentioned_classes(goal)
+    if include_occluders:
+        untouchable -= occluder_classes(goal, weights)
     changes = []
     for index, goal_class in PEAK_CLASS.items():
-        if goal_class in mentioned:
+        if goal_class in untouchable:
             continue
         span = slice(index * P, (index + 1) * P)
         size = float(np.linalg.norm(params[span] - start_params[span]))
