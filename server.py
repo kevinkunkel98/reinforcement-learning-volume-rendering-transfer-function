@@ -295,11 +295,21 @@ def _scene_event_id(before, after, event_id=None):
     return "scene-event:" + hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
-# A targeted class whose share of the rendered image is below this reads as
-# "nothing happened" to the viewer. `visibility.py` floors "invisible" at
-# goals.EPSILON = 1e-3 (0.1 %), so 1 % is ten times that floor: a class this
-# small is a sliver of pixels, not something a brighten/darken can show.
-HIDDEN_TARGET_SHARE = 0.01
+# A command that targets a class but leaves the picture unchanged reads as
+# "nothing happened" -- the class sits behind other tissue. Its share of the
+# image is the wrong signal (the heart is plainly visible at 0.4-0.7 %), so
+# compare renders: the fraction of pixels whose max-channel |difference| from
+# the previous step exceeds VISIBLE_PIXEL_DELTA (of 255). Measured on 31 renders
+# of one camera against the start render:
+#   no visible change: "brighten the kidneys a lot" 0.02 %, "the spleen is way
+#     too dark" 0.02 %, "alpha up on the vessels" 0.00 %, "make the vessels a
+#     little more solid" 0.00 %
+#   barely visible:    "darken the skeleton" 0.22 %
+#   visible:           "set the heart to high" 0.57 %, "shift the bone peak up"
+#     1.67 %, "make the liver translucent" 1.57 %, show_only up to 15 %
+# NO_VISIBLE_CHANGE_SHARE = 0.3 % separates the first two groups from the third.
+VISIBLE_PIXEL_DELTA = 16
+NO_VISIBLE_CHANGE_SHARE = 0.003
 _TARGET_LABELS = {"soft": "soft tissue"}
 
 
@@ -318,22 +328,41 @@ def _target_classes(cmd):
     return found
 
 
-def _hidden_target_hint(cmd, class_visibility):
-    """Why a targeted class may look unchanged: it is occluded (below
-    HIDDEN_TARGET_SHARE) or the volume cannot measure it (None). None when
-    every target is visible."""
-    hints = []
-    for name in _target_classes(cmd):
-        label = _TARGET_LABELS.get(name, name)
-        if name not in class_visibility:
-            continue
-        share = class_visibility[name]
-        if share is None:
-            hints.append(f"{label} cannot be measured on this scan")
-        elif share < HIDDEN_TARGET_SHARE:
-            hints.append(f"{label} is hidden behind other tissue -- try "
-                         f"'show only {label}' or 'less soft tissue'")
-    return " · ".join(hints) or None
+def _step_pixels(step):
+    """The step's rendered image as an int16 RGB array, or None when neither
+    its inline PNG nor its saved file can be read."""
+    try:
+        if step.get("image_b64"):
+            raw = io.BytesIO(base64.b64decode(step["image_b64"]))
+        elif step.get("image_path"):
+            raw = step["image_path"]
+        else:
+            return None
+        return np.asarray(Image.open(raw).convert("RGB"), dtype=np.int16)
+    except (OSError, ValueError):
+        return None
+
+
+def _changed_pixel_share(before_step, after_step):
+    """Fraction of pixels visibly different between two steps' renders, or
+    None when either image is unavailable or the sizes differ."""
+    a, b = _step_pixels(before_step), _step_pixels(after_step)
+    if a is None or b is None or a.shape != b.shape:
+        return None
+    return float((np.abs(a - b).max(axis=-1) > VISIBLE_PIXEL_DELTA).mean())
+
+
+def _no_visible_change_hint(cmd, before_step, after_step):
+    """A note for a targeted command whose render barely changed, else None."""
+    targets = _target_classes(cmd)
+    if not targets:
+        return None
+    share = _changed_pixel_share(before_step, after_step)
+    if share is None or share >= NO_VISIBLE_CHANGE_SHARE:
+        return None
+    labels = [_TARGET_LABELS.get(name, name) for name in targets]
+    return (f"no visible change -- {' and '.join(labels)} mostly hidden behind other "
+            f"tissue; try 'show only {labels[0]}'")
 
 
 def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera,
@@ -984,15 +1013,15 @@ class Session:
             # in the same channel policy-mode fallbacks already use.
             message = f"LLM parse rejected, used the rule parser -- {parser_meta['parser_fallback']}"
 
-        hint = _hidden_target_hint(cmd, _class_visibility(new_params))
-        if hint:
-            message = f"{message} · {hint}" if message else hint
-
         step = _render_step(new_params, text, cmd, search_flag,
                              self.history[-1]["id"] + 1, self.session_id, current_camera,
                              mode=actual_mode, message=message, parser_meta=parser_meta,
                              layers=self.history[self.cursor].get("anatomy_layers",
                                                                    default_layers()))
+        hint = _no_visible_change_hint(cmd, self.history[self.cursor], step)
+        if hint:
+            step["message"] = f"{step['message']} · {hint}" if step["message"] else hint
+
         if actual_mode == "exact":
             self._log_command(cmd, current_params, new_params, step)
 

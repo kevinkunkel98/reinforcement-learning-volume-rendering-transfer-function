@@ -6,6 +6,8 @@ Cocoa render window can only be created on the true process main thread on macOS
 dependency, so calling it directly sidesteps that entirely; the HTTP routing layer
 itself is thin enough to verify by running the real server (see the plan's Task 6).
 """
+import base64
+import io
 import os
 import asyncio
 import time
@@ -13,6 +15,7 @@ import json
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from fastapi import HTTPException
 from fastapi.responses import Response
@@ -806,11 +809,8 @@ def test_viewer_polishes_the_policy_with_a_short_search_by_default():
     assert _fresh_session().policy_refine_evaluations == 200
 
 
-def test_policy_mode_applies_the_policys_action(ts_session, monkeypatch):
+def test_policy_mode_applies_the_policys_action(ts_session):
     s = ts_session
-    # No hidden-target hint: this test is about the absence of a fallback note.
-    monkeypatch.setattr(server, "_class_visibility",
-                        lambda params: {c: 0.2 for c in server.goals.GOAL_CLASSES})
     # Stays clear of ±1 so no colour channel saturates: a peak's channels sit
     # at their hue offsets around the group mean, and clipping one of them
     # would shift that mean off the action value (see the clipping test).
@@ -1032,7 +1032,8 @@ def test_search_mode_reports_when_the_budget_is_too_small_to_move():
     state = s.command("increase opacity for bone strongly", mode="search", steps=5)
 
     assert state["current"]["mode"] == "search"
-    assert state["current"]["message"] == (
+    # The unchanged render also earns the no-visible-change hint, joined on.
+    assert state["current"]["message"].startswith(
         "search spent 5 evaluations without improving on the start; "
         f"a full sweep needs about {2 * len(CONTROLLABLE) + 1}")
 
@@ -1543,7 +1544,8 @@ def test_policy_mode_on_ct_chest_falls_back_for_stale_checkpoint(ct_chest_sessio
     state = s.command("more bone", mode="policy")
 
     assert state["current"]["mode"] == "exact"
-    assert state["current"]["message"] == (
+    # (a no-visible-change hint may be joined on after the fallback note)
+    assert state["current"]["message"].startswith(
         "old one-shot checkpoint "
         f"'{os.path.join(_REPO_ROOT, 'out/rl_v2/oneshot_v3_seed0/best.zip')}' "
         "has observation/action dimensions 57/12; expected 97/24 for oneshot-v6")
@@ -1555,7 +1557,8 @@ def test_command_records_its_mode():
     s = _fresh_session()
     exact_state = s.command("increase opacity for bone strongly", parser="rule", search=False)
     assert exact_state["current"]["mode"] == "exact"
-    assert exact_state["current"]["message"] is None
+    # no fallback note; a no-visible-change hint depends on the render
+    assert "fall" not in (exact_state["current"]["message"] or "")
 
     search_state = s.command("increase opacity for bone strongly", parser="rule",
                               search=True, steps=3)
@@ -1759,32 +1762,51 @@ def test_transcribe_mlx_ffmpeg_failure_returns_no_speech(monkeypatch):
     assert out["text"] == "" and out["heard"] == ""
 
 
-def _visibility_stub(monkeypatch, **shares):
-    full = {name: 0.2 for name in server.goals.GOAL_CLASSES}
-    full.update(shares)
-    monkeypatch.setattr(server, "_class_visibility", lambda params: dict(full))
+def _png_b64(color, size=(20, 20), patch=None):
+    """A flat-colour PNG (base64); `patch` = (fraction, colour) paints that
+    share of the rows in another colour."""
+    arr = np.zeros((size[1], size[0], 3), dtype=np.uint8) + np.array(color, dtype=np.uint8)
+    if patch:
+        rows = int(size[1] * patch[0])
+        arr[:rows] = patch[1]
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
 
 
-def test_hidden_target_gets_a_hint(ts_session, monkeypatch):
-    _visibility_stub(monkeypatch, kidneys=0.001)
+def _stub_new_image(monkeypatch, s, new_b64, start_b64=None):
+    s.history[s.cursor]["image_b64"] = start_b64 or _png_b64((100, 100, 100))
+    monkeypatch.setattr(server, "_render_image_b64", lambda *a, **k: (new_b64, np.zeros((4, 4, 3), dtype=np.uint8), b""))
+
+
+def test_unchanged_image_gets_a_hint(ts_session, monkeypatch):
+    _stub_new_image(monkeypatch, ts_session, _png_b64((100, 100, 100)))
 
     state = ts_session.command("brighten the kidneys a lot", mode="exact")
 
     assert state["current"]["message"] == (
-        "kidneys is hidden behind other tissue -- try 'show only kidneys' or 'less soft tissue'")
+        "no visible change -- kidneys mostly hidden behind other tissue; try 'show only kidneys'")
 
 
-def test_soft_target_uses_the_display_label(ts_session, monkeypatch):
-    _visibility_stub(monkeypatch, soft=0.0)
+def test_soft_target_uses_the_display_label_and_compound_joins_labels(ts_session, monkeypatch):
+    _stub_new_image(monkeypatch, ts_session, _png_b64((100, 100, 100)))
 
-    state = ts_session.command("darken the soft tissue", mode="exact")
+    state = ts_session.command("brighten the kidneys and darken the soft tissue", mode="exact")
 
-    assert "soft tissue is hidden behind other tissue" in state["current"]["message"]
-    assert "'show only soft tissue'" in state["current"]["message"]
+    assert "kidneys and soft tissue mostly hidden" in state["current"]["message"]
 
 
-def test_visible_target_gets_no_hint(ts_session, monkeypatch):
-    _visibility_stub(monkeypatch, kidneys=server.HIDDEN_TARGET_SHARE)
+def test_sub_threshold_difference_still_counts_as_unchanged(ts_session, monkeypatch):
+    # delta 10 < VISIBLE_PIXEL_DELTA everywhere
+    _stub_new_image(monkeypatch, ts_session, _png_b64((110, 100, 100)))
+
+    state = ts_session.command("brighten the kidneys", mode="exact")
+
+    assert "no visible change" in state["current"]["message"]
+
+
+def test_changed_image_gets_no_hint(ts_session, monkeypatch):
+    _stub_new_image(monkeypatch, ts_session, _png_b64((100, 100, 100), patch=(0.5, (200, 200, 200))))
 
     state = ts_session.command("brighten the kidneys a lot", mode="exact")
 
@@ -1792,38 +1814,18 @@ def test_visible_target_gets_no_hint(ts_session, monkeypatch):
 
 
 def test_show_only_gets_no_hint(ts_session, monkeypatch):
-    _visibility_stub(monkeypatch, kidneys=0.0)
+    _stub_new_image(monkeypatch, ts_session, _png_b64((100, 100, 100)))
 
     state = ts_session.command("show only the kidneys", mode="exact")
 
     assert state["current"]["message"] is None
 
 
-def test_unsupported_target_says_it_cannot_be_measured(ts_session, monkeypatch):
-    _visibility_stub(monkeypatch, vessels=None)
-
-    state = ts_session.command("make the vessels a little more solid", mode="exact")
-
-    assert state["current"]["message"] == "vessels cannot be measured on this scan"
-
-
 def test_hint_joins_an_existing_message(ts_session, monkeypatch):
-    _visibility_stub(monkeypatch, kidneys=0.0)
+    _stub_new_image(monkeypatch, ts_session, _png_b64((100, 100, 100)))
     ts_session.policy_provider = lambda: None  # policy unavailable -> fallback message
 
     state = ts_session.command("brighten the kidneys", mode="policy")
 
     message = state["current"]["message"]
-    assert message.startswith(server.NO_POLICY_CHECKPOINT_MESSAGE)
-    assert message.endswith("kidneys is hidden behind other tissue -- try "
-                            "'show only kidneys' or 'less soft tissue'")
-    assert " · " in message
-
-
-def test_compound_hints_each_hidden_target(ts_session, monkeypatch):
-    _visibility_stub(monkeypatch, kidneys=0.0)
-
-    state = ts_session.command("brighten the kidneys and darken the lungs", mode="exact")
-
-    message = state["current"]["message"]
-    assert "kidneys is hidden" in message and "lungs" not in message
+    assert message.startswith(server.NO_POLICY_CHECKPOINT_MESSAGE + " · no visible change")
