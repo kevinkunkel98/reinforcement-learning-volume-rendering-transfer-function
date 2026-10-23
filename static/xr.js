@@ -207,7 +207,7 @@
       setBackground(flatBackground);
       pulseAll(0.5, 40);
     }
-    if (event.type === "applied") pulseAll(0.7, 90);
+    if (event.type === "applied" && !event.quiet) pulseAll(0.7, 90);
     if (event.type === "error") pulseAll(0.6, 60, 2);
   }
 

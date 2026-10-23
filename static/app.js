@@ -558,6 +558,9 @@ async function awaitRefinement(stepId, before, replyDiv) {
     summary: window.xrLogic.summarizeStep(reply.current, before, CLASS_ORDER, CLASS_LABEL, METHOD_SAID),
     deltas: classDeltas(reply.current.class_visibility, before),
     dataset: state.dataset,
+    // The same command, polished: update the panel, but the controller
+    // already buzzed when the fast answer landed.
+    quiet: true,
   });
   return true;
 }
