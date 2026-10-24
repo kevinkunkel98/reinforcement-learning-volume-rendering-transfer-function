@@ -1,4 +1,4 @@
-# Status — 2026-10-19
+# Status — 2026-10-19, updated 2026-10-23
 
 Snapshot after the switch to model-based RL, task v2 and v3, the instruction
 parser work, planning through the learned model, and the second VR lab
@@ -31,6 +31,11 @@ head-on.
 | 10-19 | **Ceiling fix** (found by rendering): soft tissue's ceiling was probed at full peak height only (0.2–2.3 % instead of 4–22 %); retrained (`out/rl_mb_v3c`); the val→test drop disappeared | same, "Debugging with renders" |
 | 10-19 | **Planning through the learned model** at use time; viewer default (`POLICY_PLAN=1`); seed 1 of v3c ships | same, "Results after the ceiling fix" |
 | 10-19 | VR lab session 2: 21–22 → 57–58 fps head-on, 84–88 rotating, same resolution; volume placed in front of the viewer; VR panel lists per-class changes | `experiments/2026-10-19-vr-lab-session.md` |
+| 10-21 | VR lab session 3: 1 Hz panel upload was the head-motion stutter; adaptive controller fixed; surface-weighted lighting; dynamic volume resolution, sharp panel at `xrscale=1` | `experiments/2026-10-21-vr-lab-session.md` |
+| 10-21 | **Voice lexicon** (`data/lexicon.json`): one vocabulary for Whisper's prompt, normalization of ASR errors, rule parser and LLM prompt/schema; hybrid parser (rule when every word is covered, else LLM); Whisper hallucination filter; per-class reset. Realistic set: rule parser held-out 58 → 94 % (phrases written by the developer) | `superpowers/specs/2026-10-21-voice-lexicon-design.md`, `superpowers/plans/2026-10-21-voice-lexicon.md` |
+| 10-22 | Voice end to end over 36 scripted commands × 2 synthetic voices: 29 / 30 of 36 right; latency dominated by the 200-evaluation refine (3 s) | `experiments/2026-10-22-voice-e2e-run.md` |
+| 10-23 | **Keep repair** + **two-stage answer**: unmentioned-class brightness drift 0.25 → 0.10 at equal attainment (plan + 200 + keep 0.89–0.91); first image after ~0.7 s (plan + keep, 0.66–0.71), final after ~3.8 s; "no visible change" hint from the render | `experiments/2026-10-23-keep-repair-and-refine-budget.md` |
+| 10-23 | Occluders as keep-repair candidates: never changes the final answer — the goal itself asks for the occluder fade; left off | `experiments/2026-10-23-keep-repair-occluders.md` |
 
 The 10-14 TODO list, item by item:
 
@@ -103,8 +108,13 @@ on another.
   (policy alone 0.14 on one liver case); "a bit more" can overshoot when the
   search clears an occluder; brightness on organs below ~2 % of the image is
   invisible even when scored 0.9+; occluders fade as a side effect.
-- **Parser held-out set written by the developer** — optimistic until
-  phrases from other people are tested.
+- **Parser held-out sets written by the developer** (base and realistic,
+  `data/parser_eval_realistic.json`) — optimistic until phrases from other
+  people are tested; the LLM model choice (qwen2.5:7b vs qwen3.5:4b,
+  gemma4:e4b, granite4:3b, compared 10-22 without them) waits on those.
+- **Nothing from 10-21 to 10-23 has been tried in the headset**: two-stage
+  answer, "Understood: …" / "no visible change" panel lines (long lines may
+  be cut), voice path latency (extrapolated from loaded runs).
 - **VR numbers come from one scan, one sitting**, and depend ~3× on the TF.
 - **Drift accumulates over a session** (found 2026-10-22, live VR session on
   ts_s0477). Each policy step keeps unmentioned classes within
@@ -154,11 +164,16 @@ on another.
    Also: report wall-clock time next to render counts (planning costs ~0.2 s,
    about 8 renders), and cite differentiable volume rendering (DiffDVR, Weiss
    & Westermann 2021) in related work as the per-query gradient alternative.
-5. **Multi-step sessions** (inference fix in progress, retraining optional):
-   - *Keep repair (now):* after each policy step, revert every changed peak of
-     an unmentioned class to its pre-step value when attainment does not
-     drop (~8 visibility evaluations, ~0.1 s). Report as its own arm
-     ("policy + keep") next to policy and policy + planning.
+5. **Multi-step sessions** (keep repair done 10-23, retraining optional):
+   - *Keep repair (done):* the viewer default; report "policy + keep" and
+     "plan + 200 + keep" next to the other arms
+     (`experiments/2026-10-23-keep-repair-and-refine-budget.md`).
+   - *Open thesis decisions* (each changes every reported number):
+     occluders at weight 0 let "more lungs" erase soft tissue completely —
+     a reduced occluder weight instead
+     (`experiments/2026-10-23-keep-repair-occluders.md`); vessel goals exist
+     only on "angiography" scans although e.g. `ts_s0477` is contrast-enhanced
+     (vessels median 127 HU) — define contrast by measured vessel HU.
    - *Retraining (possible feature):* train on multi-step episodes (starts
      drawn from the policy's own earlier outputs, not only the task's start
      TF) and charge drift against the episode origin, with a smaller

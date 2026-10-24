@@ -253,11 +253,18 @@ python -m pytest -q -m "not slow"
 ```
 
 Run from the repository root — paths like `out/` and `static/` are relative.
-Everything runs on CPU. LLM parsing needs Ollama (`ollama serve && ollama pull
-qwen2.5:7b`); without it, commands fall back to the rule parser, which covers
-the grammar in `COMMANDS.md` and everyday phrasings ("add bones", "set the
-spleen to high", "the aorta is dominating the view, pull it back"). Both are
-scored by `eval_parsers.py` (`docs/experiments/2026-10-18-instruction-parser.md`).
+Everything runs on CPU. Voice commands go through one vocabulary,
+`data/lexicon.json`: Whisper gets it as a prompt, known transcription errors
+are normalized ("Darkin' Skeleton" → "darken skeleton"), the rule parser
+answers when it accounts for every word, and only the rest goes to the local
+LLM (Ollama, `ollama serve && ollama pull qwen2.5:7b`; the server checks and
+preloads it at start, and falls back to the rule parser without it). New
+words go into `data/lexicon.json`. Parsers are scored by `eval_parsers.py`
+(`--set realistic` for the spoken-style set; see
+`docs/experiments/2026-10-18-instruction-parser.md` and the 10-21 lexicon
+spec). In policy mode the viewer shows a fast answer at once and replaces it
+with the refined one a few seconds later (`POLICY_TWO_STAGE`,
+`docs/experiments/2026-10-23-keep-repair-and-refine-budget.md`).
 
 ## Layout
 
