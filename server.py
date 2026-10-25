@@ -366,6 +366,51 @@ def _no_visible_change_hint(cmd, before_step, after_step):
             f"tissue; try 'show only {labels[0]}'")
 
 
+# "add X" of a class a command hid restores it: a relative increase of an
+# invisible class stays invisible (after "show only skeleton", "add liver"
+# left the liver at 0.0 % of the image on ts_s0477, "add lungs" at 0.21 %).
+# RESTORE_BELOW_SHARE is goals.EPSILON, the floor the goal channels treat as
+# "not shown". At the task's start TF every class is well above it -- the
+# start shares on ts_s0477, ts_s1379 and ts_s0358 are >= 0.27 % of the image
+# for every class, the kidneys the smallest -- so a class below 0.1 % is one
+# a command hid, and its start is what "add" should bring back.
+RESTORE_BELOW_SHARE = 0.001
+
+
+def restore_hidden(cmd, class_visibility):
+    """`cmd` with every opacity increase of a hidden class -- its share in
+    `class_visibility` below RESTORE_BELOW_SHARE -- replaced by a class reset
+    of it, and the classes so restored, in order. Unsupported classes (share
+    None), missing shares and every other kind of command are left alone; a
+    compound keeps its other sub-commands."""
+    if not class_visibility or not isinstance(cmd, dict) or "camera" in cmd:
+        return cmd, []
+    restored = []
+
+    def rewrite(sub):
+        if sub.get("attribute") != "opacity" or sub.get("direction") != "increase":
+            return sub
+        target = sub.get("target")
+        share = class_visibility.get(target) if isinstance(target, str) else None
+        if share is None or share >= RESTORE_BELOW_SHARE:
+            return sub
+        restored.append(target)
+        return {"target": target, "attribute": None, "direction": "reset", "strength": None}
+
+    if isinstance(cmd.get("compound"), list):
+        new = {**cmd, "compound": [rewrite(sub) for sub in cmd["compound"]]}
+    else:
+        new = rewrite(cmd)
+    return (new, restored) if restored else (cmd, [])
+
+
+def _restore_message(classes):
+    labels = " and ".join(commands.CLASS_LABEL.get(c, c) for c in classes)
+    if len(classes) == 1:
+        return f"{labels} was hidden -- restored to its start"
+    return f"{labels} were hidden -- restored to their start"
+
+
 def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera,
                   mode="exact", message=None, parser_meta=None, layers=None):
     layers = normalize_layers(layers or default_layers())
@@ -1092,6 +1137,10 @@ class Session:
         # search toggle) keep working unchanged.
         effective_mode = mode or ("search" if search else "exact")
 
+        cmd, restored = restore_hidden(cmd, self.history[self.cursor].get("class_visibility"))
+        if restored and "understood" in parser_meta:
+            parser_meta = {**parser_meta, "understood": commands.describe_command(cmd)}
+
         message = None
         refine_job = None
         if effective_mode == "policy":
@@ -1141,6 +1190,9 @@ class Session:
         hint = _no_visible_change_hint(cmd, self.history[self.cursor], step)
         if hint:
             step["message"] = f"{step['message']} · {hint}" if step["message"] else hint
+        if restored:
+            note = _restore_message(restored)
+            step["message"] = f"{step['message']} · {note}" if step["message"] else note
         if refine_job is not None:
             step["refining"] = True
             self._pending_refines[step["id"]] = {

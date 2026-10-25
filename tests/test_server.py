@@ -2010,3 +2010,83 @@ def test_refined_route_returns_at_once_for_an_unknown_step(monkeypatch):
     assert time.perf_counter() - start < 1.0
     assert out["refined"] is False
     assert out["current"]["id"] == 0
+
+
+# --- "add X" restores a class a command hid ----------------------------------
+
+def _rel(target, direction="increase", attribute="opacity", strength="moderately"):
+    return {"target": target, "attribute": attribute, "direction": direction, "strength": strength}
+
+
+def _reset(target):
+    return {"target": target, "attribute": None, "direction": "reset", "strength": None}
+
+
+_HIDDEN_LIVER = {"liver": 0.0, "lungs": 0.0004, "skeleton": 0.05, "heart": 0.01, "vessels": None}
+
+
+def test_restore_hidden_turns_an_increase_of_a_hidden_class_into_its_reset():
+    assert server.restore_hidden(_rel("liver"), _HIDDEN_LIVER) == (_reset("liver"), ["liver"])
+
+
+def test_restore_hidden_leaves_visible_unsupported_and_decreases_alone():
+    for cmd in (_rel("heart"), _rel("vessels"), _rel("liver", "decrease"),
+                _rel("liver", attribute="brightness"),
+                {"target": "liver", "attribute": "opacity", "direction": "set", "level": "high"},
+                {"target": "liver", "attribute": "opacity", "direction": "show_only", "strength": None},
+                {"camera": {"action": "zoom", "direction": "in", "strength": "moderately"}}):
+        assert server.restore_hidden(cmd, _HIDDEN_LIVER) == (cmd, [])
+    assert server.restore_hidden(_rel("liver"), None) == (_rel("liver"), [])
+    assert server.restore_hidden(_rel("liver"), {}) == (_rel("liver"), [])
+
+
+def test_restore_hidden_rewrites_only_the_hidden_part_of_a_compound():
+    cmd = {"compound": [_rel("liver"), _rel("heart"), _rel("lungs", strength="strongly")]}
+    assert server.restore_hidden(cmd, _HIDDEN_LIVER) == (
+        {"compound": [_reset("liver"), _rel("heart"), _reset("lungs")]}, ["liver", "lungs"])
+
+
+def test_restore_hidden_threshold_is_the_goal_floor():
+    assert server.RESTORE_BELOW_SHARE == 0.001
+    assert server.restore_hidden(_rel("liver"), {"liver": 0.001})[1] == []
+    assert server.restore_hidden(_rel("liver"), {"liver": 0.00099})[1] == ["liver"]
+
+
+def test_add_a_hidden_class_restores_it_and_says_so(ts_session):
+    s = ts_session
+    s.command("show only skeleton", mode="exact")
+    s.history[s.cursor]["class_visibility"] = {**s.history[s.cursor]["class_visibility"], "liver": 0.0}
+    before = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+
+    state = s.command("add liver", parser="hybrid", mode="policy")
+
+    step = state["current"]
+    assert step["cmd_dict"] == _reset("liver")
+    assert step["understood"] == "reset the liver"
+    assert step["mode"] == "exact" and not step.get("refining")
+    assert "liver was hidden -- restored to its start" in step["message"]
+    expected = server.apply_command(_reset("liver"), before, reset_params=server.initial_params(s.task_version))
+    np.testing.assert_allclose(step["params"], expected)
+
+
+def test_add_a_visible_class_is_untouched(ts_session):
+    s = ts_session
+    state = s.command("add liver", parser="hybrid", mode="exact")
+    step = state["current"]
+    assert step["cmd_dict"] == _rel("liver")
+    assert step["understood"] == "more liver"
+    assert not step["message"] or "restored" not in step["message"]
+
+
+def test_restore_message_joins_an_existing_message(ts_session):
+    s = ts_session
+    s.policy_provider = lambda: None
+    s.history[s.cursor]["class_visibility"] = {**s.history[s.cursor]["class_visibility"],
+                                               "liver": 0.0, "lungs": 0.0}
+
+    state = s.command("add liver and lungs", mode="policy")
+
+    step = state["current"]
+    assert step["cmd_dict"] == {"compound": [_reset("liver"), _reset("lungs")]}
+    assert step["message"] == (server.NO_POLICY_CHECKPOINT_MESSAGE
+                               + " · liver and lungs were hidden -- restored to their start")
