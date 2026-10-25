@@ -436,7 +436,8 @@ def _restore_understood(restored, rest):
 
 def _restore_message(classes):
     labels = " and ".join(commands.CLASS_LABEL.get(c, c) for c in classes)
-    if len(classes) == 1:
+    # "lungs", "kidneys", "vessels" are plural nouns even as a single class.
+    if len(classes) == 1 and not commands.CLASS_LABEL.get(classes[0], classes[0]).endswith("s"):
         return f"{labels} was hidden -- restored to its start"
     return f"{labels} were hidden -- restored to their start"
 

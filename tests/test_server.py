@@ -2159,3 +2159,9 @@ def test_restore_message_joins_an_existing_message(ts_session):
     reset_params = server.initial_params(s.task_version)
     expected = server.apply_command(_rel("lungs"), server.apply_command(_reset("liver"), before, reset_params))
     np.testing.assert_allclose(step["params"], expected)
+
+
+def test_restore_message_agrees_with_plural_class_names():
+    assert server._restore_message(["liver"]) == "liver was hidden -- restored to its start"
+    assert server._restore_message(["lungs"]) == "lungs were hidden -- restored to their start"
+    assert server._restore_message(["liver", "kidneys"]) == "liver and kidneys were hidden -- restored to their start"
