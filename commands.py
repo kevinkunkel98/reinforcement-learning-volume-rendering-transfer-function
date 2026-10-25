@@ -314,10 +314,29 @@ def _cue_direction(t: str):
     return cue.get("direction") if cue else None
 
 
+# "also show the liver", "show the liver too / as well": adds to what is
+# shown rather than replacing it. "too" counts only at the end of a clause
+# ("too strong" is a decrease cue).
+_ALSO_RE = re.compile(r"\b(also|as well)\b|\btoo\b(?=(?: please)?$)")
+_ALSO_SHOW_RE = re.compile(r"\b(show|display)\b")
+
+
+def _parse_also_show(clause: str):
+    """A show/display clause with "also"/"too"/"as well" -> an opacity
+    increase of each class named, or None."""
+    if not (_ALSO_RE.search(clause) and _ALSO_SHOW_RE.search(clause)):
+        return None
+    classes = _find_classes(clause) or _fuzzy_classes(clause)
+    return [{"target": c, "attribute": "opacity", "direction": "increase", "strength": _strength_in(clause)}
+            for c in classes] or None
+
+
 def _parse_show_only(t: str):
     """"show only the heart", "just the kidneys", "isolate the liver", "I only
     want to see the vessels" -> show_only over every class named."""
     if not (_SHOW_ONLY_RE.search(t) or _cue_direction(t) == "show_only") or _RELATIVE_CUE_RE.search(t):
+        return None
+    if _ALSO_RE.search(t) and _ALSO_SHOW_RE.search(t):
         return None
     classes = _find_classes(t) or _fuzzy_classes(t)
     if not classes:
@@ -480,13 +499,19 @@ def parse_command_rule(text: str) -> dict:
         elif reset_clauses is not None and _parse_show_only(clause):
             parsed = [_parse_show_only(clause)]
         else:
-            parsed = _parse_grammar_clause(clause) or _parse_free_clause(clause, previous)
+            parsed = (_parse_also_show(clause) or _parse_grammar_clause(clause)
+                      or _parse_free_clause(clause, previous))
         if not parsed and subcommands and subcommands[-1]["direction"] == "reset" and _is_class_list(clause):
             # "reset the lungs and the liver": a bare class list continues the reset.
             last = subcommands[-1]["target"]
             last = last if isinstance(last, list) else [last]
             subcommands[-1] = _class_reset(last + [c for c in _find_classes(clause) if c not in last])
             continue
+        if not parsed and subcommands and _is_class_list(clause):
+            # "add liver and lungs", "darken the liver and the heart": a bare
+            # class list gets the previous clause's direction, attribute,
+            # strength (or level).
+            parsed = [{**subcommands[-1], "target": c} for c in _find_classes(clause)]
         if not parsed:
             if len(clauses) > 1:
                 raise ValueError(f"could not parse clause {clause!r} in compound command: {text!r}")

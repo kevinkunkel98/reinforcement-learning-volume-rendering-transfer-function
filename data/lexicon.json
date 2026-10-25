@@ -51,7 +51,8 @@
                  "far", "very", "massively", "heavily"]
   },
   "asr_fixes": {"darkin": "darken", "leitenlangs": "lighten lungs", "leiten": "lighten",
-                "art": "heart", "arc": "heart", "ripsage": "ribcage"},
+                "art": "heart", "arc": "heart", "ripsage": "ribcage",
+                "revered": "revert"},
   "keep": ["heard", "hard", "heat", "long", "longs", "lounge", "spin", "issue", "skill", "host", "sole", "soil",
            "silo", "border", "timer", "torn", "lover"],
   "filler": ["please", "can", "could", "would", "you", "the", "a", "an", "now", "again", "even", "just", "me", "i",
@@ -68,5 +69,5 @@
               "through", "dominating", "dominate", "drown", "drowning", "obscure", "obscuring", "block",
               "blocking", "cut", "back", "too", "strong", "prominent", "dense", "tone", "dial", "pull", "reset",
               "revert", "start", "over", "from", "scratch", "default", "defaults", "original", "settings", "and",
-              "then", "plus", "while", "so", "for", "on", "with", "everything", "view", "level", "instead"]
+              "then", "plus", "while", "so", "for", "on", "with", "everything", "view", "level", "instead", "also", "as", "well"]
 }

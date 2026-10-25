@@ -1487,3 +1487,61 @@ def test_with_meta_hybrid_carries_understood_and_the_warning(monkeypatch):
     assert meta["parse_warning"] == "may have missed: 'moriorta'"
     _, meta = commands.parse_command_with_meta("add kidneys", parser="hybrid")
     assert meta["understood"] == "more kidneys" and meta["parse_warning"] is None
+
+
+# ---------- class-only clauses and "also show" ----------
+
+def _inc(target, strength="moderately", attribute="opacity"):
+    return {"target": target, "attribute": attribute, "direction": "increase", "strength": strength}
+
+
+@pytest.mark.parametrize("text, targets", [
+    ("add liver and lung", ["liver", "lungs"]),
+    ("add liver and lungs", ["liver", "lungs"]),
+    ("add the liver and the kidneys", ["liver", "kidneys"]),
+    ("more liver and lungs", ["liver", "lungs"]),
+])
+def test_a_class_only_clause_inherits_the_previous_clause(text, targets):
+    assert parse_command_rule(text) == {"compound": [_inc(t) for t in targets]}
+
+
+def test_a_class_only_clause_inherits_strength_attribute_and_level():
+    assert parse_command_rule("darken the liver a lot and the heart") == {"compound": [
+        _inc("liver", "strongly", "brightness") | {"direction": "decrease"},
+        _inc("heart", "strongly", "brightness") | {"direction": "decrease"}]}
+    assert parse_command_rule("set the liver to high and lungs") == {"compound": [
+        {"target": "liver", "attribute": "opacity", "direction": "set", "level": "high"},
+        {"target": "lungs", "attribute": "opacity", "direction": "set", "level": "high"}]}
+
+
+def test_a_class_only_clause_still_continues_a_class_reset():
+    assert parse_command_rule("reset the lungs and the liver") == _class_reset(["lungs", "liver"])
+
+
+def test_a_lone_class_name_still_fails():
+    with pytest.raises(ValueError):
+        parse_command_rule("the liver")
+
+
+@pytest.mark.parametrize("text", [
+    "also show the liver", "show the liver too", "show the liver as well", "bring back the liver",
+    "also display the liver", "show the liver too please",
+])
+def test_also_show_is_an_increase_not_show_only(text):
+    assert parse_command_rule(text) == _inc("liver")
+
+
+def test_also_show_two_classes_and_plain_show_unchanged():
+    assert parse_command_rule("also show the liver and the heart") == {"compound": [_inc("liver"), _inc("heart")]}
+    assert parse_command_rule("show the liver")["direction"] == "show_only"
+    assert parse_command_rule("show only the liver and the heart")["direction"] == "show_only"
+
+
+def test_hybrid_parses_also_show_and_revered_skeleton_on_the_rule_path():
+    cmd, meta = commands.parse_command_hybrid("also show the liver")
+    assert cmd == _inc("liver") and meta["path"] == "rule"
+    cmd, meta = commands.parse_command_hybrid("show the liver as well")
+    assert cmd == _inc("liver") and meta["path"] == "rule"
+    cmd, meta = commands.parse_command_hybrid("Revered skeleton.")
+    assert cmd == _class_reset("skeleton") and meta["path"] == "rule"
+    assert meta["understood"] == "reset the skeleton"
