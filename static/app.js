@@ -46,6 +46,7 @@ function applyTheme(theme) {
   button?.setAttribute("title", `Switch to ${resolved === "dark" ? "light" : "dark"} theme`);
   const label = button?.querySelector("#theme-label");
   if (label) label.textContent = `${resolved[0].toUpperCase()}${resolved.slice(1)} mode`;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", resolved === "light" ? "#f3f5f7" : "#161719");
 }
 
 function initTheme() {
@@ -92,22 +93,20 @@ function initAboutDialog() {
 initTheme();
 initAboutDialog();
 
-// Shared anatomy metadata keeps telemetry, comparison bars, and curve markers
-// aligned with the eight canonical backend goal classes.
+// Shared anatomy metadata keeps telemetry and comparison bars aligned with
+// the eight canonical backend goal classes.
 const ANATOMY_CLASSES = [
-  { name: "skeleton", label: "skeleton", group: "structural", center: 900, rgb: [0.95, 0.95, 0.90] },
-  { name: "lungs", label: "lungs", group: "thoracic", center: -800, rgb: [0.55, 0.70, 0.95] },
-  { name: "heart", label: "heart", group: "thoracic", center: 120, rgb: [0.85, 0.25, 0.25] },
-  { name: "vessels", label: "vessels", group: "thoracic", center: 300, rgb: [0.90, 0.45, 0.40] },
-  { name: "liver", label: "liver", group: "abdominal", center: 70, rgb: [0.75, 0.45, 0.25] },
-  { name: "kidneys", label: "kidneys", group: "abdominal", center: 45, rgb: [0.70, 0.40, 0.35] },
-  { name: "spleen", label: "spleen", group: "abdominal", center: 65, rgb: [0.55, 0.30, 0.45] },
-  { name: "soft", label: "soft tissue", group: "structural", center: 40, rgb: [0.85, 0.35, 0.35] },
+  { name: "skeleton", label: "skeleton", group: "structural" },
+  { name: "lungs", label: "lungs", group: "thoracic" },
+  { name: "heart", label: "heart", group: "thoracic" },
+  { name: "vessels", label: "vessels", group: "thoracic" },
+  { name: "liver", label: "liver", group: "abdominal" },
+  { name: "kidneys", label: "kidneys", group: "abdominal" },
+  { name: "spleen", label: "spleen", group: "abdominal" },
+  { name: "soft", label: "soft tissue", group: "structural" },
 ];
 const CLASS_ORDER = ANATOMY_CLASSES.map((item) => item.name);
 const CLASS_LABEL = Object.fromEntries(ANATOMY_CLASSES.map((item) => [item.name, item.label]));
-const CLASS_CENTER_HU = Object.fromEntries(ANATOMY_CLASSES.map((item) => [item.name, item.center]));
-const CLASS_ANATOMICAL_RGB = Object.fromEntries(ANATOMY_CLASSES.map((item) => [item.name, item.rgb]));
 
 const messagesEl = el("messages");
 const emptyState = el("empty-state");
@@ -277,7 +276,6 @@ async function refresh(data) {
   }
 
   updateTelemetry(state.current.class_visibility, state.current.class_brightness);
-  drawTfCurve(state.current.histogram, state.current.curve);
   return data;
 }
 
@@ -296,110 +294,11 @@ function updateTelemetry(classVisibility, classBrightness) {
     if (!node) continue;
     node.textContent = available ? `${(value * 100).toFixed(1)}%` : "not measurable";
     node.classList.toggle("telem-unavailable", !available);
-    if (bright) bright.textContent = classBrightness?.[name] == null ? "brightness —" : `brightness ${classBrightness[name].toFixed(3)}`;
-    if (bar) bar.style.width = available ? `${Math.max(0, Math.min(100, value * 100))}%` : "0%";
-  }
-}
-
-// The histogram/transfer-function visual guide: the volume's own intensity
-// histogram (sqrt-scaled -- raw CT histograms are dominated by one huge
-// air/background bin that would otherwise make every tissue peak invisible),
-// the opacity curve traced over it, and a colour ramp along the bottom built
-// from the exact same samples the render composites. Both `histogram` and
-// `curve` come from the current step (server.py's _render_step), computed by
-// the same code the renderer and the policy's observation use -- this draws
-// what the system actually sees, not a separate approximation of it.
-const tfCurveCanvas = el("tf-curve-canvas");
-const tfCurveCtx = tfCurveCanvas ? tfCurveCanvas.getContext("2d") : null;
-
-function drawTfCurve(histogram, curve) {
-  if (!tfCurveCtx || !curve) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const cssWidth = tfCurveCanvas.clientWidth || 700;
-  const cssHeight = tfCurveCanvas.clientHeight || 110;
-  tfCurveCanvas.width = Math.round(cssWidth * dpr);
-  tfCurveCanvas.height = Math.round(cssHeight * dpr);
-  const ctx = tfCurveCtx;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssWidth, cssHeight);
-
-  const rampHeight = 10;
-  const plotHeight = cssHeight - rampHeight - 2;
-  const [lo, hi] = histogram ? histogram.range : [curve.hu[0], curve.hu[curve.hu.length - 1]];
-  const huToX = (hu) => ((hu - lo) / (hi - lo)) * cssWidth;
-
-  // Histogram: filled area, sqrt-scaled so tissue peaks aren't flattened to
-  // nothing beside the background bin.
-  if (histogram && histogram.counts.length) {
-    const counts = histogram.counts;
-    const maxCount = Math.max(...counts, 1e-9);
-    const binWidth = cssWidth / counts.length;
-    ctx.fillStyle = "hsla(0, 0%, 60%, 0.25)";
-    ctx.beginPath();
-    ctx.moveTo(0, plotHeight);
-    counts.forEach((count, i) => {
-      const h = Math.sqrt(Math.max(count, 0) / maxCount) * plotHeight;
-      const x = i * binWidth;
-      ctx.lineTo(x, plotHeight - h);
-      ctx.lineTo(x + binWidth, plotHeight - h);
-    });
-    ctx.lineTo(cssWidth, plotHeight);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  // Opacity curve, traced from the same samples the colour ramp below uses.
-  const primary = getComputedStyle(document.documentElement).getPropertyValue("--primary");
-  ctx.strokeStyle = `hsl(${primary})`;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  curve.hu.forEach((hu, i) => {
-    const x = huToX(hu);
-    const y = plotHeight - curve.opacity[i] * plotHeight;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  // Colour ramp: the exact blended colour at each sampled HU, so a haze or a
-  // desaturated peak (see docs/STATUS.md's width-narrowing fix) is visible
-  // directly, not just inferable from the opacity line.
-  const rampY = plotHeight + 2;
-  const step = cssWidth / curve.rgb.length;
-  curve.rgb.forEach((rgb, i) => {
-    const [r, g, b] = rgb;
-    ctx.fillStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-    ctx.fillRect(i * step, rampY, step + 1, rampHeight);
-  });
-
-  // Tick marks at the eight anatomical peak centres, in that peak's actual
-  // transfer-function colour (transfer.ANATOMICAL_COLOURS) -- not the
-  // telemetry tiles' --class-* accent hues, which are UI-only and would
-  // contradict the colour ramp directly underneath. A dark outline keeps the
-  // near-white skeleton tick visible against the cream ramp there.
-  let previousLabelX = -Infinity;
-  for (const goalClass of CLASS_ORDER) {
-    const x = huToX(CLASS_CENTER_HU[goalClass]);
-    if (x < 0 || x > cssWidth) continue;
-    const [r, g, b] = CLASS_ANATOMICAL_RGB[goalClass];
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, plotHeight);
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.strokeStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    // Collision-aware labels: keep every tick, suppress only labels too close
-    // to the previous label on narrow canvases.
-    if (x - previousLabelX >= 42) {
-      ctx.fillStyle = "rgba(230, 235, 238, 0.85)";
-      ctx.font = "9px sans-serif";
-      ctx.fillText(CLASS_LABEL[goalClass], Math.min(x + 3, cssWidth - 42), 10);
-      previousLabelX = x;
+    if (bright) {
+      bright.hidden = classBrightness?.[name] == null;
+      bright.textContent = bright.hidden ? "" : `brightness ${classBrightness[name].toFixed(3)}`;
     }
+    if (bar) bar.style.width = available ? `${Math.max(0, Math.min(100, value * 100))}%` : "0%";
   }
 }
 
@@ -652,6 +551,15 @@ textInput.addEventListener("keydown", (e) => {
   }
 });
 
+document.querySelectorAll("[data-command]").forEach((button) => {
+  button.addEventListener("click", () => {
+    textInput.value = button.dataset.command;
+    autoResize();
+    updateSendState();
+    textInput.focus();
+  });
+});
+
 function navigate(path) {
   return withLoading(() => navigateImpl(path));
 }
@@ -686,6 +594,12 @@ window.appControls = {
 
 // ---------- toolbar: toggle groups + single toggle ----------
 
+function updateMethodSummary() {
+  const parser = { rule: "Rule parser", hybrid: "Hybrid parser", llm: "LLM parser" }[config.parser];
+  const method = { exact: "Direct application", search: "Search", policy: "Learned policy" }[config.mode];
+  el("method-summary").textContent = `${parser} · ${method}`;
+}
+
 // A ToggleGroup is a single-select set of buttons sharing one `data-toggle-group`
 // container: exactly one child carries data-state="on" at a time, clicking a
 // sibling flips it, and the container's mapped `config` key is kept in sync.
@@ -700,6 +614,7 @@ function initToggleGroup(container) {
       other.tabIndex = active ? 0 : -1;
     });
     config[key] = selected.dataset.value;
+    updateMethodSummary();
   };
   items.forEach((item) => {
     item.setAttribute("role", "radio");
@@ -724,6 +639,7 @@ function initToggleGroup(container) {
 }
 
 document.querySelectorAll("[data-toggle-group]").forEach(initToggleGroup);
+updateMethodSummary();
 
 const searchToggleBtn = el("search-toggle-btn");
 const searchOptions = el("search-options");
@@ -743,6 +659,7 @@ searchToggleBtn.addEventListener("click", () => {
   } else {
     config.mode = "exact";
   }
+  updateMethodSummary();
 });
 
 policyToggleBtn.addEventListener("click", () => {
@@ -758,6 +675,7 @@ policyToggleBtn.addEventListener("click", () => {
   } else {
     config.mode = "exact";
   }
+  updateMethodSummary();
 });
 
 // ---------- mic: push to talk + real audio-reactive waveform ----------
@@ -889,17 +807,21 @@ micBtn.addEventListener("click", () => {
   else startRecording();
 });
 
-// Push-to-talk hotkey: hold Space to record, release to stop. Skipped while
-// the text input is focused so typing a literal space still works there.
+// Space activates native controls when focused; elsewhere it is push-to-talk.
+// Remember ownership so releasing still stops a recording if focus changes.
+let spaceRecording = false;
 document.addEventListener("keydown", (e) => {
-  if (e.code !== "Space" || e.repeat || document.activeElement === textInput) return;
+  if (e.code !== "Space" || e.repeat || e.defaultPrevented) return;
+  if (e.target instanceof Element && e.target.closest('button, input, textarea, select, summary, a, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="radio"], [role="option"], [role="listbox"], dialog[open]')) return;
   e.preventDefault();
+  spaceRecording = true;
   startRecording();
 });
 
 document.addEventListener("keyup", (e) => {
-  if (e.code !== "Space" || document.activeElement === textInput) return;
+  if (e.code !== "Space" || !spaceRecording) return;
   e.preventDefault();
+  spaceRecording = false;
   stopRecording();
 });
 

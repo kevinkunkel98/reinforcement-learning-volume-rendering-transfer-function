@@ -706,6 +706,22 @@
     return () => tfListeners.delete(listener);
   }
 
+  // The workspace changes size at responsive breakpoints. Resize the backing
+  // canvas as well as its CSS box so the camera projection stays proportional.
+  // XR owns the framebuffer while presenting, including its render dimensions.
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => {
+      if (!openGLRenderWindow || !renderWindow || inXR()) return;
+      const width = viewerEl.clientWidth;
+      const height = viewerEl.clientHeight;
+      if (!width || !height) return;
+      const [oldWidth, oldHeight] = openGLRenderWindow.getSize();
+      if (width === oldWidth && height === oldHeight) return;
+      openGLRenderWindow.setSize(width, height);
+      renderWindow.render();
+    }).observe(viewerEl);
+  }
+
   window.volumeViewer = {
     load, setTransferFunction, setLabelAwareTransferFunction, getCamera, setCamera,
     // The XR frame loop renders on its own; a flat render() mid-session would

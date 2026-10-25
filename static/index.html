@@ -2,22 +2,42 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Transfer Function Console</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#161719" />
+  <title>TF/RL Volume Lab · Conversational CT exploration</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem("tf-rl-theme") === "light" ? "light" : "dark"; } catch (_) {}
+  </script>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+  <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <symbol id="icon-curve" viewBox="0 0 32 32"><path d="M3 25h26M3 25V7M4 23c7 0 4-15 10-15s3 15 14 15"/><path d="M4 23c12 0 9-9 15-9s4 9 9 9" opacity=".45"/></symbol>
+      <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.1"/></symbol>
+      <symbol id="icon-book" viewBox="0 0 24 24"><path d="M12 5v15M3 4c4-1 6 0 9 1 3-1 5-2 9-1v15c-4-1-6 0-9 1-3-1-5-2-9-1Z"/></symbol>
+      <symbol id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></symbol>
+      <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M20.5 13A8.5 8.5 0 0 1 11 3.5 8.5 8.5 0 1 0 20.5 13Z"/></symbol>
+      <symbol id="icon-reset" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6"/></symbol>
+      <symbol id="icon-headset" viewBox="0 0 24 24"><path d="M5 7h14l2 3v7a2 2 0 0 1-2 2h-3l-4-3-4 3H5a2 2 0 0 1-2-2v-7Z"/><path d="M7 11h2m6 0h2"/></symbol>
+      <symbol id="icon-sliders" viewBox="0 0 24 24"><path d="M4 7h7m4 0h5M4 17h3m4 0h9"/><circle cx="13" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+      <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    </defs>
+  </svg>
   <div id="app">
     <header id="app-bar">
       <div id="app-bar-left">
-        <svg id="app-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-          <path d="M3 12c2-5 6-8 9-8s7 3 9 8c-2 5-6 8-9 8s-7-3-9-8Z" />
-          <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
-        </svg>
-        <span id="app-title">TF<span class="thin">/RL</span> CONSOLE</span>
+        <svg id="app-mark" class="icon" aria-hidden="true"><use href="#icon-curve"/></svg>
+        <div>
+          <div id="app-title">TF<span class="thin">/</span>RL <span class="title-name">Volume Lab</span></div>
+          <p id="app-subtitle">Language-guided CT exploration <span>· Master's thesis</span></p>
+        </div>
       </div>
       <div id="app-bar-right">
         <div id="dataset-row">
-          <label id="dataset-select-label">SAMPLE</label>
+          <span id="dataset-select-label">Scan</span>
           <div id="dataset-select" class="select-root">
             <button type="button" id="dataset-select-trigger" class="select-trigger"
                     aria-haspopup="listbox" aria-expanded="false" aria-labelledby="dataset-select-label dataset-select-value">
@@ -28,15 +48,23 @@
           </div>
         </div>
         <button id="theme-toggle" class="btn btn-ghost btn-sm" type="button"
-                aria-label="Toggle color theme" aria-pressed="false" title="Switch to light theme"><span id="theme-label">Dark mode</span></button>
+                aria-label="Toggle color theme" aria-pressed="true" title="Switch to light theme">
+          <svg class="icon theme-moon" aria-hidden="true"><use href="#icon-moon"/></svg>
+          <svg class="icon theme-sun" aria-hidden="true"><use href="#icon-sun"/></svg>
+          <span id="theme-label">Dark mode</span>
+        </button>
         <button id="about-btn" class="btn btn-ghost btn-icon" type="button"
-                aria-label="About this project" aria-haspopup="dialog" data-tooltip="About this project">?</button>
-        <button id="commands-help-btn" class="btn btn-ghost btn-icon" aria-label="Command reference" data-tooltip="Command reference">?</button>
+                aria-label="About this project" aria-haspopup="dialog" data-tooltip="About this project"><svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg></button>
+        <button id="commands-help-btn" class="btn btn-ghost btn-icon" aria-label="Command reference" aria-haspopup="dialog" data-tooltip="Command reference"><svg class="icon" aria-hidden="true"><use href="#icon-book"/></svg></button>
       </div>
     </header>
 
     <div id="main">
-      <section id="image-panel">
+      <section id="image-panel" aria-labelledby="volume-title">
+        <div class="panel-heading">
+          <h1 id="volume-title">Volume explorer</h1>
+          <span class="panel-meta">CT / 3D volume</span>
+        </div>
         <div id="viewport">
           <div id="single-view">
             <div id="viewport-frame">
@@ -46,6 +74,7 @@
               <img id="current-image" alt="rendered volume" />
             </div>
             <div id="nav">
+              <span class="nav-label">History</span>
               <button id="back-btn" class="btn btn-outline btn-icon" aria-label="Previous step" data-tooltip="Previous step">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
               </button>
@@ -53,14 +82,18 @@
               <button id="forward-btn" class="btn btn-outline btn-icon" aria-label="Next step" data-tooltip="Next step">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
               </button>
-              <button id="reset-btn" class="btn btn-secondary btn-sm" data-tooltip="Reset the transfer function to its default">Reset</button>
-              <button id="enter-vr-btn" class="btn btn-secondary btn-sm" hidden data-tooltip="View in a VR headset (WebXR)">Enter VR</button>
+              <button id="reset-btn" class="btn btn-outline btn-sm" data-tooltip="Reset the transfer function to its default"><svg class="icon" aria-hidden="true"><use href="#icon-reset"/></svg>Reset transfer function</button>
+              <button id="enter-vr-btn" class="btn btn-secondary btn-sm" hidden data-tooltip="View in a VR headset (WebXR)"><svg class="icon" aria-hidden="true"><use href="#icon-headset"/></svg>Enter VR</button>
             </div>
+            <p id="viewer-hint">Drag to rotate <span>·</span> Scroll to zoom</p>
           </div>
 
         </div>
 
-        <div id="telemetry" data-readout="visibility" aria-label="Anatomy visibility">
+        <div id="research-readouts">
+        <section id="telemetry-panel" aria-labelledby="telemetry-title">
+          <div class="readout-heading"><h2 id="telemetry-title">Anatomy visibility</h2><span>Visible share / %</span></div>
+          <div id="telemetry" data-readout="visibility" aria-label="Anatomy visibility">
           <section class="telem-group" data-group="thoracic">
             <h3 class="telem-group-title">Thoracic</h3>
             <div class="telem-group-rows">
@@ -85,34 +118,46 @@
             </div>
           </section>
         </div>
+        </section>
 
-        <div id="tf-curve-panel" aria-label="Transfer function curve over the intensity histogram">
-          <canvas id="tf-curve-canvas"></canvas>
         </div>
       </section>
 
-      <section id="chat-panel">
-        <div id="messages">
+      <section id="chat-panel" aria-labelledby="instructions-title">
+        <div class="notebook-heading"><h2 id="instructions-title">Instructions</h2><span class="panel-meta">Current session</span></div>
+        <div id="messages" role="log" aria-label="Instruction history" aria-live="polite">
           <div id="empty-state">
-            <p>Describe what you want to see.</p>
-            <p class="hint">e.g. "show only the lungs", "a bit less soft tissue", "brighten the bone"</p>
+            <h2>Say what you<br>want to see.</h2>
+            <p class="hint">Explore anatomy in your own words.<br>Type an instruction or hold Space to talk.</p>
+            <div class="starter-commands" aria-label="Example instructions">
+              <button type="button" class="starter-command" data-command="show only the lungs">Show only the lungs<svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></button>
+              <button type="button" class="starter-command" data-command="a bit less soft tissue">Less soft tissue<svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></button>
+            </div>
           </div>
         </div>
 
         <div id="composer">
+          <details id="method-settings">
+            <summary><svg class="icon" aria-hidden="true"><use href="#icon-sliders"/></svg><span>Method &amp; experiments<span id="method-summary" aria-live="polite">Hybrid parser · Learned policy</span></span><svg class="icon disclosure-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg></summary>
           <div id="toolbar">
+            <span class="toolbar-label" id="parser-label">Interpretation</span>
             <div id="parser-toggle-group" class="toggle-group" data-toggle-group="parser" role="radiogroup" aria-label="Command parser">
-              <button type="button" class="toggle-item" data-value="rule" data-state="off">rule</button>
-              <button type="button" class="toggle-item" data-value="llm" data-state="on">llm</button>
+              <button type="button" class="toggle-item" data-value="rule" data-state="off">Rule</button>
+              <button type="button" class="toggle-item" data-value="hybrid" data-state="on">Hybrid</button>
+              <button type="button" class="toggle-item" data-value="llm" data-state="off">LLM</button>
             </div>
-            <button id="search-toggle-btn" class="toggle" data-active="false" aria-pressed="false" data-tooltip="Hill-climb search">search</button>
+            <span class="toolbar-label">Answer method</span>
+            <button id="search-toggle-btn" class="toggle" data-active="false" aria-pressed="false" data-tooltip="Hill-climb search">Search</button>
             <div id="search-options" hidden>
-              <input id="steps-input" type="number" value="10" min="1" max="200" aria-label="Search steps" title="Visibility evaluations spent hill-climbing, not UI steps -- a full sweep needs about 25" />
+              <label for="steps-input">Evaluations</label><input id="steps-input" type="number" value="10" min="1" max="200" aria-label="Search steps" title="Visibility evaluations spent hill-climbing, not UI steps -- a full sweep needs about 25" />
             </div>
-            <button id="policy-toggle-btn" class="toggle" data-active="true" aria-pressed="true" data-tooltip="Answer with the trained policy">policy</button>
-            <button id="compare-btn" class="btn btn-outline btn-sm" data-tooltip="Answer four ways and compare">compare</button>
-            <button id="sweep-btn" class="btn btn-outline btn-sm" data-tooltip="Run 20 sampled instructions and show the spread">sweep 20</button>
+            <button id="policy-toggle-btn" class="toggle" data-active="true" aria-pressed="true" data-tooltip="Answer with the trained policy">Learned policy</button>
+            <p class="toolbar-note">Turn both off to apply instructions directly.</p>
+            <span class="toolbar-label">Experiments</span>
+            <button id="compare-btn" class="btn btn-outline btn-sm" data-tooltip="Answer four ways and compare">Compare methods</button>
+            <button id="sweep-btn" class="btn btn-outline btn-sm" data-tooltip="Run 20 sampled instructions and show the spread">Sweep 20</button>
           </div>
+          </details>
 
           <div id="input-row">
             <button id="mic-btn" aria-label="Record voice command" data-tooltip="Push to talk">
@@ -125,11 +170,12 @@
                 <span></span><span></span><span></span><span></span><span></span>
               </div>
             </button>
-            <textarea id="text-input" rows="1" placeholder="a bit less soft tissue"></textarea>
-            <button id="send-btn" aria-label="Send" data-tooltip="Send" disabled>
+            <textarea id="text-input" rows="2" aria-label="Instruction" placeholder="Describe what you want to see…"></textarea>
+            <button id="send-btn" aria-label="Apply instruction" data-tooltip="Apply instruction" disabled>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
             </button>
           </div>
+          <p class="composer-hint">Enter to apply <span>·</span> Shift + Enter for a new line</p>
         </div>
       </section>
     </div>
@@ -137,7 +183,7 @@
     <dialog id="commands-modal" aria-labelledby="commands-modal-title">
       <div id="commands-modal-header">
         <h2 id="commands-modal-title">Command Reference</h2>
-        <button id="commands-modal-close" class="btn btn-ghost btn-icon" aria-label="Close" data-tooltip="Close">×</button>
+        <button id="commands-modal-close" class="btn btn-ghost btn-icon" aria-label="Close" data-tooltip="Close"><svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg></button>
       </div>
       <div id="commands-list"></div>
     </dialog>
@@ -163,7 +209,7 @@
             <h2 id="about-modal-title">Conversational Transfer Functions</h2>
           </div>
           <button id="about-modal-close" class="btn btn-ghost btn-icon" type="button"
-                  aria-label="Close About">×</button>
+                  aria-label="Close About"><svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg></button>
         </header>
         <div class="about-body">
           <p>Explore medical CT volume rendering with typed or spoken instructions.</p>

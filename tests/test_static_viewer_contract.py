@@ -230,10 +230,9 @@ def test_app_defines_grouped_eight_class_anatomy_metadata():
     assert "updateTelemetry(state.current.class_visibility, state.current.class_brightness)" in app
 
 
-def test_app_compare_and_curve_use_shared_anatomy_metadata():
+def test_app_compare_uses_shared_anatomy_metadata():
     app = read("app.js")
     assert "ANATOMY_CLASSES.map" in app
-    assert "collision" in app.lower()
     assert "CLASS_ORDER = ANATOMY_CLASSES.map" in app
 
 
