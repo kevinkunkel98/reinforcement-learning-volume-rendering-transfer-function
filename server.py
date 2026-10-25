@@ -377,31 +377,61 @@ def _no_visible_change_hint(cmd, before_step, after_step):
 RESTORE_BELOW_SHARE = 0.001
 
 
+def _is_restore(sub, class_visibility):
+    """An opacity increase of a class whose share is below RESTORE_BELOW_SHARE."""
+    if sub.get("attribute") != "opacity" or sub.get("direction") != "increase":
+        return False
+    target = sub.get("target")
+    share = class_visibility.get(target) if isinstance(target, str) else None
+    return share is not None and share < RESTORE_BELOW_SHARE
+
+
+def _class_reset(target):
+    return {"target": target, "attribute": None, "direction": "reset", "strength": None}
+
+
 def restore_hidden(cmd, class_visibility):
     """`cmd` with every opacity increase of a hidden class -- its share in
     `class_visibility` below RESTORE_BELOW_SHARE -- replaced by a class reset
     of it, and the classes so restored, in order. Unsupported classes (share
     None), missing shares and every other kind of command are left alone; a
-    compound keeps its other sub-commands."""
+    compound keeps its other sub-commands. This is the command the step
+    stores; `split_restores` is how it is applied."""
     if not class_visibility or not isinstance(cmd, dict) or "camera" in cmd:
         return cmd, []
-    restored = []
+    subs = cmd["compound"] if isinstance(cmd.get("compound"), list) else [cmd]
+    restored = [sub["target"] for sub in subs if _is_restore(sub, class_visibility)]
+    if not restored:
+        return cmd, []
+    new = [_class_reset(sub["target"]) if _is_restore(sub, class_visibility) else sub for sub in subs]
+    return ({**cmd, "compound": new} if "compound" in cmd else new[0]), restored
 
-    def rewrite(sub):
-        if sub.get("attribute") != "opacity" or sub.get("direction") != "increase":
-            return sub
-        target = sub.get("target")
-        share = class_visibility.get(target) if isinstance(target, str) else None
-        if share is None or share >= RESTORE_BELOW_SHARE:
-            return sub
-        restored.append(target)
-        return {"target": target, "attribute": None, "direction": "reset", "strength": None}
 
-    if isinstance(cmd.get("compound"), list):
-        new = {**cmd, "compound": [rewrite(sub) for sub in cmd["compound"]]}
-    else:
-        new = rewrite(cmd)
-    return (new, restored) if restored else (cmd, [])
+def split_restores(cmd, class_visibility):
+    """(restored classes, the rest of `cmd` -- None, one sub-command or a
+    compound). The restores are applied exactly first; the rest then takes
+    the normal path from that state, so "add liver and more lungs" after
+    "show only skeleton" still gets the policy for the lungs."""
+    _new, restored = restore_hidden(cmd, class_visibility)
+    if not restored:
+        return [], cmd
+    rest = [sub for sub in cmd["compound"] if not _is_restore(sub, class_visibility)] if "compound" in cmd else []
+    if not rest:
+        return restored, None
+    return restored, (rest[0] if len(rest) == 1 else {**cmd, "compound": rest})
+
+
+def _only_resets(cmd):
+    """A reset (full or class), or a compound of nothing else: an intended
+    exact command, never a policy/search fallback."""
+    subs = cmd["compound"] if isinstance(cmd.get("compound"), list) else [cmd]
+    return all(sub.get("direction") == "reset" for sub in subs)
+
+
+def _restore_understood(restored, rest):
+    """"restore the liver and lungs", "+ more lungs" for the rest."""
+    said = f"restore the {commands._and_list(commands._labels(restored))}"
+    return " + ".join([said] + ([commands.describe_command(rest)] if rest is not None else []))
 
 
 def _restore_message(classes):
@@ -1137,28 +1167,45 @@ class Session:
         # search toggle) keep working unchanged.
         effective_mode = mode or ("search" if search else "exact")
 
-        cmd, restored = restore_hidden(cmd, self.history[self.cursor].get("class_visibility"))
-        if restored and "understood" in parser_meta:
-            parser_meta = {**parser_meta, "understood": commands.describe_command(cmd)}
+        # "add X" of a hidden class restores it (RESTORE_BELOW_SHARE): the
+        # step stores the rewritten command; the restores are applied
+        # exactly first and only the rest (`run_cmd`) takes the mode's path,
+        # from `base_params`.
+        visibility_now = self.history[self.cursor].get("class_visibility")
+        stored_cmd, restored = restore_hidden(cmd, visibility_now)
+        reset_params = initial_params(self.task_version)
+        if restored:
+            _restored, run_cmd = split_restores(cmd, visibility_now)
+            base_params = apply_command(_class_reset(restored if len(restored) > 1 else restored[0]),
+                                        current_params, reset_params=reset_params)
+            if "understood" in parser_meta:
+                parser_meta = {**parser_meta, "understood": _restore_understood(restored, run_cmd)}
+        else:
+            run_cmd, base_params = cmd, current_params
 
         message = None
         refine_job = None
-        if effective_mode == "policy":
+        if run_cmd is None or _only_resets(run_cmd):
+            # A reset is an intended exact command, not a policy fallback.
+            new_params = (base_params if run_cmd is None
+                          else apply_command(run_cmd, base_params, reset_params=reset_params))
+            actual_mode, search_flag = "exact", False
+        elif effective_mode == "policy":
             try:
                 if defer_refine and self.policy_refine_evaluations > 0:
-                    new_params, refine_job = self._fast_policy(cmd, current_params)
+                    new_params, refine_job = self._fast_policy(run_cmd, base_params)
                 else:
-                    new_params, _goal_text = self._run_policy(cmd, current_params)
+                    new_params, _goal_text = self._run_policy(run_cmd, base_params)
                 actual_mode, search_flag = "policy", False
             except ValueError as exc:
                 message = str(exc)
-                new_params = apply_command(cmd, current_params, reset_params=initial_params(self.task_version))
+                new_params = apply_command(run_cmd, base_params, reset_params=reset_params)
                 actual_mode, search_flag = "exact", False
         elif effective_mode == "search":
             try:
-                new_params, _goal_text = self._run_search(cmd, current_params, steps)
+                new_params, _goal_text = self._run_search(run_cmd, base_params, steps)
                 actual_mode, search_flag = "search", True
-                if np.array_equal(new_params, current_params):
+                if np.array_equal(new_params, base_params):
                     # hill_climb ran -- search_flag stays True -- but a
                     # budget short of a full sweep (12 groups x 2 signs, plus
                     # 1 to score the start = ~25 evaluations) can spend its
@@ -1171,11 +1218,12 @@ class Session:
                                f"start; a full sweep needs about {full_sweep}")
             except (ValueError, FileNotFoundError, KeyError) as exc:
                 message = str(exc)
-                new_params = apply_command(cmd, current_params, reset_params=initial_params(self.task_version))
+                new_params = apply_command(run_cmd, base_params, reset_params=reset_params)
                 actual_mode, search_flag = "exact", False
         else:
-            new_params = apply_command(cmd, current_params, reset_params=initial_params(self.task_version))
+            new_params = apply_command(run_cmd, base_params, reset_params=reset_params)
             actual_mode, search_flag = "exact", False
+        cmd = stored_cmd
 
         if parser_meta["parser_fallback"] and not message:
             # The viewer asked for the LLM parser and got a rule parse; say so

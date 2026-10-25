@@ -886,10 +886,23 @@ def test_policy_mode_non_goal_command_falls_back_with_message(ts_session):
     s = ts_session
     s.policy_provider = lambda: _StubPolicy(np.zeros(len(CONTROLLABLE)))
 
-    state = s.command("reset", mode="policy")
+    state = s.command("shift the bone peak up", mode="policy")
 
     assert state["current"]["mode"] == "exact"
     assert state["current"]["message"]
+
+
+@pytest.mark.parametrize("text", ["reset", "revert the skeleton"])
+@pytest.mark.parametrize("policy", [True, False])
+def test_policy_mode_reset_is_exact_without_a_fallback_message(ts_session, text, policy):
+    s = ts_session
+    s.policy_provider = (lambda: _StubPolicy(np.zeros(len(CONTROLLABLE)))) if policy else (lambda: None)
+    s.command("more bone", mode="exact")
+
+    state = s.command(text, mode="policy")
+
+    assert state["current"]["mode"] == "exact"
+    assert state["current"]["message"] is None
 
 
 def test_policy_mode_class_reset_compound_falls_back_to_exact(ts_session):
@@ -2062,9 +2075,9 @@ def test_add_a_hidden_class_restores_it_and_says_so(ts_session):
 
     step = state["current"]
     assert step["cmd_dict"] == _reset("liver")
-    assert step["understood"] == "reset the liver"
+    assert step["understood"] == "restore the liver"
     assert step["mode"] == "exact" and not step.get("refining")
-    assert "liver was hidden -- restored to its start" in step["message"]
+    assert step["message"] == "liver was hidden -- restored to its start"
     expected = server.apply_command(_reset("liver"), before, reset_params=server.initial_params(s.task_version))
     np.testing.assert_allclose(step["params"], expected)
 
@@ -2078,15 +2091,71 @@ def test_add_a_visible_class_is_untouched(ts_session):
     assert not step["message"] or "restored" not in step["message"]
 
 
+def _hide(s, *classes):
+    s.history[s.cursor]["class_visibility"] = {**s.history[s.cursor]["class_visibility"],
+                                               **{c: 0.0 for c in classes}}
+
+
+def test_split_restores_separates_the_restored_classes_from_the_rest():
+    cmd = {"compound": [_rel("liver"), _rel("heart"), _rel("lungs"), _reset("skeleton")]}
+    assert server.split_restores(cmd, _HIDDEN_LIVER) == (
+        ["liver", "lungs"], {"compound": [_rel("heart"), _reset("skeleton")]})
+    assert server.split_restores({"compound": [_rel("liver"), _rel("heart")]}, _HIDDEN_LIVER) == (
+        ["liver"], _rel("heart"))
+    assert server.split_restores(_rel("liver"), _HIDDEN_LIVER) == (["liver"], None)
+    assert server.split_restores(_rel("heart"), _HIDDEN_LIVER) == ([], _rel("heart"))
+
+
+def test_restoring_two_classes_reads_as_one_restore(ts_session):
+    s = ts_session
+    _hide(s, "liver", "lungs")
+
+    step = s.command("add liver and lungs", parser="hybrid", mode="policy")["current"]
+
+    assert step["cmd_dict"] == {"compound": [_reset("liver"), _reset("lungs")]}
+    assert step["understood"] == "restore the liver and lungs"
+    assert step["message"] == "liver and lungs were hidden -- restored to their start"
+
+
+def test_mixed_compound_restores_first_then_runs_the_rest_through_the_policy(ts_session):
+    s = ts_session
+    s.policy_provider = lambda: _StubPolicy(np.linspace(-0.4, 0.4, len(CONTROLLABLE)))
+    _hide(s, "liver")
+    before = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    restored = server.apply_command(_reset("liver"), before, reset_params=server.initial_params(s.task_version))
+    expected, _ = s._run_policy(_rel("lungs"), restored.copy())
+
+    step = s.command("add liver and more lungs", parser="hybrid", mode="policy")["current"]
+
+    assert step["cmd_dict"] == {"compound": [_reset("liver"), _rel("lungs")]}
+    assert step["understood"] == "restore the liver + more lungs"
+    assert step["mode"] == "policy"
+    assert step["message"] == "liver was hidden -- restored to its start"
+    np.testing.assert_allclose(step["params"], expected)
+
+
+def test_mixed_compound_defers_the_refine_from_the_restored_state(two_stage):
+    s = two_stage
+    _hide(s, "liver")
+    before = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    restored = server.apply_command(_reset("liver"), before, reset_params=server.initial_params(s.task_version))
+
+    step = s.command("add liver and more lungs", mode="policy", defer_refine=True)["current"]
+
+    assert step["refining"] is True
+    np.testing.assert_allclose(s._pending_refines[step["id"]]["start_params"], restored)
+
+
 def test_restore_message_joins_an_existing_message(ts_session):
     s = ts_session
     s.policy_provider = lambda: None
-    s.history[s.cursor]["class_visibility"] = {**s.history[s.cursor]["class_visibility"],
-                                               "liver": 0.0, "lungs": 0.0}
+    _hide(s, "liver")
+    before = np.array(s.history[s.cursor]["params"], dtype=np.float64)
 
-    state = s.command("add liver and lungs", mode="policy")
+    step = s.command("add liver and more lungs", mode="policy")["current"]
 
-    step = state["current"]
-    assert step["cmd_dict"] == {"compound": [_reset("liver"), _reset("lungs")]}
-    assert step["message"] == (server.NO_POLICY_CHECKPOINT_MESSAGE
-                               + " · liver and lungs were hidden -- restored to their start")
+    assert step["mode"] == "exact"
+    assert step["message"] == server.NO_POLICY_CHECKPOINT_MESSAGE + " · liver was hidden -- restored to its start"
+    reset_params = server.initial_params(s.task_version)
+    expected = server.apply_command(_rel("lungs"), server.apply_command(_reset("liver"), before, reset_params))
+    np.testing.assert_allclose(step["params"], expected)
