@@ -43,6 +43,7 @@ import policy as policy_module
 import render as render_module
 from render import features, grab, render
 from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
+from rl.colour_guard import colour_guard
 from rl.keep_repair import keep_repair
 from rl.oneshot_env import build_observation
 from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
@@ -542,6 +543,13 @@ KEEP_REPAIR = os.environ.get("KEEP_REPAIR", "1") != "0"
 # (`keep_repair(include_occluders=True)`). Off until the measurement in
 # docs/experiments/2026-10-23-keep-repair-occluders.md decides it.
 KEEP_REPAIR_OCCLUDERS = os.environ.get("KEEP_REPAIR_OCCLUDERS", "0") == "1"
+# After the keep repair, give every class its colour back unless the command
+# asked for its brightness, and keep the hue of the ones it did ask about
+# (rl.colour_guard): the policy recolours hidden classes and occluders for
+# free, and chained in the viewer a hidden heart came back white, a skeleton
+# black (2026-10-25). Luminance -- what `bright` measures -- is kept, so the
+# goal metric only sees it where a colour garbled earlier is repaired.
+COLOUR_GUARD = os.environ.get("COLOUR_GUARD", "1") != "0"
 
 
 def initial_params(task_version: str = None) -> np.ndarray:
@@ -848,6 +856,7 @@ class Session:
         self.policy_steps = POLICY_STEPS
         self.keep_repair = KEEP_REPAIR
         self.keep_repair_occluders = KEEP_REPAIR_OCCLUDERS
+        self.colour_guard = COLOUR_GUARD
         # step id -> what `_refine_policy`/`_apply_refined` need to finish a
         # two-stage policy answer (see `command(defer_refine=True)`).
         self._pending_refines = {}
@@ -1014,19 +1023,25 @@ class Session:
                "layers": layers, "start_params": current_params.copy(),
                "proposal": proposal.copy(), "keep_repair": self.keep_repair,
                "keep_repair_occluders": self.keep_repair_occluders,
+               "colour_guard": self.colour_guard,
+               "reference_params": initial_params(self.task_version),
                "evaluations": self.policy_refine_evaluations}
         return proposal, job
 
     @staticmethod
     def _keep_repaired(job, params):
-        if not job["keep_repair"]:
-            return params
+        """The keep repair, then the colour guard, each behind its switch:
+        how both policy stages end."""
         instruction = job["instruction"]
-        repaired, _n_evals = keep_repair(job["model"], instruction["goal"], job["start_params"], params,
-                                         layers=job["layers"], weights=instruction.get("weights"),
-                                         start_agg=job["start_agg"],
-                                         include_occluders=job.get("keep_repair_occluders", False))
-        return repaired
+        if job["keep_repair"]:
+            params, _n_evals = keep_repair(job["model"], instruction["goal"], job["start_params"], params,
+                                           layers=job["layers"], weights=instruction.get("weights"),
+                                           start_agg=job["start_agg"],
+                                           include_occluders=job.get("keep_repair_occluders", False))
+        if job.get("colour_guard"):
+            params = colour_guard(instruction["goal"], job["start_params"], params, job["reference_params"],
+                                  weights=instruction.get("weights"))
+        return params
 
     def _run_policy(self, cmd, current_params):
         """mode="policy": the policy's proposal (`_policy_proposal`), the warm
@@ -1037,14 +1052,14 @@ class Session:
 
     def _fast_policy(self, cmd, current_params):
         """The two-stage answer's first stage: the policy's proposal with the
-        keep repair but without the warm search. Returns the params and the
+        keep repair and colour guard but without the warm search. Returns the params and the
         `job` `_refine_policy` finishes later."""
         proposal, job = self._policy_proposal(cmd, current_params)
         return self._keep_repaired(job, proposal), job
 
     @staticmethod
     def _refine_policy(job):
-        """The warm search and keep repair from the policy's proposal -- the
+        """The warm search, keep repair and colour guard from the policy's proposal -- the
         same functions in the same order the synchronous `_run_policy` ends
         with, so the final params match it exactly. Pure visibility-model
         work (no rendering, no session state), so it may run in a worker

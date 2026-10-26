@@ -710,8 +710,10 @@ def ts_session(monkeypatch):
     # The tests below pin what the policy itself proposes; the viewer's warm
     # search on top of it has its own tests (test_policy_mode_refinement_*).
     s.policy_refine_evaluations = 0
-    # ... and so is the keep repair after it (test_policy_mode_keep_repair_*).
+    # ... and so is the keep repair after it (test_policy_mode_keep_repair_*),
+    # and the colour guard after that (test_policy_mode_colour_guard_*).
     s.keep_repair = False
+    s.colour_guard = False
     try:
         yield s
     finally:
@@ -802,6 +804,68 @@ def test_policy_mode_keep_repair_off_is_the_bare_policy(ts_session, monkeypatch)
     assert called == []
     start = np.array(s.history[s.cursor]["params"], dtype=np.float64)
     np.testing.assert_allclose(params, server.apply_controllable(start, action))
+
+
+def test_viewer_guards_the_policys_colours_by_default():
+    assert server.COLOUR_GUARD is True
+    assert _fresh_session().colour_guard is True
+
+
+def test_policy_mode_colour_guard_on_is_the_guarded_policy(ts_session):
+    """With the switch on, policy mode returns `colour_guard` of what it
+    returned with the switch off: measured from the command's own start, with
+    the session's start TF as the reference palette."""
+    from rl.colour_guard import colour_guard
+    s = ts_session
+    s.policy_provider = lambda: _StubPolicy(np.linspace(-0.4, 0.4, len(CONTROLLABLE)))
+    start = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    bare = _policy_mode_params(s, "show only bone")
+    s.colour_guard = True
+    guarded = _policy_mode_params(s, "show only bone")
+
+    cmd, _ = server.parse_command_with_meta("show only bone", parser="rule")
+    model = s.model_for_volume(server._dataset_name)
+    _start_agg, instruction = s.instruction_for(cmd, model, start, s.history[s.cursor].get("anatomy_layers"))
+    expected = colour_guard(instruction["goal"], start, bare, server.initial_params(s.task_version))
+    np.testing.assert_allclose(guarded, expected)
+    assert not np.array_equal(guarded, bare)          # the stub recoloured something
+    for i in range(transfer.N_PEAKS):                  # opacity, width, centre are the policy's
+        np.testing.assert_array_equal(guarded[i * 6:i * 6 + 3], bare[i * 6:i * 6 + 3])
+
+
+def test_policy_mode_colour_guard_off_is_the_bare_policy(ts_session, monkeypatch):
+    s = ts_session
+    action = np.linspace(-0.4, 0.4, len(CONTROLLABLE))
+    s.policy_provider = lambda: _StubPolicy(action)
+    called = []
+    monkeypatch.setattr(server, "colour_guard", lambda *a, **k: called.append(1))
+
+    params = _policy_mode_params(s, "more bone")
+
+    assert called == []
+    start = np.array(s.history[s.cursor]["params"], dtype=np.float64)
+    np.testing.assert_allclose(params, server.apply_controllable(start, action))
+
+
+def test_both_policy_stages_guard_colour_after_the_keep_repair(ts_session, monkeypatch):
+    s = ts_session
+    s.policy_provider = lambda: _StubPolicy(np.linspace(-0.4, 0.4, len(CONTROLLABLE)))
+    s.policy_refine_evaluations = 30
+    s.keep_repair = True
+    s.colour_guard = True
+    seen = []
+    real_keep, real_guard = server.keep_repair, server.colour_guard
+    monkeypatch.setattr(server, "keep_repair", lambda *a, **k: seen.append("keep") or real_keep(*a, **k))
+    monkeypatch.setattr(server, "colour_guard", lambda *a, **k: seen.append("guard") or real_guard(*a, **k))
+
+    sync = s.command("more bone", mode="policy")["current"]["params"]
+    s.back()
+    seen.clear()
+    fast = s.command("more bone", mode="policy", defer_refine=True)["current"]
+    refined = s._refine_policy(s._pending_refines[fast["id"]])
+
+    assert seen == ["keep", "guard", "keep", "guard"]
+    np.testing.assert_allclose(refined, sync)
 
 
 def test_viewer_leaves_occluders_out_of_the_keep_repair_by_default():
