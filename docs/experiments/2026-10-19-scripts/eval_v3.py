@@ -11,10 +11,13 @@ change|). With --keep-occ also every answer after rl.keep_repair with
 include_occluders=True (`<name>_keepocc`, same extras), and the drift
 (`<name>_odrift`, sum of |log10 vis change|; `<name>_obdrift`, of
 |brightness change|) of the instruction's weight-0 occluders, which `_drift`
-does not cover. --no-search skips the + 30 / 200
+does not cover. With --colour (implies --keep) also every `_keep` answer
+after rl.colour_guard (`<name>_keep_colour`, its evaluations and
+milliseconds are the keep repair's plus the guard's), reference palette the
+task's start TF. --no-search skips the + 30 / 200
 searches. Without the new flags the output is what it was.
 
-    eval_v3.py CKPT OUT.json SPLIT LO HI [--cold] [--plan] [--keep] [--keep-occ] [--no-search]
+    eval_v3.py CKPT OUT.json SPLIT LO HI [--cold] [--plan] [--keep] [--keep-occ] [--colour] [--no-search]
 """
 import json
 import sys
@@ -27,19 +30,22 @@ sys.path.insert(0, ".")
 import goals  # noqa: E402
 from rl import vis_eval as ve  # noqa: E402
 from rl.baselines import hill_climb  # noqa: E402
+from rl.colour_guard import colour_guard  # noqa: E402
 from rl.keep_repair import keep_repair, mentioned_classes, occluder_classes  # noqa: E402
 
 ckpt, out, split, lo, hi = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
 cold = "--cold" in sys.argv
 planning = "--plan" in sys.argv
 keep_occ = "--keep-occ" in sys.argv
-keep = "--keep" in sys.argv or keep_occ
-repairs = [(suffix, include) for suffix, include, on in (("_keep", False, "--keep" in sys.argv),
+colour = "--colour" in sys.argv
+keep = "--keep" in sys.argv or keep_occ or colour
+repairs = [(suffix, include) for suffix, include, on in (("_keep", False, "--keep" in sys.argv or colour),
                                                           ("_keepocc", True, keep_occ)) if on]
 search = "--no-search" not in sys.argv
 meta = ve.load_policy_metadata(ckpt)
 episodes = ve.fixed_episodes(split, 300, seed=0, formulation="one_shot", policy_metadata=meta)[lo:hi]
 policy = ve._load_sac(ckpt)
+reference = goals.starting_params(meta.get("task_version", "v1"))
 rows = []
 for i, ep in enumerate(episodes, start=lo):
     env, obs, info = ve._frozen_one_shot_env(ep["volume"], ep["start_params"], ep["instruction"],
@@ -76,6 +82,14 @@ for i, ep in enumerate(episodes, start=lo):
             row[name + suffix + "_ms"] = (time.perf_counter() - started) * 1000.0
             row[name + suffix + "_evals"] = n_evals
             record(name + suffix, fixed)
+            if colour and suffix == "_keep":
+                started = time.perf_counter()
+                guarded = colour_guard(env._instruction["goal"], start, fixed, reference,
+                                       weights=env._instruction.get("weights"))
+                row[name + "_keep_colour_ms"] = (row[name + "_keep_ms"]
+                                                 + (time.perf_counter() - started) * 1000.0)
+                row[name + "_keep_colour_evals"] = n_evals
+                record(name + "_keep_colour", guarded)
 
     def proposal_and_search(name, params):
         record(name, params)
