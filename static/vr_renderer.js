@@ -259,7 +259,14 @@ void main() { outColor = texture(uTex, vUv); }`;
 
     // Draw the volume for one view into the bound framebuffer/viewport.
     // `model`: data mm -> room m; `view`: room -> eye; `proj`: eye -> clip.
-    function drawVolume(model, view, proj) {
+    // `blend`: composite over what is already in the framebuffer (the
+    // cleared background) instead of overwriting it. Needed when drawing
+    // straight into the XR layer: the volume pass is scissored to the box's
+    // rectangle, and an opaque write left a black box over any non-black
+    // background (the dark-red recording background, 2026-11-03). Not for
+    // the offscreen target, which is never cleared -- there the overwrite
+    // is what replaces last frame's pixels.
+    function drawVolume(model, view, proj, { blend = false } = {}) {
       const mv = window.vrMath.multiply(view, model);
       const invMvp = window.vrMath.invert(window.vrMath.multiply(proj, mv));
       const eye = window.vrMath.transformPoint(window.vrMath.invert(mv), [0, 0, 0]);
@@ -290,10 +297,17 @@ void main() { outColor = texture(uTex, vUv); }`;
       const axis = window.vrMath.transformPoint(proj, [0, 0, -1]);
       gl.uniform2f(u.uFovCenter, axis[0], axis[1]);
       gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.BLEND);
+      if (blend) {
+        // The shader outputs premultiplied colour (acc.rgb is weighted by alpha).
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      } else {
+        gl.disable(gl.BLEND);
+      }
       gl.bindVertexArray(quad);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.bindVertexArray(null);
+      gl.disable(gl.BLEND);
     }
 
     // HUD quad (corners in data mm, placed by `model` without rotation).
@@ -390,10 +404,14 @@ void main() { outColor = texture(uTex, vUv); }`;
       gl.uniform4f(u.uRect, (x + 0.5) / offscreen.w, (y + 0.5) / offscreen.h,
         (x + w - 0.5) / offscreen.w, (y + h - 0.5) / offscreen.h);
       gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.BLEND);
+      // Composite the premultiplied volume image over the cleared background
+      // (see drawVolume's `blend`).
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.bindVertexArray(quad);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.bindVertexArray(null);
+      gl.disable(gl.BLEND);
     }
 
     return {
@@ -542,7 +560,7 @@ void main() { outColor = texture(uTex, vUv); }`;
           gl.enable(gl.SCISSOR_TEST);
           scissorTo(ndc.get(view), full);
           if (reduced) scene.upscale(rects.get(view));
-          else scene.drawVolume(model, view.transform.inverse.matrix, view.projectionMatrix);
+          else scene.drawVolume(model, view.transform.inverse.matrix, view.projectionMatrix, { blend: true });
           gl.disable(gl.SCISSOR_TEST);
         }
         scene.drawHud(hudModel, view.transform.inverse.matrix, view.projectionMatrix);
