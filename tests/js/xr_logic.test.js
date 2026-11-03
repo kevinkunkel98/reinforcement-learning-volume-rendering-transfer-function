@@ -433,6 +433,34 @@ test("strideDownsample by 1 returns the input untouched", () => {
   assert.deepEqual(result.dims, [3, 2, 1]);
 });
 
+test("averageDownsample takes the mean of each factor^3 block, partial blocks at the edges", () => {
+  // 3 x 2 x 2, values = x + 10 y + 100 z
+  const dims = [3, 2, 2];
+  const values = Float32Array.from({ length: 12 }, (_, i) => (i % 3) + 10 * (Math.floor(i / 3) % 2) + 100 * Math.floor(i / 6));
+  const { values: out, dims: outDims } = xr.averageDownsample(values, dims, 2);
+  assert.deepEqual(outDims, [2, 1, 1]);
+  // block x 0..1: mean of x (0.5) + 10 * mean y (0.5) + 100 * mean z (0.5)
+  assert.ok(Math.abs(out[0] - (0.5 + 5 + 50)) < 1e-6);
+  // edge block x = 2 only
+  assert.ok(Math.abs(out[1] - (2 + 5 + 50)) < 1e-6);
+});
+
+test("averageDownsample keeps the array type and returns the input for factor 1", () => {
+  const input = Int16Array.from([1, 3, 5, 7, 9, 11, 13, 15]);
+  assert.equal(xr.averageDownsample(input, [2, 2, 2], 1).values, input);
+  const out = xr.averageDownsample(input, [2, 2, 2], 2).values;
+  assert.ok(out instanceof Int16Array);
+  assert.deepEqual(Array.from(out), [8]);
+});
+
+test("modeDownsample keeps the most common label, ties go to a labelled class", () => {
+  const dims = [2, 2, 2];
+  assert.deepEqual(Array.from(xr.modeDownsample(Uint8Array.from([3, 3, 3, 0, 0, 0, 0, 0]), dims, 2).values), [0]);
+  assert.deepEqual(Array.from(xr.modeDownsample(Uint8Array.from([3, 3, 3, 3, 0, 0, 0, 0]), dims, 2).values), [3]);
+  assert.deepEqual(Array.from(xr.modeDownsample(Uint8Array.from([2, 2, 5, 5, 5, 0, 0, 0]), dims, 2).values), [5]);
+  assert.deepEqual(Array.from(xr.modeDownsample(Uint8Array.from([5, 5, 5, 5, 2, 2, 2, 2]), dims, 2).values), [2]);
+});
+
 test("toSixteenBit picks Uint16 for non-negative data, rounding and clamping", () => {
   const out = xr.toSixteenBit(Float32Array.from([0, 35818.4, 70000]));
   assert.ok(out instanceof Uint16Array);

@@ -269,7 +269,7 @@
       // the uncropped volume's.
       origin = box.min.map((index, axis) => index * volumeMetadata.spacing[axis]);
     }
-    ({ values, dims } = logic.strideDownsample(values, dims, PERF.down));
+    ({ values, dims } = logic.averageDownsample(values, dims, PERF.down));
     const spacing = volumeMetadata.spacing.map((step) => step * PERF.down);
     if (PERF.tex === "f16") values = logic.toSixteenBit(values);
     buildImageData({ dimensions: dims, spacing }, values, origin);

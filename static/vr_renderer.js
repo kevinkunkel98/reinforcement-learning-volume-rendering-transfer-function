@@ -204,8 +204,9 @@ void main() { outColor = texture(uTex, vUv); }`;
     const logic = window.xrLogic;
     const max3d = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
     let { hu, labels, dims } = data;
-    ({ values: hu, dims } = logic.strideDownsample(hu, data.dims, down));
-    if (labels) labels = logic.strideDownsample(labels, data.dims, down).values;
+    // Averaged, not strided: see xrLogic.averageDownsample / modeDownsample.
+    ({ values: hu, dims } = logic.averageDownsample(hu, data.dims, down));
+    if (labels) labels = logic.modeDownsample(labels, data.dims, down).values;
     if (dims.some((d) => d > max3d)) throw new Error(`volume ${dims.join("x")} exceeds MAX_3D_TEXTURE_SIZE ${max3d}`);
     const spacing = data.spacing.map((s) => s * down);
     const huClamped = Float32Array.from(hu, (v) => Math.max(-1050, Math.min(2000, v)));

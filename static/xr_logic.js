@@ -388,6 +388,79 @@
     return { values: result, dims: out };
   }
 
+  // Visit each factor^3 block of `dims` (partial blocks at the far edges),
+  // calling visit(outIndex, srcIndex) for every source voxel in it.
+  function forEachBlockVoxel(dims, factor, visit) {
+    const [nx, ny, nz] = dims;
+    const out = dims.map((size) => Math.ceil(size / factor));
+    let dst = 0;
+    for (let k = 0; k < out[2]; k += 1) {
+      for (let j = 0; j < out[1]; j += 1) {
+        for (let i = 0; i < out[0]; i += 1, dst += 1) {
+          for (let dz = 0; dz < factor && k * factor + dz < nz; dz += 1) {
+            for (let dy = 0; dy < factor && j * factor + dy < ny; dy += 1) {
+              const row = nx * (j * factor + dy + ny * (k * factor + dz));
+              for (let dx = 0; dx < factor && i * factor + dx < nx; dx += 1) visit(dst, row + i * factor + dx);
+            }
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  // Mean of each factor^3 block. Keeping every factor-th voxel
+  // (strideDownsample) aliases: at down=2 a 1.5 mm body scan rendered grainy,
+  // with streaks along the slices in the headset (2026-11-03); averaging is
+  // the same 8x fewer voxels at load-time cost only.
+  function averageDownsample(values, dims, factor) {
+    if (factor === 1) return { values, dims };
+    const outDims = dims.map((size) => Math.ceil(size / factor));
+    const n = outDims[0] * outDims[1] * outDims[2];
+    const sum = new Float64Array(n);
+    const count = new Uint8Array(n);
+    forEachBlockVoxel(dims, factor, (dst, src) => { sum[dst] += values[src]; count[dst] += 1; });
+    const result = new values.constructor(n);
+    const integer = !(values instanceof Float32Array || values instanceof Float64Array);
+    for (let i = 0; i < n; i += 1) result[i] = integer ? Math.round(sum[i] / count[i]) : sum[i] / count[i];
+    return { values: result, dims: outDims };
+  }
+
+  // Most common label of each factor^3 block; a tie goes to a labelled class
+  // over 0 (unlabelled), then to the smaller id. Smoother organ edges than
+  // whichever corner voxel strideDownsample keeps.
+  function modeDownsample(labels, dims, factor) {
+    if (factor === 1) return { values: labels, dims };
+    const outDims = dims.map((size) => Math.ceil(size / factor));
+    const n = outDims[0] * outDims[1] * outDims[2];
+    const result = new labels.constructor(n);
+    const counts = new Uint16Array(256);
+    const seen = [];
+    let current = -1;
+    const flush = () => {
+      if (current < 0) return;
+      let best = 0;
+      let bestCount = -1;
+      for (const label of seen) {
+        const c = counts[label];
+        const better = c > bestCount
+          || (c === bestCount && ((best === 0 && label !== 0) || (label !== 0 && label < best)));
+        if (better) { best = label; bestCount = c; }
+        counts[label] = 0;
+      }
+      seen.length = 0;
+      result[current] = best;
+    };
+    forEachBlockVoxel(dims, factor, (dst, src) => {
+      if (dst !== current) { flush(); current = dst; }
+      const label = labels[src];
+      if (counts[label] === 0) seen.push(label);
+      counts[label] += 1;
+    });
+    flush();
+    return { values: result, dims: outDims };
+  }
+
   // The narrowest 16-bit integer array that holds the data, for vtk.js to
   // upload as a half-float (R16F) texture with preferSizeOverAccuracy. CT HU
   // and our label bands are integer-valued, so rounding loses nothing;
@@ -522,7 +595,7 @@
     summarizeStep, parseNote, stepDeltas, hudPlacement, withXRLayerContext, xrPlacement,
     PERF_DEFAULTS, HEADSET_PERF_DEFAULTS, parsePerfFlags, diagnosticLines,
     physicalRotation, createStickRotator, centeredUserMatrix, rotatedPhysicalFrame,
-    bodyBoundingBox, cropVolume, strideDownsample, toSixteenBit,
+    bodyBoundingBox, cropVolume, strideDownsample, averageDownsample, modeDownsample, toSixteenBit,
     ADAPT_DEFAULTS, ADAPT_INITIAL, adaptSampleDistance, SPLIT_MAX_LOAD, splitLoad,
   };
 });
