@@ -168,3 +168,33 @@ def test_guard_leaves_brightness_features_unchanged_for_brightness_targets():
     opacity_guarded, lum_guarded = visibility.label_transfer_tables(guarded)
     np.testing.assert_allclose(lum_guarded, lum_answer, atol=1e-6)
     np.testing.assert_array_equal(opacity_guarded, opacity_answer)
+
+
+# --- darkening floor (hue.MIN_LUMINANCE_FRACTION) -------------------------
+
+def test_requested_darkening_stops_at_the_floor():
+    """2026-11-03: "darken kidney and liver strongly" took the liver to black,
+    a hole in the image. The guard lifts a darkened class to the floor."""
+    import hue
+    start = REFERENCE.copy()
+    answer = _set_rgb(start, "liver", (0.0, 0.0, 0.0))
+    guarded = colour_guard(_brightness_goal("liver", -0.4), start, answer, REFERENCE)
+    liver = np.array(transfer.ANATOMICAL_COLOURS["liver"])
+    np.testing.assert_allclose(_rgb(guarded, "liver"),
+                               scale_hue(liver, hue.MIN_LUMINANCE_FRACTION * luminance(liver)))
+
+
+def test_darkening_above_the_floor_is_the_answers():
+    liver = np.array(transfer.ANATOMICAL_COLOURS["liver"])
+    start = REFERENCE.copy()
+    answer = _set_rgb(start, "liver", scale_hue(liver, 0.5 * luminance(liver)))
+    guarded = colour_guard(_brightness_goal("liver", -0.4), start, answer, REFERENCE)
+    assert luminance(_rgb(guarded, "liver")) == pytest.approx(0.5 * luminance(liver))
+
+
+def test_darkening_a_class_already_below_the_floor_does_not_brighten_it():
+    liver = np.array(transfer.ANATOMICAL_COLOURS["liver"])
+    start = _set_rgb(REFERENCE, "liver", scale_hue(liver, 0.03))
+    answer = _set_rgb(start, "liver", (0.0, 0.0, 0.0))
+    guarded = colour_guard(_brightness_goal("liver", -0.4), start, answer, REFERENCE)
+    assert luminance(_rgb(guarded, "liver")) == pytest.approx(0.03)

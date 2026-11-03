@@ -29,7 +29,9 @@ Per class (one peak per goal class, `transfer.ANATOMICAL_PEAK_INDEX`):
 
 - brightness target in the goal (mask n != 0): the reference hue at the
   answer's luminance -- the requested brightening/darkening stays, the hue
-  comes back.
+  comes back -- but never darker than `hue.darkening_floor`
+  (MIN_LUMINANCE_FRACTION of the reference's luminance): "darken the liver
+  strongly" took it to black on 2026-11-03, a hole in the body.
 - no brightness target, colour before the command (`start_params`) has the
   reference hue (`hue_matches`): that colour, exactly. The answer's rgb is
   discarded.
@@ -54,55 +56,11 @@ import numpy as np
 
 import goals
 import transfer
-import visibility
+from hue import (  # noqa: F401  (re-exported: the guard's vocabulary)
+    DARK_LUMINANCE, HUE_MIN_COSINE, LUMINANCE, darkening_floor, hue_matches, luminance, scale_hue,
+)
 
 P = transfer.PARAMS_PER_PEAK
-LUMINANCE = visibility.LUMINANCE
-# Same hue: the angle between the colour and the reference colour in RGB is
-# at most ~18 deg. Red (0.95, 0.2, 0.2) against white is 38 deg, against its
-# start-noise shifts (rgb +-0.15, rl.oneshot_env.START_NOISE) <= 10 deg; liver
-# (0.75, 0.3, 0.2) fails it about half-way to white, at (1, 0.75, 0.65).
-HUE_MIN_COSINE = 0.95
-# Below this luminance a colour renders black and has no hue to compare.
-DARK_LUMINANCE = 0.02
-
-
-def luminance(rgb) -> float:
-    return float(np.asarray(rgb, dtype=np.float64) @ LUMINANCE)
-
-
-def scale_hue(rgb_ref, level: float) -> np.ndarray:
-    """`rgb_ref`'s hue at luminance `level` (in [0, 1]), exactly.
-
-    Scaled (`rgb_ref * level / lum(rgb_ref)`) while no channel exceeds 1.
-    Beyond that the hue at full saturation (largest channel at 1) is mixed
-    toward white just enough to reach `level`: white has luminance 1 and
-    luminance is linear, so the mix is exact. A brightened red therefore
-    stays red until `level` is nearly 1 and is pure white only at 1.
-    """
-    rgb_ref = np.asarray(rgb_ref, dtype=np.float64)
-    level = float(np.clip(level, 0.0, 1.0))
-    ref_level = luminance(rgb_ref)
-    if ref_level <= 0.0:
-        return np.full(3, level)
-    scaled = rgb_ref * (level / ref_level)
-    if scaled.max() <= 1.0:
-        return scaled
-    saturated = rgb_ref / rgb_ref.max()
-    saturated_level = luminance(saturated)
-    mix = (level - saturated_level) / (1.0 - saturated_level)
-    return np.clip((1.0 - mix) * saturated + mix, 0.0, 1.0)
-
-
-def hue_matches(rgb, rgb_ref, min_cosine=HUE_MIN_COSINE, dark=DARK_LUMINANCE) -> bool:
-    """`rgb` has `rgb_ref`'s hue: not near-black, and within `min_cosine`
-    of it as a direction in RGB."""
-    rgb = np.asarray(rgb, dtype=np.float64)
-    rgb_ref = np.asarray(rgb_ref, dtype=np.float64)
-    if luminance(rgb) < dark:
-        return False
-    cosine = float(rgb @ rgb_ref / (np.linalg.norm(rgb) * np.linalg.norm(rgb_ref)))
-    return cosine >= min_cosine
 
 
 def is_garbled(rgb, rgb_ref, min_cosine=HUE_MIN_COSINE, dark=DARK_LUMINANCE) -> bool:
@@ -135,10 +93,11 @@ def colour_guard(goal, start_params, params, reference_params, weights=None) -> 
     asked = brightness_classes(goal)
     for goal_class, index in transfer.ANATOMICAL_PEAK_INDEX.items():
         reference = _rgb(reference_params, index)
+        before = _rgb(start_params, index)
         if goal_class in asked:
-            rgb = scale_hue(reference, luminance(_rgb(guarded, index)))
+            level = max(luminance(_rgb(guarded, index)), darkening_floor(reference, before))
+            rgb = scale_hue(reference, level)
         else:
-            before = _rgb(start_params, index)
             rgb = reference if is_garbled(before, reference) else before
         guarded[index * P + 3:index * P + 6] = transfer._from_unit(rgb)
     return guarded

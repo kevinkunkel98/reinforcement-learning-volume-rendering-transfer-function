@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 
 import anatomy
+import hue
 import lexicon
 from anatomy_layers import default_layers, normalize_layers
 from transfer import (
@@ -674,6 +675,9 @@ def apply_command(cmd: dict, params: np.ndarray, reset_params=None) -> np.ndarra
             params[b + 2] = _from_unit(0.7 if i in target_idxs else 0.0)
         return params
 
+    if cmd["attribute"] == "brightness":
+        return _apply_brightness(cmd, params, reset_params)
+
     params, idx = _find_or_create_peak(params, cmd["target"])
     base = idx * PARAMS_PER_PEAK
     indices = ATTRIBUTE_PARAM_INDEX[cmd["attribute"]]
@@ -694,6 +698,38 @@ def apply_command(cmd: dict, params: np.ndarray, reset_params=None) -> np.ndarra
         if cmd["attribute"] == "center":
             new_ext = _center_band_clip(new_ext, cmd["target"])
         params[base + offset] = float(np.clip(new_ext, -1.0, 1.0))
+    return params
+
+
+def _apply_brightness(cmd: dict, params: np.ndarray, reset_params=None) -> np.ndarray:
+    """A brightness command on the class's peak, along its own hue.
+
+    Stepping each rgb channel on its own (`_asymptotic_step`) toward 1 turns
+    a red heart pink, then white, and nothing stopped a darkening at black.
+    Here the luminance takes the step the channels used to take -- the
+    channels' asymptotic step moves luminance the same way, it is linear --
+    and `hue.scale_hue` puts the colour's hue (the reference's when the
+    colour is too dark to have one) at that luminance. A darkening stops at
+    `hue.darkening_floor`, as the policy path's colour guard does. The
+    reference is the class's colour in `reset_params` (the viewer's start
+    TF), `default_params()` when not given."""
+    reference_params = default_params() if reset_params is None else np.asarray(reset_params, dtype=np.float64)
+    params, idx = _find_or_create_peak(params, cmd["target"])
+    base = idx * PARAMS_PER_PEAK
+    before = np.asarray(peak_internal(params, idx)["rgb"], dtype=np.float64)
+    ref_idx = _class_peak_index(reference_params, cmd["target"])
+    reference = (before if ref_idx is None
+                 else np.asarray(peak_internal(reference_params, ref_idx)["rgb"], dtype=np.float64))
+    level = hue.luminance(before)
+    if cmd["direction"] == "set":
+        target = LEVEL_WORDS[cmd["level"]]
+    else:
+        delta = STRENGTH_WORDS[cmd["strength"] or "moderately"]
+        target = level + delta * (1.0 - level) if cmd["direction"] == "increase" else level * (1.0 - delta)
+    if target < level:
+        target = max(target, hue.darkening_floor(reference, before))
+    rgb = hue.scale_hue(hue.hue_source(before, reference), target)
+    params[base + 3:base + 6] = np.clip(_from_unit(rgb), -1.0, 1.0)
     return params
 
 

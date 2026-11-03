@@ -5,7 +5,8 @@ import numpy as np
 import pytest
 
 import commands
-from commands import parse_command_rule, apply_command, parse_command_llm
+from commands import LEVEL_WORDS, STRENGTH_WORDS, parse_command_rule, apply_command, parse_command_llm
+from transfer import PARAMS_PER_PEAK
 from transfer import default_params, peak_internal, N_PEAKS
 
 
@@ -436,6 +437,72 @@ def test_apply_command_brightness_decrease_lowers_all_channels():
     after_rgb = peak_internal(after, 3)["rgb"]
     for before_c, after_c in zip(before_rgb, after_rgb):
         assert after_c <= before_c
+
+
+def _cosine(a, b):
+    a, b = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
+    return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+def test_apply_command_brightness_decrease_keeps_the_hue():
+    import hue
+    import goals
+    start = goals.starting_params("v3")
+    cmd = {"target": "liver", "attribute": "brightness", "direction": "decrease", "strength": "strongly"}
+    before = np.array(peak_internal(start, 2)["rgb"])
+    after = np.array(peak_internal(apply_command(cmd, start, reset_params=start), 2)["rgb"])
+    assert _cosine(after, before) == pytest.approx(1.0)
+    assert hue.luminance(after) == pytest.approx(hue.luminance(before) * (1 - STRENGTH_WORDS["strongly"]))
+
+
+def test_apply_command_repeated_darkening_stops_at_the_floor():
+    import hue
+    import goals
+    start = goals.starting_params("v3")
+    cmd = {"target": "liver", "attribute": "brightness", "direction": "decrease", "strength": "strongly"}
+    params = start
+    for _ in range(6):
+        params = apply_command(cmd, params, reset_params=start)
+    reference = np.array(peak_internal(start, 2)["rgb"])
+    after = np.array(peak_internal(params, 2)["rgb"])
+    assert hue.luminance(after) == pytest.approx(hue.MIN_LUMINANCE_FRACTION * hue.luminance(reference))
+    assert _cosine(after, reference) == pytest.approx(1.0)
+
+
+def test_apply_command_brightness_increase_keeps_red_red():
+    import hue
+    import goals
+    start = goals.starting_params("v3")
+    cmd = {"target": "heart", "attribute": "brightness", "direction": "increase", "strength": "strongly"}
+    before = np.array(peak_internal(start, 5)["rgb"])
+    after = np.array(peak_internal(apply_command(cmd, start, reset_params=start), 5)["rgb"])
+    level = hue.luminance(before)
+    # the luminance the per-channel step gave, with the hue kept
+    assert hue.luminance(after) == pytest.approx(level + STRENGTH_WORDS["strongly"] * (1 - level))
+    assert after[0] == pytest.approx(1.0) and after[0] - after[1] > 0.3
+
+
+def test_apply_command_brightness_set_keeps_the_hue():
+    import hue
+    import goals
+    start = goals.starting_params("v3")
+    cmd = {"target": "liver", "attribute": "brightness", "direction": "set", "level": "low"}
+    before = np.array(peak_internal(start, 2)["rgb"])
+    after = np.array(peak_internal(apply_command(cmd, start, reset_params=start), 2)["rgb"])
+    assert hue.luminance(after) == pytest.approx(LEVEL_WORDS["low"])
+    assert _cosine(after, before) == pytest.approx(1.0)
+
+
+def test_apply_command_brightening_a_black_class_takes_the_reference_hue():
+    import hue
+    import goals
+    start = goals.starting_params("v3")
+    black = start.copy()
+    black[2 * PARAMS_PER_PEAK + 3:2 * PARAMS_PER_PEAK + 6] = -1.0
+    cmd = {"target": "liver", "attribute": "brightness", "direction": "increase", "strength": "moderately"}
+    after = np.array(peak_internal(apply_command(cmd, black, reset_params=start), 2)["rgb"])
+    assert hue.luminance(after) == pytest.approx(STRENGTH_WORDS["moderately"])
+    assert _cosine(after, peak_internal(start, 2)["rgb"]) == pytest.approx(1.0)
 
 
 def test_apply_command_center_increase_shifts_center_up():
