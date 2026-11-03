@@ -376,50 +376,99 @@ def _no_visible_change_hint(cmd, before_step, after_step):
 # for every class, the kidneys the smallest -- so a class below 0.1 % is one
 # a command hid, and its start is what "add" should bring back.
 RESTORE_BELOW_SHARE = 0.001
+# The floor alone misses a class a command hid only mostly: on ts_s0058
+# (2026-11-03) "show only bones" left the lungs at 0.49 % of the image
+# (start 1.70 %, 0.29 of it) and the kidneys at 0.14 % (start 0.67 %, 0.21);
+# "add lungs" then went to the policy as "more lungs", which also lit the
+# unlabelled air the lungs peak shades -- a blue box over the body, the
+# skeleton 24.8 -> 5.6 %. So a class also counts as hidden below this
+# fraction of its share at the task's start TF (`_start_visibility`).
+# Not 0.5: a "less X" (moderately) targets half the share
+# (goals.VISIBILITY_STRENGTH 0.3 log10), and the policy lands at 0.43-0.53
+# of the start on ts_s0058 and 0.37-0.49 on ts_s0477 (the exact path at
+# 0.84-1.00) -- "add X" after that must stay "more X". 0.35 is the
+# geometric middle of one moderate (0.5) and one strong (0.25) decrease;
+# a "less X strongly" therefore reads as hidden and "add X" restores it.
+RESTORE_BELOW_FRACTION = 0.35
 
 
-def _is_restore(sub, class_visibility):
-    """An opacity increase of a class whose share is below RESTORE_BELOW_SHARE."""
+def _is_hidden(share, start_share):
+    if share is None:
+        return False
+    if share < RESTORE_BELOW_SHARE:
+        return True
+    return start_share is not None and share < RESTORE_BELOW_FRACTION * start_share
+
+
+def _is_restore(sub, class_visibility, start_visibility=None):
+    """An opacity increase of a class whose share is below RESTORE_BELOW_SHARE,
+    or below RESTORE_BELOW_FRACTION of its share in `start_visibility`."""
     if sub.get("attribute") != "opacity" or sub.get("direction") != "increase":
         return False
     target = sub.get("target")
-    share = class_visibility.get(target) if isinstance(target, str) else None
-    return share is not None and share < RESTORE_BELOW_SHARE
+    if not isinstance(target, str):
+        return False
+    return _is_hidden(class_visibility.get(target), (start_visibility or {}).get(target))
+
+
+_start_visibility_cache = {}
+
+
+def _start_visibility(task_version=None):
+    """`_class_visibility` of the task's start TF on the loaded volume -- the
+    shares `restore_hidden` measures "hidden" against -- cached per dataset
+    and task version."""
+    key = (_dataset_name, task_version or TASK_VERSION)
+    if key not in _start_visibility_cache:
+        _start_visibility_cache[key] = _class_visibility(initial_params(task_version))
+    return _start_visibility_cache[key]
 
 
 def _class_reset(target):
     return {"target": target, "attribute": None, "direction": "reset", "strength": None}
 
 
-def restore_hidden(cmd, class_visibility):
+def restore_hidden(cmd, class_visibility, start_visibility=None):
     """`cmd` with every opacity increase of a hidden class -- its share in
-    `class_visibility` below RESTORE_BELOW_SHARE -- replaced by a class reset
-    of it, and the classes so restored, in order. Unsupported classes (share
-    None), missing shares and every other kind of command are left alone; a
-    compound keeps its other sub-commands. This is the command the step
-    stores; `split_restores` is how it is applied."""
+    `class_visibility` below RESTORE_BELOW_SHARE, or below
+    RESTORE_BELOW_FRACTION of its share in `start_visibility` (the task's
+    start TF, `_start_visibility`) -- replaced by a class reset of it, and the
+    classes so restored, in order. Unsupported classes (share None), missing
+    shares and every other kind of command are left alone; a compound keeps
+    its other sub-commands. This is the command the step stores;
+    `split_restores` is how it is applied."""
     if not class_visibility or not isinstance(cmd, dict) or "camera" in cmd:
         return cmd, []
     subs = cmd["compound"] if isinstance(cmd.get("compound"), list) else [cmd]
-    restored = [sub["target"] for sub in subs if _is_restore(sub, class_visibility)]
+    hidden = [_is_restore(sub, class_visibility, start_visibility) for sub in subs]
+    restored = [sub["target"] for sub, h in zip(subs, hidden) if h]
     if not restored:
         return cmd, []
-    new = [_class_reset(sub["target"]) if _is_restore(sub, class_visibility) else sub for sub in subs]
+    new = [_class_reset(sub["target"]) if h else sub for sub, h in zip(subs, hidden)]
     return ({**cmd, "compound": new} if "compound" in cmd else new[0]), restored
 
 
-def split_restores(cmd, class_visibility):
+def split_restores(cmd, class_visibility, start_visibility=None):
     """(restored classes, the rest of `cmd` -- None, one sub-command or a
     compound). The restores are applied exactly first; the rest then takes
     the normal path from that state, so "add liver and more lungs" after
     "show only skeleton" still gets the policy for the lungs."""
-    _new, restored = restore_hidden(cmd, class_visibility)
+    _new, restored = restore_hidden(cmd, class_visibility, start_visibility)
     if not restored:
         return [], cmd
-    rest = [sub for sub in cmd["compound"] if not _is_restore(sub, class_visibility)] if "compound" in cmd else []
+    rest = ([sub for sub in cmd["compound"] if not _is_restore(sub, class_visibility, start_visibility)]
+            if "compound" in cmd else [])
     if not rest:
         return restored, None
     return restored, (rest[0] if len(rest) == 1 else {**cmd, "compound": rest})
+
+
+def _mentions_opacity_increase(cmd):
+    """Only these can be restores; the start shares are not computed (one
+    visibility evaluation, then cached) for any other command."""
+    subs = cmd["compound"] if isinstance(cmd.get("compound"), list) else [cmd]
+    return any(isinstance(sub, dict) and sub.get("attribute") == "opacity"
+               and sub.get("direction") == "increase" for sub in subs)
 
 
 def _only_resets(cmd):
@@ -1183,15 +1232,17 @@ class Session:
         # search toggle) keep working unchanged.
         effective_mode = mode or ("search" if search else "exact")
 
-        # "add X" of a hidden class restores it (RESTORE_BELOW_SHARE): the
-        # step stores the rewritten command; the restores are applied
-        # exactly first and only the rest (`run_cmd`) takes the mode's path,
-        # from `base_params`.
+        # "add X" of a hidden class restores it (RESTORE_BELOW_SHARE, or
+        # RESTORE_BELOW_FRACTION of its start share): the step stores the
+        # rewritten command; the restores are applied exactly first and only
+        # the rest (`run_cmd`) takes the mode's path, from `base_params`.
         visibility_now = self.history[self.cursor].get("class_visibility")
-        stored_cmd, restored = restore_hidden(cmd, visibility_now)
+        visibility_start = (_start_visibility(self.task_version)
+                            if _mentions_opacity_increase(cmd) else None)
+        stored_cmd, restored = restore_hidden(cmd, visibility_now, visibility_start)
         reset_params = initial_params(self.task_version)
         if restored:
-            _restored, run_cmd = split_restores(cmd, visibility_now)
+            _restored, run_cmd = split_restores(cmd, visibility_now, visibility_start)
             base_params = apply_command(_class_reset(restored if len(restored) > 1 else restored[0]),
                                         current_params, reset_params=reset_params)
             if "understood" in parser_meta:

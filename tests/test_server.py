@@ -2129,6 +2129,63 @@ def test_restore_hidden_threshold_is_the_goal_floor():
     assert server.restore_hidden(_rel("liver"), {"liver": 0.00099})[1] == ["liver"]
 
 
+def test_restore_hidden_counts_a_class_far_below_its_start_as_hidden():
+    # 2026-11-03, ts_s0058: "show only bones" left the lungs at 0.49 % of the
+    # image (start 1.70 %), above the absolute floor; "add lungs" went to the
+    # policy as "more lungs" and lit the air around the body.
+    start = {"lungs": 0.0170, "kidneys": 0.0067, "heart": 0.0072, "vessels": None}
+    now = {"lungs": 0.0049, "kidneys": 0.0014, "heart": 0.0072, "vessels": None}
+    assert server.restore_hidden(_rel("lungs"), now, start) == (_reset("lungs"), ["lungs"])
+    assert server.restore_hidden(_rel("kidneys"), now, start)[1] == ["kidneys"]
+    assert server.restore_hidden(_rel("heart"), now, start) == (_rel("heart"), [])
+
+
+def test_restore_hidden_leaves_a_class_reduced_once_to_the_policy():
+    # One "less lungs" (moderately: half the share) on ts_s0058 left the
+    # lungs at 0.81 % of 1.70 % -- reduced, not hidden: "add" means "more".
+    start = {"lungs": 0.0170}
+    assert server.restore_hidden(_rel("lungs"), {"lungs": 0.0081}, start) == (_rel("lungs"), [])
+    fraction = server.RESTORE_BELOW_FRACTION
+    assert server.restore_hidden(_rel("lungs"), {"lungs": 0.0170 * (fraction + 0.01)}, start)[1] == []
+    assert server.restore_hidden(_rel("lungs"), {"lungs": 0.0170 * (fraction - 0.01)}, start)[1] == ["lungs"]
+
+
+def test_restore_hidden_relative_rule_needs_both_shares():
+    # None (unsupported) now or at the start: untouched unless below the floor.
+    assert server.restore_hidden(_rel("vessels"), {"vessels": None}, {"vessels": None}) == (_rel("vessels"), [])
+    assert server.restore_hidden(_rel("vessels"), {"vessels": None}, {"vessels": 0.01}) == (_rel("vessels"), [])
+    assert server.restore_hidden(_rel("liver"), {"liver": 0.004}, {"liver": None}) == (_rel("liver"), [])
+    assert server.restore_hidden(_rel("liver"), {"liver": 0.004}, None) == (_rel("liver"), [])
+    assert server.restore_hidden(_rel("liver"), {"liver": 0.0005}, {"liver": None})[1] == ["liver"]
+
+
+def test_split_restores_uses_the_start_shares_too():
+    start = {"lungs": 0.0170, "heart": 0.0072}
+    now = {"lungs": 0.0049, "heart": 0.0072}
+    cmd = {"compound": [_rel("lungs"), _rel("heart")]}
+    assert server.split_restores(cmd, now, start) == (["lungs"], _rel("heart"))
+
+
+def test_start_visibility_is_the_start_tf_of_the_volume_cached(ts_session, monkeypatch):
+    s = ts_session
+    expected = server._class_visibility(server.initial_params(s.task_version))
+    assert server._start_visibility(s.task_version) == expected
+    monkeypatch.setattr(server, "_class_visibility", lambda *a, **k: pytest.fail("not cached"))
+    assert server._start_visibility(s.task_version) == expected
+
+
+def test_add_a_class_far_below_its_start_restores_it(ts_session):
+    s = ts_session
+    start_share = server._start_visibility(s.task_version)["lungs"]
+    s.history[s.cursor]["class_visibility"] = {**s.history[s.cursor]["class_visibility"],
+                                               "lungs": start_share * 0.29}
+
+    step = s.command("add lungs", parser="hybrid", mode="policy")["current"]
+
+    assert step["cmd_dict"] == _reset("lungs")
+    assert step["message"] == "lungs were hidden -- restored to their start"
+
+
 def test_add_a_hidden_class_restores_it_and_says_so(ts_session):
     s = ts_session
     s.command("show only skeleton", mode="exact")
