@@ -3,7 +3,7 @@ import pytest
 
 import goals
 import transfer
-from rl.colour_guard import colour_guard, hue_matches, luminance, scale_hue
+from rl.colour_guard import colour_guard, hue_matches, is_garbled, luminance, scale_hue
 
 P = transfer.PARAMS_PER_PEAK
 REFERENCE = goals.starting_params("v3")
@@ -88,14 +88,36 @@ def test_pre_step_colour_with_the_reference_hue_is_kept_exactly():
     np.testing.assert_allclose(_rgb(guarded, "heart"), _rgb(start, "heart"))
 
 
-@pytest.mark.parametrize("garbled", [(1.0, 1.0, 1.0), (0.8, 0.8, 0.8), (0.0, 0.0, 0.0)])
+@pytest.mark.parametrize("garbled", [(1.0, 1.0, 1.0), (0.8, 0.8, 0.8), (0.2, 0.6, 0.9)])
 def test_garbled_pre_step_colour_comes_back_at_the_reference(garbled):
-    """A heart already white/grey/black before the step (an earlier,
+    """A heart already white/grey/blue before the step (an earlier,
     unguarded answer) returns to the reference colour, at the reference's
-    luminance -- not white's or black's."""
+    luminance -- not white's."""
     start = _set_rgb(REFERENCE, "heart", garbled)
     guarded = colour_guard(_show_only_skeleton_goal(), start, start, REFERENCE)
     np.testing.assert_allclose(_rgb(guarded, "heart"), _rgb(REFERENCE, "heart"))
+
+
+@pytest.mark.parametrize("dark", [(0.0, 0.0, 0.0), (0.01, 0.01, 0.01), (0.03, 0.0, 0.0)])
+def test_near_black_pre_step_colour_is_kept_exactly(dark):
+    """2026-11-03: "darken kidney and liver strongly" took the liver to black;
+    the next command, "darken skeleton strongly", reset it to its orange --
+    undoing the user's darkening. A colour too dark to have a measurable hue
+    is a darkening, not a garbled colour: kept."""
+    start = _set_rgb(REFERENCE, "liver", dark)
+    answer = _set_rgb(start, "liver", (1.0, 1.0, 1.0))
+    guarded = colour_guard(_brightness_goal("skeleton", -0.4), start, answer, REFERENCE)
+    np.testing.assert_allclose(_rgb(guarded, "liver"), _rgb(start, "liver"))
+
+
+def test_is_garbled_needs_a_measurable_wrong_hue():
+    heart = np.array(transfer.ANATOMICAL_COLOURS["heart"])
+    assert not is_garbled(heart, heart)
+    assert not is_garbled(scale_hue(heart, 0.05), heart)
+    assert not is_garbled(np.zeros(3), heart)
+    assert is_garbled(np.array([1.0, 1.0, 1.0]), heart)
+    assert is_garbled(np.array([0.3, 0.3, 0.3]), heart)
+    assert is_garbled(np.array([0.2, 0.6, 0.9]), heart)
 
 
 def test_brightness_target_keeps_the_answers_luminance_with_the_reference_hue():

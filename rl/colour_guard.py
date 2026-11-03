@@ -33,11 +33,18 @@ Per class (one peak per goal class, `transfer.ANATOMICAL_PEAK_INDEX`):
 - no brightness target, colour before the command (`start_params`) has the
   reference hue (`hue_matches`): that colour, exactly. The answer's rgb is
   discarded.
-- no brightness target, colour before the command already garbled (white,
-  grey or black heart from an earlier unguarded answer): the reference
-  colour, at the reference's luminance. Its luminance carried no request
-  either -- it is what the earlier recolouring left behind -- so it is not
-  kept.
+- no brightness target, colour before the command near-black (luminance
+  below DARK_LUMINANCE, no measurable hue): that colour, exactly. The guard
+  keeps an unasked class's colour, so the policy can no longer leave one
+  black behind; a black before the command is a user's darkening ("darken
+  the liver strongly", 2026-11-03, which the next command "darken skeleton
+  strongly" used to undo by resetting the liver to orange) or a pre-guard
+  session, and only the first is worth guessing about.
+- no brightness target, colour before the command garbled (`is_garbled`: a
+  measurable luminance with a clearly different hue -- a white, grey or
+  desaturated heart from an earlier unguarded answer): the reference colour,
+  at the reference's luminance. Its luminance carried no request either --
+  it is what the earlier recolouring left behind -- so it is not kept.
 
 Centre, width and height (opacity) are never touched. The reference palette
 is the task's start TF (`goals.starting_params`, the viewer's
@@ -98,6 +105,13 @@ def hue_matches(rgb, rgb_ref, min_cosine=HUE_MIN_COSINE, dark=DARK_LUMINANCE) ->
     return cosine >= min_cosine
 
 
+def is_garbled(rgb, rgb_ref, min_cosine=HUE_MIN_COSINE, dark=DARK_LUMINANCE) -> bool:
+    """`rgb` is bright enough to show a hue (luminance >= `dark`) and that
+    hue is not `rgb_ref`'s. A near-black colour is never garbled: it has no
+    hue to compare, and it is how a darkening looks."""
+    return luminance(rgb) >= dark and not hue_matches(rgb, rgb_ref, min_cosine, dark)
+
+
 def brightness_classes(goal) -> set:
     """Goal classes the goal sets a brightness target for (mask n != 0)."""
     goal = np.asarray(goal, dtype=np.float64)
@@ -125,6 +139,6 @@ def colour_guard(goal, start_params, params, reference_params, weights=None) -> 
             rgb = scale_hue(reference, luminance(_rgb(guarded, index)))
         else:
             before = _rgb(start_params, index)
-            rgb = before if hue_matches(before, reference) else reference
+            rgb = reference if is_garbled(before, reference) else before
         guarded[index * P + 3:index * P + 6] = transfer._from_unit(rgb)
     return guarded
