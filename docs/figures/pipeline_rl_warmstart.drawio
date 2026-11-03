@@ -1,0 +1,105 @@
+<mxGraphModel adaptiveColors="auto" dx="1600" dy="900" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    <mxCell id="title" value="&lt;b&gt;Modellbasiertes RL als Warmstart: von 0,48 auf 0,90&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=20;" vertex="1" parent="1">
+      <mxGeometry x="40" y="0" width="900" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="laneT" value="&lt;b&gt;1 · Training (offline, einmalig)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#bdbdbd;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;fontSize=14;arcSize=4;" vertex="1" parent="1">
+      <mxGeometry x="20" y="50" width="1460" height="270" as="geometry"/>
+    </mxCell>
+    <mxCell id="A" value="&lt;b&gt;Trainingsdaten&lt;/b&gt;&lt;br&gt;TF-Varianten → echte Renders&lt;br&gt;→ Sichtbarkeit &amp;amp; Helligkeit&lt;br&gt;pro Organ" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b6a63;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="60" y="120" width="250" height="100" as="geometry"/>
+    </mxCell>
+    <mxCell id="B" value="&lt;b&gt;Ensemble-Ersatzmodell&lt;/b&gt;&lt;br&gt;(differenzierbar)&lt;br&gt;TF → Sichtbarkeit, Helligkeit&lt;br&gt;&lt;i&gt;gelernter „Renderer“&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f1fc;strokeColor=#2a78d6;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="470" y="120" width="270" height="100" as="geometry"/>
+    </mxCell>
+    <mxCell id="C" value="&lt;b&gt;Policy&lt;/b&gt;&lt;br&gt;Anweisung + Startzustand → TF&lt;br&gt;&lt;i&gt;trainiert per Gradient&lt;br&gt;durch das Modell&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f1fc;strokeColor=#2a78d6;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="900" y="120" width="270" height="100" as="geometry"/>
+    </mxCell>
+    <mxCell id="eAB" value="lernt" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6b6a63;fontSize=12;endArrow=block;" edge="1" parent="1" source="A" target="B">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="eBC" value="Gradienten&lt;br&gt;durchs Modell" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2a78d6;strokeWidth=2;fontSize=12;endArrow=block;" edge="1" parent="1" source="B" target="C">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="eCA" value="Dyna: echte Daten nachsammeln, wo das Ensemble uneins ist" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6b6a63;dashed=1;fontSize=12;endArrow=block;exitX=0.85;exitY=1;entryX=0.5;entryY=1;" edge="1" parent="1" source="C" target="A">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1129" y="285"/>
+          <mxPoint x="185" y="285"/>
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="noteT" value="Modellfrei (SAC) zum Vergleich: &lt;b&gt;0,09&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=13;fontColor=#6b6a63;" vertex="1" parent="1">
+      <mxGeometry x="1200" y="150" width="270" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="laneI" value="&lt;b&gt;2 · Anwendung (pro Anweisung)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fcfcfb;strokeColor=#bdbdbd;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;fontSize=14;arcSize=4;" vertex="1" parent="1">
+      <mxGeometry x="20" y="350" width="1460" height="330" as="geometry"/>
+    </mxCell>
+    <mxCell id="D" value="&lt;b&gt;Sprache / Text&lt;/b&gt;&lt;br&gt;„mehr Leber“" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b6a63;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="40" y="420" width="150" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="E" value="&lt;b&gt;Parser&lt;/b&gt;&lt;br&gt;→ Ziel pro Organ" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b6a63;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="230" y="420" width="150" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="F" value="&lt;b&gt;Policy&lt;/b&gt; (one-shot)&lt;br&gt;0 Renders&lt;br&gt;&lt;font style=&quot;font-size:20px&quot; color=&quot;#2a78d6&quot;&gt;&lt;b&gt;0,48&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f1fc;strokeColor=#2a78d6;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="420" y="410" width="170" height="100" as="geometry"/>
+    </mxCell>
+    <mxCell id="G" value="&lt;b&gt;Planning&lt;/b&gt; durchs Modell&lt;br&gt;0 Renders, ~0,2 s&lt;br&gt;&lt;font style=&quot;font-size:20px&quot; color=&quot;#2a78d6&quot;&gt;&lt;b&gt;0,64&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f1fc;strokeColor=#2a78d6;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="630" y="410" width="190" height="100" as="geometry"/>
+    </mxCell>
+    <mxCell id="H" value="&lt;b&gt;Suche&lt;/b&gt; (Hill-Climb)&lt;br&gt;ab diesem Startpunkt&lt;br&gt;30 Renders → &lt;font color=&quot;#2a78d6&quot;&gt;&lt;b&gt;0,77&lt;/b&gt;&lt;/font&gt;&lt;br&gt;200 Renders → &lt;font style=&quot;font-size:20px&quot; color=&quot;#2a78d6&quot;&gt;&lt;b&gt;0,90&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f1fc;strokeColor=#2a78d6;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="860" y="400" width="200" height="120" as="geometry"/>
+    </mxCell>
+    <mxCell id="I" value="&lt;b&gt;Keep Repair&lt;/b&gt;&lt;br&gt;+ &lt;b&gt;Colour Guard&lt;/b&gt;&lt;br&gt;&lt;i&gt;keine Nebenwirkungen&lt;br&gt;auf andere Organe&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b6a63;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="1100" y="410" width="170" height="100" as="geometry"/>
+    </mxCell>
+    <mxCell id="J" value="&lt;b&gt;Rendering&lt;/b&gt;&lt;br&gt;Browser / VR" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6b6a63;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="1310" y="420" width="150" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="eDE" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6b6a63;endArrow=block;" edge="1" parent="1" source="D" target="E">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="eEF" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6b6a63;endArrow=block;" edge="1" parent="1" source="E" target="F">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="eFG" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2a78d6;strokeWidth=2;endArrow=block;" edge="1" parent="1" source="F" target="G">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="eGH" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2a78d6;strokeWidth=2;endArrow=block;" edge="1" parent="1" source="G" target="H">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="eHI" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6b6a63;endArrow=block;" edge="1" parent="1" source="H" target="I">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="eIJ" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6b6a63;endArrow=block;" edge="1" parent="1" source="I" target="J">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="eCF" value="trainierte Policy" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2a78d6;dashed=1;fontSize=12;endArrow=block;exitX=0.4;exitY=1;entryX=0.5;entryY=0;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="C" target="F">
+      <mxGeometry x="0.1" relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1008" y="335"/>
+          <mxPoint x="505" y="335"/>
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="eBG" value="Modell (fürs Planning)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6b6a63;dashed=1;dashPattern=2 3;fontSize=12;endArrow=block;exitX=0.75;exitY=1;entryX=0.5;entryY=0;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="B" target="G">
+      <mxGeometry x="0.55" relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="672" y="380"/>
+          <mxPoint x="725" y="380"/>
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="K" value="&lt;b&gt;Vergleich:&lt;/b&gt; Suche vom Start&lt;br&gt;(ohne RL), 200 Renders → &lt;b&gt;0,70&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1baf7a;dashed=1;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="840" y="570" width="240" height="60" as="geometry"/>
+    </mxCell>
+    <mxCell id="L" value="&lt;b&gt;Kernaussage:&lt;/b&gt; mit RL-Startpunkt erreichen 30 Renders (0,77) das Niveau&lt;br&gt;von 200 Renders kalter Suche (0,70) → etwa 6–7× weniger Renders" style="text;html=1;align=left;verticalAlign=middle;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="40" y="560" width="760" height="70" as="geometry"/>
+    </mxCell>
+    <mxCell id="M" value="Median-Attainment, Test-Split (6 Patienten), 300 Episoden, 3 Seeds · 1 = Ziel erreicht, 0 = kein Fortschritt" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#6b6a63;" vertex="1" parent="1">
+      <mxGeometry x="40" y="640" width="900" height="30" as="geometry"/>
+    </mxCell>
+  </root>
+</mxGraphModel>
