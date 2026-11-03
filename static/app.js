@@ -1367,3 +1367,24 @@ async function runSweepImpl() {
 }
 
 el("sweep-btn").addEventListener("click", runSweep);
+
+
+// ---- drag mode: rotate the volume or scroll the page ----------------------
+// The headset browser sends the controller as touch input; over the volume a
+// drag rotated it, so the page (and anything below the viewer) could not be
+// scrolled. Headsets start in scroll mode, desktops in rotate mode.
+(() => {
+  const frame = el("viewport-frame");
+  const button = el("view-mode-btn");
+  if (!frame || !button) return;
+  const setMode = (rotate) => {
+    frame.classList.toggle("scroll-mode", !rotate);
+    button.setAttribute("aria-pressed", String(rotate));
+    button.textContent = rotate ? "Drag: rotate" : "Drag: scroll";
+  };
+  button.addEventListener("click", () => setMode(button.getAttribute("aria-pressed") !== "true"));
+  setMode(true);
+  navigator.xr?.isSessionSupported?.("immersive-vr")
+    .then((headset) => { if (headset) setMode(false); })
+    .catch(() => {});
+})();
