@@ -14,6 +14,7 @@
  {"text": "add liver and lung", "expected": {"compound": [{"target": "liver", "attribute": "opacity", "direction": "increase", "strength": "moderately"}, {"target": "lungs", "attribute": "opacity", "direction": "increase", "strength": "moderately"}]}, "split": "dev", "source": "log-2026-10-25"},
  {"text": "also show the liver", "expected": {"target": "liver", "attribute": "opacity", "direction": "increase", "strength": "moderately"}, "split": "dev", "source": "log-2026-10-25"},
  {"text": "revert skeleton", "expected": {"target": "skeleton", "attribute": null, "direction": "reset", "strength": null}, "split": "dev", "source": "log-2026-10-25"},
+ {"text": "Make the front more translucent so I can see the bones behind better.", "expected": {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": ["moderately", "strongly"]}, "split": "dev", "source": "log-2026-11-03"},
  {"text": "You", "expected": null, "split": "dev", "source": "log-2026-10-21"},
  {"text": "We've heard this from Epstein survivors. And... Hard.", "expected": null, "split": "dev", "source": "log-2026-10-21"},
  {"text": "make the liver translucent", "expected": {"target": "liver", "attribute": "opacity", "direction": "decrease", "strength": "moderately"}, "split": "dev", "source": "claude"},

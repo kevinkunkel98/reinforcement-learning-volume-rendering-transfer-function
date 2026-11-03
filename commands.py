@@ -402,6 +402,31 @@ def _parse_grammar_clause(t: str):
 
 
 _PURPOSE_RE = re.compile(r"\s*\b(so that|so|in order to|because)\b.*$")
+# "make the front more translucent so I can see the bones": the purpose
+# names what to show, the main clause only how (and names no class).
+_SEE_PURPOSE_RE = re.compile(
+    r"\s*\b(?:so that|so|in order to)\s+(?:(?:i|we|you)\s+)?(?:can|could|will|would|may)?\s*"
+    r"(?:see|view|look at|make out)\b(?P<what>.*)$")
+
+
+def _parse_see_purpose(t: str):
+    """Opacity increase of the classes a "so I can see X" clause names, when
+    the clause before it names none ("make the front more translucent so I
+    can see the bones" -> more skeleton). Strength from the main clause's
+    modifier words. None otherwise -- "less soft tissue so I can see the
+    bones" stays a soft tissue decrease."""
+    m = _SEE_PURPOSE_RE.search(t)
+    if not m or _find_classes(t[:m.start()]) or not t[:m.start()].strip():
+        return None
+    classes = _find_classes(m.group("what"))
+    if not classes:
+        return None
+    main = t[:m.start()]
+    strength = ("strongly" if _STRONG_RE.search(main) else "slightly" if _SLIGHT_RE.search(main)
+                else "moderately")
+    subs = [{"target": c, "attribute": "opacity", "direction": "increase", "strength": strength}
+            for c in classes]
+    return subs[0] if len(subs) == 1 else {"compound": subs}
 _CLAUSE_SPLIT_RE = re.compile(
     r"\s*(?:[,;+]|\band\b|\bbut\b|\bthen\b|\bplus\b|\bwhile\b|\binstead\b(?!\s+of\b))\s*")
 
@@ -487,6 +512,9 @@ def parse_command_rule(text: str) -> dict:
         if camera:
             return camera
 
+        see_purpose = _parse_see_purpose(t)
+        if see_purpose:
+            return see_purpose
         t = _PURPOSE_RE.sub("", t) or t
         show_only = _parse_show_only(t)
         if show_only:
@@ -864,6 +892,13 @@ be visible) even if the sentence itself sounds negative ("barely there" ->
 increase). If something is hiding, dominating, or should be reduced, that is
 "decrease".
 
+"so I can see X", "I want to see X behind ...", "the front / outside / skin /
+body is in the way" name what the user wants to see: that is X "increase"
+(opacity), even when the sentence asks to make something unnamed more
+transparent ("make the front more translucent so I can see the bones" ->
+target "skeleton", direction "increase"). When the sentence names the class to
+reduce as well ("less soft tissue so I can see the bones"), answer that.
+
 Never output numeric values. "reset" has attribute=null, strength=null. With
 target=null it resets everything ("reset", "start over"); with a class target
 it resets only that class ("revert the skeleton", "put the liver back") and can
@@ -910,6 +945,8 @@ Examples:
 - "brighten the spleen" -> canonical target "spleen"
 - "show heart" -> canonical target "heart"
 - "reduce aorta" -> canonical target "vessels"
+- "make the front more translucent so I can see the bones" -> target "skeleton",
+  direction "increase" (the bones are what to see; "the front" is no class)
 
 If the input is not an instruction about the rendering at all -- small talk,
 a filler word, a fragment the speech recogniser picked up ("thank you",

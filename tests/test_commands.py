@@ -956,6 +956,40 @@ def test_rule_parser_everyday_phrasings(text, expected):
     assert parse_command_rule(text) == expected
 
 
+@pytest.mark.parametrize("text,expected", [
+    # 2026-11-03, rejected: the main clause names no class, the purpose does.
+    ("Make the front more translucent so I can see the bones behind better.", _rel("skeleton", "increase")),
+    ("make the outside see-through so that I can see the heart", _rel("heart", "increase")),
+    ("fade the body a lot so we can see the liver", _rel("liver", "increase", "strongly")),
+])
+def test_rule_parser_see_purpose_names_the_target(text, expected):
+    assert parse_command_rule(text) == expected
+
+
+def test_rule_parser_see_purpose_does_not_override_a_named_main_clause():
+    assert parse_command_rule("make the soft tissue more translucent so I can see the bones") == _rel(
+        "soft", "decrease")
+
+
+def test_llm_prompt_says_so_i_can_see_x_means_more_x():
+    assert "so I can see" in commands._SYSTEM_PROMPT
+    assert "in the way" in commands._SYSTEM_PROMPT
+
+
+def test_llm_path_answers_the_see_purpose_utterance(monkeypatch):
+    text = "Make the front more translucent so I can see the bones behind better."
+    payload = {"target": "skeleton", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+    sent = []
+
+    def fake_urlopen(request, timeout=None):
+        sent.append(json.loads(request.data.decode()))
+        return _fake_response(payload)
+    monkeypatch.setattr(commands, "urlopen", fake_urlopen)
+    cmd, meta = commands.parse_command_hybrid(text)
+    assert cmd == payload and meta["path"] == "llm"
+    assert "so I can see" in sent[0]["system"]
+
+
 @pytest.mark.parametrize("text,level,target", [
     ("high spleen", "high", "spleen"), ("set the spleen to high", "high", "spleen"),
     ("liver opacity medium", "medium", "liver"), ("make the kidneys low opacity", "low", "kidneys"),
