@@ -35,6 +35,9 @@ uniform sampler3D uOcc;
 uniform sampler2D uTf;
 uniform mat4 uInvMvp;      // NDC -> data mm
 uniform vec3 uDims;
+uniform vec3 uLabelDims;    // label volume at the scan's full resolution
+uniform vec3 uLabelSpacing; // its voxel size in mm
+uniform vec3 uHuOffset;     // centre of HU voxel 0 in mm (averaged blocks sit half a source voxel in)
 uniform vec3 uSpacing;
 uniform vec3 uOccDims;
 uniform float uStep;       // mm
@@ -49,6 +52,8 @@ uniform float uFovStep;    // step multiplier at the view's edge (1 = uniform)
 uniform vec2 uFovCenter;   // NDC of the eye's optical axis
 uniform float uEmptyStride; // step multiplier after a fully transparent sample
 uniform vec2 uSurface;     // gradient (HU/mm) where lighting fades in / is full
+uniform float uJitter;     // 1 = per-pixel ray offset (grain that moves with the head), 0 = none (steady bands)
+uniform float uExposure;   // scales the volume's colour (lower = less contrast against black)
 in vec2 vNdc;
 out vec4 outColor;
 
@@ -80,13 +85,13 @@ void main() {
   float scale = mix(1.0, uFovStep, smoothstep(0.3, 0.9, length(vNdc - uFovCenter)));
   float dt = uStep * scale;
   float opacityExp = uOpacityExp * scale;
-  float t = max(hit.x, 0.0) + hash(gl_FragCoord.xy) * dt;
+  float t = max(hit.x, 0.0) + mix(0.5, hash(gl_FragCoord.xy), uJitter) * dt;
   vec4 acc = vec4(0.0);
   vec3 texel = 1.0 / uDims;
   for (int i = 0; i < ${MAX_STEPS}; i++) {
     if (t > hit.y || acc.a >= 0.98) break;
     vec3 p = ro + rd * t;
-    vec3 vox = p / uSpacing;
+    vec3 vox = (p - uHuOffset) / uSpacing;
     ivec3 iv = clamp(ivec3(floor(vox + 0.5)), ivec3(0), ivec3(uDims) - 1);
     if (uSkip > 0.5) {
       ivec3 b = iv / ${BRICK};
@@ -100,7 +105,10 @@ void main() {
     }
     vec3 tc = (vox + 0.5) * texel;
     float hu = texture(uHu, tc).r;
-    float row = uRows > 1.5 ? texelFetch(uLabel, iv, 0).r * 255.0 : 0.0;
+    // Labels at full resolution: a class's boundary follows 1.5 mm label
+    // voxels, not the 3 mm HU grid (bone edges looked blocky, 2026-11-03).
+    ivec3 il = clamp(ivec3(floor(p / uLabelSpacing + 0.5)), ivec3(0), ivec3(uLabelDims) - 1);
+    float row = uRows > 1.5 ? texelFetch(uLabel, il, 0).r * 255.0 : 0.0;
     float u = clamp((hu - uHuRange.x) / (uHuRange.y - uHuRange.x), 0.0, 1.0);
     vec4 c = texture(uTf, vec2(u * 255.0 / 256.0 + 0.5 / 256.0, (floor(row + 0.5) + 0.5) / uRows));
     if (c.a > 0.002) {
@@ -137,7 +145,7 @@ void main() {
       t += dt * uEmptyStride;
     }
   }
-  outColor = acc;
+  outColor = vec4(acc.rgb * uExposure, acc.a);
 }`;
 
   // Upscales the reduced-resolution volume image into one eye's viewport.
@@ -200,15 +208,33 @@ void main() { outColor = texture(uTex, vUv); }`;
   }
 
   // One renderer per GL context: textures, programs, TF state.
-  function createScene(gl, data, { down = 1 } = {}) {
+  function createScene(gl, data, { down = 1, ds = null, lab = null } = {}) {
     const logic = window.xrLogic;
     const max3d = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
     let { hu, labels, dims } = data;
-    // Averaged, not strided: see xrLogic.averageDownsample / modeDownsample.
-    ({ values: hu, dims } = logic.averageDownsample(hu, data.dims, down));
-    if (labels) labels = logic.modeDownsample(labels, data.dims, down).values;
-    if (dims.some((d) => d > max3d)) throw new Error(`volume ${dims.join("x")} exceeds MAX_3D_TEXTURE_SIZE ${max3d}`);
+    // HU averaged, not strided (xrLogic.averageDownsample). Labels stay at the
+    // scan's full resolution for the texture (1 byte per voxel, one nearest
+    // fetch per sample); the brick statistics use a majority-downsampled copy
+    // on the HU grid.
+    // A/B switches for the headset (2026-11-03): ?ds=stride keeps every
+    // down-th voxel as before, ?lab=down puts the labels on the HU grid.
+    const query = typeof location === "undefined" ? new URLSearchParams() : new URLSearchParams(location.search);
+    const strided = (ds ?? query.get("ds")) === "stride";
+    const labelsOnHuGrid = (lab ?? query.get("lab")) === "down" || !labels;
+    ({ values: hu, dims } = (strided ? logic.strideDownsample : logic.averageDownsample)(hu, data.dims, down));
+    const labelsDown = labels
+      ? (strided ? logic.strideDownsample : logic.modeDownsample)(labels, data.dims, down).values : null;
+    const labelsFull = labelsOnHuGrid ? labelsDown : labels;
+    const labelDims = labels ? (labelsOnHuGrid ? dims.slice() : data.dims.slice()) : [1, 1, 1];
+    labels = labelsDown;
+    if (dims.some((d) => d > max3d) || labelDims.some((d) => d > max3d)) {
+      throw new Error(`volume ${data.dims.join("x")} exceeds MAX_3D_TEXTURE_SIZE ${max3d}`);
+    }
     const spacing = data.spacing.map((s) => s * down);
+    const labelSpacing = labelsOnHuGrid ? spacing.slice() : data.spacing.slice();
+    // An averaged block's centre is half a source voxel past its first voxel
+    // (a strided one sits on its first voxel).
+    const huOffset = data.spacing.map((s) => (strided ? 0 : 0.5 * (down - 1) * s));
     const huClamped = Float32Array.from(hu, (v) => Math.max(-1050, Math.min(2000, v)));
     const stats = window.brickGrid.brickStats(huClamped, labels, dims, BRICK);
 
@@ -225,8 +251,8 @@ void main() { outColor = texture(uTex, vUv); }`;
     gl.bindVertexArray(null);
 
     const huTex = texture3D(gl, gl.R16F, gl.RED, gl.FLOAT, dims, huClamped, gl.LINEAR);
-    const labelTex = texture3D(gl, gl.R8, gl.RED, gl.UNSIGNED_BYTE, dims,
-      labels || new Uint8Array(dims[0] * dims[1] * dims[2]), gl.NEAREST);
+    const labelTex = texture3D(gl, gl.R8, gl.RED, gl.UNSIGNED_BYTE, labelDims,
+      labelsFull || new Uint8Array(1), gl.NEAREST);
     let occTex = null;
     let tfTex = null;
     let rowCount = 1;
@@ -256,7 +282,11 @@ void main() { outColor = texture(uTex, vUv); }`;
     // surface: HU/mm gradient range over which lighting fades in (tuned in
     // the headset 2026-10-21; soft-tissue noise at down=2 sits below it).
     // stepMul: from xrLogic.splitLoad each frame (1 outside VR).
-    const state = { step: baseStep, skip: true, lit: true, fovStep: 1, emptyStride: 2, stepMul: 1, surface: [10, 60] };
+    // jitter / exposure: live-tunable from the debugger (2026-11-03 headset
+    // comparison of grain vs steady bands, and of lens colour fringes on
+    // bright bone against black).
+    const state = { step: baseStep, skip: true, lit: true, fovStep: 1, emptyStride: 2, stepMul: 1, surface: [10, 60],
+      jitter: 1, exposure: 1 };
 
     // Draw the volume for one view into the bound framebuffer/viewport.
     // `model`: data mm -> room m; `view`: room -> eye; `proj`: eye -> clip.
@@ -282,6 +312,9 @@ void main() { outColor = texture(uTex, vUv); }`;
       gl.uniformMatrix4fv(u.uInvMvp, false, invMvp);
       gl.uniform3fv(u.uDims, dims);
       gl.uniform3fv(u.uSpacing, spacing);
+      gl.uniform3fv(u.uLabelDims, labelDims);
+      gl.uniform3fv(u.uLabelSpacing, labelSpacing);
+      gl.uniform3fv(u.uHuOffset, huOffset);
       gl.uniform1f(u.uStep, state.step * state.stepMul);
       gl.uniform1f(u.uOpacityExp, state.step * state.stepMul / data.unitDistance);
       gl.uniform1f(u.uRows, rowCount);
@@ -293,6 +326,8 @@ void main() { outColor = texture(uTex, vUv); }`;
       gl.uniform1f(u.uFovStep, state.fovStep);
       gl.uniform1f(u.uEmptyStride, state.emptyStride);
       gl.uniform2fv(u.uSurface, state.surface);
+      gl.uniform1f(u.uJitter, state.jitter);
+      gl.uniform1f(u.uExposure, state.exposure);
       // Where the eye's forward axis lands on screen (asymmetric per-eye
       // frusta put it off-centre).
       const axis = window.vrMath.transformPoint(proj, [0, 0, -1]);
@@ -426,13 +461,13 @@ void main() { outColor = texture(uTex, vUv); }`;
   // filling the view. Returns ms per frame (readPixels-synced) and,
   // optionally, a PNG data URL for screenshot parity.
   function benchmark({ w = 1152, h = 576, n = 8, skip = true, lit = true, stepScale = 1, down = 1, fovstep = 1,
-    emptyStride = 2, image = false } = {}) {
+    emptyStride = 2, image = false, ds = null, lab = null } = {}) {
     const data = window.volumeViewer.getVolumeData();
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
     const gl = canvas.getContext("webgl2", { antialias: false, preserveDrawingBuffer: image });
-    const scene = createScene(gl, data, { down });
+    const scene = createScene(gl, data, { down, ds, lab });
     scene.state.skip = skip;
     scene.state.lit = lit;
     scene.state.fovStep = fovstep;
