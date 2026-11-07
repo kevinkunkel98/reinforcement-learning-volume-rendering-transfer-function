@@ -53,7 +53,9 @@ from rl.oneshot_env import (ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, load_
 # + 30 evaluations 0.77 / 0.78).
 # With TASK_VERSION=v2 set POLICY_PATH=out/rl_mb_v2/clb_r3_seed1/checkpoint.pt,
 # with TASK_VERSION=v1 POLICY_PATH=out/rl_mb/r1_seed1/checkpoint.pt.
-POLICY_PATH = os.environ.get("POLICY_PATH", "out/rl_mb_v3c/clb_r3_seed1/checkpoint.pt")
+# The shipped default is a copy of out/rl_mb_v3c/clb_r3_seed1 (checkpoint +
+# metadata.json) under models/, which is tracked, so a fresh clone has a policy.
+POLICY_PATH = os.environ.get("POLICY_PATH", "models/v3c_seed1/checkpoint.pt")
 
 _state = {"policies": {}}
 

@@ -1,0 +1,64 @@
+{
+  "policy_version": "oneshot-v9",
+  "anatomy_layout": "anatomy-v2",
+  "observation_size": 97,
+  "action_size": 24,
+  "goal_classes": [
+    "skeleton",
+    "lungs",
+    "heart",
+    "vessels",
+    "liver",
+    "kidneys",
+    "spleen",
+    "soft"
+  ],
+  "controllable_groups": 24,
+  "action_mode": "residual",
+  "reward_mode": "target",
+  "transfer_mode": "label_scoped",
+  "task_version": "v3",
+  "algorithm": "model_based",
+  "init": "out/rl_mb_v3c/r3_seed1/checkpoint.pt",
+  "data": [
+    "out/rl_mb_v3c/data_r0.npz",
+    "out/rl_mb_v3c/data_r1.npz",
+    "out/rl_mb_v3c/data_r2.npz",
+    "out/rl_mb_v3c/data_r3.npz"
+  ],
+  "closed_loop_horizon": 2,
+  "train_steps": 20000,
+  "seed": 1,
+  "learning_rate": 0.0001,
+  "intermediate_weight": 0.2,
+  "balance_kinds": true,
+  "report": {
+    "model_predicted_median": 0.8024994134902954,
+    "val": {
+      "ALL": {
+        "t1": 0.4286752466933143,
+        "t2": 0.5289491513218904
+      },
+      "absolute": {
+        "t1": 0.4653615181755333,
+        "t2": 0.6343778087374587
+      },
+      "brightness": {
+        "t1": 0.871573587514858,
+        "t2": 0.9404383404433534
+      },
+      "compound": {
+        "t1": 0.38349363495162053,
+        "t2": 0.44548196255689515
+      },
+      "relative": {
+        "t1": 0.44983660366651645,
+        "t2": 0.57901420872107
+      },
+      "show_only": {
+        "t1": 0.33219331413015163,
+        "t2": 0.4337747916264877
+      }
+    }
+  }
+}

@@ -72,25 +72,32 @@ def build_label_volume(masks: dict, shape) -> np.ndarray:
 
 
 def _subject_label_volume(zf, subject_id, shape):
-    """Read every mask of one subject and collapse it into a label volume."""
-    masks = {}
+    """Read every mask of one subject and collapse it into a label volume.
+
+    Folds each mask in as it is read instead of holding them all (a few GB
+    for a whole-body scan): "later classes overwrite earlier ones" is the
+    maximum class id over the masks covering a voxel, so the result equals
+    `build_label_volume` of all masks."""
+    index_of = {name: index for index, name in enumerate(CLASS_NAMES, start=1)}
+    labels = np.zeros(tuple(shape), dtype=np.uint8)
     affine = None
     prefix = f"{subject_id}/segmentations/"
     for name in zf.namelist():
         if not name.startswith(prefix) or not name.endswith(".nii.gz"):
             continue
         structure = name[len(prefix):-len(".nii.gz")]
-        if class_for_structure(structure) is None:
+        class_name = class_for_structure(structure)
+        if class_name is None:
             continue
         image = nib.Nifti1Image.from_bytes(gzip.decompress(zf.read(name)))
         affine = image.affine
         mask = np.asarray(image.dataobj) > 0
         if mask.shape == tuple(shape):
-            masks[structure] = mask
+            np.maximum(labels, np.where(mask, np.uint8(index_of[class_name]), np.uint8(0)), out=labels)
     if affine is None:
         raise ValueError(
             f"{subject_id}: no recognized structure found in its segmentation masks")
-    return build_label_volume(masks, tuple(shape)), affine
+    return labels, affine
 
 
 def region_for_study_type(study_type: str) -> str:

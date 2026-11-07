@@ -133,10 +133,12 @@ def test_undiscounted_return_telescopes_to_attainment_when_unclipped(monkeypatch
     def fake_distance(goal, start, current):
         if current is start:
             return 1.0
+        # The entry keeps `current` alive: a freed object's id can be reused
+        # by the next step's features (seen on Linux, Python 3.12).
         key = id(current)
         if key not in cache:
-            cache[key] = next(step_distances)
-        return cache[key]
+            cache[key] = (current, next(step_distances))
+        return cache[key][1]
 
     monkeypatch.setattr(vis_env.goals, "distance", fake_distance)
     monkeypatch.setattr(vis_env.goals, "is_useless", lambda features: False)

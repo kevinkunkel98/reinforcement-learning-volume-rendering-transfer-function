@@ -19,9 +19,22 @@ renders of search on top -- as good as 200 renders of search from scratch
 
 ## Try it
 
+macOS or Linux, Python 3.12-3.14 (prerequisites per system under
+[Setup](#setup)):
+
 ```bash
-python server.py      # http://127.0.0.1:8000
+git clone https://github.com/kevinkunkel98/reinforcement-learning-volume-rendering-transfer-function.git
+cd reinforcement-learning-volume-rendering-transfer-function
+make setup      # .venv + pinned dependencies; Linux without an NVIDIA GPU: make setup CPU=1
+make scans      # the 6 test patients from Zenodo, ~230 MB
+make run        # http://127.0.0.1:8000
 ```
+
+The trained policy ships in `models/`. The viewer opens on a Slicer chest CT
+(downloaded on first start, 40 MB); the scan list switches to the
+TotalSegmentator patients, which have the organ labels the policy was trained
+on. Free-form voice commands also need `make llm` (below); without it the rule
+parser answers alone.
 
 Type or hold Space to talk. The viewer opens on a transfer function with the
 organs in view; every command is answered by the policy, refined by planning
@@ -34,7 +47,7 @@ same over twenty sampled instructions.
 
 | env var | default | |
 |---|---|---|
-| `POLICY_PATH` | `out/rl_mb_v3c/clb_r3_seed1/checkpoint.pt` | policy checkpoint (must match the task version) |
+| `POLICY_PATH` | `models/v3c_seed1/checkpoint.pt` | policy checkpoint (must match the task version); a copy of `out/rl_mb_v3c/clb_r3_seed1` |
 | `POLICY_PLAN` | `1` | `0` skips planning through the learned model |
 | `POLICY_REFINE_EVALUATIONS` | `200` | search on top of the policy; `30` ≈ 0.77 in ~0.7 s, `0` shows the policy (+ planning) alone |
 | `POLICY_STEPS` | `1` | times the policy acts per command (re-rendering in between) |
@@ -43,9 +56,13 @@ same over twenty sampled instructions.
 ### In a VR headset
 
 ```bash
-python server.py --host 0.0.0.0 --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
-# headset browser: https://<mac-lan-ip>:8000/   (certificate from mkcert, must cover that IP)
+make certs      # HTTPS certificate for this machine's LAN address (mkcert)
+make run-vr     # prints the address to open in the headset browser
 ```
+
+Microphone and WebXR need HTTPS off localhost. The headset browser warns once
+about the certificate (its authority is only trusted on this machine); accept
+it. A new network address needs a new `make certs`.
 
 A standalone headset (tested: Vive Focus 3) gets a custom WebGL2 ray marcher
 instead of vtk.js: foveated step size, a longer stride through transparent
@@ -210,13 +227,25 @@ more training patients (`train_extra`) for the model-based learner, and four
 Slicer CTs as an out-of-source set. Val and test are the same for every
 result.
 
+`data/totalseg_manifest.json` (tracked) fixes which patient is in which split
+and the checksum of every CT. `tools.fetch_scans` reads just those patients
+out of the 3 GB zip on Zenodo with range requests and verifies them:
+
+```bash
+make scans                        # test split, enough for the viewer
+make scans SPLITS="test val train"
+make scans-all                    # all 100, for retraining
+python -m tools.build_visibility_cache                         # optional: otherwise built on first use
+python -m tools.build_visibility_cache --splits train_extra
+```
+
+The manifest itself was made from the full zip; to redo the selection:
+
 ```bash
 curl -L -o data/Totalsegmentator_dataset_small_v201.zip \
   "https://zenodo.org/records/10047263/files/Totalsegmentator_dataset_small_v201.zip?download=1"
 python -m tools.select_totalseg
 python -m tools.extend_totalseg
-python -m tools.build_visibility_cache
-python -m tools.build_visibility_cache --splits train_extra
 ```
 
 ## Reproduce the policy
@@ -246,10 +275,27 @@ The per-round seeds, policies and logs are in
 
 ## Setup
 
+| | macOS | Ubuntu / Debian |
+|---|---|---|
+| Python 3.12-3.14 | `brew install python@3.13` | 24.04: `sudo apt install python3 python3-venv make` |
+| OpenGL for the server-side renders (VTK) | built in | `sudo apt install libgl1 libegl1`, headless also `libosmesa6` |
+| HTTPS certificates for VR | `brew install mkcert` | `sudo apt install mkcert` |
+| local LLM | [Ollama](https://ollama.com/download), then `make llm` | `curl -fsSL https://ollama.com/install.sh \| sh`, then `make llm` |
+
+`make setup PYTHON=python3.13` picks another interpreter. `make test` runs the
+fast test suite (~13 min, wants ~8 GB of RAM and the test scans from
+`make scans`). Everything, training included, runs on the CPU; on Linux pip
+still installs the CUDA build of torch (~3 GB), and `make setup CPU=1` takes
+the CPU build instead. Speech recognition is faster-whisper on the CPU; on Apple
+silicon `.venv/bin/pip install mlx-whisper` makes it use the GPU.
+
+Without `make`, the same steps are:
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m pytest -q -m "not slow"
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m tools.fetch_scans          # --splits test val train | all
+.venv/bin/python server.py                     # --host 0.0.0.0 --ssl-certfile ... for VR
 ```
 
 Run from the repository root — paths like `out/` and `static/` are relative.
