@@ -1,358 +1,78 @@
 # Say what you want to see
 
-Speak to a CT scan and it renders what you asked for — "show only the
-skeleton," "a bit more kidneys." A rule parser or a local LLM turns the words
-into an instruction, a policy trained with reinforcement learning proposes the
-transfer function in one forward pass, planning through its own learned model
-refines it, and a short search polishes it.
+Speak to a CT scan and it renders what you asked for: "show only the
+skeleton", "a bit more kidneys", "make the lungs darker". A reinforcement
+learning policy turns the instruction into a transfer function, which works on
+patients it has never seen. It also works in VR.
 
 <p align="center">
-  <img src="docs/screenshots/ui.png" width="85%" alt="The viewer mid-session: a render, the instruction history with each command's per-class visibility delta, and the histogram/transfer-function curve panel" />
+  <img src="docs/screenshots/ui.png" width="85%" alt="The viewer: a render, the instruction history with each command's effect, and the transfer function panel" />
 </p>
 
-This is a master's thesis: can a transfer function be learned with RL well
-enough to follow instructions on a patient it has never seen? On six held-out
-patients the policy alone gets about half-way to the goal of a typical
-instruction in one step, 0.64 after planning (no renders), 0.77 with 30
-renders of search on top -- as good as 200 renders of search from scratch
-(0.70) -- and 0.91 with 200.
+## How it works
 
-## Try it
+1. **Understand.** Whisper transcribes speech. A rule parser handles known
+   phrasings, and a local LLM (Ollama) handles everything else.
+2. **Propose.** A policy trained with model-based RL suggests a transfer
+   function in one step.
+3. **Refine.** Gradients through the policy's learned model of the renderer
+   improve the suggestion in about 0.2 s, without a single render.
+4. **Polish.** A short search on the real objective finishes the job.
 
-macOS, Ubuntu/Debian, Fedora or Arch; needs `git` and `make`:
+On held-out patients, the policy reaches about half of the goal (median
+attainment 0.48). Planning raises that to 0.64. With 30 search steps on top it
+matches what a search from scratch reaches with 200 (0.77 vs. 0.70), and with
+200 it reaches 0.90. Model-free RL (SAC) stayed below 0.1.
+
+<p align="center">
+  <img src="docs/figures/budget_curve.png" width="65%" alt="Median attainment against search budget: starting from the policy and planning needs far fewer renders than searching from scratch" />
+</p>
+
+## Quick start
+
+macOS, Ubuntu/Debian, Fedora or Arch. You need `git` and `make`.
 
 ```bash
 git clone https://github.com/kevinkunkel98/reinforcement-learning-volume-rendering-transfer-function.git
 cd reinforcement-learning-volume-rendering-transfer-function
-make system-deps  # Python 3.12-3.14, OpenGL, mkcert via apt / dnf / pacman / brew (sudo)
-make setup        # .venv + pinned dependencies; Linux without an NVIDIA GPU: make setup CPU=1
-make scans        # the 6 test patients from Zenodo, ~250 MB
-make run          # http://127.0.0.1:8000
+make system-deps   # Python 3.12-3.14, OpenGL, mkcert (asks for sudo)
+make setup         # Linux without an NVIDIA GPU: make setup CPU=1
+make scans         # 6 test patients from Zenodo, ~250 MB
+make run           # http://127.0.0.1:8000
 ```
 
-The trained policy ships in `models/`. The viewer opens on a Slicer chest CT
-(downloaded on first start, 40 MB); the scan list switches to the
-TotalSegmentator patients, which have the organ labels the policy was trained
-on. Free-form voice commands also need `make llm` (below); without it the rule
-parser answers alone.
+Pick a `ts_…` scan in the scan list. These patients have the organ labels the
+policy was trained on. Type a command, or hold Space to talk.
 
-Type or hold Space to talk. The viewer opens on a transfer function with the
-organs in view; every command is answered by the policy, refined by planning
-through its learned model (~0.2 s), then polished by a 200-evaluation search
-(~5 s). Exact application of the parsed command and plain search are
-one click away. **compare** answers one instruction four ways from the same
-start — applied directly, hill-climbed at 10 and 200 evaluations, and by the
-bare policy — with attainment and cost side by side; **sweep 20** does the
-same over twenty sampled instructions.
+**Free-form voice commands:** install [Ollama](https://ollama.com/download),
+then run `make llm`. Without it, only the rule parser answers.
 
-| env var | default | |
-|---|---|---|
-| `POLICY_PATH` | `models/v3c_seed1/checkpoint.pt` | policy checkpoint (must match the task version); a copy of `out/rl_mb_v3c/clb_r3_seed1` |
-| `POLICY_PLAN` | `1` | `0` skips planning through the learned model |
-| `POLICY_REFINE_EVALUATIONS` | `200` | search on top of the policy; `30` ≈ 0.77 in ~0.7 s, `0` shows the policy (+ planning) alone |
-| `POLICY_STEPS` | `1` | times the policy acts per command (re-rendering in between) |
-| `TASK_VERSION` | `v3` | `v2` (with `out/rl_mb_v2/clb_r3_seed1/checkpoint.pt`) or `v1` restores an earlier task |
-
-### In a VR headset
+**VR headset** (tested on a Vive Focus 3) on the same network:
 
 ```bash
-make certs      # HTTPS certificate for this machine's LAN address (mkcert)
-make run-vr     # prints the address to open in the headset browser
+make certs     # HTTPS certificate for this machine's address
+make run-vr    # prints the address to open in the headset browser
 ```
 
-Microphone and WebXR need HTTPS off localhost. The headset browser warns once
-about the certificate (its authority is only trusted on this machine); accept
-it. A new network address needs a new `make certs`.
+The headset browser warns once about the certificate. Accept the warning.
+Hold the trigger to talk and use the thumbstick to turn the volume.
 
-A standalone headset (tested: Vive Focus 3) gets a custom WebGL2 ray marcher
-instead of vtk.js: foveated step size, a longer stride through transparent
-samples, brick skipping when the TF leaves bricks sparse, and coarser steps
-while the volume turns -- 57-58 fps head-on and 84-88 fps while rotating on a
-523-slice body scan, at the same resolution. Hold the trigger to talk; the
-thumbstick turns the volume, a click resets it and brings it back in front of
-you; the panel above it lists what each command changed, as the chat does.
-URL flags (`renderer`, `down`, `xrscale`, `fovstep`, ...) and the debugging
-tools are in `tools/headset/README.md`; measurements in
-`docs/experiments/2026-10-19-vr-lab-session.md` and
-`docs/experiments/2026-10-15-vr-lab-session.md`.
+`make help` lists every target, and `make test` runs the tests (~13 min,
+~8 GB RAM).
 
-## Why this is hard
+## More
 
-"More kidneys" has no closed-form answer — it depends on what sits in front
-of the kidneys on that particular scan and what else lights up when their
-peak moves. Instructions are scored on what the render actually shows:
-`visibility.py` estimates each labelled class's visible share of the image
-(14 ms against 50–210 ms for a real render), and `goals.py` turns an
-instruction into target changes per class and measures **attainment** — 1
-means the goal was reached, 0 means no progress, negative means worse than
-not touching anything; changing an unmentioned class costs.
-
-Eight classes, all from TotalSegmentator labels: skeleton, lungs, heart,
-vessels, liver, kidneys, spleen, soft tissue. The transfer function has one
-peak per class, and a labelled voxel is shaded by its own class's peak only
-(`transfer_mode="label_scoped"`), so organs that share a Hounsfield range —
-soft 40, kidneys 45, heart 50, spleen 55, liver 65 HU — no longer light each
-other up. Unlabelled tissue (skin, fat, muscle) still sees peaks by HU.
-
-## The task: v1, v2, v3
-
-On the original task (v1) about 30 % of instructions could not be improved by
-any method, even a 1000-evaluation search. They were ill-posed, not hard:
-"less lungs" when the lungs were already invisible, "more spleen" when the
-spleen sat behind the skin shell, so revealing it was charged as overshoot
-and fading the shell as drift. Task v2 fixes the definition, not the learner:
-
-1. the viewer and training start on a TF with the organs in view;
-2. instructions are well-posed (no "less X" for an invisible X);
-3. a class hiding a target may fade without penalty (`goals.find_occluders`);
-4. targets are clipped to what a class can physically reach.
-
-That lifts what a 500-evaluation search can reach from 0.49 to 0.82. v1 stays
-available (`task_version="v1"`); results on the two tasks are reported side
-by side, never as one number improving on the other
-(`docs/experiments/2026-10-17-task-v2.md`).
-
-Task v3 is what the viewer runs. On v2 the unlabelled shell -- skin and fat lit
-by the soft-tissue peak -- still covered half the image, so a "more liver"
-scored as complete moved half a percent of it. v3 draws unlabelled tissue at
-0.2 opacity, asks brightness only of classes that are visible, and lets
-"show only" hide everything else completely, and a class's reachable ceiling
-is probed at several peak heights (soft tissue is most visible at a low one).
-Policy + 200 evaluations reaches the goal as often as on v2 (0.88-0.92) with
-two to three times the on-screen change (median 2.5-3 percentage points of the
-image against 1) (`docs/experiments/2026-10-19-task-v3.md`). Every evaluation also reports
-**visible pp**, the percentage points of the image moved toward the goal.
-
-## The policy
-
-Model-based RL (`rl/model_based.py`). An ensemble of five MLPs learns what a
-transfer-function change does to the measured visibility, from renders of
-random changes on 90 training patients. The policy is trained by
-backpropagating the exact goal distance through that learned model; Dyna
-rounds render the policy's own proposals and refit the model where it was
-wrong. A closed-loop fine-tune (`rl/closed_loop.py`) trains through two-step
-rollouts, with every instruction kind drawn equally often. At use, the
-policy's answer is refined by gradient descent through its own learned model
-(`rl.model_based.plan`, no renders, ~0.2 s). Model-free SAC on the same task
-stayed at a median of 0.00-0.09.
-
-Task v3, 300 episodes per split, median attainment (median visible pp);
-policy rows are three training seeds:
-
-| method | evaluations | val | **test** (run once) |
-|---|---|---|---|
-| **policy + planning + search** (viewer default) | 200 | 0.89 / 0.90 / 0.90 (2.9-3.1) | **0.91 / 0.92 / 0.90 (2.5)** |
-| **policy + planning + search** | 30 | 0.75 / 0.77 / 0.75 (2.7-3.0) | **0.77 / 0.78 / 0.77 (2.3-2.5)** |
-| search (hill climb) | 200 | 0.75 (2.1) | 0.70 (2.0) |
-| **policy + planning** | 0 | 0.62 / 0.63 / 0.63 (2.6-2.7) | **0.62 / 0.65 / 0.64 (2.3-2.5)** |
-| **policy alone** | 0 | 0.50 / 0.49 / 0.49 (1.4-1.6) | **0.48 / 0.47 / 0.47 (1.2-1.5)** |
-
-Planning beats the policy alone, and planning + 30 beats policy + 30, on every
-seed and split (paired Wilcoxon, p ≤ 3e-5); planning + 30 is level with the
-200-evaluation search from scratch (p = 0.14-0.9).
-
-Task v2, 300 episodes per split, the same episodes for every method, median
-attainment; policy rows are three training seeds:
-
-| method | evaluations | val | **test** (run once) |
-|---|---|---|---|
-| **policy + search** (viewer default) | 200 | 0.89 / 0.89 / 0.89 | **0.90 / 0.91 / 0.90** |
-| **policy + search** | 100 | 0.85 / 0.87 / 0.85 | **0.86 / 0.86 / 0.85** |
-| **policy + search** | 30 | 0.70 / 0.72 / 0.71 | **0.71 / 0.70 / 0.70** |
-| search (hill climb) | 200 | 0.66 | 0.65 |
-| **policy alone** | 0 | 0.50 / 0.54 / 0.50 | **0.49 / 0.51 / 0.50** |
-| search | 100 | 0.48 | 0.49 |
-| search | 30 | 0.13 | 0.14 |
-| search | 10 | 0.04 | 0.05 |
-| rule executor | 0 | 0.03 | 0.01 |
-
-On v2:
-
-- The policy alone beats every baseline except the 200-evaluation search
-  (paired Wilcoxon p < 1e-15) and generalises: val 0.51, test 0.50.
-- As a starting point it beats search from scratch at every budget
-  (p < 1e-15). Policy + 30 evaluations is level with a 200-evaluation search;
-  with 100 it is clearly ahead.
-
-By kind (v2, test, seed 1):
-
-| kind | policy | + 30 | + 200 | search 200 |
-|---|---|---|---|---|
-| absolute ("high opacity vessels") | 0.62 | 0.78 | 0.96 | 0.71 |
-| relative ("more liver") | 0.53 | 0.76 | 0.97 | 0.74 |
-| compound ("more bone, less lungs") | 0.43 | 0.63 | 0.82 | 0.65 |
-| show only | 0.40 | 0.53 | 0.70 | 0.35 |
-| brightness | 0.79 | 0.89 | 0.93 | 0.99 |
-
-On v1 the same learner reaches 0.23, against at most 0.09 for SAC
-(`docs/experiments/2026-10-16-overnight-results.md`).
-
-## What didn't work
-
-- **Model-free SAC** (experiments E1–E9) — a median of at most 0.09 however the
-  reward, pretraining or show-only weighting was set. Its critic had to learn
-  instruction × rendering physics from one scalar.
-- **Behaviour cloning on search results** — negative even as the imitation
-  loss improved: averaging several good answers gives a bad one.
-- **A ten-step formulation**, nudging parameters over ten steps — never
-  learned. Letting the trained policy act twice with a re-render in between
-  is no better than once either (p = 0.37).
-- **More Dyna rounds** — the fourth added nothing.
-- **Intensity-band tissue labels** ("fat", "spongy") — needed real anatomy
-  labels. **Measuring visibility by deleting voxels** opens a hole that
-  reveals what is behind; blacking out colour, not opacity, is correct.
-
-## Learning from people
-
-A search needs tens to hundreds of renders per instruction, which no one will
-rate; a policy answers in one, which makes learning from human preference
-feasible. `/collect` shows two candidate renders per instruction, judged blind
-(A, B, equal, skip); `tools.merge_preferences` merges several raters' files
-and reports their agreement — the ceiling for any reward model trained on
-them. Judgments collected before a rendering fix are kept apart as a pilot.
-
-Since 2026-10-19 `/collect` renders the way the viewer does (task v3,
-label-scoped, faded shell; six views, cropped rather than squeezed) and pairs
-two of the conditions the thesis compares: the policy alone, policy +
-planning, + 30 or + 200 renders of search, 200 renders of search from the
-start, and the rule executor. Rows go to `out/vis_preferences_v3.jsonl` with
-each candidate's source and attainment, so agreement with the objective can be
-measured per condition. An item takes ~5–9 s to prepare; the 40 shared anchor
-items are cached in `out/cache/anchor_items.json` (built on first use, ~minutes).
+- [`docs/STATUS.md`](docs/STATUS.md): the current state, results and open problems
+- [`docs/experiments/`](docs/experiments/): one dated write-up per experiment,
+  with full tables and the scripts to reproduce them. Retraining the policy
+  starts at `docs/experiments/2026-10-19-scripts/pipeline_v3.sh` and needs
+  `make scans-all`.
+- [`tools/headset/README.md`](tools/headset/README.md): VR URL flags and
+  headset debugging
 
 ## Data
 
-TotalSegmentator CT (CC-BY-4.0): 20 train / 4 val / 6 test patients, plus 70
-more training patients (`train_extra`) for the model-based learner, and four
-Slicer CTs as an out-of-source set. Val and test are the same for every
-result.
-
-`data/totalseg_manifest.json` (tracked) fixes which patient is in which split
-and the checksum of every CT. `tools.fetch_scans` reads just those patients
-out of the 3 GB zip on Zenodo with range requests and verifies them:
-
-```bash
-make scans                        # test split, enough for the viewer
-make scans SPLITS="test val train"
-make scans-all                    # all 100, for retraining
-python -m tools.build_visibility_cache                         # optional: otherwise built on first use
-python -m tools.build_visibility_cache --splits train_extra
-```
-
-The manifest itself was made from the full zip; to redo the selection:
-
-```bash
-curl -L -o data/Totalsegmentator_dataset_small_v201.zip \
-  "https://zenodo.org/records/10047263/files/Totalsegmentator_dataset_small_v201.zip?download=1"
-python -m tools.select_totalseg
-python -m tools.extend_totalseg
-```
-
-## Reproduce the policy
-
-```bash
-# task v2 shown; task v3 is the same with --task-version v3
-# (docs/experiments/2026-10-19-scripts/pipeline_v3.sh)
-B="--splits train,train_extra --task-version v2"
-python -m rl.model_based collect --out out/rl_mb_v2/data_r0b.npz --starts 3000 --seed-base 7000000 $B
-python -m rl.model_based train --data out/rl_mb_v2/data_r0b.npz --out out/rl_mb_v2/r0b_seed0 --task-version v2
-# Dyna rounds: render the latest policy's proposals, retrain on everything so far
-python -m rl.model_based collect --out out/rl_mb_v2/data_r1.npz --starts 1500 --seed-base 8000000 \
-    --policy out/rl_mb_v2/r0b_seed0/checkpoint.pt $B
-# ... data_r2 (seed base 9000000, policy r1_seed2), data_r3 (4000000, policy cl2_r2_seed2), then per seed:
-D=out/rl_mb_v2/data_r0b.npz,out/rl_mb_v2/data_r1.npz,out/rl_mb_v2/data_r2.npz,out/rl_mb_v2/data_r3.npz
-python -m rl.model_based train --data $D --out out/rl_mb_v2/r3_seed1 --seed 1 --task-version v2
-python -m rl.closed_loop --init out/rl_mb_v2/r3_seed1/checkpoint.pt --data $D \
-    --out out/rl_mb_v2/clb_r3_seed1 --seed 1 --balance-kinds --task-version v2
-
-# official scores (300 fixed episodes; --refine N adds policy + N-evaluation search)
-python -m rl.vis_eval --policy out/rl_mb_v2/clb_r3_seed1/checkpoint.pt --split val
-```
-
-The per-round seeds, policies and logs are in
-`docs/experiments/2026-10-17-task-v2.md`; the probes behind its tables are in
-`docs/experiments/2026-10-17-scripts/`.
-
-## Setup
-
-`make system-deps` installs these; to do it by hand:
-
-| | packages |
-|---|---|
-| macOS | `brew install python@3.13 mkcert` (OpenGL is built in) |
-| Ubuntu / Debian | `sudo apt install python3 python3-venv make curl libgl1 libegl1 mkcert` |
-| Fedora | `sudo dnf install python3.14 make curl mesa-libGL mesa-libEGL mesa-dri-drivers mkcert` |
-| Arch | `sudo pacman -S --needed python make curl mesa libglvnd mkcert` |
-
-Python has to be 3.12-3.14: torch, vtk and matplotlib publish no wheels for
-3.15 yet, which Fedora 45 ships as `python3` -- hence `python3.14` there.
-`make setup` takes the first of `python3.14`, `python3.13`, `python3.12`,
-`python3` in that range; `make setup PYTHON=...` overrides it. OpenGL is for
-the server's own renders (VTK); without a display VTK falls back to EGL with
-Mesa's software renderer, so it also runs over SSH. For free-form voice
-commands install [Ollama](https://ollama.com/download) (Linux:
-`curl -fsSL https://ollama.com/install.sh | sh`, Arch: `sudo pacman -S
-ollama`), then `make llm`.
-
-Tested from a fresh clone on macOS 27 (arm64), Ubuntu 24.04 (Python 3.12),
-Fedora 45 (3.14) and Arch (3.14, x86_64): setup, scans, a policy command on a
-test patient, and the tests.
-
-`make test` runs the fast test suite (~13 min, wants ~8 GB of RAM and the test scans from
-`make scans`). Everything, training included, runs on the CPU; on Linux pip
-still installs the CUDA build of torch (~3 GB), and `make setup CPU=1` takes
-the CPU build instead. Speech recognition is faster-whisper on the CPU; on Apple
-silicon `.venv/bin/pip install mlx-whisper` makes it use the GPU.
-
-Without `make`, the same steps are:
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python -m tools.fetch_scans          # --splits test val train | all
-.venv/bin/python server.py                     # --host 0.0.0.0 --ssl-certfile ... for VR
-```
-
-Run from the repository root — paths like `out/` and `static/` are relative.
-Everything runs on CPU. Voice commands go through one vocabulary,
-`data/lexicon.json`: Whisper gets it as a prompt, known transcription errors
-are normalized ("Darkin' Skeleton" → "darken skeleton"), the rule parser
-answers when it accounts for every word, and only the rest goes to the local
-LLM (Ollama, `ollama serve && ollama pull qwen2.5:7b`; the server checks and
-preloads it at start, and falls back to the rule parser without it). New
-words go into `data/lexicon.json`. Parsers are scored by `eval_parsers.py`
-(`--set realistic` for the spoken-style set; see
-`docs/experiments/2026-10-18-instruction-parser.md` and the 10-21 lexicon
-spec). In policy mode the viewer shows a fast answer at once and replaces it
-with the refined one a few seconds later (`POLICY_TWO_STAGE`,
-`docs/experiments/2026-10-23-keep-repair-and-refine-budget.md`).
-
-## Layout
-
-| Path | What's there |
-|---|---|
-| `server.py`, `static/` | web UI, voice, WebXR viewer, compare panel, preference collection |
-| `commands.py`, `asr.py`, `eval_parsers.py` | instruction parsing, speech, parser evaluation |
-| `transfer.py`, `anatomy.py`, `anatomy_layers.py`, `render.py` | transfer functions, classes, rendering |
-| `visibility.py`, `goals.py` | what a render shows; instructions, task v1/v2/v3, attainment, visible pp |
-| `rl/model_based.py`, `rl/closed_loop.py` | the policy: dynamics ensemble, training, Dyna, closed-loop fine-tune, planning |
-| `rl/vis_eval.py`, `rl/baselines.py` | official evaluation, search and rule baselines |
-| `rl/oneshot_env.py`, `rl/oneshot_train.py`, `rl/pretrain.py` | the environment; SAC experiments |
-| `policy.py` | checkpoint loading for the viewer |
-| `static/vr_renderer.js`, `static/xr.js`, `static/xr_logic.js` | VR: ray marcher, WebXR session and panel, pure logic (tested by `tests/js/`) |
-| `datasets.py`, `totalseg.py`, `tools/` | volumes, splits, labels, caches; `tools/headset/` drives the headset over adb |
-| `docs/experiments/` | one dated write-up per experiment, with scripts |
-
-## Reading further
-
-- `docs/experiments/2026-10-19-task-v3.md` — task v3: the faded shell, show-only scoring, the camera fix, the ceiling fix found by rendering, planning, the final results.
-- `docs/experiments/2026-10-19-vr-lab-session.md` — VR frame rate from 21 to 57 fps at the same resolution.
-- `docs/experiments/2026-10-17-task-v2.md` — task v2, the policy, policy + search.
-- `docs/experiments/2026-10-16-overnight-results.md` — model-based RL on v1, why SAC stalled.
-- `docs/STATUS.md` — project snapshot as of 2026-10-19: results, weaknesses, next steps.
-
-Design specs and plans (`docs/superpowers/`), the SAC-era system documents
-(`system-documentation`, `rl-v2-pipeline`, `transfer-function`,
-`rl-training-setup`) and the SAC-era tools and plots were removed on
-2026-10-19; `git checkout pre-cleanup-2026-10-19` restores them, and every experiment doc's
-reproduce command still runs there.
+The CT scans and organ labels come from
+[TotalSegmentator](https://zenodo.org/records/10047263) (CC-BY-4.0): 90
+training, 4 validation and 6 test patients. The four out-of-distribution CTs
+come from the 3D Slicer sample data.
