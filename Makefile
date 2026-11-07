@@ -1,7 +1,11 @@
-# Clone, then:  make setup && make scans && make run   (macOS and Linux)
-# `make help` lists every target.
+# Clone, then:  make system-deps && make setup && make scans && make run
+# (macOS, Ubuntu/Debian, Fedora, Arch). `make help` lists every target.
 
-PYTHON ?= python3
+# The first interpreter in the supported range (3.12-3.14): torch, vtk and
+# matplotlib publish no wheels for 3.15 yet, which Fedora 45 ships as python3.
+PYTHON ?= $(shell for p in python3.14 python3.13 python3.12 python3; do \
+	command -v $$p >/dev/null 2>&1 && $$p -c 'import sys; sys.exit(not (3, 12) <= sys.version_info[:2] <= (3, 14))' 2>/dev/null \
+	&& { echo $$p; break; }; done)
 VENV   := .venv
 PY     := $(VENV)/bin/python
 PORT   ?= 8000
@@ -13,23 +17,39 @@ CPU    ?=
 TORCH  := $(shell sed -n 's/^torch==//p' requirements.txt)
 
 # This machine's LAN address, for the headset (override: make certs IP=192.168.1.20)
-IP ?= $(shell (ipconfig getifaddr en0 || ipconfig getifaddr en1 || hostname -I | awk '{print $$1}') 2>/dev/null | head -n1)
+IP ?= $(shell { ipconfig getifaddr en0 || ipconfig getifaddr en1 \
+	|| ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($$i == "src") print $$(i + 1)}'; } 2>/dev/null | head -n1)
 
-.PHONY: help setup scans scans-all llm run certs run-vr test
+.PHONY: help system-deps setup scans scans-all llm run certs run-vr test
 
 help:
-	@echo "make setup      virtualenv in .venv + pinned dependencies ($(PYTHON), needs 3.12-3.14)"
-	@echo "                (Linux without an NVIDIA GPU: make setup CPU=1)"
-	@echo "make scans      download the 6 test patients from Zenodo (~230 MB; SPLITS='test val train' for more)"
-	@echo "make scans-all  all 100 scans, for retraining (~3 GB)"
-	@echo "make llm        pull the local LLM ($(LLM)) for free-form voice commands (needs Ollama)"
-	@echo "make run        viewer on http://127.0.0.1:$(PORT)"
-	@echo "make certs      HTTPS certificate for this machine's LAN address ($(IP)) with mkcert"
-	@echo "make run-vr     viewer on https://$(IP):$(PORT) for a headset on the same network"
-	@echo "make test       fast test suite"
+	@echo "make system-deps  system packages: Python 3.12-3.14, OpenGL, mkcert (apt, dnf, pacman or brew; uses sudo)"
+	@echo "make setup        virtualenv in .venv + pinned dependencies (Python: $(or $(PYTHON),none found))"
+	@echo "                  (Linux without an NVIDIA GPU: make setup CPU=1)"
+	@echo "make scans        download the 6 test patients from Zenodo (~250 MB; SPLITS='test val train' for more)"
+	@echo "make scans-all    all 100 scans, for retraining (~3 GB)"
+	@echo "make llm          pull the local LLM ($(LLM)) for free-form voice commands (needs Ollama)"
+	@echo "make run          viewer on http://127.0.0.1:$(PORT)"
+	@echo "make certs        HTTPS certificate for this machine's LAN address ($(IP)) with mkcert"
+	@echo "make run-vr       viewer on https://$(IP):$(PORT) for a headset on the same network"
+	@echo "make test         fast test suite (wants ~8 GB of RAM and make scans)"
+
+system-deps:
+	@if command -v apt-get >/dev/null 2>&1; then \
+		set -x; sudo apt-get update; sudo apt-get install -y python3 python3-venv make curl libgl1 libegl1 mkcert; \
+	elif command -v dnf >/dev/null 2>&1; then \
+		set -x; sudo dnf install -y python3.14 make curl mesa-libGL mesa-libEGL mesa-dri-drivers mkcert; \
+	elif command -v pacman >/dev/null 2>&1; then \
+		set -x; sudo pacman -S --needed --noconfirm python make curl mesa libglvnd mkcert; \
+	elif command -v brew >/dev/null 2>&1; then \
+		set -x; brew install python@3.13 mkcert; \
+	else \
+		echo "unknown package manager: install Python 3.12-3.14, make, OpenGL/EGL (Mesa) and mkcert yourself"; exit 1; \
+	fi
 
 $(PY):
-	$(PYTHON) -c 'import sys; v = sys.version_info[:2]; sys.exit(0 if (3, 12) <= v <= (3, 14) else f"Python 3.12-3.14 needed, {sys.executable} is {v[0]}.{v[1]} -- try make setup PYTHON=python3.12")'
+	@test -n "$(PYTHON)" || { echo "no Python 3.12-3.14 found (python3.14, python3.13, python3.12 or python3): make system-deps"; exit 1; }
+	@echo "using $(PYTHON) ($$($(PYTHON) --version))"
 	$(PYTHON) -m venv $(VENV)
 	$(PY) -m pip install --upgrade pip
 
@@ -47,14 +67,14 @@ scans-all: $(PY)
 	$(PY) -u -m tools.fetch_scans --splits all
 
 llm:
-	@command -v ollama >/dev/null || { echo "Ollama is not installed: https://ollama.com/download"; exit 1; }
+	@command -v ollama >/dev/null || { echo "Ollama is not installed: https://ollama.com/download (Arch: sudo pacman -S ollama)"; exit 1; }
 	ollama pull $(LLM)
 
 run: $(PY)
 	$(PY) server.py --port $(PORT)
 
 certs:
-	@command -v mkcert >/dev/null || { echo "mkcert is not installed: brew install mkcert / sudo apt install mkcert"; exit 1; }
+	@command -v mkcert >/dev/null || { echo "mkcert is not installed: make system-deps"; exit 1; }
 	@test -n "$(IP)" || { echo "no LAN address found; pass one: make certs IP=..."; exit 1; }
 	mkdir -p certs
 	mkcert -cert-file certs/lan.pem -key-file certs/lan-key.pem $(IP) localhost 127.0.0.1

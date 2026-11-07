@@ -19,15 +19,15 @@ renders of search on top -- as good as 200 renders of search from scratch
 
 ## Try it
 
-macOS or Linux, Python 3.12-3.14 (prerequisites per system under
-[Setup](#setup)):
+macOS, Ubuntu/Debian, Fedora or Arch; needs `git` and `make`:
 
 ```bash
 git clone https://github.com/kevinkunkel98/reinforcement-learning-volume-rendering-transfer-function.git
 cd reinforcement-learning-volume-rendering-transfer-function
-make setup      # .venv + pinned dependencies; Linux without an NVIDIA GPU: make setup CPU=1
-make scans      # the 6 test patients from Zenodo, ~230 MB
-make run        # http://127.0.0.1:8000
+make system-deps  # Python 3.12-3.14, OpenGL, mkcert via apt / dnf / pacman / brew (sudo)
+make setup        # .venv + pinned dependencies; Linux without an NVIDIA GPU: make setup CPU=1
+make scans        # the 6 test patients from Zenodo, ~250 MB
+make run          # http://127.0.0.1:8000
 ```
 
 The trained policy ships in `models/`. The viewer opens on a Slicer chest CT
@@ -275,15 +275,30 @@ The per-round seeds, policies and logs are in
 
 ## Setup
 
-| | macOS | Ubuntu / Debian |
-|---|---|---|
-| Python 3.12-3.14 | `brew install python@3.13` | 24.04: `sudo apt install python3 python3-venv make` |
-| OpenGL for the server-side renders (VTK) | built in | `sudo apt install libgl1 libegl1`, headless also `libosmesa6` |
-| HTTPS certificates for VR | `brew install mkcert` | `sudo apt install mkcert` |
-| local LLM | [Ollama](https://ollama.com/download), then `make llm` | `curl -fsSL https://ollama.com/install.sh \| sh`, then `make llm` |
+`make system-deps` installs these; to do it by hand:
 
-`make setup PYTHON=python3.13` picks another interpreter. `make test` runs the
-fast test suite (~13 min, wants ~8 GB of RAM and the test scans from
+| | packages |
+|---|---|
+| macOS | `brew install python@3.13 mkcert` (OpenGL is built in) |
+| Ubuntu / Debian | `sudo apt install python3 python3-venv make curl libgl1 libegl1 mkcert` |
+| Fedora | `sudo dnf install python3.14 make curl mesa-libGL mesa-libEGL mesa-dri-drivers mkcert` |
+| Arch | `sudo pacman -S --needed python make curl mesa libglvnd mkcert` |
+
+Python has to be 3.12-3.14: torch, vtk and matplotlib publish no wheels for
+3.15 yet, which Fedora 45 ships as `python3` -- hence `python3.14` there.
+`make setup` takes the first of `python3.14`, `python3.13`, `python3.12`,
+`python3` in that range; `make setup PYTHON=...` overrides it. OpenGL is for
+the server's own renders (VTK); without a display VTK falls back to EGL with
+Mesa's software renderer, so it also runs over SSH. For free-form voice
+commands install [Ollama](https://ollama.com/download) (Linux:
+`curl -fsSL https://ollama.com/install.sh | sh`, Arch: `sudo pacman -S
+ollama`), then `make llm`.
+
+Tested from a fresh clone on macOS 27 (arm64), Ubuntu 24.04 (Python 3.12),
+Fedora 45 (3.14) and Arch (3.14, x86_64): setup, scans, a policy command on a
+test patient, and the tests.
+
+`make test` runs the fast test suite (~13 min, wants ~8 GB of RAM and the test scans from
 `make scans`). Everything, training included, runs on the CPU; on Linux pip
 still installs the CUDA build of torch (~3 GB), and `make setup CPU=1` takes
 the CPU build instead. Speech recognition is faster-whisper on the CPU; on Apple
