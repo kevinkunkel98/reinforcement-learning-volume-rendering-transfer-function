@@ -6,7 +6,9 @@ TotalSegmentator zip on Zenodo with HTTP range requests and writes
 data/totalseg/<id>/ct.nii.gz and labels.nii.gz exactly as
 `tools.select_totalseg` does from a local copy of the zip.
 
-    python -m tools.fetch_scans                      # the 6 test patients (~230 MB), enough for the viewer
+    python -m tools.fetch_scans --demo --splits      # the viewer's 7 showcase patients (make scans)
+    python -m tools.fetch_scans                      # the 6 test patients (~250 MB; the tests use them)
+    python -m tools.fetch_scans --names ts_s0358     # plus single scans by name
     python -m tools.fetch_scans --splits test val train
     python -m tools.fetch_scans --splits all         # all 100 (~3 GB of reads), for retraining
 
@@ -112,9 +114,9 @@ class HttpRangeFile(io.RawIOBase):
         return written
 
 
-def wanted_subjects(splits) -> list:
+def wanted_subjects(splits, names=()) -> list:
     subjects = totalseg._manifest().get("subjects", [])
-    return [s for s in subjects if s["split"] in splits]
+    return [s for s in subjects if s["split"] in splits or s["name"] in names]
 
 
 def is_present(entry: dict) -> bool:
@@ -122,8 +124,8 @@ def is_present(entry: dict) -> bool:
             and _sha256_file(entry["path"]) == entry["sha256"])
 
 
-def fetch(splits, out_dir: str = DEFAULT_OUT_DIR, url: str = ZIP_URL, workers: int = 4) -> list:
-    entries = wanted_subjects(splits)
+def fetch(splits, out_dir: str = DEFAULT_OUT_DIR, url: str = ZIP_URL, workers: int = 4, names=()) -> list:
+    entries = wanted_subjects(splits, names)
     if not entries:
         raise SystemExit(f"no subjects of split(s) {', '.join(splits)} in {totalseg.MANIFEST_PATH}")
     missing = [e for e in entries if not is_present(e)]
@@ -161,12 +163,15 @@ def fetch(splits, out_dir: str = DEFAULT_OUT_DIR, url: str = ZIP_URL, workers: i
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--splits", nargs="+", default=["test"], choices=list(ALL_SPLITS) + ["all"])
+    parser.add_argument("--splits", nargs="*", default=["test"], choices=list(ALL_SPLITS) + ["all"])
+    parser.add_argument("--names", nargs="*", default=[], help="single scans on top, e.g. ts_s0358")
+    parser.add_argument("--demo", action="store_true", help="the viewer's showcase set, data/demo_scans.json")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     parser.add_argument("--workers", type=int, default=4, help="scans downloaded in parallel")
     args = parser.parse_args()
     splits = ALL_SPLITS if "all" in args.splits else tuple(args.splits)
-    fetch(splits, args.out_dir, workers=args.workers)
+    names = tuple(args.names) + (tuple(totalseg.demo_names()) if args.demo else ())
+    fetch(splits, args.out_dir, workers=args.workers, names=names)
     print(f"[fetch_scans] done: {len(totalseg.available_names())} scans available")
 
 

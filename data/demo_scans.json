@@ -1,0 +1,4 @@
+{
+  "_comment": "The viewer's scan list and `make scans`: TotalSegmentator patients picked by looking at their start renders (2026-11-07). First = start scan. Test/val patients were never trained on; s0358 (the VR lab scan) and s0727 are training patients.",
+  "scans": ["ts_s0477", "ts_s1388", "ts_s0591", "ts_s1379", "ts_s0878", "ts_s0358", "ts_s0727"]
+}

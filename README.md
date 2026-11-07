@@ -37,12 +37,14 @@ git clone https://github.com/kevinkunkel98/reinforcement-learning-volume-renderi
 cd reinforcement-learning-volume-rendering-transfer-function
 make system-deps   # Python 3.12-3.14, OpenGL, mkcert (asks for sudo)
 make setup         # Linux without an NVIDIA GPU: make setup CPU=1
-make scans         # 6 test patients from Zenodo, ~250 MB
+make scans         # the 7 demo patients from Zenodo, ~300 MB
 make run           # http://127.0.0.1:8000
 ```
 
-Pick a `ts_…` scan in the scan list. These patients have the organ labels the
-policy was trained on. Type a command, or hold Space to talk.
+The scan list holds a fixed demo set of seven patients, picked because they
+render well (`data/demo_scans.json`). Five of them were never seen in
+training, including s0477, the start scan, and s1379, a contrast scan that
+shows the vessels. Type a command, or hold Space to talk.
 
 **Free-form voice commands:** install [Ollama](https://ollama.com/download),
 then run `make llm`. Without it, only the rule parser answers.
@@ -59,6 +61,29 @@ Hold the trigger to talk and use the thumbstick to turn the volume.
 
 `make help` lists every target, and `make test` runs the tests (~13 min,
 ~8 GB RAM).
+
+### Without make
+
+```bash
+python3 -m venv .venv                          # Python 3.12-3.14
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m tools.fetch_scans --demo --splits   # demo patients
+.venv/bin/python server.py                     # http://127.0.0.1:8000
+
+# VR: certificate for this machine's LAN address, then serve over HTTPS
+mkcert -cert-file certs/lan.pem -key-file certs/lan-key.pem <lan-ip> localhost 127.0.0.1
+.venv/bin/python server.py --host 0.0.0.0 --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
+
+# voice: local LLM for free-form commands
+ollama pull qwen2.5:7b
+
+# tests
+.venv/bin/python -m tools.fetch_scans          # the 6 test patients
+.venv/bin/python -m pytest -q -m "not slow"
+```
+
+`server.py --dataset ts_s0591` starts on another scan. With `--port 8001`
+it uses another port.
 
 ## More
 

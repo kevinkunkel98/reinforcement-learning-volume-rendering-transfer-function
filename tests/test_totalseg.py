@@ -229,3 +229,16 @@ def test_label_digest_changes_when_label_file_changes(labelled_manifest):
     second = totalseg.label_digest("ts_l0001")
 
     assert second != first
+
+
+def test_demo_scans_are_labelled_manifest_patients():
+    import json
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "data/demo_scans.json")) as f:
+        demo = json.load(f)["scans"]
+    with open(os.path.join(root, "data/totalseg_manifest.json")) as f:
+        subjects = {s["name"]: s for s in json.load(f)["subjects"]}
+    assert demo and len(set(demo)) == len(demo)
+    for name in demo:
+        assert name in subjects and subjects[name]["labels_path"]

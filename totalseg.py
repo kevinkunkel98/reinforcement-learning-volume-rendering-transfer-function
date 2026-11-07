@@ -45,6 +45,17 @@ def subject(name: str) -> dict:
     return subjects[name]
 
 
+DEMO_SCANS_PATH = "data/demo_scans.json"
+
+
+def demo_names() -> list:
+    """The fixed showcase set (data/demo_scans.json), first = the viewer's start scan."""
+    if not os.path.exists(DEMO_SCANS_PATH):
+        return []
+    with open(DEMO_SCANS_PATH) as f:
+        return list(json.load(f)["scans"])
+
+
 def available_names() -> list:
     """Manifest volumes whose CT file exists locally, sorted."""
     return sorted(n for n, s in _subjects().items() if os.path.exists(s["path"]))

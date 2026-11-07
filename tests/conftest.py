@@ -1,4 +1,11 @@
+import os
+
 import pytest
+
+# The server picks its start scan when it is imported; the tests were written
+# against the unlabelled Slicer chest CT, and run from scratch directories
+# where the downloaded TotalSegmentator scans are not visible.
+os.environ.setdefault("UI_DATASET", "ct_chest")
 
 import transfer
 

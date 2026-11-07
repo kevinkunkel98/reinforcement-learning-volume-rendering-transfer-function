@@ -9,7 +9,6 @@ PYTHON ?= $(shell for p in python3.14 python3.13 python3.12 python3; do \
 VENV   := .venv
 PY     := $(VENV)/bin/python
 PORT   ?= 8000
-SPLITS ?= test
 LLM    ?= qwen2.5:7b
 # Linux only: make setup CPU=1 installs the CPU build of torch (~200 MB instead
 # of ~3 GB of CUDA libraries) on a machine without an NVIDIA GPU.
@@ -26,13 +25,13 @@ help:
 	@echo "make system-deps  system packages: Python 3.12-3.14, OpenGL, mkcert (apt, dnf, pacman or brew; uses sudo)"
 	@echo "make setup        virtualenv in .venv + pinned dependencies (Python: $(or $(PYTHON),none found))"
 	@echo "                  (Linux without an NVIDIA GPU: make setup CPU=1)"
-	@echo "make scans        download the 6 test patients from Zenodo (~250 MB; SPLITS='test val train' for more)"
+	@echo "make scans        download the 7 demo patients (data/demo_scans.json) from Zenodo"
 	@echo "make scans-all    all 100 scans, for retraining (~3 GB)"
 	@echo "make llm          pull the local LLM ($(LLM)) for free-form voice commands (needs Ollama)"
 	@echo "make run          viewer on http://127.0.0.1:$(PORT)"
 	@echo "make certs        HTTPS certificate for this machine's LAN address ($(IP)) with mkcert"
 	@echo "make run-vr       viewer on https://$(IP):$(PORT) for a headset on the same network"
-	@echo "make test         fast test suite (wants ~8 GB of RAM and make scans)"
+	@echo "make test         fast test suite (fetches the 6 test patients first; ~8 GB of RAM)"
 
 system-deps:
 	@if command -v apt-get >/dev/null 2>&1; then \
@@ -61,7 +60,7 @@ endif
 	@echo; echo "next: make scans && make run"
 
 scans: $(PY)
-	$(PY) -u -m tools.fetch_scans --splits $(SPLITS)
+	$(PY) -u -m tools.fetch_scans --demo --splits
 
 scans-all: $(PY)
 	$(PY) -u -m tools.fetch_scans --splits all
@@ -85,4 +84,5 @@ run-vr: $(PY)
 	$(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
 
 test: $(PY)
+	$(PY) -u -m tools.fetch_scans --splits test
 	$(PY) -m pytest -q -m "not slow"

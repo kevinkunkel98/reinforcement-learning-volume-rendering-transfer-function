@@ -835,7 +835,8 @@ let selectHighlighted = -1;
 
 function setSelectValue(name) {
   state.dataset = name;
-  selectValueLabel.textContent = name;
+  const option = selectOptions.find((opt) => opt.dataset.value === name);
+  selectValueLabel.textContent = option ? option.textContent : name;
   selectOptions.forEach((opt) => opt.setAttribute("aria-selected", String(opt.dataset.value === name)));
 }
 
@@ -908,7 +909,7 @@ async function loadDatasets() {
     opt.className = "select-option";
     opt.setAttribute("role", "option");
     opt.dataset.value = name;
-    opt.textContent = name;
+    opt.textContent = (data.labels && data.labels[name]) || name;
     opt.addEventListener("click", () => chooseDataset(name));
     selectPopover.appendChild(opt);
     return opt;

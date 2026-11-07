@@ -42,6 +42,7 @@ import lexicon
 import policy as policy_module
 import render as render_module
 from render import features, grab, render
+import totalseg
 from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
 from rl.colour_guard import colour_guard
 from rl.keep_repair import keep_repair
@@ -92,6 +93,26 @@ def _predict_action(policy, observation: np.ndarray) -> np.ndarray:
     return np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
 
 
+def _scan_list() -> list:
+    """The viewer's scan list: the demo patients of data/demo_scans.json that
+    are downloaded, in that order (all downloaded TotalSegmentator patients
+    if none of them is). The Slicer CTs, the MRI and the uncalibrated volumes
+    have no organ labels and are not offered (still loadable: --dataset)."""
+    available = set(totalseg.available_names())
+    demo = [n for n in totalseg.demo_names() if n in available]
+    return demo or sorted(available)
+
+
+def _scan_label(name: str) -> str:
+    """"s0477 · neck–pelvis" from the study type "ct neck-thorax-abdomen-pelvis"."""
+    entry = totalseg.subject(name)
+    study = entry["study_type"].lower().removeprefix("ct ")
+    prefix = "angio " if study.startswith("angiography ") else ""
+    parts = study.removeprefix("angiography ").split("-")
+    region = parts[0] if len(parts) == 1 else f"{parts[0]}–{parts[-1]}"
+    return f"{entry['id']} · {prefix}{region}"
+
+
 def _resolve_dataset_name():
     # Read --dataset from argv directly (not argparse) so this resolves before
     # any module-level code below -- notably `session = Session(...)` -- runs
@@ -100,11 +121,12 @@ def _resolve_dataset_name():
         idx = sys.argv.index("--dataset")
         if idx + 1 < len(sys.argv):
             return sys.argv[idx + 1]
-    # ct_chest, not mri_head: MRI has no calibrated Hounsfield scale (see
-    # datasets.py's module docstring) and is excluded from RL v2 for exactly
-    # that reason, so the chat UI's default should be a calibrated CT where
-    # every mode -- including policy -- works.
-    return os.environ.get("UI_DATASET", "ct_chest")
+    if os.environ.get("UI_DATASET"):
+        return os.environ["UI_DATASET"]
+    # The first demo patient (data/demo_scans.json). Without downloaded scans,
+    # ct_chest: a calibrated CT, unlike mri_head, so every mode still works.
+    scans = _scan_list()
+    return scans[0] if scans else "ct_chest"
 
 
 _dataset_name = _resolve_dataset_name()
@@ -1365,7 +1387,11 @@ async def forward():
 
 @app.get("/api/datasets")
 async def datasets_list():
-    return {"available": list_datasets(), "current": _dataset_name}
+    names = _scan_list()
+    if _dataset_name not in names:
+        names = [_dataset_name] + names
+    return {"available": names, "current": _dataset_name,
+            "labels": {n: _scan_label(n) for n in names if totalseg.is_totalseg(n)}}
 
 
 @app.get("/api/datasets/{name}/metadata")
@@ -1752,6 +1778,8 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     print(f"[server] dataset: {_dataset_name}")
+    if not _scan_list():
+        print("\n[server] WARNING: no TotalSegmentator scans downloaded -- run `make scans`\n")
     import threading
 
     def _llm_ready():
