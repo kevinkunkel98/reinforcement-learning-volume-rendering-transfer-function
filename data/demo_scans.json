@@ -1,4 +1,38 @@
 {
-  "_comment": "The viewer's scan list and `make scans`: TotalSegmentator patients picked by looking at their start renders (2026-11-07). First = start scan. Test/val patients were never trained on; s0358 (the VR lab scan) and s0727 are training patients.",
-  "scans": ["ts_s0477", "ts_s1388", "ts_s0591", "ts_s1379", "ts_s0878", "ts_s0358", "ts_s0727"]
+  "_comment": "The viewer's scan list and `make scans`: TotalSegmentator patients picked by looking at their start renders (2026-11-07). First = start scan. Test/val patients were never trained on; s0358 (the VR lab scan) and s0727 are training patients. `candidates`: the 24 patients compared for the pick (all test/val, s0358, 13 whole-trunk training patients); make scans-candidates.",
+  "scans": [
+    "ts_s0477",
+    "ts_s1388",
+    "ts_s0591",
+    "ts_s1379",
+    "ts_s0878",
+    "ts_s0358",
+    "ts_s0727"
+  ],
+  "candidates": [
+    "ts_s0454",
+    "ts_s0477",
+    "ts_s0591",
+    "ts_s0763",
+    "ts_s0878",
+    "ts_s1245",
+    "ts_s1337",
+    "ts_s1379",
+    "ts_s1383",
+    "ts_s1388",
+    "ts_s0358",
+    "ts_s0011",
+    "ts_s0461",
+    "ts_s0511",
+    "ts_s0519",
+    "ts_s0703",
+    "ts_s0720",
+    "ts_s0726",
+    "ts_s0727",
+    "ts_s0777",
+    "ts_s0812",
+    "ts_s0859",
+    "ts_s0903",
+    "ts_s0912"
+  ]
 }

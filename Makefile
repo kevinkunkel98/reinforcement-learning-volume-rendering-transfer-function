@@ -19,13 +19,14 @@ TORCH  := $(shell sed -n 's/^torch==//p' requirements.txt)
 IP ?= $(shell { ipconfig getifaddr en0 || ipconfig getifaddr en1 \
 	|| ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($$i == "src") print $$(i + 1)}'; } 2>/dev/null | head -n1)
 
-.PHONY: help system-deps setup scans scans-all llm run certs run-vr test
+.PHONY: help system-deps setup scans scans-candidates scans-all llm run certs run-vr test
 
 help:
 	@echo "make system-deps  system packages: Python 3.12-3.14, OpenGL, mkcert (apt, dnf, pacman or brew; uses sudo)"
 	@echo "make setup        virtualenv in .venv + pinned dependencies (Python: $(or $(PYTHON),none found))"
 	@echo "                  (Linux without an NVIDIA GPU: make setup CPU=1)"
 	@echo "make scans        download the 7 demo patients (data/demo_scans.json) from Zenodo"
+	@echo "make scans-candidates  the 24 patients the demo set was picked from (~1 GB); view them: make run SCANS=all"
 	@echo "make scans-all    all 100 scans, for retraining (~3 GB)"
 	@echo "make llm          pull the local LLM ($(LLM)) for free-form voice commands (needs Ollama)"
 	@echo "make run          viewer on http://127.0.0.1:$(PORT)"
@@ -62,6 +63,9 @@ endif
 scans: $(PY)
 	$(PY) -u -m tools.fetch_scans --demo --splits
 
+scans-candidates: $(PY)
+	$(PY) -u -m tools.fetch_scans --candidates --splits
+
 scans-all: $(PY)
 	$(PY) -u -m tools.fetch_scans --splits all
 
@@ -69,8 +73,9 @@ llm:
 	@command -v ollama >/dev/null || { echo "Ollama is not installed: https://ollama.com/download (Arch: sudo pacman -S ollama)"; exit 1; }
 	ollama pull $(LLM)
 
+# SCANS=all lists every downloaded patient, not only the demo set
 run: $(PY)
-	$(PY) server.py --port $(PORT)
+	SCANS=$(or $(SCANS),demo) $(PY) server.py --port $(PORT)
 
 certs:
 	@command -v mkcert >/dev/null || { echo "mkcert is not installed: make system-deps"; exit 1; }
@@ -81,7 +86,7 @@ certs:
 run-vr: $(PY)
 	@test -f certs/lan.pem || { echo "no certificate yet: make certs"; exit 1; }
 	@echo "headset browser: https://$(IP):$(PORT)/"
-	$(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
+	SCANS=$(or $(SCANS),demo) $(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
 
 test: $(PY)
 	$(PY) -u -m tools.fetch_scans --splits test

@@ -46,6 +46,10 @@ render well (`data/demo_scans.json`). Five of them were never seen in
 training, including s0477, the start scan, and s1379, a contrast scan that
 shows the vessels. Type a command, or hold Space to talk.
 
+`make scans-candidates` fetches the 24 patients the demo set was picked from
+(~1 GB). `make scans-all` fetches all 100 (~3 GB). `make run SCANS=all` lists
+every downloaded patient in the viewer.
+
 **Free-form voice commands:** install [Ollama](https://ollama.com/download),
 then run `make llm`. Without it, only the rule parser answers.
 
@@ -69,6 +73,7 @@ python3 -m venv .venv                          # Python 3.12-3.14
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m tools.fetch_scans --demo --splits   # demo patients
 .venv/bin/python server.py                     # http://127.0.0.1:8000
+SCANS=all .venv/bin/python server.py           # list every downloaded patient
 
 # VR: certificate for this machine's LAN address, then serve over HTTPS
 mkcert -cert-file certs/lan.pem -key-file certs/lan-key.pem <lan-ip> localhost 127.0.0.1

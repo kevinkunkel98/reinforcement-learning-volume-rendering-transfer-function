@@ -93,6 +93,10 @@ def _predict_action(policy, observation: np.ndarray) -> np.ndarray:
     return np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
 
 
+# SCANS=all: list every downloaded patient after the demo set.
+SCAN_LIST = os.environ.get("SCANS", "demo")
+
+
 def _scan_list() -> list:
     """The viewer's scan list: the demo patients of data/demo_scans.json that
     are downloaded, in that order (all downloaded TotalSegmentator patients
@@ -100,6 +104,8 @@ def _scan_list() -> list:
     have no organ labels and are not offered (still loadable: --dataset)."""
     available = set(totalseg.available_names())
     demo = [n for n in totalseg.demo_names() if n in available]
+    if SCAN_LIST == "all":
+        return demo + sorted(available - set(demo))
     return demo or sorted(available)
 
 

@@ -48,12 +48,13 @@ def subject(name: str) -> dict:
 DEMO_SCANS_PATH = "data/demo_scans.json"
 
 
-def demo_names() -> list:
-    """The fixed showcase set (data/demo_scans.json), first = the viewer's start scan."""
+def demo_names(key: str = "scans") -> list:
+    """The fixed showcase set (data/demo_scans.json), first = the viewer's
+    start scan; key="candidates" gives the 24 patients it was picked from."""
     if not os.path.exists(DEMO_SCANS_PATH):
         return []
     with open(DEMO_SCANS_PATH) as f:
-        return list(json.load(f)["scans"])
+        return list(json.load(f).get(key, []))
 
 
 def available_names() -> list:
