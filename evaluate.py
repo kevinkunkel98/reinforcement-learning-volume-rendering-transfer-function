@@ -12,5 +12,5 @@ import json
 
 
 def jsonl_append(path: str, entry: dict) -> None:
-    with open(path, "a") as f:
+    with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")

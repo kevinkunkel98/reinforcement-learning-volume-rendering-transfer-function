@@ -941,7 +941,7 @@ class Session:
 
     def _load_or_init(self):
         if os.path.exists(self.path):
-            with open(self.path) as f:
+            with open(self.path, encoding="utf-8") as f:
                 data = json.load(f)
             history = data.get("history", [])
             # Persisted sessions from the four-peak viewer contain 24 values;
@@ -981,7 +981,7 @@ class Session:
 
     def save(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        with open(self.path, "w") as f:
+        with open(self.path, "w", encoding="utf-8") as f:
             json.dump({"history": self.history, "cursor": self.cursor, "session_id": self.session_id}, f)
 
     def state(self):
@@ -1714,7 +1714,7 @@ async def scene_transition_route(payload: dict):
     os.makedirs(os.path.dirname(SCENE_TRANSITIONS_PATH) or ".", exist_ok=True)
     with _SCENE_WRITE_LOCK:
         if os.path.exists(SCENE_TRANSITIONS_PATH):
-            with open(SCENE_TRANSITIONS_PATH) as stream:
+            with open(SCENE_TRANSITIONS_PATH, encoding="utf-8") as stream:
                 for line in stream:
                     if not line.strip():
                         continue
@@ -1759,7 +1759,7 @@ async def transcribe(audio: UploadFile = File(...)):
         return {"text": "", "heard": "", "duration": time.time() - start}
     duration = time.time() - start
 
-    with open(os.path.join(AUDIO_DIR, f"{stamp}.txt"), "w") as f:
+    with open(os.path.join(AUDIO_DIR, f"{stamp}.txt"), "w", encoding="utf-8") as f:
         f.write(text)
     if is_hallucination(text):
         # The client shows "No speech recognised" for an empty text.

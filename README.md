@@ -31,6 +31,7 @@ matches what a search from scratch reaches with 200 (0.77 vs. 0.70), and with
 ## Quick start
 
 macOS, Ubuntu/Debian, Fedora or Arch. You need `git` and `make`.
+For Windows, see [below](#windows).
 
 ```bash
 git clone https://github.com/kevinkunkel98/reinforcement-learning-volume-rendering-transfer-function.git
@@ -65,6 +66,26 @@ Hold the trigger to talk and use the thumbstick to turn the volume.
 
 `make help` lists every target, and `make test` runs the tests (~13 min,
 ~8 GB RAM).
+
+### Windows
+
+The same steps run in PowerShell through `make.ps1`, which has the same
+targets as the Makefile. You need [git](https://git-scm.com/download/win).
+
+```powershell
+git clone https://github.com/kevinkunkel98/reinforcement-learning-volume-rendering-transfer-function.git
+cd reinforcement-learning-volume-rendering-transfer-function
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned   # once, so .\make.ps1 may run
+.\make.ps1 system-deps   # Python 3.13, mkcert, Ollama via winget; then open a new terminal
+.\make.ps1 setup
+.\make.ps1 scans
+.\make.ps1 run           # .\make.ps1 run -Scans all, .\make.ps1 certs, .\make.ps1 run-vr, .\make.ps1 help
+```
+
+On Windows, pip installs the CPU build of torch by default, so you don't need
+`-Cpu`. For VR, allow Python through the Windows firewall when it asks. You
+can also follow the Linux steps in WSL2 (Ubuntu), but a headset can't reach
+WSL without port forwarding.
 
 ### Without make
 

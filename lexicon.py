@@ -89,7 +89,7 @@ def _cached(lex: dict, name: str, build):
 
 
 def load(path: str = LEXICON_PATH) -> dict:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return validate(json.load(f))
 
 
