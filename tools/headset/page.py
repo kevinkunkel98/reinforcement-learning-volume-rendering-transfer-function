@@ -1,5 +1,6 @@
 """Usage: page.py <url-substring> <js-expression>  -- evaluates JS in the matching headset tab."""
-import json, sys
+import json
+import sys
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from rdp import RDP
 

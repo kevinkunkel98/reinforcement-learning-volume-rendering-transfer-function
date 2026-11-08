@@ -146,113 +146,7 @@ async function withLoading(task) {
   }
 }
 
-let sceneSnapshot = null;
 let lastState = null;
-const sceneNonce = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-const sceneSequenceKey = "localViewerSceneSequence";
-const storedSceneSequence = Number.parseInt(safeStorageGet("session", sceneSequenceKey) || "0", 10);
-let sceneSequence = Number.isSafeInteger(storedSceneSequence) && storedSceneSequence >= 0
-  ? storedSceneSequence
-  : 0;
-
-function nextSceneId(data, suffix = "") {
-  sceneSequence += 1;
-  safeStorageSet("session", sceneSequenceKey, String(sceneSequence));
-  return `web:${data.session_id || "web-session"}:${sceneNonce}:scene:${sceneSequence}${suffix}`;
-}
-
-function transitionIdentity(data, before, metadata = {}) {
-  return encodeURIComponent(JSON.stringify({
-    nonce: sceneNonce,
-    session_id: data.session_id,
-    parent_scene_id: before.scene_id,
-    step_id: data.current.id,
-    command: data.current.cmd_dict,
-    params: data.current.params,
-    camera: data.current.camera,
-    metadata,
-  }));
-}
-
-function cameraForScene(current) {
-  const camera = window.volumeViewer?.getCamera();
-  if (camera?.position && camera?.focal_point && camera?.view_up) return camera;
-  return {
-    position: [0, 0, 1], focal_point: [0, 0, 0], view_up: [0, 1, 0],
-    zoom: current.camera?.zoom || 1,
-  };
-}
-
-function sceneFromState(data, parentSceneId = null, sceneId = null) {
-  const current = data.current;
-  const rawCommand = current.cmd_dict || {};
-  const isOpacity = rawCommand.attribute === "opacity" &&
-    typeof rawCommand.target === "string" &&
-    (rawCommand.direction === "increase" || rawCommand.direction === "decrease");
-  const command = rawCommand.camera
-    ? { attribute: "camera" }
-    : isOpacity
-      ? { attribute: "opacity", target: rawCommand.target, direction: rawCommand.direction }
-      : { attribute: "neutral", kind: "non_extractable" };
-  const scene = {
-    scene_id: sceneId || nextSceneId(data),
-    parent_scene_id: parentSceneId,
-    step_id: data.current.id,
-    parent_step_id: parentSceneId ? (sceneSnapshot?.step_id ?? null) : null,
-    carried_forward: Boolean(parentSceneId),
-    session_id: data.session_id || "web-session",
-    client: "web",
-    dataset: data.dataset,
-    dataset_version: data.render_info?.dataset_version || `${data.dataset}-unknown`,
-    volume: {
-      dimensions: data.render_info?.volume_shape || [1, 1, 1],
-      spacing: data.render_info?.spacing || [1, 1, 1],
-      scalar_type: "float32",
-      orientation: "dataset-normalized",
-    },
-    transfer_function: current.params,
-    camera: cameraForScene(current),
-    command,
-    client_metadata: {
-      source: "static-app", cursor: data.cursor, total: data.total,
-      ...(isOpacity || rawCommand.camera ? {} : { original_command: rawCommand }),
-    },
-    features_before: lastState?.current?.features || null,
-    features_after: current.features || null,
-  };
-  if (command.attribute === "opacity") {
-    scene.goal = { target: command.target, direction: command.direction };
-  }
-  return scene;
-}
-
-function captureSceneRoot(data) {
-  sceneSnapshot = sceneFromState(data, null);
-  sceneSnapshot.command = { attribute: "neutral", kind: "root" };
-  delete sceneSnapshot.goal;
-  sceneSnapshot.scene_id = `web:${data.session_id || "web-session"}:${sceneNonce}:root`;
-  lastState = data;
-}
-
-async function postSceneTransition(data, metadata = {}) {
-  if (!sceneSnapshot) captureSceneRoot(data);
-  const before = sceneSnapshot;
-  const identity = transitionIdentity(data, before, metadata);
-  const after = { ...sceneFromState(data, sceneSnapshot.scene_id, `web:${data.session_id}:${sceneNonce}:transition:${identity}`), ...metadata };
-  const eventId = `web:${data.session_id}:${sceneNonce}:event:${identity}`;
-  const response = await fetch("/api/scenes/transition", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ before, after, event_id: eventId, dedupe_key: eventId }),
-  });
-  if (!response.ok) {
-    const detail = await response.text();
-    showToast(`Scene transition failed (${response.status}): ${detail || "server rejected record"}`, "destructive");
-    return;
-  }
-  sceneSnapshot = await response.json();
-  lastState = data;
-}
 
 async function refresh(data) {
   state.current = data.current;
@@ -272,10 +166,11 @@ async function refresh(data) {
   }
   if (window.volumeViewer && state.dataset && state.current) {
     await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera,
-      state.current.anatomy_layers, data.anatomy);
+      {}, data.anatomy);
   }
 
   updateTelemetry(state.current.class_visibility, state.current.class_brightness);
+  lastState = data;
   return data;
 }
 
@@ -450,7 +345,6 @@ async function awaitRefinement(stepId, before, replyDiv) {
     return false;
   }
   await refresh(reply);
-  await postSceneTransition(reply, { carried_forward: true, parent_step_id: stepId });
   const updated = buildReply(reply.current, before);
   replyDiv.replaceWith(updated);
   emitAppEvent("applied", {
@@ -468,8 +362,6 @@ async function loadState() {
   const r = await fetch("/api/state");
   const data = await r.json();
   await refresh(data);
-  captureSceneRoot(data);
-  sceneSnapshot.command = { attribute: "neutral", kind: "dataset_boundary" };
   // Full history isn't in /api/state (only the current step), so rebuild the
   // thread by walking back/forward would be wasteful; instead the server's
   // current step is enough to seed the empty state on first load.
@@ -508,7 +400,6 @@ async function sendCommandImpl(text) {
   }
   const data = await r.json();
   await refresh(data);
-  await postSceneTransition(data);
   appendMessage(data.current);
   const replyDiv = appendReply(data.current, before);
   emitAppEvent("applied", {
@@ -568,10 +459,6 @@ async function navigateImpl(path) {
   const previous = lastState;
   const data = await (await fetch(path, { method: "POST" })).json();
   await refresh(data);
-  await postSceneTransition(data, {
-    carried_forward: true,
-    parent_step_id: previous?.current?.id ?? null,
-  });
   emitAppEvent("applied", {
     summary: path.endsWith("/back") ? "stepped back" : "stepped forward",
     deltas: classDeltas(data.current?.class_visibility, previous?.current?.class_visibility),
@@ -864,7 +751,6 @@ function chooseDataset(name) {
 async function chooseDatasetImpl(name) {
   if (name === state.dataset) { closeSelect(); return; }
   const previous = state.dataset;
-  const previousSceneId = sceneSnapshot?.scene_id || "none";
   const r = await fetch("/api/dataset", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -879,25 +765,11 @@ async function chooseDatasetImpl(name) {
   }
   const data = await r.json();
   setSelectValue(name);
-  sceneSnapshot = null;
   lastState = null;
   closeSelect();
   messagesEl.innerHTML = "";
   messagesEl.appendChild(emptyState);
   await refresh(data);
-  captureSceneRoot(data);
-  const boundaryEventId = `web:${data.session_id}:${sceneNonce}:boundary:${previousSceneId}:${sceneSnapshot.scene_id}:${data.dataset}:${data.render_info.dataset_version}`;
-  const boundaryResponse = await fetch("/api/scenes/transition", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      after: { ...sceneSnapshot, command: { attribute: "neutral", kind: "dataset_boundary" } },
-      boundary: true,
-       event_id: boundaryEventId,
-       dedupe_key: boundaryEventId,
-    }),
-  });
-  if (boundaryResponse.ok) sceneSnapshot = await boundaryResponse.json();
 }
 
 async function loadDatasets() {

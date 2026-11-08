@@ -64,8 +64,8 @@ make run-vr    # prints the address to open in the headset browser
 The headset browser warns once about the certificate. Accept the warning.
 Hold the trigger to talk and use the thumbstick to turn the volume.
 
-`make help` lists every target, and `make test` runs the tests (~13 min,
-~8 GB RAM).
+`make help` lists every target, and `make test` runs the tests (~30 s, on
+small synthetic scans, so no download needed).
 
 ### Windows
 
@@ -104,20 +104,31 @@ mkcert -cert-file certs/lan.pem -key-file certs/lan-key.pem <lan-ip> localhost 1
 ollama pull qwen2.5:7b
 
 # tests
-.venv/bin/python -m tools.fetch_scans          # the 6 test patients
-.venv/bin/python -m pytest -q -m "not slow"
+.venv/bin/python -m pytest -q
 ```
 
 `server.py --dataset ts_s0591` starts on another scan. With `--port 8001`
 it uses another port.
 
+## Code
+
+| | |
+|---|---|
+| `server.py`, `session.py`, `answers.py` | the web app; a session and its history; how a command is answered (policy, planning, search, repairs) |
+| `commands.py`, `lexicon.py`, `asr.py` | speech, the vocabulary (`data/lexicon.json`), rule and LLM parsing, applying a command |
+| `goals.py`, `visibility.py`, `transfer.py`, `render.py` | the task's goals and attainment, the fast visibility estimate, the transfer function, VTK rendering |
+| `rl/` | `episodes` (the task), `model_based` + `closed_loop` (training), `evaluate` (the thesis numbers), `search`, `keep_repair`, `colour_guard` |
+| `scans.py`, `tools/` | the TotalSegmentator scans and their download; parser and ASR evaluation; headset debugging |
+| `static/` | the browser viewer and the VR renderer |
+
 ## More
 
 - [`docs/STATUS.md`](docs/STATUS.md): the current state, results and open problems
-- [`docs/experiments/`](docs/experiments/): one dated write-up per experiment,
-  with full tables and the scripts to reproduce them. Retraining the policy
-  starts at `docs/experiments/2026-10-19-scripts/pipeline_v3.sh` and needs
-  `make scans-all`.
+- [`docs/experiments/`](docs/experiments/): one dated write-up per experiment
+  with full tables. The thesis numbers come from `python -m rl.evaluate`;
+  retraining runs `docs/experiments/2026-10-19-scripts/pipeline_v3.sh` and
+  needs `make scans-all`. Older experiment scripts, SAC and the earlier task
+  versions are at tag `pre-refactor-2026-11-08`.
 - [`tools/headset/README.md`](tools/headset/README.md): VR URL flags and
   headset debugging
 
@@ -125,5 +136,4 @@ it uses another port.
 
 The CT scans and organ labels come from
 [TotalSegmentator](https://zenodo.org/records/10047263) (CC-BY-4.0): 90
-training, 4 validation and 6 test patients. The four out-of-distribution CTs
-come from the 3D Slicer sample data.
+training, 4 validation and 6 test patients.

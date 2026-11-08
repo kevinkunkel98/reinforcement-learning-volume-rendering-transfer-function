@@ -1,5 +1,6 @@
 """Usage: console.py <url-substring> [n] -- prints the last n cached console messages/errors."""
-import json, sys
+import json
+import sys
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from rdp import RDP
 from page import target_for

@@ -69,7 +69,7 @@ switch ($Target) {
 .\make.ps1 run [-Scans all]   viewer on http://127.0.0.1:$Port
 .\make.ps1 certs              HTTPS certificate for this machine's LAN address (mkcert)
 .\make.ps1 run-vr             viewer over HTTPS for a headset on the same network
-.\make.ps1 test               fast test suite (fetches the 6 test patients first; ~8 GB of RAM)
+.\make.ps1 test               the tests (~30 s, synthetic scans, no download needed)
 "@ | Write-Host
     }
     "system-deps" {
@@ -116,8 +116,7 @@ switch ($Target) {
     }
     "test" {
         Ensure-Venv
-        Invoke-Checked $Py @("-u", "-m", "tools.fetch_scans", "--splits", "test")
-        Invoke-Checked $Py @("-m", "pytest", "-q", "-m", "not slow")
+        Invoke-Checked $Py @("-m", "pytest", "-q")
     }
     default { throw "unknown target '$Target': .\make.ps1 help" }
 }

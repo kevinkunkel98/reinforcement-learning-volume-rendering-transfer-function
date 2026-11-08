@@ -20,12 +20,11 @@ import math
 
 import numpy as np
 
-import totalseg
+import scans
 import transfer
 from anatomy import CANONICAL_CLASSES
 
 GOAL_CLASSES = CANONICAL_CLASSES
-MEASURED_FOR_GOAL = {goal_class: (goal_class,) for goal_class in GOAL_CLASSES}
 
 # RL v2 peak order, by the class each peak is seeded for. Defined in transfer,
 # because visibility.solo_max must probe at these same centres and cannot
@@ -47,118 +46,32 @@ BRIGHTNESS_STRENGTH = {"slightly": 0.1, "moderately": 0.2, "strongly": 0.4}
 ABSOLUTE_LEVEL = {"low": 0.1, "medium": 0.4, "high": 0.8}                      # share of solo_max
 
 
-TASK_VERSIONS = ("v1", "v2", "v3")
-# Task v3 is v2 with the unlabelled shell faded (`transfer.UNLABELLED_OPACITY`),
-# brightness asked only of classes that are visible at the start, and show_only
-# asking its hidden classes to vanish (`hide_fully`)
-# (docs/experiments/2026-10-19-task-v3.md). It changes what a render shows, so
-# it needs its own dynamics model and policy.
-UNLABELLED_OPACITY_BY_TASK = {"v1": 1.0, "v2": 1.0, "v3": 0.2}
-# Heights visibility.solo_max probes for a class's ceiling (transfer.SOLO_PROBE_HEIGHTS).
-SOLO_PROBE_HEIGHTS_BY_TASK = {"v1": (1.0,), "v2": (1.0,), "v3": (0.05, 0.1, 0.2, 0.4, 0.7, 1.0)}
+def starting_params() -> np.ndarray:
+    """The task's start transfer function: one peak per goal class, the organs
+    visible (`transfer.VISIBLE_ORGAN_HEIGHTS`). The same layout
+    `visibility.solo_max` probes at, so "what the instruction asks for" and
+    "what this volume can reach" are measured in one geometry."""
+    return transfer.anatomical_params(transfer.VISIBLE_ORGAN_HEIGHTS)
 
 
-def use_task_version(task_version: str) -> None:
-    """Make this process render and measure the way `task_version` does
-    (today: the unlabelled shell's opacity). Every entry point that runs a
-    task -- the env, the viewer -- calls this."""
-    if task_version not in TASK_VERSIONS:
-        raise ValueError(f"unknown task version {task_version!r}")
-    transfer.set_unlabelled_opacity(UNLABELLED_OPACITY_BY_TASK[task_version])
-    transfer.set_solo_probe_heights(SOLO_PROBE_HEIGHTS_BY_TASK[task_version])
+def features(model, params) -> dict:
+    return model.features(params)
 
 
-def starting_params(task_version: str = "v1") -> np.ndarray:
-    """RL v2's starting transfer function: one peak per goal class.
-
-    The same layout `visibility.solo_max` probes at, so "what the instruction
-    asks for" and "what this volume can reach" are measured in one geometry.
-    Task v2 and v3 start with the organs visible (`transfer.VISIBLE_ORGAN_HEIGHTS`)."""
-    if task_version not in TASK_VERSIONS:
-        raise ValueError(f"unknown task version {task_version!r}")
-    return transfer.anatomical_params(None if task_version == "v1" else transfer.VISIBLE_ORGAN_HEIGHTS)
-
-
-def features(model, params, active_layers=None) -> dict:
-    """Evaluate model features with optional active anatomy layers."""
-    if active_layers is None:
-        return model.features(params)
-    try:
-        return model.features(params, active_layers)
-    except TypeError:
-        return model.features(params)
-
-
-def _goal_sources(goal_class: str, source_vis: dict) -> tuple:
-    """Measured-class keys backing one goal class, in `source_vis`. Read old
-    synthetic feature fixtures while canonical models use only registry
-    names: legacy `organs`+`muscle` are read as generic `soft`, never
-    promoted, when the canonical `soft` key itself is absent."""
-    if goal_class == "soft" and "soft" not in source_vis:
-        return ("organs", "muscle")
-    return MEASURED_FOR_GOAL[goal_class]
-
-
-def _aggregate_vis(source_vis: dict) -> dict:
-    """Measured-class vis -> goal-class vis. Shared by `aggregate` (which
-    also needs `bright`/`coverage`) and `aggregate_vis` (which doesn't)."""
-    vis = {goal_class: sum(source_vis.get(m, 0.0) for m in _goal_sources(goal_class, source_vis))
-           for goal_class in GOAL_CLASSES}
+def aggregate(features: dict) -> dict:
+    """A model's features as {"vis": {class: float, "other": float},
+    "bright": {class: float}, "coverage": float}."""
+    vis = {goal_class: features["vis"].get(goal_class, 0.0) for goal_class in GOAL_CLASSES}
     # Not a goal class -- no instruction ever names it -- but distance() still
-    # needs it to tell "hidden" apart from "hidden behind unlabeled material".
-    vis["other"] = source_vis.get("other", 0.0)
-    return vis
-
-
-def aggregate(features: dict, active_layers=None) -> dict:
-    """Measured classes -> goal classes.
-
-    {"vis": {goal class: float}, "bright": {goal class: float}, "coverage": float}
-    Each canonical goal class maps to its matching measured class. Legacy raw
-    feature dictionaries using `organs` and `muscle` are read as generic
-    `soft`; canonical models use the shared anatomy registry directly.
-    """
-    source_vis = features.get("effective_vis", features["vis"]) if active_layers is not None else features["vis"]
-    source_bright = (features.get("effective_bright", features["bright"])
-                     if active_layers is not None else features["bright"])
-    vis = _aggregate_vis(source_vis)
-    bright = {}
-    for goal_class in GOAL_CLASSES:
-        sources = _goal_sources(goal_class, source_vis)
-        total_vis = vis[goal_class]
-        if total_vis > 0.0:
-            bright[goal_class] = (sum(source_vis.get(m, 0.0) * source_bright.get(m, 0.0)
-                                   for m in sources) / total_vis)
-        else:
-            bright[goal_class] = 0.0
-    coverage = (features.get("effective_coverage", features["coverage"])
-                if active_layers is not None else features["coverage"])
-    return {"vis": vis, "bright": bright, "coverage": coverage}
-
-
-def aggregate_vis(vis: dict) -> dict:
-    """Like `aggregate`, but for a vis-only measured-class dict such as
-    `visibility.VisibilityModel.vis_only`'s output: no `bright`/`coverage`,
-    for callers that never read them (the hindsight visibility search loop
-    in `rl.oneshot_env`)."""
-    return _aggregate_vis(vis)
-
-
-def vis(model, params, active_layers=None) -> dict:
-    """Per-class visibility only, via the model's cheap `vis_only` when it
-    has one (the real `VisibilityModel`); a model without it (test stubs)
-    falls back to `features()`, exactly mirroring `aggregate`'s own
-    plain-vs-effective selection so the fallback can never disagree with
-    what `aggregate(features(...))` would have picked."""
-    if not hasattr(model, "vis_only"):
-        raw = features(model, params, active_layers)
-        return raw.get("effective_vis", raw["vis"]) if active_layers is not None else raw["vis"]
-    if active_layers is None:
-        return model.vis_only(params)
-    try:
-        return model.vis_only(params, active_layers)
-    except TypeError:
-        return model.vis_only(params)
+    # needs it to tell "hidden" apart from "hidden behind unlabelled tissue".
+    vis["other"] = features["vis"].get("other", 0.0)
+    # (vis * bright) / vis, not bright: the brightness of a class is its
+    # visibility-weighted mean, and keeping this arithmetic keeps every
+    # recorded result bit-identical.
+    bright = {goal_class: (vis[goal_class] * features["bright"].get(goal_class, 0.0) / vis[goal_class]
+                           if vis[goal_class] > 0.0 else 0.0)
+              for goal_class in GOAL_CLASSES}
+    return {"vis": vis, "bright": bright, "coverage": features["coverage"]}
 
 
 def goal_vector(targets: dict) -> np.ndarray:
@@ -285,31 +198,14 @@ def distance(goal: np.ndarray, start: dict, current: dict, weights: dict = None)
     return float(total)
 
 
-def scoring(goal, start_features, final_features, active_layers=None, weights: dict = None) -> float:
-    """Score final model features against start features using effective layers."""
-    start = aggregate(start_features, active_layers)
-    final = aggregate(final_features, active_layers)
-    kwargs = {} if weights is None else {"weights": weights}
-    return attainment(goal, start, final, **kwargs)
-
-
-def attainment(goal, start, final, active_layers=None, weights: dict = None) -> float:
+def attainment(goal, start, final, weights: dict = None) -> float:
     """1 - distance(final) / distance(start); 1 = goal reached, < 0 = worse."""
-    # Omitting the `weights` kwarg entirely when it's None (rather than always
-    # passing `weights=None`) matters: several tests monkeypatch `distance`
-    # with a fixed-arity stub lacking a `weights` parameter, and this function
-    # calling it with an unconditional `weights=` keyword would break every
-    # one of them even though no actual weighting is happening.
-    kwargs = {} if weights is None else {"weights": weights}
-    return 1.0 - distance(goal, start, final, **kwargs) / distance(goal, start, start, **kwargs)
+    return 1.0 - distance(goal, start, final, weights) / distance(goal, start, start, weights)
 
 
-def is_useless(features: dict, active_layers=None) -> bool:
+def is_useless(features: dict) -> bool:
     """Nothing drawn, or an opaque wall hiding everything."""
-    vis = features.get("effective_vis", features["vis"]) if active_layers is not None else features["vis"]
-    coverage = (features.get("effective_coverage", features["coverage"])
-                if active_layers is not None else features["coverage"])
-    return (coverage < 0.01 or sum(vis.values()) < 0.001)
+    return features["coverage"] < 0.01 or sum(features["vis"].values()) < 0.001
 
 
 ATTAINMENT_CLIP = 1.0
@@ -359,38 +255,13 @@ CLASS_WORDS = {
 }
 
 
-# Goal classes measurable on a volume with no anatomical labelling at all --
-# visibility.for_volume's intensity fallback (label_source == "intensity")
-# only separates skeleton, lungs and generic soft tissue by Hounsfield value;
-# promoted organs and vessels are not populated because intensity alone cannot
-# identify them. Callers that need to know *why* (whether this volume actually
-# has anatomical labels) should read `visibility.for_volume(name).label_source`;
-# this function reports which goals are measurable either way, so policy mode
-# and instruction sampling keep working on every calibrated CT.
-FALLBACK_GOAL_CLASSES = ("skeleton", "lungs", "soft")
-
-
 def goal_classes_for_volume(name: str) -> list:
     """Goal classes this volume supports: those with labels present, with
     `vessels` only on contrast scans (elsewhere vessels share intensities with
-    soft tissue and no transfer function can single them out).
-
-    Volumes with no TotalSegmentator anatomy labelling (anything that isn't a
-    `ts_*` subject) fall back to `FALLBACK_GOAL_CLASSES` -- what the
-    intensity-label fallback in `visibility.for_volume` can actually
-    measure."""
-    try:
-        present = set(totalseg.classes_present(name))
-    except ValueError:
-        return list(FALLBACK_GOAL_CLASSES)
-    supported = []
-    for goal_class in GOAL_CLASSES:
-        if goal_class == "vessels":
-            if "vessels" in present and totalseg.is_contrast(name):
-                supported.append(goal_class)
-        elif any(m in present for m in MEASURED_FOR_GOAL[goal_class]):
-            supported.append(goal_class)
-    return supported
+    soft tissue and no transfer function can single them out)."""
+    present = set(scans.classes_present(name))
+    return [c for c in GOAL_CLASSES
+            if c in present and (c != "vessels" or scans.is_contrast(name))]
 
 
 # A goal class is worth asking about only if a transfer function can actually
@@ -409,17 +280,12 @@ def goal_classes_for_volume(name: str) -> list:
 VISIBLE_CEILING = 0.005
 
 
-def class_ceiling(model, goal_class: str, active_layers=None) -> float:
-    """The most of `goal_class` any single-peak transfer function can show,
-    summed over the measured classes in `MEASURED_FOR_GOAL`; canonical classes
-    are one-to-one, including generic `soft`."""
-    ceiling = sum(model.solo_max(m) for m in MEASURED_FOR_GOAL[goal_class])
-    if active_layers is not None:
-        ceiling *= active_layers.get(goal_class, {}).get("opacity", 1.0)
-    return ceiling
+def class_ceiling(model, goal_class: str) -> float:
+    """The most of `goal_class` any single-peak transfer function can show."""
+    return model.solo_max(goal_class)
 
 
-def reachable_goal_classes(name: str, model, active_layers=None) -> list:
+def reachable_goal_classes(name: str, model) -> list:
     """`goal_classes_for_volume` narrowed to the classes a render can actually
     show on this volume (ceiling >= `VISIBLE_CEILING`).
 
@@ -428,8 +294,7 @@ def reachable_goal_classes(name: str, model, active_layers=None) -> list:
     instructions no method can satisfy and no rater can judge -- they pollute
     preference collection and drag every held-out score toward zero equally.
     """
-    return [c for c in goal_classes_for_volume(name)
-            if class_ceiling(model, c, active_layers) >= VISIBLE_CEILING]
+    return [c for c in goal_classes_for_volume(name) if class_ceiling(model, c) >= VISIBLE_CEILING]
 
 
 def _class_word(goal_class: str, rng) -> str:
@@ -448,11 +313,11 @@ def _relative_text(goal_class: str, direction: str, strength: str, rng) -> str:
     return rng.choice(templates)
 
 
-def _absolute_target_delta(model, goal_class: str, level: str, start_vis: float, active_layers=None) -> float:
+def _absolute_target_delta(model, goal_class: str, level: str, start_vis: float) -> float:
     """The vis change an absolute-level instruction requests: `level`'s share
-    of solo_max (aggregated for the goal class) as a log10 change from
-    `start_vis`, so "high skeleton" means the same thing on every volume."""
-    solo = class_ceiling(model, goal_class, active_layers)
+    of solo_max as a log10 change from `start_vis`, so "high skeleton" means
+    the same thing on every volume."""
+    solo = class_ceiling(model, goal_class)
     target_vis = ABSOLUTE_LEVEL[level] * solo
     return math.log10(target_vis + EPSILON) - math.log10(start_vis + EPSILON)
 
@@ -479,31 +344,6 @@ def _choose_class(classes: list, rng, preferred=None) -> str:
     if preferred is not None and preferred in classes:
         return preferred
     return str(rng.choice(classes))
-
-
-def _sample_relative(classes: list, rng, preferred=None) -> tuple:
-    goal_class = _choose_class(classes, rng, preferred)
-    direction = rng.choice(("increase", "decrease"))
-    strength = rng.choice(list(VISIBILITY_STRENGTH))
-    sign = 1.0 if direction == "increase" else -1.0
-    targets = {goal_class: {"vis": sign * VISIBILITY_STRENGTH[strength]}}
-    return targets, _relative_text(goal_class, direction, strength, rng)
-
-
-def _sample_compound(classes: list, rng, preferred=None) -> tuple:
-    n = min(2, len(classes))
-    chosen = ([preferred] if preferred in classes else [])
-    remaining = [c for c in classes if c not in chosen]
-    if len(chosen) < n:
-        chosen.extend(list(rng.choice(remaining, size=n - len(chosen), replace=False)))
-    targets, phrases = {}, []
-    for goal_class in chosen:
-        direction = rng.choice(("increase", "decrease"))
-        strength = rng.choice(list(VISIBILITY_STRENGTH))
-        sign = 1.0 if direction == "increase" else -1.0
-        targets[goal_class] = {"vis": sign * VISIBILITY_STRENGTH[strength]}
-        phrases.append(_relative_text(goal_class, direction, strength, rng))
-    return targets, ", ".join(phrases)
 
 
 SOLVABLE_DRAWS = 10   # (direction, strength) draws before giving up on a solvable target
@@ -564,8 +404,7 @@ def show_only_weights(shown: set, classes) -> dict:
     shown ones purely by having more terms.
 
     Either group can be empty: `classes` is `reachable_goal_classes`/
-    `goal_classes_for_volume`, narrowed by `active_layers` or a volume's own
-    label coverage, and can shrink to as few as 1-2 classes -- in which case
+    `goal_classes_for_volume`, narrowed by a volume's own label coverage, and can shrink to as few as 1-2 classes -- in which case
     naming all of them as "shown" leaves nothing to hide (`_sample_show_only`
     and `_goal_show_only` both produce exactly this `targets` shape when
     `shown == classes`: every class at +HIDE_STRENGTH, none at -HIDE_STRENGTH).
@@ -604,14 +443,13 @@ def _sample_absolute(classes: list, model, start_features: dict, rng, preferred=
     return targets, _absolute_text(goal_class, level, rng)
 
 
-def _sample_brightness(classes: list, rng, preferred=None, start_vis=None) -> tuple:
-    """With `start_vis`, only classes visible at the start (vis >= EPSILON):
-    brightening an invisible organ changes nothing on screen, and its measured
-    brightness is 0 until it shows. None when no class is visible."""
-    if start_vis is not None:
-        classes = [c for c in classes if start_vis.get(c, 0.0) >= EPSILON]
-        if not classes:
-            return None
+def _sample_brightness(classes: list, rng, preferred, start_vis):
+    """Only classes visible at the start (vis >= EPSILON): brightening an
+    invisible organ changes nothing on screen, and its measured brightness is
+    0 until it shows. None when no class is visible."""
+    classes = [c for c in classes if start_vis.get(c, 0.0) >= EPSILON]
+    if not classes:
+        return None
     goal_class = _choose_class(classes, rng, preferred)
     direction = rng.choice(("increase", "decrease"))
     strength = rng.choice(list(BRIGHTNESS_STRENGTH))
@@ -620,20 +458,19 @@ def _sample_brightness(classes: list, rng, preferred=None, start_vis=None) -> tu
     return targets, _brightness_text(goal_class, direction, rng)
 
 
-def sample_instruction(name, model, start_features, rng, active_layers=None,
-                       class_counts=None, balance_classes=False, solvable_only=False,
-                       visible_brightness=False) -> dict:
+def sample_instruction(name, model, start_features, rng, class_counts=None, balance_classes=False) -> dict:
     """One instruction: {"kind", "text", "targets", "goal"}, plus "weights"
     for show_only instructions (see `show_only_weights`).
 
-    `targets` is the goal_vector input; `text` is the spoken form. Absolute
-    levels use ABSOLUTE_LEVEL x model.solo_max aggregated for the goal class,
-    turned into a requested change from the start state, so "high skeleton"
-    means the same thing on every volume. `visible_brightness` (task v3) asks
-    brightness only of classes visible at the start.
+    `targets` is the goal_vector input; `text` is the spoken form. Relative
+    and compound targets are only ones the start state allows; when there are
+    none, an absolute request stays meaningful ("make X high") where "a bit
+    more X" for an invisible X is not. Brightness is asked only of classes
+    visible at the start. Absolute levels use ABSOLUTE_LEVEL x solo_max, so
+    "high skeleton" means the same thing on every volume. `balance_classes`
+    prefers the class `class_counts` has seen least.
     """
-    classes = (reachable_goal_classes(name, model, active_layers)
-               if active_layers is not None else reachable_goal_classes(name, model))
+    classes = reachable_goal_classes(name, model)
     preferred = None
     if balance_classes and class_counts:
         minimum = min(class_counts.get(goal_class, 0) for goal_class in classes)
@@ -643,32 +480,21 @@ def sample_instruction(name, model, start_features, rng, active_layers=None,
     kind = _sample_kind(rng)
     weights = None
     drawn = None
-    if solvable_only and kind in ("relative", "compound"):
-        # Only targets the start state allows; when there are none, an
-        # absolute request stays meaningful ("make X high") where "a bit
-        # more X" for an invisible X is not.
+    if kind in ("relative", "compound"):
         sampler = _sample_relative_solvable if kind == "relative" else _sample_compound_solvable
         drawn = sampler(classes, start_features["vis"], rng, preferred)
         if drawn is None:
             kind = "absolute"
-    if visible_brightness and kind == "brightness":
-        brightness = _sample_brightness(classes, rng, preferred, start_features["vis"])
-        if brightness is None:
+    if kind == "brightness":
+        drawn = _sample_brightness(classes, rng, preferred, start_features["vis"])
+        if drawn is None:
             kind = "absolute"
-        else:
-            drawn = brightness
     if drawn is not None:
         targets, text = drawn
-    elif kind == "relative":
-        targets, text = _sample_relative(classes, rng, preferred)
-    elif kind == "compound":
-        targets, text = _sample_compound(classes, rng, preferred)
     elif kind == "show_only":
         targets, text, weights = _sample_show_only(classes, rng, preferred)
-    elif kind == "absolute":
-        targets, text = _sample_absolute(classes, model, start_features, rng, preferred)
     else:
-        targets, text = _sample_brightness(classes, rng, preferred)
+        targets, text = _sample_absolute(classes, model, start_features, rng, preferred)
     instruction = {"kind": kind, "text": text, "targets": targets, "goal": goal_vector(targets)}
     if weights is not None:
         instruction["weights"] = weights
@@ -726,11 +552,11 @@ def _goal_relative(command: dict, volume) -> dict:
     return {"kind": "relative", "text": text, "targets": targets, "goal": goal_vector(targets)}
 
 
-def _goal_absolute(command: dict, model, start_features: dict, volume, active_layers=None) -> dict:
+def _goal_absolute(command: dict, model, start_features: dict, volume) -> dict:
     goal_class = command["target"]
     _check_class_supported(goal_class, volume)
     start_vis = start_features["vis"][goal_class]
-    delta = _absolute_target_delta(model, goal_class, command["level"], start_vis, active_layers)
+    delta = _absolute_target_delta(model, goal_class, command["level"], start_vis)
     targets = {goal_class: {"vis": delta}}
     text = _absolute_command_text(goal_class, command["level"])
     return {"kind": "absolute", "text": text, "targets": targets, "goal": goal_vector(targets)}
@@ -759,8 +585,7 @@ def _goal_show_only(command: dict, volume) -> dict:
             "weights": show_only_weights(set(shown), classes)}
 
 
-def goal_from_command(command: dict, model, start_features: dict, volume: str = None,
-                      active_layers=None) -> dict:
+def goal_from_command(command: dict, model, start_features: dict, volume: str = None) -> dict:
     """Turn a parsed command (from `commands.parse_command_rule`/`_llm`) into
     the same {"kind", "text", "targets", "goal"} shape `sample_instruction`
     produces, so downstream code cannot tell a typed instruction from a
@@ -772,13 +597,12 @@ def goal_from_command(command: dict, model, start_features: dict, volume: str = 
     does not contain, and a class the scan contains but cannot show (see
     `reachable_goal_classes` -- asking for lungs on an abdomen scan).
     """
-    goal = _goal_from_command(command, model, start_features, volume, active_layers)
+    goal = _goal_from_command(command, model, start_features, volume)
     if volume is not None:
         for goal_class, target in goal["targets"].items():
             if target.get("vis", 0.0) <= 0.0:
                 continue
-            ceiling = (class_ceiling(model, goal_class, active_layers)
-                       if active_layers is not None else class_ceiling(model, goal_class))
+            ceiling = class_ceiling(model, goal_class)
             if ceiling < VISIBLE_CEILING:
                 raise ValueError(
                     f"{goal_class!r} cannot be shown on volume {volume!r} -- the most any "
@@ -787,7 +611,7 @@ def goal_from_command(command: dict, model, start_features: dict, volume: str = 
     return goal
 
 
-def _goal_from_command(command: dict, model, start_features: dict, volume, active_layers=None) -> dict:
+def _goal_from_command(command: dict, model, start_features: dict, volume) -> dict:
     """`goal_from_command` without the reachability check, which the public
     entry point applies once to the finished targets so a compound command is
     checked as a whole."""
@@ -795,7 +619,7 @@ def _goal_from_command(command: dict, model, start_features: dict, volume, activ
         raise ValueError(_NOT_A_GOAL.format(what="a camera command"))
 
     if "compound" in command:
-        sub_goals = [_goal_from_command(sub, model, start_features, volume, active_layers)
+        sub_goals = [_goal_from_command(sub, model, start_features, volume)
                      for sub in command["compound"]]
         targets = {}
         for sub_goal in sub_goals:
@@ -816,7 +640,7 @@ def _goal_from_command(command: dict, model, start_features: dict, volume, activ
         return _goal_relative(command, volume)
 
     if attribute == "opacity" and direction == "set":
-        return _goal_absolute(command, model, start_features, volume, active_layers)
+        return _goal_absolute(command, model, start_features, volume)
 
     if attribute == "brightness" and direction in ("increase", "decrease"):
         return _goal_brightness(command, volume)
@@ -824,17 +648,14 @@ def _goal_from_command(command: dict, model, start_features: dict, volume, activ
     raise ValueError(_NOT_A_GOAL.format(what=f"{command!r}"))
 
 
-# --- task v2: making hidden-organ instructions solvable ----------------------
+# --- well-posed goals (task v2/v3) -------------------------------------------
 #
-# Under the v1 task about half of relative/compound val instructions cannot be
-# improved by any method (docs/experiments/2026-10-17-task-v2.md): they ask to
-# lower a class that is already invisible, to raise a class hidden behind other
-# tissue (fading the occluder costs more keep-drift than the goal gains), or to
-# move a class further than it can physically go. Task v2 keeps the metric and
-# changes what an instruction asks for: well-posed sampling (solvable_only), the
-# two transforms below, and a start transfer function with the organs visible
-# (`transfer.VISIBLE_ORGAN_HEIGHTS`). Each is expressed through the goal vector
-# and `weights`, so every caller of `distance` scores v2 without change.
+# Under the first task definition about half of relative/compound instructions
+# could not be improved by any method (docs/experiments/2026-10-17-task-v2.md):
+# they asked to lower a class already invisible, to raise a class hidden behind
+# other tissue, or to move a class further than it can physically go. The
+# transforms below fix what an instruction asks for, through the goal vector
+# and `weights`, so `distance` itself is unchanged.
 
 OCCLUDER_GAIN = 0.15     # log10 visibility a target must gain for a class to count as its occluder
 
@@ -843,7 +664,7 @@ def _height_index(goal_class: str) -> int:
     return transfer.ANATOMICAL_PEAK_INDEX[goal_class] * transfer.PARAMS_PER_PEAK + 2
 
 
-def find_occluders(model, params, instruction, active_layers=None) -> set:
+def find_occluders(model, params, instruction) -> set:
     """Classes (and "other", the unlabelled tissue) that hide a target the
     instruction asks to make more visible.
 
@@ -856,9 +677,11 @@ def find_occluders(model, params, instruction, active_layers=None) -> set:
     targets = [c for c, t in instruction["targets"].items() if t.get("vis", 0.0) > 0]
     if not targets:
         return set()
-    log = lambda vis, c: math.log10(vis.get(c, 0.0) + EPSILON)
-    vis_of = lambda p: aggregate(model.features(p) if active_layers is None
-                                 else model.features(p, active_layers), active_layers)["vis"]
+    def log(vis, c):
+        return math.log10(vis.get(c, 0.0) + EPSILON)
+
+    def vis_of(p):
+        return aggregate(model.features(p))["vis"]
     others = [k for k in GOAL_CLASSES if k not in instruction["targets"]]
     base = vis_of(params)
     found = set()
@@ -902,7 +725,7 @@ def occlusion_aware(instruction: dict, occluders: set) -> dict:
     return {**instruction, "goal": goal, "weights": weights, "occluders": sorted(occluders)}
 
 
-def reachable_targets(instruction: dict, model, start: dict, active_layers=None) -> dict:
+def reachable_targets(instruction: dict, model, start: dict) -> dict:
     """`instruction` with every visibility target clipped to what its class can
     reach from `start`: not below the EPSILON floor ("a lot less lungs" when the
     lungs are already invisible) and not above the class's single-peak ceiling
@@ -916,7 +739,7 @@ def reachable_targets(instruction: dict, model, start: dict, active_layers=None)
             continue
         start_vis = start["vis"].get(goal_class, 0.0)
         current = math.log10(start_vis + EPSILON)
-        ceiling = math.log10(max(class_ceiling(model, goal_class, active_layers), start_vis) + EPSILON)
+        ceiling = math.log10(max(class_ceiling(model, goal_class), start_vis) + EPSILON)
         goal[i] = min(max(goal[i], floor - current), ceiling - current)
     return {**instruction, "goal": goal}
 
@@ -946,17 +769,12 @@ def hide_fully(instruction: dict, start: dict) -> dict:
     return {**instruction, "goal": goal, "weights": weights}
 
 
-def for_task_version(instruction: dict, model, start_params, start: dict, task_version: str = "v1",
-                     active_layers=None) -> dict:
-    """`instruction` as `task_version` scores it. v1 leaves it unchanged; v2
-    exempts the target's occluders from the keep terms (`occlusion_aware`) and
-    clips every target to what is reachable from `start` (`reachable_targets`);
-    v3 also asks show_only's hidden classes to vanish (`hide_fully`).
-    The env, the model-based collector and the viewer all go through here."""
-    if task_version not in TASK_VERSIONS:
-        raise ValueError(f"unknown task version {task_version!r}")
-    if task_version == "v1":
-        return instruction
-    instruction = occlusion_aware(instruction, find_occluders(model, start_params, instruction, active_layers))
-    instruction = reachable_targets(instruction, model, start, active_layers)
-    return hide_fully(instruction, start) if task_version == "v3" else instruction
+def well_posed(instruction: dict, model, start_params, start: dict) -> dict:
+    """`instruction` as the task scores it: the target's occluders exempt from
+    the keep terms (`occlusion_aware`), every target clipped to what is
+    reachable from `start` (`reachable_targets`), and show_only's hidden
+    classes asked to vanish (`hide_fully`). The episode sampler, the
+    model-based collector and the viewer all go through here."""
+    instruction = occlusion_aware(instruction, find_occluders(model, start_params, instruction))
+    instruction = reachable_targets(instruction, model, start)
+    return hide_fully(instruction, start)

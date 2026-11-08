@@ -32,7 +32,7 @@ help:
 	@echo "make run          viewer on http://127.0.0.1:$(PORT)"
 	@echo "make certs        HTTPS certificate for this machine's LAN address ($(IP)) with mkcert"
 	@echo "make run-vr       viewer on https://$(IP):$(PORT) for a headset on the same network"
-	@echo "make test         fast test suite (fetches the 6 test patients first; ~8 GB of RAM)"
+	@echo "make test         the tests (~30 s, synthetic scans, no download needed)"
 
 system-deps:
 	@if command -v apt-get >/dev/null 2>&1; then \
@@ -89,5 +89,4 @@ run-vr: $(PY)
 	SCANS=$(or $(SCANS),demo) $(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
 
 test: $(PY)
-	$(PY) -u -m tools.fetch_scans --splits test
-	$(PY) -m pytest -q -m "not slow"
+	$(PY) -m pytest -q

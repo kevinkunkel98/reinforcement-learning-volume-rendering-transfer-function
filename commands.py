@@ -13,7 +13,6 @@ import numpy as np
 import anatomy
 import hue
 import lexicon
-from anatomy_layers import default_layers, normalize_layers
 from transfer import (
     ANATOMICAL_CENTRES_HU, ANATOMICAL_WIDTHS_HU, CENTER_RANGE, N_PEAKS,
     PARAMS_PER_PEAK, SHOW_ONLY_MAX_WIDTH_HU, TISSUE_BANDS, TISSUE_HU,
@@ -761,30 +760,6 @@ def _apply_brightness(cmd: dict, params: np.ndarray, reset_params=None) -> np.nd
     return params
 
 
-def apply_command_state(cmd: dict, params: np.ndarray, layers: dict) -> tuple[np.ndarray, dict]:
-    """Apply a command to HU peaks and anatomical layer state independently."""
-    layer_command = cmd.get("layer_action")
-    if cmd.get("attribute") != "layers" and layer_command is None:
-        return apply_command(cmd, params), normalize_layers(layers)
-    result = normalize_layers(layers)
-    action = layer_command["action"] if layer_command else cmd["action"]
-    targets = set(layer_command["targets"] if layer_command else cmd["targets"])
-    if action == "restore":
-        result = default_layers()
-    elif action == "show_only":
-        for name, layer in result.items():
-            layer["opacity"] = 1.0 if name in targets else 0.0
-    elif action == "hide":
-        for name in targets:
-            result[name]["opacity"] = 0.0
-    elif action == "show":
-        for name in targets:
-            result[name]["opacity"] = 1.0
-    else:
-        raise ValueError(f"unknown layer action: {action}")
-    return np.asarray(params, dtype=np.float64).copy(), result
-
-
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 VALID_DIRECTIONS = {"increase", "decrease", "show_only", "reset"}
 VALID_STRENGTHS = set(STRENGTH_WORDS) | {None}
@@ -1136,9 +1111,12 @@ def _validate_cmd(obj) -> bool:
 LLM_LOG_PATH = "out/llm_requests.jsonl"
 
 
+def jsonl_append(path: str, row: dict) -> None:
+    with open(path, "a", encoding="utf-8") as stream:
+        stream.write(_json.dumps(row) + "\n")
+
+
 def _log_llm_request(text, model, host, raw_response, parsed_cmd, final_cmd, fallback_reason):
-    import os
-    from evaluate import jsonl_append  # local import: avoids a module-load-order dependency on evaluate.py
     os.makedirs(os.path.dirname(LLM_LOG_PATH) or ".", exist_ok=True)
     jsonl_append(LLM_LOG_PATH, {
         "timestamp": _dt.datetime.now().isoformat(),
@@ -1265,7 +1243,6 @@ def parse_command_llm(text: str, model: str = DEFAULT_LLM_MODEL, host: str = Non
 
 def _log_utterance(text, meta, cmd, error, start):
     meta["parse_ms"] = round((time.perf_counter() - start) * 1000, 1)
-    from evaluate import jsonl_append  # same lazy import as _log_llm_request
     # Best effort: a log that cannot be written must never fail a parse.
     try:
         os.makedirs(os.path.dirname(UTTERANCE_LOG_PATH) or ".", exist_ok=True)

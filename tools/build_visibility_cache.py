@@ -1,22 +1,23 @@
-"""Precompute visibility caches for the RL v2 volumes.
+"""Precompute the visibility caches (`visibility.for_volume` builds one on
+first use otherwise, a few seconds per scan).
 
-    python -m tools.build_visibility_cache                  # train + val + test + out_of_source
-    python -m tools.build_visibility_cache --splits train
+    python -m tools.build_visibility_cache                  # train + val + test
+    python -m tools.build_visibility_cache --splits train_extra
 """
 import argparse
 import time
 
-import datasets
+import scans
 import visibility
 
-SPLITS = ("train", "val", "test", "out_of_source")
+SPLITS = ("train", "val", "test")
 OPTIONAL_SPLITS = ("train_extra",)
 
 
 def build(splits=SPLITS, cache_dir=None) -> list:
     built = []
     for split in splits:
-        for name in datasets.volumes_for_split(split):
+        for name in scans.split_names(split):
             started = time.time()
             model = visibility.for_volume(name, cache_dir)
             built.append((split, name, time.time() - started))

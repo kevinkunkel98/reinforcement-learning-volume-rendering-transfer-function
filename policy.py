@@ -1,112 +1,26 @@
-"""The trained one-shot policy: one checkpoint path, one lazy loader.
+"""The trained policy the viewer and /collect use: one path, one lazy loader.
 
-This module exists because the path was written down twice. `server.py` was
-moved to the v3 checkpoint when the observation fixes landed -- v2 was trained
-with the reachable ceiling probed at the retired band layout's fat peak, and
-with a colour action that collapsed r, g and b to one scalar -- but `collect.py`
-kept its own copy of the constant and went on sampling the v2 policy. Every
-preference pair judged before 2026-09-17 therefore compared candidates from the
-superseded checkpoint, which is a quiet corruption of the data the reward model
-is meant to learn from.
-
-Two callers, one constant. Anything that needs the policy imports it here.
+The default is the policy behind the thesis results (task v3, seed 1, best on
+val with planning), a copy of out/rl_mb_v3c/clb_r3_seed1 under models/ so a
+fresh clone has it. POLICY_PATH points elsewhere.
 """
+import functools
 import os
-import json
 
-from rl.oneshot_env import (ACTION_SIZE, OBSERVATION_SIZE, POLICY_VERSION, load_policy_metadata,
-                            observation_metadata)
+from rl.episodes import policy_metadata
 
-# v4: trained after goals.distance gained an "other" keep term (visibility.py's
-# unlabeled-tissue bucket) -- v3 and earlier let a transfer function satisfy
-# "show only X" by rendering an opaque wall of unclassified tissue instead of
-# X, since none of the four goal classes charged for it. Per-seed held-out
-# medians: seed0 +0.306, seed1 +0.331, seed2 +0.357 (out/rl_v2/eval_v4_seed*.json)
-# -- seed2 shipped here as the strongest, where v3 shipped its weakest (seed0)
-# by oversight (see docs/STATUS.md's "Known issues").
-#
-# v3's own numbers (pre-fix, kept for the historical comparison in
-# docs/STATUS.md and docs/rl-paper.typ): held-out attainment +0.275 against
-# v2's +0.247, as the median of the three seeds' own medians. On the paired
-# v2/v3 test (a different statistic -- do not cross the two): v3 +0.286
-# against v2 +0.201, Wilcoxon p = 0.0064.
-#
-# Model-based (rl.model_based, one Dyna round) replaced SAC as the default on
-# 2026-10-16: policy alone +0.182 seed-averaged median on 200 val episodes
-# against SAC E3's +0.001 (paired Wilcoxon p = 5e-20, 3 seeds each), positive on
-# every instruction kind including show_only; seed 1 ships as the strongest of
-# 0.165 / 0.202 / 0.191 per-seed medians (docs/experiments/
-# 2026-10-16-overnight-results.md). A .zip path still loads an SB3 checkpoint.
-#
-# Task v2 (2026-10-17, docs/experiments/2026-10-17-task-v2.md): the viewer opens
-# on the visible-organ start TF and scores commands as v2 (server.TASK_VERSION),
-# so it runs a v2 policy -- three Dyna rounds plus kind-balanced closed-loop
-# fine-tuning (rl.closed_loop --balance-kinds). rl.vis_eval, 300 val episodes,
-# policy alone: median 0.539 (absolute 0.62, show_only 0.44, both above the
-# 200-evaluation search) against 0.511 for the round-2 policy it replaces.
-#
-# Task v3 (2026-10-19, docs/experiments/2026-10-19-task-v3.md): the same recipe
-# on v3; seed 2, the best of three on val (policy alone 0.51, policy + 200
-# evaluations 0.89, with about twice the on-screen change of v2). Retrained
-# after the v3 ceiling fix (out/rl_mb_v3c): seed 1, best on val with
-# planning through its dynamics model (policy + planning 0.63 val / 0.65 test,
-# + 30 evaluations 0.77 / 0.78).
-# With TASK_VERSION=v2 set POLICY_PATH=out/rl_mb_v2/clb_r3_seed1/checkpoint.pt,
-# with TASK_VERSION=v1 POLICY_PATH=out/rl_mb/r1_seed1/checkpoint.pt.
-# The shipped default is a copy of out/rl_mb_v3c/clb_r3_seed1 (checkpoint +
-# metadata.json) under models/, which is tracked, so a fresh clone has a policy.
 POLICY_PATH = os.environ.get("POLICY_PATH", "models/v3c_seed1/checkpoint.pt")
 
-_state = {"policies": {}}
 
-
-def _load_sac(path):
-    from stable_baselines3 import SAC
-    return SAC.load(path)
-
-
-def _load_model_based(path):
+@functools.lru_cache(maxsize=4)
+def _load(path: str):
     from rl.model_based import ModelBasedPolicy
+    policy_metadata(path)
     return ModelBasedPolicy.load(path)
 
 
-def write_metadata(path: str) -> None:
-    with open(path, "w") as stream:
-        json.dump(observation_metadata(), stream, indent=2)
-
-
-def _validate_checkpoint(model, path: str) -> None:
-    observation_shape = tuple(model.observation_space.shape)
-    action_shape = tuple(model.action_space.shape)
-    if observation_shape != (OBSERVATION_SIZE,) or action_shape != (ACTION_SIZE,):
-        raise ValueError(
-            f"old one-shot checkpoint {path!r} has observation/action dimensions "
-            f"{observation_shape[0]}/{action_shape[0]}; expected "
-            f"{OBSERVATION_SIZE}/{ACTION_SIZE} for {POLICY_VERSION}")
-
-
 def load_policy(path: str = None):
-    """The checkpoint, loaded on first use and cached after.
-
-    Lazy, and `None` when no checkpoint exists: the viewer and the collection
-    page both have to work before a training run has finished, falling back to
-    exact command application and to the non-policy candidate sources
-    respectively.
-    """
+    """The checkpoint, loaded on first use and cached; None when there is
+    none, so the viewer falls back to applying commands exactly."""
     path = os.path.realpath(os.path.abspath(path or POLICY_PATH))
-    if path not in _state["policies"]:
-        loaded = None
-        if os.path.exists(path):
-            loaded = _load_model_based(path) if path.endswith(".pt") else _load_sac(path)
-            _validate_checkpoint(loaded, path)
-            # How the viewer turns an action into a TF: a residual policy's
-            # action is a change to the current controllable values.
-            loaded.action_mode = load_policy_metadata(path).get("action_mode", "absolute")
-        _state["policies"][path] = loaded
-    return _state["policies"][path]
-
-
-def reset_cache():
-    """Forget the cached checkpoint. For tests that change `POLICY_PATH` or the
-    working directory -- the path is relative, so cwd decides what it finds."""
-    _state["policies"].clear()
+    return _load(path) if os.path.exists(path) else None

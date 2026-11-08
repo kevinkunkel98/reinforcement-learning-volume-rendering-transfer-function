@@ -1,12 +1,7 @@
-"""Render the six standard views of a transfer function as one grid image,
-for the preference-collection page (`collect.py`): the rater judges exactly
-what the reward model will later see, not a live 3D viewport.
-
-`_render_views` is the one seam that touches VTK/dataset loading -- tests
-stub it out, so `view_grid`'s caching and grid-composition logic is testable
-without a real renderer. A labelled volume renders label-scoped with the
-current task's unlabelled-shell opacity (`transfer.UNLABELLED_OPACITY`, set by
-`goals.use_task_version`), exactly as the viewer shows it.
+"""The six standard views of a transfer function as one grid image, for
+/collect: the rater judges the same fixed views every time, not a live
+viewport. Rendered label-scoped with the faded unlabelled shell, as the viewer
+shows it, and cached on disk under out/cache/collect_images.
 """
 import base64
 import hashlib
@@ -17,11 +12,9 @@ import numpy as np
 from PIL import Image
 
 import render as render_module
-import totalseg
+import scans
 import transfer
 import views
-from anatomy_layers import default_layers
-from datasets import _dataset_version, label_cache_identity, load_dataset
 
 CACHE_DIR = "out/cache/collect_images"
 # 2: label-scoped renders with the task's shell opacity, frames cropped
@@ -62,14 +55,11 @@ def _render_views(volume_id: str, params: np.ndarray) -> list:
     """The six standard views of `volume_id` under `params`, one RGB array
     per `views.cameras_for_volume` camera, via `render.render`/`render.grab`,
     cropped to the columns the volume can occupy (`_crop_columns`)."""
-    volume, spacing = load_dataset(volume_id, canonical=True)
-    labels = totalseg.load_labels(volume_id) if totalseg.is_totalseg(volume_id) and \
-        totalseg.has_labels(volume_id) else None
-    layers = default_layers() if labels is not None else None
-    cameras = views.cameras_for_volume(volume, spacing)
+    volume, spacing = scans.load_volume(volume_id)
+    labels = scans.load_labels(volume_id)
     frames = []
-    for camera in cameras:
-        win = render_module.render(volume, params, spacing, camera, labels=labels, layers=layers)
+    for camera in views.cameras_for_volume(volume, spacing):
+        win = render_module.render(volume, params, spacing, camera, labels=labels)
         frame = render_module.grab(win)
         left, right = _crop_columns(volume, spacing, frame.shape[1], frame.shape[0])
         frames.append(frame[:, left:right, :3])
@@ -96,13 +86,9 @@ def view_grid(volume_id: str, params: np.ndarray, size: int = 320, columns: int 
     laid out `columns`-wide. Cached on disk under `<cache_dir>/<sha256 of
     volume version, params and size>.png`; written atomically (`.tmp` then
     `os.replace`) so a reader never sees a partial file."""
-    volume_version = _dataset_version(volume_id)
+    volume_version = scans.version(volume_id)
     params = np.asarray(params, dtype=np.float64)
-    if not label_identity:
-        try:
-            label_identity = label_cache_identity(volume_id)
-        except FileNotFoundError:
-            pass
+    label_identity = label_identity or scans.label_cache_identity(volume_id)
     key = _cache_key(volume_id, volume_version, params, size, columns, label_identity)
     path = _cache_path(key, cache_dir)
     if os.path.exists(path):

@@ -26,7 +26,7 @@ import zipfile
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import totalseg
+import scans
 from tools.select_totalseg import DEFAULT_OUT_DIR, ZENODO_RECORD, _sha256_file, extract_subject
 
 ZIP_NAME = "Totalsegmentator_dataset_small_v201.zip"
@@ -115,7 +115,7 @@ class HttpRangeFile(io.RawIOBase):
 
 
 def wanted_subjects(splits, names=()) -> list:
-    subjects = totalseg._manifest().get("subjects", [])
+    subjects = scans.manifest().get("subjects", [])
     return [s for s in subjects if s["split"] in splits or s["name"] in names]
 
 
@@ -127,7 +127,7 @@ def is_present(entry: dict) -> bool:
 def fetch(splits, out_dir: str = DEFAULT_OUT_DIR, url: str = ZIP_URL, workers: int = 4, names=()) -> list:
     entries = wanted_subjects(splits, names)
     if not entries:
-        raise SystemExit(f"no subjects of split(s) {', '.join(splits)} in {totalseg.MANIFEST_PATH}")
+        raise SystemExit(f"no subjects of split(s) {', '.join(splits)} in {scans.MANIFEST_PATH}")
     missing = [e for e in entries if not is_present(e)]
     print(f"[fetch_scans] {len(entries) - len(missing)}/{len(entries)} already present")
     if not missing:
@@ -171,10 +171,10 @@ def main():
     parser.add_argument("--workers", type=int, default=4, help="scans downloaded in parallel")
     args = parser.parse_args()
     splits = ALL_SPLITS if "all" in args.splits else tuple(args.splits)
-    names = (tuple(args.names) + (tuple(totalseg.demo_names()) if args.demo else ())
-             + (tuple(totalseg.demo_names("candidates")) if args.candidates else ()))
+    names = (tuple(args.names) + (tuple(scans.demo_names()) if args.demo else ())
+             + (tuple(scans.demo_names("candidates")) if args.candidates else ()))
     fetch(splits, args.out_dir, workers=args.workers, names=names)
-    print(f"[fetch_scans] done: {len(totalseg.available_names())} scans available")
+    print(f"[fetch_scans] done: {len(scans.available_names())} scans available")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# Status — 2026-10-19, updated 2026-10-23
+# Status — 2026-10-19, updated 2026-11-08
 
 Snapshot after the switch to model-based RL, task v2 and v3, the instruction
 parser work, planning through the learned model, and the second VR lab
@@ -17,6 +17,20 @@ on top — level with 200 renders of search from scratch (0.70, p = 0.14–0.9)
 — and 0.90–0.92 with 200. Model-free SAC never got past 0.09. The viewer
 runs the same pipeline on desktop and in a standalone VR headset at 57–58 fps
 head-on.
+
+## Code cleanup (2026-11-08)
+
+The repository now holds only the path the thesis uses: task v3, the
+model-based policy (oneshot-v9), planning, search, the viewer, VR and
+/collect. SAC, task v1/v2, the Slicer/MRI/synthetic volumes, the per-class
+layer opacities and the scene logging are gone; tag `pre-refactor-2026-11-08`
+has them. `rl/episodes.py` replaces the gymnasium environment and
+`rl/evaluate.py` the old evaluation; checked against the previous code:
+the evaluation (12 test episodes, every method incl. keep repair and colour
+guard: 1080 values), the viewer (8 chained commands in all modes) and the
+training data collection (with Dyna) come out bit-identical. ~13.7k -> ~8.4k
+lines of Python; the tests went from 1323 (12 min, real scans) to 54 (30 s,
+synthetic scans).
 
 ## Since 10-14
 

@@ -8,17 +8,12 @@ transfer function. The result is, per class, how much of the final image that
 class contributes (`vis`) and how bright it appears (`bright`), plus how much
 of the frame is covered at all (`coverage`).
 
-Classes come from the shared eight-class anatomy registry and TotalSegmentator
-label volume (`totalseg.load_labels`) when one exists; `label_source` reports
-"anatomy" in that case. Volumes without labels use coarse Hounsfield bands
-(`label_source` is "intensity"): only skeleton, lungs and generic soft tissue
-are measurable from intensity alone. Promoted organs (heart, liver, kidneys,
-spleen) and vessels stay empty in that fallback because intensity cannot
-identify them reliably. Unassigned samples use class id 0 and are reported as
-`other`.
+Classes come from the eight-class anatomy registry and the TotalSegmentator
+label volume (`scans.load_labels`). Unlabelled samples (fat, skin, muscle)
+use class id 0 and are reported as `other`.
 
-It is an estimate, not a renderer: no shading, no perspective, a coarse grid.
-tools/validate_visibility.py measures how well it tracks real VTK renders.
+It is an estimate, not a renderer: no shading, no perspective, a coarse grid
+(14 ms against 50-210 ms for a VTK render).
 """
 import collections
 import hashlib
@@ -28,12 +23,9 @@ import numpy as np
 import torch
 
 from anatomy import CLASS_LAYOUT_VERSION, MEASURED_CLASSES
-from anatomy_layers import LAYER_LAYOUT_VERSION, normalize_layers
+import scans
 import transfer
-from transfer import (
-    CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK,
-    anatomical_params, _opacity_and_color_at,
-)
+from transfer import CENTER_RANGE, N_PEAKS, PARAMS_PER_PEAK, anatomical_params
 from views import N_VIEWS, view_directions
 
 CLASSES = MEASURED_CLASSES[:-1]  # eight canonical classes; id 0 is "other"
@@ -46,6 +38,9 @@ LUMINANCE = np.array([0.2126, 0.7152, 0.0722])
 CACHE_DIR = "out/cache/visibility"
 CACHE_VERSION = 3
 VISIBILITY_RENDERER_VERSION = "visibility-v1"
+# Part of the cache key since the per-class layer opacities (removed); kept so
+# existing caches stay valid.
+LAYER_LAYOUT_VERSION = "anatomy-layers-v1"
 
 
 def quantize(values: np.ndarray) -> np.ndarray:
@@ -60,39 +55,18 @@ def lut_values() -> np.ndarray:
     return np.linspace(*CENTER_RANGE, LUT_SIZE)
 
 
-def _intensity_class_ids(hu: np.ndarray) -> np.ndarray:
-    """Map unlabeled samples to skeleton, lungs or generic soft tissue.
-
-    Promoted organs and vessels remain unassigned: intensity alone cannot
-    identify those anatomical classes reliably.
-    """
-    ids = np.zeros(hu.shape, dtype=np.uint8)
-    ids[hu <= -500.0] = CLASSES.index("lungs") + 1
-    ids[(hu >= -30.0) & (hu < 300.0)] = CLASSES.index("soft") + 1
-    ids[hu >= 300.0] = CLASSES.index("skeleton") + 1
-    return ids
-
-
-def transfer_tables(params: np.ndarray):
-    """(opacity, luminance) per LUT index for one transfer function."""
-    opacity, rgb = _opacity_and_color_at(np.asarray(params, dtype=np.float64), lut_values())
-    return opacity.astype(np.float32), (rgb @ LUMINANCE).astype(np.float32)
-
-
-def label_transfer_tables(params: np.ndarray, mode: str = transfer.DEFAULT_TRANSFER_MODE):
+def label_transfer_tables(params: np.ndarray):
     """(opacity, luminance), each (1 + len(CLASSES), LUT_SIZE): row 0 for
     unlabelled samples, row i + 1 for CLASSES[i] (`transfer.label_scoped_tables`)."""
-    rows = transfer.label_scoped_tables(np.asarray(params, dtype=np.float64), lut_values(),
-                                        CLASSES, mode)
+    rows = transfer.label_scoped_tables(np.asarray(params, dtype=np.float64), lut_values(), CLASSES)
     opacity = np.stack([row[0] for row in rows]).astype(np.float32)
     luminance = np.stack([row[1] @ LUMINANCE for row in rows]).astype(np.float32)
     return opacity, luminance
 
 
-def _sample_cubes(volume, spacing, directions, n, labels=None):
-    """Resample the volume (and, if given, a label volume) into one cube per
-    view; axis 0 runs front to back. Returns (hu_cubes, step_mm, label_cubes
-    or None)."""
+def _sample_cubes(volume, spacing, directions, n, labels):
+    """Resample the volume and its label volume into one cube per view; axis 0
+    runs front to back. Returns (hu_cubes, step_mm, label_cubes)."""
     shape = np.asarray(volume.shape, dtype=np.float64)
     extent = shape * np.asarray(spacing, dtype=np.float64)
     side = float(extent.max())
@@ -102,11 +76,9 @@ def _sample_cubes(volume, spacing, directions, n, labels=None):
     # Sampling outside the volume must read as air, and grid_sample pads with
     # zeros, so shift the values and shift them back.
     source = torch.from_numpy(np.ascontiguousarray(volume, dtype=np.float32) - AIR_HU)[None, None]
-    label_source = None
-    if labels is not None:
-        # No shift needed here: grid_sample's zero padding already means "no
-        # class" (id 0, "other"), exactly the sentinel the label volume uses.
-        label_source = torch.from_numpy(np.ascontiguousarray(labels, dtype=np.float32))[None, None]
+    # No shift needed for labels: grid_sample's zero padding already means "no
+    # class" (id 0, "other"), exactly the sentinel the label volume uses.
+    label_source = torch.from_numpy(np.ascontiguousarray(labels, dtype=np.float32))[None, None]
     cubes, label_cubes = [], []
     for direction in directions:
         right = np.cross(direction, [0.0, 0.0, 1.0])
@@ -126,13 +98,11 @@ def _sample_cubes(volume, spacing, directions, n, labels=None):
             source, grid[None], mode="nearest", align_corners=True,
             padding_mode="zeros")[0, 0] + AIR_HU
         cubes.append(sampled.numpy())
-        if label_source is not None:
-            sampled_labels = torch.nn.functional.grid_sample(
-                label_source, grid[None], mode="nearest", align_corners=True,
-                padding_mode="zeros")[0, 0]
-            label_cubes.append(sampled_labels.round().numpy().astype(np.uint8))
-    stacked_labels = np.stack(label_cubes) if label_cubes else None
-    return np.stack(cubes), step, stacked_labels
+        sampled_labels = torch.nn.functional.grid_sample(
+            label_source, grid[None], mode="nearest", align_corners=True,
+            padding_mode="zeros")[0, 0]
+        label_cubes.append(sampled_labels.round().numpy().astype(np.uint8))
+    return np.stack(cubes), step, np.stack(label_cubes)
 
 
 class VisibilityModel:
@@ -154,12 +124,10 @@ class VisibilityModel:
         self._rays = int(self.indices.shape[0] * self.indices.shape[2] * self.indices.shape[3])
         self._solo_max = {}
         self._label_index_cache = None
-        # Label row per sample (0 = "other", i + 1 = CLASSES[i]): layer
-        # opacities become one gather, and per-class sums one reorder plus
-        # contiguous block sums (labels never change, so the order is fixed;
-        # ~5x faster than one masked pass per class, same precision).
-        self._class_bins = (self._labels.long() + 1)
-        flat = self._class_bins.reshape(-1)
+        # Label row per sample (0 = "other", i + 1 = CLASSES[i]): per-class
+        # sums are one reorder plus contiguous block sums (labels never change,
+        # so the order is fixed; ~5x faster than one masked pass per class).
+        flat = (self._labels.long() + 1).reshape(-1)
         self._class_order = torch.argsort(flat, stable=True).to(torch.int32)
         self._class_counts = torch.bincount(flat, minlength=len(CLASSES) + 1).tolist()
 
@@ -168,17 +136,13 @@ class VisibilityModel:
         return int(self.indices.shape[0])
 
     @classmethod
-    def from_volume(cls, volume, spacing, labels=None, n=GRID_N, n_views=N_VIEWS,
+    def from_volume(cls, volume, spacing, labels, n=GRID_N, n_views=N_VIEWS,
                     volume_id="", label_identity=""):
         directions = view_directions(n_views)
         cubes, step, label_cubes = _sample_cubes(volume, spacing, directions, n, labels)
         counts, _ = np.histogram(volume, bins=HISTOGRAM_BINS, range=CENTER_RANGE)
         histogram = counts / max(counts.sum(), 1)
-        if label_cubes is not None:
-            class_ids, label_source = label_cubes, "anatomy"
-        else:
-            class_ids, label_source = _intensity_class_ids(cubes), "intensity"
-        return cls(quantize(cubes), step, histogram, class_ids, label_source,
+        return cls(quantize(cubes), step, histogram, label_cubes, "anatomy",
                    volume_id, spacing, label_identity)
 
     def _label_index(self):
@@ -189,27 +153,15 @@ class VisibilityModel:
                                        + self.indices.long())
         return self._label_index_cache
 
-    def _alpha_luminance(self, params, transfer_mode):
-        """(alpha per sample, luminance per sample), before any layer mask --
-        the layer-independent half of the old `_weights`: LUT build, index
-        lookup, and the `(1 - alpha) ** step_mm` term. The expensive part,
-        so callers that need both a plain and a layer-masked composite
-        (`features`) compute this once and branch after, instead of paying
-        for it twice."""
-        opacity_table, luminance_table = label_transfer_tables(params, transfer_mode)
+    def _alpha_luminance(self, params):
+        """(alpha per sample, luminance per sample): LUT build, index lookup
+        and the `(1 - alpha) ** step_mm` opacity correction."""
+        opacity_table, luminance_table = label_transfer_tables(params)
         index = self._label_index()
         # The opacity correction is elementwise, so correct the label x LUT
         # table and gather once, instead of correcting every sample.
         corrected = 1.0 - (1.0 - torch.from_numpy(opacity_table.reshape(-1))) ** (self.step_mm / 1.0)
-        alpha = corrected[index]
-        luminance = torch.from_numpy(luminance_table.reshape(-1))[index]
-        return alpha, luminance
-
-    def _layer_mask(self, alpha, layers):
-        """Per-sample layer-opacity multiplier for `layers` (already
-        normalized). `alpha` is only used for its shape/dtype/device."""
-        per_row = alpha.new_tensor([1.0] + [layers[name]["opacity"] for name in CLASSES])
-        return per_row[self._class_bins]
+        return corrected[index], torch.from_numpy(luminance_table.reshape(-1))[index]
 
     def _composite(self, alpha):
         """(contribution per sample, accumulated opacity per ray) from alpha."""
@@ -223,101 +175,36 @@ class VisibilityModel:
         grouped = values.reshape(-1)[self._class_order]
         return torch.stack([block.sum() for block in torch.split(grouped, self._class_counts)]).tolist()
 
-    def _weights(self, params, layers=None, transfer_mode=transfer.DEFAULT_TRANSFER_MODE):
-        """(contribution per sample, luminance per sample, accumulated opacity per ray)."""
-        alpha, luminance = self._alpha_luminance(params, transfer_mode)
-        if layers is not None:
-            alpha = alpha * self._layer_mask(alpha, normalize_layers(layers))
-        weights, accumulated = self._composite(alpha)
-        return weights, luminance, accumulated
-
-    def features(self, params, layers=None,
-                 transfer_mode=transfer.DEFAULT_TRANSFER_MODE) -> dict:
+    def features(self, params) -> dict:
         """{"vis": {class: float, "other": float}, "bright": {class: float}, "coverage": float}.
 
-        "other" is voxels the label volume (or the intensity fallback)
-        assigned to none of the eight classes -- fat, connective tissue,
-        partial-volume edges. A transfer function can still put opacity
-        there, so it is measured the same way the eight classes are, instead
-        of silently vanishing: `goals.distance` charges for it under the same
-        keep-tolerance any unmentioned class gets, or a search/policy could
-        satisfy "show only X" by rendering an opaque wall of unclassified
-        material instead of X (see goals.py's OTHER keep term).
-
-        When `layers` is None (every non-v8 policy), `effective_*` equals
-        the plain fields by construction -- skip computing it a second time
-        rather than re-deriving an already-known answer."""
-        alpha, luminance = self._alpha_luminance(params, transfer_mode)
+        "other" is voxels the label volume assigns to none of the eight
+        classes -- fat, connective tissue, partial-volume edges. A transfer
+        function can still put opacity there, so it is measured like the eight
+        classes: `goals.distance` charges for it under the same keep tolerance
+        any unmentioned class gets, or "show only X" could be met by an opaque
+        wall of unclassified material."""
+        alpha, luminance = self._alpha_luminance(params)
         weights, accumulated = self._composite(alpha)
-        if layers is None:
-            effective_weights, effective_accumulated = weights, accumulated
-        else:
-            effective_alpha = alpha * self._layer_mask(alpha, normalize_layers(layers))
-            effective_weights, effective_accumulated = self._composite(effective_alpha)
-        def per_class(w):
-            totals, lit = self._class_sums(w), self._class_sums(w * luminance)
-            vis_, bright_ = {}, {}
-            for index, name in enumerate(CLASSES):
-                total = totals[index + 1]
-                vis_[name] = total / self._rays
-                bright_[name] = lit[index + 1] / total if total / self._rays > 1e-4 else 0.0
-            return vis_, bright_, totals[0] / self._rays
-
-        vis, bright, other = per_class(weights)
-        if layers is None:
-            effective_vis, effective_bright = dict(vis), dict(bright)
-        else:
-            effective_vis, effective_bright, _ = per_class(effective_weights)
-        vis["other"] = other
-        effective_vis["other"] = vis["other"]
-        effective_bright["other"] = bright.get("other", 0.0)
+        totals, lit = self._class_sums(weights), self._class_sums(weights * luminance)
+        vis, bright = {}, {}
+        for index, name in enumerate(CLASSES):
+            total = totals[index + 1]
+            vis[name] = total / self._rays
+            bright[name] = lit[index + 1] / total if total / self._rays > 1e-4 else 0.0
+        vis["other"] = totals[0] / self._rays
         coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
-        effective_coverage = (coverage if layers is None else
-                              float((effective_accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean()))
-        return {"vis": vis, "bright": bright, "effective_vis": effective_vis,
-                "effective_bright": effective_bright,
-                "effective_class_contribution": dict(effective_vis),
-                "coverage": coverage, "effective_coverage": effective_coverage}
+        return {"vis": vis, "bright": bright, "coverage": coverage}
 
-    def vis_only(self, params, layers=None,
-                 transfer_mode=transfer.DEFAULT_TRANSFER_MODE) -> dict:
-        """Per-class vis only (`{class: float, "other": float}`) -- skips
-        the luminance lookup, `bright`, and `coverage` that `features()`
-        also computes. For search loops that only ever compare visibility,
-        e.g. the hindsight goal sampler in `rl.oneshot_env`."""
-        alpha, _ = self._alpha_luminance(params, transfer_mode)
-        if layers is not None:
-            alpha = alpha * self._layer_mask(alpha, normalize_layers(layers))
+    def vis_only(self, params) -> dict:
+        """Per-class vis only (`{class: float, "other": float}`), skipping
+        luminance, brightness and coverage."""
+        alpha, _ = self._alpha_luminance(params)
         weights, _ = self._composite(alpha)
         totals = self._class_sums(weights)
         vis = {name: totals[index + 1] / self._rays for index, name in enumerate(CLASSES)}
         vis["other"] = totals[0] / self._rays
         return vis
-
-    def layer_metrics(self, params, target: str, layers=None) -> dict:
-        """Report target isolation and cross-class leakage for one layer."""
-        if target not in CLASSES:
-            raise ValueError(f"unknown anatomy class: {target}")
-        selected = normalize_layers(layers or {})
-        for name in CLASSES:
-            if name != target:
-                selected[name]["opacity"] = 0.0
-        effective = self.features(params, selected)
-        contributions = effective["effective_class_contribution"]
-        target_contribution = contributions[target]
-        total = sum(contributions[name] for name in CLASSES)
-        leakage = total - target_contribution
-        return {"target": target, "target_contribution": target_contribution,
-                "isolation": target_contribution / total if total else 0.0,
-                "cross_class_leakage": leakage / total if total else 0.0}
-
-    def per_view_visibility(self, params, name: str) -> list:
-        """Visibility of one class in each view separately (diagnostics, tests)."""
-        weights, _, _ = self._weights(params)
-        index = CLASSES.index(name)
-        masked = torch.where(self._labels == index, weights, torch.zeros(()))
-        per_ray = self.indices.shape[2] * self.indices.shape[3]
-        return [float(masked[view].sum()) / per_ray for view in range(self.n_views)]
 
     def solo_max(self, name: str) -> float:
         """Largest vis_c over the eight single-peak transfer functions (peak i
@@ -373,7 +260,7 @@ class VisibilityModel:
         cache_dir = cache_dir or CACHE_DIR
         probe = cls(np.zeros((n_views, n, n, n), dtype=np.uint8), 1.0,
                     np.zeros(HISTOGRAM_BINS), np.zeros((n_views, n, n, n), dtype=np.uint8),
-                    "intensity", volume_id)
+                    "anatomy", volume_id)
         path = os.path.join(cache_dir, f"{volume_id}-{probe.cache_key(volume_version, label_identity)}.npz")
         if not os.path.exists(path):
             return None
@@ -385,23 +272,15 @@ class VisibilityModel:
 
 
 def _load_volume(name: str):
-    from datasets import load_dataset
-    return load_dataset(name, canonical=True)
+    return scans.load_volume(name)
 
 
 def _volume_version(name: str) -> str:
-    from datasets import _dataset_version
-    return _dataset_version(name)
-
-
-def _has_labels(name: str) -> bool:
-    import totalseg
-    return totalseg.is_totalseg(name) and totalseg.has_labels(name)
+    return scans.version(name)
 
 
 def _load_labels(name: str):
-    import totalseg
-    return totalseg.load_labels(name)
+    return scans.load_labels(name)
 
 
 # Keep a few built models in memory, most-recently-used last.
@@ -434,10 +313,7 @@ def for_volume(name: str, cache_dir: str = None) -> VisibilityModel:
     assigns to a model after `__init__` except `solo_max`'s own memo, which is
     what the sharing exists to preserve."""
     version = _volume_version(name)
-    label_identity = ""
-    if _has_labels(name):
-        from datasets import label_cache_identity
-        label_identity = label_cache_identity(name)
+    label_identity = scans.label_cache_identity(name)
     key = (name, version, label_identity, os.path.abspath(cache_dir or CACHE_DIR))
     if key in _MODEL_CACHE:
         _MODEL_CACHE.move_to_end(key)
@@ -446,8 +322,7 @@ def for_volume(name: str, cache_dir: str = None) -> VisibilityModel:
     model = VisibilityModel.load_cache(name, version, cache_dir, label_identity=label_identity)
     if model is None:
         volume, spacing = _load_volume(name)
-        labels = _load_labels(name) if _has_labels(name) else None
-        model = VisibilityModel.from_volume(volume, spacing, labels=labels, volume_id=name,
+        model = VisibilityModel.from_volume(volume, spacing, _load_labels(name), volume_id=name,
                                             label_identity=label_identity)
         model.save_cache(version, cache_dir, label_identity=label_identity)
 

@@ -1,6 +1,7 @@
-"""48-float transfer-function vector <-> VTK objects, opacity_mass metric."""
+"""The transfer function: one Gaussian peak per anatomy class, 6 values each
+(centre, width, height, r, g, b), normalized to [-1, 1]."""
 import numpy as np
-import vtk
+
 from anatomy import CANONICAL_CLASSES, CANONICAL_PEAK_ORDER
 
 N_PEAKS = len(CANONICAL_PEAK_ORDER)
@@ -180,99 +181,31 @@ def _opacity_and_color_at(params: np.ndarray, hu: np.ndarray, peaks=None):
     return total_opacity, rgb
 
 
-# How a transfer function reaches labelled voxels. "label_scoped": a voxel
-# segmented as class c is shaded by c's own peak alone, so peaks that share a
-# Hounsfield range (soft 40, kidneys 45, heart 50, spleen 55, liver 65 HU) no
-# longer light each other's organs. Unlabelled voxels see only the peaks HU
-# alone can identify (UNLABELLED_PEAKS); letting them see the organ peaks too
-# meant raising "liver" also lit the unsegmented soft tissue in front of it.
-# On 60 validation episodes that version reached hill-climb median +0.293 and
-# treated 13 organ goals as reachable; this one +0.342 with 45.
-# "global": one shared HU lookup for every voxel, the pre-v9 behaviour.
-TRANSFER_MODES = ("label_scoped", "global")
+# Labelled voxels are shaded by their own class's peak alone, so peaks that
+# share a Hounsfield range (soft 40, kidneys 45, heart 50, spleen 55, liver
+# 65 HU) do not light each other's organs. Unlabelled voxels (skin, fat,
+# muscle) see only the peaks HU alone can identify.
 UNLABELLED_PEAKS = ("skeleton", "lungs", "soft")
-DEFAULT_TRANSFER_MODE = "label_scoped"
 
-# Opacity multiplier on the unlabelled row in "label_scoped" mode. The
-# unlabelled skin/fat shell sees the soft peak by HU and covers ~half the image
-# at the v2 start (val: "other" 0.54 of the image, every organ < 2 %), so an
-# organ that changes a lot in log visibility barely changes on screen. Task v3
-# (goals.UNLABELLED_OPACITY_BY_TASK) holds it at 0.2: the body outline stays as
-# context and the organs come forward. Process-wide, set through
-# `goals.use_task_version`, because the renderer, the visibility estimate and
-# the browser viewer must all agree on it.
-UNLABELLED_OPACITY = 1.0
-
-
-def set_unlabelled_opacity(scale: float) -> None:
-    global UNLABELLED_OPACITY
-    if not 0.0 <= scale <= 1.0:
-        raise ValueError(f"unlabelled opacity must be in [0, 1], got {scale}")
-    UNLABELLED_OPACITY = float(scale)
-
+# The unlabelled shell would cover about half the image at full opacity, so an
+# organ changing a lot in log visibility would barely change on screen. Task
+# v3 draws it at 0.2: the body outline stays as context, the organs come
+# forward (docs/experiments/2026-10-19-task-v3.md).
+UNLABELLED_OPACITY = 0.2
 
 # Peak heights `visibility.solo_max` probes for a class's ceiling. A class is
-# not always most visible at full height: at height 1 the soft-tissue peak
-# also lights the unlabelled muscle and fat in front of it, so soft tissue
-# shows 11-16 % of the image at height 0.05 and 0.2-2 % at height 1 (lungs
-# peak near 0.2). Task v3 probes several heights; v1 and v2 keep the original
-# full-height probe so their results reproduce.
-SOLO_PROBE_HEIGHTS = (1.0,)
+# not always most visible at full height: at height 1 the soft-tissue peak also
+# lights the unlabelled muscle and fat in front of it.
+SOLO_PROBE_HEIGHTS = (0.05, 0.1, 0.2, 0.4, 0.7, 1.0)
 
 
-def set_solo_probe_heights(heights) -> None:
-    global SOLO_PROBE_HEIGHTS
-    heights = tuple(float(h) for h in heights)
-    if not heights or not all(0.0 < h <= 1.0 for h in heights):
-        raise ValueError(f"probe heights must be in (0, 1], got {heights}")
-    SOLO_PROBE_HEIGHTS = heights
-
-
-def check_transfer_mode(mode: str) -> str:
-    if mode not in TRANSFER_MODES:
-        raise ValueError(f"unknown transfer mode: {mode!r}")
-    return mode
-
-
-def label_scoped_tables(params: np.ndarray, hu: np.ndarray, classes=CANONICAL_CLASSES,
-                        mode: str = DEFAULT_TRANSFER_MODE) -> list:
-    """(opacity, rgb) per label row: row 0 for unlabelled voxels, row i + 1
-    for `classes[i]`. "label_scoped": row 0 sums UNLABELLED_PEAKS, scaled by
-    UNLABELLED_OPACITY, a class row is that class's own peak. "global": every
-    row sums every peak."""
-    check_transfer_mode(mode)
-    if mode == "global":
-        shared = _opacity_and_color_at(params, hu)
-        return [shared] * (len(classes) + 1)
+def label_scoped_tables(params: np.ndarray, hu: np.ndarray, classes=CANONICAL_CLASSES) -> list:
+    """(opacity, rgb) per label row: row 0 for unlabelled voxels (the
+    UNLABELLED_PEAKS, scaled by UNLABELLED_OPACITY), row i + 1 for
+    `classes[i]` (that class's own peak)."""
     unlabelled = tuple(ANATOMICAL_PEAK_INDEX[name] for name in UNLABELLED_PEAKS)
     opacity, rgb = _opacity_and_color_at(params, hu, unlabelled)
     rows = [(opacity * UNLABELLED_OPACITY, rgb)]
     for name in classes:
         rows.append(_opacity_and_color_at(params, hu, (ANATOMICAL_PEAK_INDEX[name],)))
     return rows
-
-
-def opacity_mass(params: np.ndarray, hu_lo: float, hu_hi: float, n: int = 256) -> float:
-    hu = np.linspace(hu_lo, hu_hi, n)
-    opacity, _ = _opacity_and_color_at(params, hu)
-    return float(np.trapezoid(opacity, hu))
-
-
-def mass_fraction(params: np.ndarray, tissue: str) -> float:
-    """opacity_mass normalized by band width -- an average-opacity-in-band
-    fraction in [0, 1], used as the RL observation/reward signal since raw
-    opacity_mass scales with band width (bone's band alone is 1400 HU wide)."""
-    lo, hi = TISSUE_BANDS[tissue]
-    return opacity_mass(params, lo, hi) / (hi - lo)
-
-
-def vector_to_vtk(params: np.ndarray, n: int = 256):
-    hu = np.linspace(*CENTER_RANGE, n)
-    opacity, rgb = _opacity_and_color_at(params, hu)
-
-    ctf = vtk.vtkColorTransferFunction()
-    otf = vtk.vtkPiecewiseFunction()
-    for i in range(n):
-        ctf.AddRGBPoint(float(hu[i]), *[float(v) for v in rgb[i]])
-        otf.AddPoint(float(hu[i]), float(opacity[i]))
-    return ctf, otf

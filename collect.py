@@ -1,19 +1,13 @@
-"""FastAPI router for the preference-collection page (`/collect`).
+"""The preference-collection page (`/collect`): raters see a start render, an
+instruction and two candidate answers (`rl.candidates`), judged blind (A, B,
+equal, skip). Rows go to out/vis_preferences_v3.jsonl with each candidate's
+source and attainment; tools/merge_preferences.py merges raters' files.
 
-Route handlers are `async def`, for the same reason `server.py`'s are (see
-its module docstring, and `tests/test_server.py`'s): `next_route` renders
-images (`collect_images.view_grid`, through `Collector.image_fn`), and VTK's
-Cocoa render window can only be created on the true process main thread on
-macOS. Keeping the handlers `async def` keeps every render call on the
-event-loop thread, which `uvicorn.run()` in `server.py`'s `__main__` drives
-from the process main thread. Tests call `Collector` methods and the route
-coroutines directly (`asyncio.run(...)`) rather than through `TestClient`,
-which runs the app on a background thread and would violate that constraint.
-
-`Collector` holds all item-generation, pending-item and repeat-scheduling
-state, independent of FastAPI, so it is directly unit-testable and every
-external seam (volume list, model lookup, image rendering, dataset version,
-item sampling, the policy) is injectable.
+Some items repeat an earlier one with sides swapped (rater consistency), and
+some come from a fixed anchor pool every rater judges (agreement between
+raters). Handlers are `async def` so the renders stay on the main thread (see
+server.py). `Collector`'s seams (volumes, model lookup, images, item sampling,
+the policy) are injectable for tests.
 """
 import collections
 import datetime
@@ -26,14 +20,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-import goals
+import json
+
+import policy as policy_module
+import scans
 import visibility
 from collect_images import grid_data_url
-from datasets import _dataset_version, volumes_for_split
-from evaluate import jsonl_append
-import policy as policy_module
 from rl.candidates import anchor_items, sample_item
-from rl.oneshot_env import load_policy_metadata, resolve_policy_metadata
 
 # Judgments on task-v3 renders (label-scoped, faded shell) with the
 # model-based candidates (rl.candidates.TASK_SOURCES), from 2026-10-19 on. The
@@ -48,20 +41,11 @@ REPEAT_RATE = 0.10          # share of items that are a repeat of an earlier one
 REPEAT_MIN_GAP = 20         # a repeat is shown only >= this many items after the original
 ANCHOR_RATE = 0.20          # share of items drawn from the shared anchor pool (roughly one in five)
 
-# Re-exported so existing callers and tests keep working; `policy.py` owns the
-# value. These were two separate constants until they drifted apart -- see that
-# module's docstring.
-POLICY_PATH = policy_module.POLICY_PATH
-_load_policy = policy_module.load_policy
 
 
-def _policy_metadata():
-    """The shipped checkpoint's contract (task version, action mode), or the
-    v1 default when no checkpoint exists -- `rl.candidates.sample_item` picks
-    the task-v2/v3 item path from it."""
-    if os.path.exists(POLICY_PATH):
-        return load_policy_metadata(POLICY_PATH)
-    return resolve_policy_metadata()
+def _append(path: str, row: dict) -> None:
+    with open(path, "a", encoding="utf-8") as stream:
+        stream.write(json.dumps(row) + "\n")
 
 
 def _to_displayed(raw: dict) -> dict:
@@ -108,75 +92,41 @@ def _instruction_json(instruction: dict) -> dict:
 
 
 class Collector:
-    """Item generation, pending-item state, repeat scheduling and the
-    append-only judgment log for `/collect`.
-
-    Every external seam is injectable so tests never touch VTK, real
-    datasets or a real policy checkpoint: `model_for_volume` (default
-    `visibility.for_volume`), `image_fn` (default `collect_images.
-    grid_data_url`), `dataset_version_fn` (default `datasets._dataset_
-    version`), `sample_item_fn` (default `rl.candidates.sample_item`),
-    `anchor_items_fn` (default `rl.candidates.anchor_items`),
-    `policy_provider` (default `_load_policy`, called -- lazily -- on every
-    sampled item) and `policy_metadata_fn` (default `_policy_metadata`).
-    A checkpoint trained on task v2/v3 switches this process to that task
-    (`goals.use_task_version`), so the renders show what the policy saw.
-    """
+    """Item generation, pending items, repeat scheduling and the append-only
+    judgment log for `/collect`, independent of FastAPI."""
 
     def __init__(self, pref_path: str = PREF_PATH, volumes=None, rng: np.random.Generator = None,
                  policy_provider=None, model_for_volume=visibility.for_volume,
-                 image_fn=grid_data_url, dataset_version_fn=_dataset_version,
-                 sample_item_fn=sample_item, anchor_items_fn=anchor_items, policy_metadata_fn=None):
+                 image_fn=grid_data_url, sample_item_fn=sample_item, anchor_items_fn=anchor_items):
         self.pref_path = pref_path
         self._volumes = list(volumes) if volumes is not None else None
         self.rng = rng if rng is not None else np.random.default_rng()
-        self.policy_provider = policy_provider or _load_policy
+        self.policy_provider = policy_provider or policy_module.load_policy
         self.model_for_volume = model_for_volume
         self.image_fn = image_fn
-        self.dataset_version_fn = dataset_version_fn
         self.sample_item_fn = sample_item_fn
         self.anchor_items_fn = anchor_items_fn
-        self.policy_metadata_fn = policy_metadata_fn or (lambda: resolve_policy_metadata())
-        self._policy_metadata = None
 
         self._model_cache = {}
-        self._items = {}                                  # pair_id -> displayed item, kept for repeats
-        self._pending = {}                                 # pair_id -> rater_id, not yet judged
+        self._items = {}                                    # pair_id -> displayed item, kept for repeats
+        self._pending = {}                                  # pair_id -> rater_id, not yet judged
         self._repeat_of = {}                                # pair_id -> original pair_id or None
         self._anchor_id = {}                                # pair_id -> anchor pool index or None
         self._rater_history = collections.defaultdict(list)  # rater_id -> judged pair_id, in order
         self._rater_meta = {}                               # rater_id -> {"role", "experience"}
-        self._anchor_pool = None                            # lazily generated, then cached for the process
-        self._rater_anchor_seen = collections.defaultdict(set)  # rater_id -> anchor indices already served
+        self._anchor_pool = None                            # generated on first use, then cached
+        self._rater_anchor_seen = collections.defaultdict(set)  # rater_id -> anchor indices served
 
     def _get_volumes(self) -> list:
-        # Resolved lazily (not at construction) so importing this module, and
-        # building the default module-level Collector, never depends on the
-        # TotalSegmentator data being present on disk.
+        # Resolved on first use, so importing this module never needs the scans.
         if self._volumes is None:
-            self._volumes = volumes_for_split("train") + volumes_for_split("val")
+            self._volumes = scans.split_names("train") + scans.split_names("val")
         return self._volumes
 
     def _get_model(self, volume: str):
-        model = self._model_cache.get(volume)
-        if model is None:
-            model = self.model_for_volume(volume)
-            self._model_cache[volume] = model
-        return model
-
-    def _get_policy_metadata(self) -> dict:
-        if self._policy_metadata is None:
-            self._policy_metadata = self.policy_metadata_fn()
-            task_version = self._policy_metadata.get("task_version", "v1")
-            if task_version != "v1":
-                goals.use_task_version(task_version)
-        return self._policy_metadata
-
-    def _sample_kwargs(self) -> dict:
-        # Only a task checkpoint adds the kwarg, so injected sample_item stubs
-        # with the original signature keep working.
-        metadata = self._get_policy_metadata()
-        return {} if metadata.get("task_version", "v1") == "v1" else {"policy_metadata": metadata}
+        if volume not in self._model_cache:
+            self._model_cache[volume] = self.model_for_volume(volume)
+        return self._model_cache[volume]
 
     def _should_repeat(self, rater_id: str) -> bool:
         history = self._rater_history[rater_id]
@@ -188,13 +138,12 @@ class Collector:
         # caches to disk (see `rl.candidates.anchor_items`), so a restart is
         # cheap too.
         if self._anchor_pool is None:
-            # A task checkpoint's anchors include its own candidates, so the
-            # pool is tied to that checkpoint (`policy_id`).
-            kwargs = self._sample_kwargs()
-            if kwargs:
-                kwargs.update(policy=self.policy_provider(), policy_id=POLICY_PATH)
+            # The anchors include the policy's candidates, so the pool is tied
+            # to the checkpoint (`policy_id`).
             self._anchor_pool = self.anchor_items_fn(volumes=self._get_volumes(),
-                                                       model_for_volume=self.model_for_volume, **kwargs)
+                                                     model_for_volume=self.model_for_volume,
+                                                     policy=self.policy_provider(),
+                                                     policy_id=policy_module.POLICY_PATH)
         return self._anchor_pool
 
     def _next_anchor_index(self, rater_id: str):
@@ -228,8 +177,7 @@ class Collector:
         else:
             volume = str(self.rng.choice(self._get_volumes()))
             model = self._get_model(volume)
-            raw = self.sample_item_fn(volume, model, self.rng, policy=self.policy_provider(),
-                                      **self._sample_kwargs())
+            raw = self.sample_item_fn(volume, model, self.rng, policy=self.policy_provider())
             item = _to_displayed(raw)
             if self.rng.random() < 0.5:
                 item = _swap_sides(item)
@@ -288,7 +236,7 @@ class Collector:
             "rater_id": rater_id,                    # kept for backwards compatibility with earlier rows
             "rater": {"id": rater_id, "role": rater_meta["role"], "experience": rater_meta["experience"]},
             "volume": volume,
-            "volume_version": self.dataset_version_fn(volume),
+            "volume_version": scans.version(volume),
             "instruction": _instruction_json(item["instruction"]),
             "start_params": np.asarray(item["start_params"], dtype=np.float64).tolist(),
             "a": {"params": np.asarray(item["a"]["params"], dtype=np.float64).tolist(),
@@ -302,19 +250,19 @@ class Collector:
             "decision_ms": decision_ms,
             "repeat_of": self._repeat_of.get(pair_id),
             "anchor_id": self._anchor_id.get(pair_id),
-            "task_version": self._get_policy_metadata().get("task_version", "v1"),
-            "policy_path": POLICY_PATH,
+            "task_version": "v3",
+            "policy_path": policy_module.POLICY_PATH,
         }
         with _WRITE_LOCK:
             os.makedirs(os.path.dirname(self.pref_path) or ".", exist_ok=True)
-            jsonl_append(self.pref_path, row)
+            _append(self.pref_path, row)
         self._rater_history[rater_id].append(pair_id)
 
         return self.next_item(rater_id)
 
 
 router = APIRouter()
-collector = Collector(policy_metadata_fn=_policy_metadata)
+collector = Collector()
 
 
 class NextRequest(BaseModel):

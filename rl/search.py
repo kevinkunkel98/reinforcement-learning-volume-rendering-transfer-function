@@ -1,31 +1,26 @@
-"""Non-learned ways to satisfy an instruction -- what the policy must beat.
+"""The search and the rule baseline, and the action space they share with the policy.
 
-Every baseline has the signature `(model, start_params, instruction) ->
-final_params`, where `model` is a `visibility.VisibilityModel`, `start_params`
-is a `transfer.TOTAL_PARAMS`-value transfer-function vector, and `instruction` is what
-`goals.sample_instruction` returns (`{"kind", "text", "targets", "goal"}`).
+`hill_climb` is a coordinate search on `goals.distance` over the controllable
+groups (`CONTROLLABLE`: width, height, and one brightness step applied to
+r/g/b together, per peak -- centres never move, as for the policy). From the
+task's start it is the "search from scratch" baseline; warm-started at the
+policy's answer it is the viewer's final polish.
 
-B0 `do_nothing` is the reference: it returns `start_params` unchanged, and
-under `goals.distance`'s KEEP_TOLERANCE it scores attainment exactly 0.
+`rule_executor` does what the command executor (`commands.py`) does with an
+instruction: act only on the mentioned classes' peaks.
 
-B1 `current_executor` replicates today's command executor (`commands.py`):
-it acts only on the peak of the mentioned goal class(es), reading the same
-strength/level words but touching nothing else. B5 `occlusion_rule` adds the
-"strip everything else" heuristic a person would hand-write. B2
-`random_policy` and B3/B4 `hill_climb` search a reduced 12-value action space
-(height, width, and one "brightness" step applied to r/g/b together, per
-peak) -- centers are never touched, matching RL v2's action space.
+Both take `(model, start_params, instruction)`: a `visibility.VisibilityModel`,
+a transfer-function vector and what `goals.sample_instruction` returns.
 """
 import math
 
 import numpy as np
 
-import anatomy
 import commands
 import goals
 import transfer
 
-N_PEAKS = len(anatomy.CANONICAL_PEAK_ORDER)
+N_PEAKS = transfer.N_PEAKS
 PARAMS_PER_PEAK = transfer.PARAMS_PER_PEAK
 
 
@@ -50,11 +45,8 @@ def apply_controllable(start_params: np.ndarray, action) -> np.ndarray:
     for it (`rl.oneshot_env.build_observation`'s `controllable`), so an action
     round-trips through the observation unchanged. Each index keeps its offset
     from that mean, which matters only for the (r, g, b) group: the offsets are
-    the peak's hue. Writing the scalar into all three channels instead (the
-    original decode) forced r = g = b, so every policy render came out grey
-    while the baselines -- which add a delta and so keep their offsets -- stayed
-    coloured. A rater could then tell which candidate was the policy's at a
-    glance, which is fatal for a blind preference comparison.
+    the peak's hue (writing the scalar into all three channels made every
+    policy render grey).
     """
     params = np.asarray(start_params, dtype=np.float64).copy()
     for group, value in zip(CONTROLLABLE, action):
@@ -90,31 +82,18 @@ def _mentioned(instruction: dict, aspect: str) -> dict:
             if aspect in entry}
 
 
-def _start_vis(model, start_params, active_layers=None) -> dict:
-    features = goals.features(model, start_params, active_layers)
-    return goals.aggregate(features, active_layers)["vis"]
-
-
-def _infer_level(model, goal_class: str, delta: float, start_vis: float, active_layers=None) -> str:
+def _infer_level(model, goal_class: str, delta: float, start_vis: float) -> str:
     """Which ABSOLUTE_LEVEL word produced `delta`, by inverting
     `goals._absolute_target_delta` against every candidate level."""
-    solo = goals.class_ceiling(model, goal_class, active_layers)
+    solo = goals.class_ceiling(model, goal_class)
     target_vis = 10.0 ** (delta + math.log10(start_vis + goals.EPSILON)) - goals.EPSILON
     fraction = target_vis / solo if solo > 0.0 else 0.0
     return min(goals.ABSOLUTE_LEVEL, key=lambda key: abs(goals.ABSOLUTE_LEVEL[key] - fraction))
 
 
-def do_nothing(model, start_params, instruction, active_layers=None) -> np.ndarray:
-    """B0: the reference every other baseline (and any learned policy) has
-    to beat. Under `goals.distance`'s KEEP_TOLERANCE, inaction scores
-    attainment exactly 0 -- it is not the floor (B2 random can score below
-    it), it is the "did following the instruction actually help" line."""
-    return start_params.copy()
-
-
-def current_executor(model, start_params, instruction, active_layers=None) -> np.ndarray:
-    """What today's command executor does with the instruction: act only on
-    the peak `goals.PEAK_INDEX` gives each mentioned goal class."""
+def rule_executor(model, start_params, instruction) -> np.ndarray:
+    """What the command executor does with the instruction: act only on the
+    peak of each mentioned goal class."""
     params = start_params.copy()
     kind = instruction["kind"]
     targets = instruction["targets"]
@@ -135,9 +114,9 @@ def current_executor(model, start_params, instruction, active_layers=None) -> np
         return params
 
     if kind == "absolute":
-        start_vis = _start_vis(model, start_params, active_layers)
+        start_vis = goals.aggregate(model.features(start_params))["vis"]
         for goal_class, delta in _mentioned(instruction, "vis").items():
-            level = _infer_level(model, goal_class, delta, start_vis[goal_class], active_layers)
+            level = _infer_level(model, goal_class, delta, start_vis[goal_class])
             base = transfer.ANATOMICAL_PEAK_INDEX[goal_class] * PARAMS_PER_PEAK
             params[base + 2] = transfer._from_unit(commands.LEVEL_WORDS[level])
         return params
@@ -164,46 +143,12 @@ def current_executor(model, start_params, instruction, active_layers=None) -> np
     return params
 
 
-def _increasing_or_shown_classes(instruction: dict) -> set:
-    return {c for c, entry in instruction["targets"].items() if entry.get("vis", 0.0) > 0.0}
-
-
-def occlusion_rule(model, start_params, instruction, active_layers=None) -> np.ndarray:
-    """`current_executor`, and additionally: if any class is being increased
-    or shown, strip every *other* peak's height to 0.02 -- the "hide
-    everything else" heuristic a person writes by hand."""
-    params = current_executor(model, start_params, instruction, active_layers)
-    shown = _increasing_or_shown_classes(instruction)
-    if shown:
-        for goal_class, idx in transfer.ANATOMICAL_PEAK_INDEX.items():
-            if goal_class not in shown:
-                base = idx * PARAMS_PER_PEAK
-                params[base + 2] = transfer._from_unit(0.02)
-    return params
-
-
-def random_policy(model, start_params, instruction, seed: int = 0,
-                  active_layers=None) -> np.ndarray:
-    """10 random +-0.1 steps on the 12 controllable values, seeded -- ignores
-    the instruction and the objective entirely; the floor any policy (learned
-    or heuristic) has to clear."""
-    rng = np.random.default_rng(seed)
-    params = start_params.copy()
-    for _ in range(10):
-        dim = CONTROLLABLE[int(rng.integers(0, len(CONTROLLABLE)))]
-        delta = 0.1 if rng.integers(0, 2) == 0 else -0.1
-        for idx in dim:
-            params[idx] = float(np.clip(params[idx] + delta, -1.0, 1.0))
-    return params
-
-
-def _evaluate(model, goal, start_agg, params, active_layers=None, weights: dict = None) -> float:
-    features = goals.features(model, params, active_layers)
-    return goals.distance(goal, start_agg, goals.aggregate(features, active_layers), weights=weights)
+def _evaluate(model, goal, start_agg, params, weights: dict = None) -> float:
+    return goals.distance(goal, start_agg, goals.aggregate(model.features(params)), weights)
 
 
 def hill_climb(model, start_params, instruction, evaluations: int = 200,
-               initial_step: float = 0.2, active_layers=None, reference_params=None) -> np.ndarray:
+               initial_step: float = 0.2, reference_params=None) -> np.ndarray:
     """Coordinate search on `goals.distance`: try +-step on each of the 12
     controllable values, keep improvements, halve the step once a full sweep
     finds none. `evaluations` bounds the number of `model.features` calls
@@ -222,14 +167,14 @@ def hill_climb(model, start_params, instruction, evaluations: int = 200,
     goal = instruction["goal"]
     weights = instruction.get("weights")
     reference = start_params if reference_params is None else reference_params
-    start_agg = goals.aggregate(goals.features(model, reference, active_layers), active_layers)
+    start_agg = goals.aggregate(model.features(reference))
     used = 1
 
     best_params = start_params.copy()
     if reference_params is None:
-        best_distance = goals.distance(goal, start_agg, start_agg, weights=weights)
+        best_distance = goals.distance(goal, start_agg, start_agg, weights)
     else:
-        best_distance = _evaluate(model, goal, start_agg, best_params, active_layers, weights=weights)
+        best_distance = _evaluate(model, goal, start_agg, best_params, weights)
         used += 1
     step = initial_step
 
@@ -242,7 +187,7 @@ def hill_climb(model, start_params, instruction, evaluations: int = 200,
                 candidate = best_params.copy()
                 for idx in dim:
                     candidate[idx] = float(np.clip(candidate[idx] + sign * step, -1.0, 1.0))
-                candidate_distance = _evaluate(model, goal, start_agg, candidate, active_layers, weights=weights)
+                candidate_distance = _evaluate(model, goal, start_agg, candidate, weights)
                 used += 1
                 if candidate_distance < best_distance:
                     best_distance = candidate_distance
@@ -253,23 +198,3 @@ def hill_climb(model, start_params, instruction, evaluations: int = 200,
         if not improved:
             step /= 2.0
     return best_params
-
-
-def hill_climb_10(model, start_params, instruction, active_layers=None) -> np.ndarray:
-    return hill_climb(model, start_params, instruction, evaluations=10,
-                      active_layers=active_layers)
-
-
-def hill_climb_200(model, start_params, instruction, active_layers=None) -> np.ndarray:
-    return hill_climb(model, start_params, instruction, evaluations=200,
-                      active_layers=active_layers)
-
-
-BASELINES = {
-    "B0_do_nothing": do_nothing,
-    "B1_current_executor": current_executor,
-    "B2_random_policy": random_policy,
-    "B3_hill_climb_10": hill_climb_10,
-    "B4_hill_climb_200": hill_climb_200,
-    "B5_occlusion_rule": occlusion_rule,
-}

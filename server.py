@@ -1,1374 +1,82 @@
-"""FastAPI backend for the chat/voice UI.
+"""The web app: the viewer's routes around one `session.Session`.
 
-Route handlers are thin `async def` wrappers around `Session` — kept async (not
-plain `def`) so Starlette runs them directly on the event-loop thread instead of
-dispatching to a worker-thread pool. On macOS, VTK's Cocoa render window can only
-be created on the true main thread; since `uvicorn.run()` in `__main__` drives the
-event loop from the main thread, async handlers keep every render() call there too.
-`Session` itself has no FastAPI/threading dependency, so it's also directly unit
-testable in-process without going anywhere near that constraint.
+    .venv/bin/python server.py                       # http://127.0.0.1:8000
+    .venv/bin/python server.py --host 0.0.0.0 --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
+
+Route handlers are `async def` so Starlette runs them on the event-loop
+thread: on macOS VTK may only render on the main thread, and `uvicorn.run`
+drives the loop from it. Only the warm search of a two-stage policy answer
+runs in a worker thread (it does not render).
 """
 import asyncio
-import base64
 import datetime
-import functools
-import hashlib
-import io
-import json
-import math
 import os
 import sys
-import threading
 import time
-import uuid
 
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from PIL import Image
 from pydantic import BaseModel, Field
 
-from asr import ASR_MODEL, _transcribe_path as asr_transcribe_path, is_hallucination
-from camera import DEFAULT_CAMERA, apply_camera_command
+import answers
 import collect
 import commands
-from commands import COMMAND_REFERENCE, apply_command, apply_command_state, parse_command_with_meta
-from datasets import (_dataset_version, dataset_metadata, default_camera_for, get_label_chunk,
-                      get_volume_chunk, label_metadata, list_datasets, load_dataset)
-from evaluate import jsonl_append
 import goals
 import lexicon
-import policy as policy_module
-import render as render_module
-from render import features, grab, render
-import totalseg
-from rl.baselines import CONTROLLABLE, apply_controllable, hill_climb
-from rl.colour_guard import colour_guard
-from rl.keep_repair import keep_repair
-from rl.oneshot_env import build_observation
-from scene_schema import normalize_scene, scene_transition as normalize_scene_transition
-from transfer import TOTAL_PARAMS, TISSUE_BANDS, _opacity_and_color_at, default_params, opacity_mass
-import transfer
-import visibility
-from anatomy_layers import default_layers, normalize_layers
+import scans
+from asr import ASR_MODEL, _transcribe_path as asr_transcribe_path, is_hallucination
+from camera import DEFAULT_CAMERA
+from session import Session, scan_label, scan_list
 
-LOG_PATH = "out/log.jsonl"
-SCENE_TRANSITIONS_PATH = "out/scene_transitions.jsonl"
-_SCENE_WRITE_LOCK = threading.Lock()
 AUDIO_DIR = "out/audio"
-NO_POLICY_CHECKPOINT_MESSAGE = (
-    "no trained policy checkpoint found -- applied the command directly instead")
+MIN_AUDIO_BYTES = 1000
+# Two-stage policy answers: the fast stage is the command's response; the warm
+# search then runs in a worker thread and the client long-polls /api/refined.
+# POLICY_TWO_STAGE=0 answers in one synchronous stage.
+TWO_STAGE = os.environ.get("POLICY_TWO_STAGE", "1") != "0"
+REFINE_WAIT_SECONDS = 20.0
+# SCANS=all lists every downloaded patient, not only the demo set.
+SHOW_ALL_SCANS = os.environ.get("SCANS", "demo") == "all"
 
-# --- Task 3: the one-shot policy, for mode="policy" --------------------------
-# Loaded lazily and cached, the same pattern collect.py uses for the same
-# checkpoint: importing this module (and starting the server) must not
-# require a finished training run, and every command after the first pays no
-# reload cost.
-# v3, not v2: the v2 seeds were trained before the observation fixes (the
-# reachable-ceiling probe sat on the retired band layout's fat peak, and the
-# colour action wrote one scalar to r, g and b). Retraining on the corrected
-# observation does move held-out attainment: v3 +0.286 against v2 +0.201 on the
-# seed-averaged per-episode median, paired Wilcoxon p = 0.0064. The earlier
-# reading -- indistinguishable, +0.1732 vs +0.1743, p = 0.85 -- came from the
-# stale evaluation batch of 2026-09-17 and is withdrawn. The viewer should
-# demonstrate the pipeline the thesis describes in any case.
-# `policy.py` owns the checkpoint path; these are re-exports so the existing
-# call sites and tests keep working.
-POLICY_PATH = policy_module.POLICY_PATH
-_policy_state = policy_module._state
-_load_policy = policy_module.load_policy
+_session = None
+_refine_events = {}   # step id -> asyncio.Event, set when its refine settles
+_refine_tasks = set()  # strong references, so pending tasks are not collected
 
 
-def _predict_action(policy, observation: np.ndarray) -> np.ndarray:
-    """One action from `policy`, an SB3-style model (`.predict(observation,
-    deterministic=...) -> (action, state)`) or a plain callable -- mirrors
-    `rl.candidates._predict`, deterministic here since the chat UI wants one
-    consistent answer, not the sampling diversity preference collection
-    wants."""
-    if hasattr(policy, "predict"):
-        action, _ = policy.predict(observation, deterministic=True)
-    else:
-        action = policy(observation)
-    return np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
-
-
-# SCANS=all: list every downloaded patient after the demo set.
-SCAN_LIST = os.environ.get("SCANS", "demo")
-
-
-def _scan_list() -> list:
-    """The viewer's scan list: the demo patients of data/demo_scans.json that
-    are downloaded, in that order (all downloaded TotalSegmentator patients
-    if none of them is). The Slicer CTs, the MRI and the uncalibrated volumes
-    have no organ labels and are not offered (still loadable: --dataset)."""
-    available = set(totalseg.available_names())
-    demo = [n for n in totalseg.demo_names() if n in available]
-    if SCAN_LIST == "all":
-        return demo + sorted(available - set(demo))
-    return demo or sorted(available)
-
-
-def _scan_label(name: str) -> str:
-    """"s0477 · neck–pelvis" from the study type "ct neck-thorax-abdomen-pelvis"."""
-    entry = totalseg.subject(name)
-    study = entry["study_type"].lower().removeprefix("ct ")
-    prefix = "angio " if study.startswith("angiography ") else ""
-    parts = study.removeprefix("angiography ").split("-")
-    region = parts[0] if len(parts) == 1 else f"{parts[0]}–{parts[-1]}"
-    return f"{entry['id']} · {prefix}{region}"
-
-
-def _resolve_dataset_name():
-    # Read --dataset from argv directly (not argparse) so this resolves before
-    # any module-level code below -- notably `session = Session(...)` -- runs
-    # and potentially triggers the first render with the wrong dataset.
-    if "--dataset" in sys.argv:
-        idx = sys.argv.index("--dataset")
-        if idx + 1 < len(sys.argv):
-            return sys.argv[idx + 1]
+def start_scan() -> str:
+    """--dataset, else UI_DATASET, else the first demo patient."""
+    if "--dataset" in sys.argv[:-1]:
+        return sys.argv[sys.argv.index("--dataset") + 1]
     if os.environ.get("UI_DATASET"):
         return os.environ["UI_DATASET"]
-    # The first demo patient (data/demo_scans.json). Without downloaded scans,
-    # ct_chest: a calibrated CT, unlike mri_head, so every mode still works.
-    scans = _scan_list()
-    return scans[0] if scans else "ct_chest"
+    available = scan_list(SHOW_ALL_SCANS)
+    if not available:
+        raise SystemExit("no scans downloaded -- run `make scans` (python -m tools.fetch_scans --demo --splits)")
+    return available[0]
 
 
-_dataset_name = _resolve_dataset_name()
-_volume = None
-_spacing = None
-_labels = None
+def session() -> Session:
+    global _session
+    if _session is None:
+        _session = Session(start_scan())
+    return _session
 
-
-def get_volume():
-    global _volume, _spacing
-    if _volume is None:
-        _volume, _spacing = load_dataset(_dataset_name)
-    return _volume, _spacing
-
-
-def get_labels():
-    """Return active dataset labels, or None for HU-only datasets."""
-    global _labels
-    if _labels is None and _dataset_name.startswith("ts_"):
-        try:
-            import totalseg
-            if totalseg.has_labels(_dataset_name):
-                _labels = totalseg.load_labels(_dataset_name)
-        except (FileNotFoundError, ValueError):
-            _labels = None
-    return _labels
-
-
-def set_dataset(name: str):
-    """Switch the active dataset. Raises ValueError for an unknown name."""
-    global _dataset_name, _volume, _spacing, _labels
-    volume, spacing = load_dataset(name)  # validates name, raises ValueError if unknown
-    _dataset_name = name
-    _volume, _spacing = volume, spacing
-    _labels = None
-
-
-def _masses(params):
-    return {t: opacity_mass(params, lo, hi) for t, (lo, hi) in TISSUE_BANDS.items()}
-
-
-# The histogram/transfer-function visual guide the original project brief
-# asked for and the viewer never had: the curve is a pure function of `params`
-# (no volume needed, so it works even for a dataset with no visibility model),
-# sampled at the same resolution visibility.py's own LUT uses internally so
-# the picture matches what the render actually composites.
-CURVE_SAMPLES = visibility.LUT_SIZE
-
-
-def _transfer_curve(params):
-    hu = visibility.lut_values()
-    opacity, rgb = _opacity_and_color_at(np.asarray(params, dtype=np.float64), hu)
-    return {"hu": hu.tolist(), "opacity": opacity.tolist(), "rgb": rgb.tolist()}
-
-
-def _histogram(model_for_volume=visibility.for_volume):
-    """The loaded volume's own intensity histogram -- the same one
-    `rl.oneshot_env`'s observation already carries, so what this plots is
-    exactly what the policy sees, not a separate visualization-only
-    computation. `None` only if the volume itself cannot be loaded/scored,
-    matching `_class_visibility`'s failure handling."""
-    try:
-        model = model_for_volume(_dataset_name)
-    except (ValueError, KeyError, FileNotFoundError) as exc:
-        print(f"[telemetry] no histogram for {_dataset_name}: {exc}")
-        return None
-    return {"counts": model.histogram.tolist(), "range": list(visibility.CENTER_RANGE)}
-
-
-def _class_visibility(params, model_for_volume=visibility.for_volume):
-    """Share of the rendered image each goal class contributes, for the
-    viewer's readout.
-
-    `_masses` measures opacity over the retired fat/air/spongy bands -- peak
-    geometry, not anatomy, and in a vocabulary no instruction can target any
-    more. This is what the policy and the preference collector are scored on
-    instead. Classes this volume cannot support (`vessels` without contrast)
-    report None rather than a 0.0 the viewer would draw as "hidden"."""
-    try:
-        model = model_for_volume(_dataset_name)
-        vis = goals.aggregate(model.features(np.asarray(params, dtype=np.float64)))["vis"]
-        supported = set(goals.goal_classes_for_volume(_dataset_name))
-    except (ValueError, KeyError, FileNotFoundError) as exc:
-        print(f"[telemetry] no visibility model for {_dataset_name}: {exc}")
-        return {goal_class: None for goal_class in goals.GOAL_CLASSES}
-    return {goal_class: (float(vis[goal_class]) if goal_class in supported else None)
-            for goal_class in goals.GOAL_CLASSES}
-
-
-def _class_brightness(params, model_for_volume=visibility.for_volume):
-    """Mean brightness of each goal class, the companion to
-    `_class_visibility`.
-
-    `goals.distance` scores two channels -- how much of the image a class
-    contributes (`vis`) and how bright it appears (`bright`, weighted KAPPA) --
-    and an instruction names one or the other. "Brighten the skeleton" barely
-    moves visibility, so a panel plotting visibility alone shows four columns
-    with near-identical bars and attainment from 0.00 to 0.94, and reads as
-    self-contradictory."""
-    try:
-        model = model_for_volume(_dataset_name)
-        bright = goals.aggregate(model.features(np.asarray(params, dtype=np.float64)))["bright"]
-        supported = set(goals.goal_classes_for_volume(_dataset_name))
-    except (ValueError, KeyError, FileNotFoundError) as exc:
-        print(f"[telemetry] no visibility model for {_dataset_name}: {exc}")
-        return {goal_class: None for goal_class in goals.GOAL_CLASSES}
-    return {goal_class: (float(bright[goal_class]) if goal_class in supported else None)
-            for goal_class in goals.GOAL_CLASSES}
-
-
-def _class_effective_contribution(params, layers, model_for_volume=visibility.for_volume):
-    try:
-        model = model_for_volume(_dataset_name)
-        return model.features(np.asarray(params, dtype=np.float64), layers)[
-            "effective_class_contribution"]
-    except (ValueError, KeyError, FileNotFoundError) as exc:
-        print(f"[telemetry] no effective layer visibility for {_dataset_name}: {exc}")
-        return {name: None for name in visibility.CLASSES}
-
-
-def _anatomy_metadata(name):
-    try:
-        metadata = label_metadata(name)
-    except (FileNotFoundError, ValueError, OSError):
-        return {"label_available": False, "available_classes": []}
-    classes = metadata.get("classes", metadata.get("class_ids", {}).keys())
-    if isinstance(classes, dict):
-        classes = classes.keys()
-    return {"label_available": True, "available_classes": sorted(classes),
-            "label_layout_version": metadata.get("label_layout_version", "anatomy-v2")}
-
-
-def goal_channels(goal) -> dict:
-    """Which channel each goal class is named on, from the 16-value goal
-    vector: targets and masks for `vis`, then targets and masks for `bright`.
-
-    The panel plots the channel the instruction is actually about."""
-    n = len(goals.GOAL_CLASSES)
-    vis_mask, bright_mask = goal[n:2 * n], goal[3 * n:4 * n]
-    return {
-        "vis": [c for i, c in enumerate(goals.GOAL_CLASSES) if vis_mask[i]],
-        "bright": [c for i, c in enumerate(goals.GOAL_CLASSES) if bright_mask[i]],
-    }
-
-
-_frame_bounds_cache = {"dataset": None, "bounds": None}
-
-
-def _frame_bounds():
-    """The framing every step of this dataset's conversation is rendered in.
-
-    Measured once, from the dataset's *default* transfer function, so a
-    command that hides a tissue doesn't also re-zoom the picture -- the whole
-    point of a before/after pair is that only the tissue changed."""
-    volume, spacing = get_volume()
-    if _frame_bounds_cache["dataset"] != _dataset_name:
-        _frame_bounds_cache["dataset"] = _dataset_name
-        _frame_bounds_cache["bounds"] = render_module.frame_bounds(volume, default_params(), spacing)
-    return _frame_bounds_cache["bounds"]
-
-
-def _render_image_b64(params, camera, layers=None):
-    volume, spacing = get_volume()
-    img = grab(render(volume, params, spacing=spacing, camera=camera, frame_bounds=_frame_bounds(),
-                     labels=get_labels(), layers=normalize_layers(layers or default_layers())))
-    buf = io.BytesIO()
-    Image.fromarray(img).save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode(), img, buf.getvalue()
-
-
-IMAGE_DIR = "out/ui_images"
-
-
-def _save_image_file(session_id, name, png_bytes):
-    # Namespaced by session_id: step ids restart from 0 after switch_dataset,
-    # so a bare <name>.png would silently overwrite an earlier session's
-    # image with the same name.
-    session_dir = os.path.join(IMAGE_DIR, session_id)
-    os.makedirs(session_dir, exist_ok=True)
-    path = os.path.join(session_dir, f"{name}.png")
-    with open(path, "wb") as f:
-        f.write(png_bytes)
-    return path
-
-
-def _scene_event_id(before, after, event_id=None):
-    if event_id:
-        return event_id
-    payload = json.dumps({"before": before, "after": after}, sort_keys=True, separators=(",", ":"))
-    return "scene-event:" + hashlib.sha256(payload.encode()).hexdigest()[:24]
-
-
-# A command that targets a class but leaves the picture unchanged reads as
-# "nothing happened" -- the class sits behind other tissue. Its share of the
-# image is the wrong signal (the heart is plainly visible at 0.4-0.7 %), so
-# compare renders: the fraction of pixels whose max-channel |difference| from
-# the previous step exceeds VISIBLE_PIXEL_DELTA (of 255). Measured on 31 renders
-# of one camera against the start render:
-#   no visible change: "brighten the kidneys a lot" 0.02 %, "the spleen is way
-#     too dark" 0.02 %, "alpha up on the vessels" 0.00 %, "make the vessels a
-#     little more solid" 0.00 %
-#   barely visible:    "darken the skeleton" 0.22 %
-#   visible:           "set the heart to high" 0.57 %, "shift the bone peak up"
-#     1.67 %, "make the liver translucent" 1.57 %, show_only up to 15 %
-# NO_VISIBLE_CHANGE_SHARE = 0.3 % separates the first two groups from the third.
-VISIBLE_PIXEL_DELTA = 16
-NO_VISIBLE_CHANGE_SHARE = 0.003
-_TARGET_LABELS = {"soft": "soft tissue"}
-
-
-def _target_classes(cmd):
-    """Goal classes a command singles out, in order. Camera, layers, reset and
-    show_only name none for this purpose (show_only already clears occluders)."""
-    subs = cmd["compound"] if "compound" in cmd else [cmd]
-    found = []
-    for sub in subs:
-        if sub.get("direction") in ("show_only", "reset"):
-            continue
-        target = sub.get("target")
-        for name in (target if isinstance(target, list) else [target]):
-            if name in goals.GOAL_CLASSES and name not in found:
-                found.append(name)
-    return found
-
-
-def _step_pixels(step):
-    """The step's rendered image as an int16 RGB array, or None when neither
-    its inline PNG nor its saved file can be read."""
-    try:
-        if step.get("image_b64"):
-            raw = io.BytesIO(base64.b64decode(step["image_b64"]))
-        elif step.get("image_path"):
-            raw = step["image_path"]
-        else:
-            return None
-        return np.asarray(Image.open(raw).convert("RGB"), dtype=np.int16)
-    except (OSError, ValueError):
-        return None
-
-
-def _changed_pixel_share(before_step, after_step):
-    """Fraction of pixels visibly different between two steps' renders, or
-    None when either image is unavailable or the sizes differ."""
-    a, b = _step_pixels(before_step), _step_pixels(after_step)
-    if a is None or b is None or a.shape != b.shape:
-        return None
-    return float((np.abs(a - b).max(axis=-1) > VISIBLE_PIXEL_DELTA).mean())
-
-
-def _no_visible_change_hint(cmd, before_step, after_step):
-    """A note for a targeted command whose render barely changed, else None."""
-    targets = _target_classes(cmd)
-    if not targets:
-        return None
-    share = _changed_pixel_share(before_step, after_step)
-    if share is None or share >= NO_VISIBLE_CHANGE_SHARE:
-        return None
-    labels = [_TARGET_LABELS.get(name, name) for name in targets]
-    return (f"no visible change -- {' and '.join(labels)} mostly hidden behind other "
-            f"tissue; try 'show only {labels[0]}'")
-
-
-# "add X" of a class a command hid restores it: a relative increase of an
-# invisible class stays invisible (after "show only skeleton", "add liver"
-# left the liver at 0.0 % of the image on ts_s0477, "add lungs" at 0.21 %).
-# RESTORE_BELOW_SHARE is goals.EPSILON, the floor the goal channels treat as
-# "not shown". At the task's start TF every class is well above it -- the
-# start shares on ts_s0477, ts_s1379 and ts_s0358 are >= 0.27 % of the image
-# for every class, the kidneys the smallest -- so a class below 0.1 % is one
-# a command hid, and its start is what "add" should bring back.
-RESTORE_BELOW_SHARE = 0.001
-# The floor alone misses a class a command hid only mostly: on ts_s0058
-# (2026-11-03) "show only bones" left the lungs at 0.49 % of the image
-# (start 1.70 %, 0.29 of it) and the kidneys at 0.14 % (start 0.67 %, 0.21);
-# "add lungs" then went to the policy as "more lungs", which also lit the
-# unlabelled air the lungs peak shades -- a blue box over the body, the
-# skeleton 24.8 -> 5.6 %. So a class also counts as hidden below this
-# fraction of its share at the task's start TF (`_start_visibility`).
-# Not 0.5: a "less X" (moderately) targets half the share
-# (goals.VISIBILITY_STRENGTH 0.3 log10), and the policy lands at 0.43-0.53
-# of the start on ts_s0058 and 0.37-0.49 on ts_s0477 (the exact path at
-# 0.84-1.00) -- "add X" after that must stay "more X". 0.35 is the
-# geometric middle of one moderate (0.5) and one strong (0.25) decrease;
-# a "less X strongly" therefore reads as hidden and "add X" restores it.
-RESTORE_BELOW_FRACTION = 0.35
-
-
-def _is_hidden(share, start_share):
-    if share is None:
-        return False
-    if share < RESTORE_BELOW_SHARE:
-        return True
-    return start_share is not None and share < RESTORE_BELOW_FRACTION * start_share
-
-
-def _is_restore(sub, class_visibility, start_visibility=None):
-    """An opacity increase of a class whose share is below RESTORE_BELOW_SHARE,
-    or below RESTORE_BELOW_FRACTION of its share in `start_visibility`."""
-    if sub.get("attribute") != "opacity" or sub.get("direction") != "increase":
-        return False
-    target = sub.get("target")
-    if not isinstance(target, str):
-        return False
-    return _is_hidden(class_visibility.get(target), (start_visibility or {}).get(target))
-
-
-_start_visibility_cache = {}
-
-
-def _start_visibility(task_version=None):
-    """`_class_visibility` of the task's start TF on the loaded volume -- the
-    shares `restore_hidden` measures "hidden" against -- cached per dataset
-    and task version."""
-    key = (_dataset_name, task_version or TASK_VERSION)
-    if key not in _start_visibility_cache:
-        _start_visibility_cache[key] = _class_visibility(initial_params(task_version))
-    return _start_visibility_cache[key]
-
-
-def _class_reset(target):
-    return {"target": target, "attribute": None, "direction": "reset", "strength": None}
-
-
-def restore_hidden(cmd, class_visibility, start_visibility=None):
-    """`cmd` with every opacity increase of a hidden class -- its share in
-    `class_visibility` below RESTORE_BELOW_SHARE, or below
-    RESTORE_BELOW_FRACTION of its share in `start_visibility` (the task's
-    start TF, `_start_visibility`) -- replaced by a class reset of it, and the
-    classes so restored, in order. Unsupported classes (share None), missing
-    shares and every other kind of command are left alone; a compound keeps
-    its other sub-commands. This is the command the step stores;
-    `split_restores` is how it is applied."""
-    if not class_visibility or not isinstance(cmd, dict) or "camera" in cmd:
-        return cmd, []
-    subs = cmd["compound"] if isinstance(cmd.get("compound"), list) else [cmd]
-    hidden = [_is_restore(sub, class_visibility, start_visibility) for sub in subs]
-    restored = [sub["target"] for sub, h in zip(subs, hidden) if h]
-    if not restored:
-        return cmd, []
-    new = [_class_reset(sub["target"]) if h else sub for sub, h in zip(subs, hidden)]
-    return ({**cmd, "compound": new} if "compound" in cmd else new[0]), restored
-
-
-def split_restores(cmd, class_visibility, start_visibility=None):
-    """(restored classes, the rest of `cmd` -- None, one sub-command or a
-    compound). The restores are applied exactly first; the rest then takes
-    the normal path from that state, so "add liver and more lungs" after
-    "show only skeleton" still gets the policy for the lungs."""
-    _new, restored = restore_hidden(cmd, class_visibility, start_visibility)
-    if not restored:
-        return [], cmd
-    rest = ([sub for sub in cmd["compound"] if not _is_restore(sub, class_visibility, start_visibility)]
-            if "compound" in cmd else [])
-    if not rest:
-        return restored, None
-    return restored, (rest[0] if len(rest) == 1 else {**cmd, "compound": rest})
-
-
-def _mentions_opacity_increase(cmd):
-    """Only these can be restores; the start shares are not computed (one
-    visibility evaluation, then cached) for any other command."""
-    subs = cmd["compound"] if isinstance(cmd.get("compound"), list) else [cmd]
-    return any(isinstance(sub, dict) and sub.get("attribute") == "opacity"
-               and sub.get("direction") == "increase" for sub in subs)
-
-
-def _only_resets(cmd):
-    """A reset (full or class), or a compound of nothing else: an intended
-    exact command, never a policy/search fallback."""
-    subs = cmd["compound"] if isinstance(cmd.get("compound"), list) else [cmd]
-    return all(sub.get("direction") == "reset" for sub in subs)
-
-
-def _restore_understood(restored, rest):
-    """"restore the liver and lungs", "+ more lungs" for the rest."""
-    said = f"restore the {commands._and_list(commands._labels(restored))}"
-    return " + ".join([said] + ([commands.describe_command(rest)] if rest is not None else []))
-
-
-def _restore_message(classes):
-    labels = " and ".join(commands.CLASS_LABEL.get(c, c) for c in classes)
-    # "lungs", "kidneys", "vessels" are plural nouns even as a single class.
-    if len(classes) == 1 and not commands.CLASS_LABEL.get(classes[0], classes[0]).endswith("s"):
-        return f"{labels} was hidden -- restored to its start"
-    return f"{labels} were hidden -- restored to their start"
-
-
-def _render_step(params, cmd_text, cmd_dict, search, step_id, session_id, camera,
-                  mode="exact", message=None, parser_meta=None, layers=None):
-    layers = normalize_layers(layers or default_layers())
-    image_b64, img, png_bytes = _render_image_b64(params, camera, layers=layers)
-    image_path = _save_image_file(session_id, f"step_{step_id}", png_bytes)
-    return {
-        "id": step_id,
-        "timestamp": datetime.datetime.now().isoformat(),
-        "cmd_text": cmd_text,
-        "cmd_dict": cmd_dict,
-        "params": params.tolist(),
-        "camera": camera,
-        "anatomy_layers": layers,
-        "image_b64": image_b64,
-        "image_path": image_path,
-        "masses": _masses(params),
-        "class_visibility": _class_visibility(params),
-        "effective_class_contribution": _class_effective_contribution(params, layers),
-        "curve": _transfer_curve(params),
-        "histogram": _histogram(),
-        "features": features(img),
-        "search": search,
-        "mode": mode,
-        "message": message,
-        **(parser_meta or {"parser_requested": None, "parser_used": None, "parser_fallback": None}),
-    }
-
-
-def run_policy_arm(model, policy, instruction, start_agg, start_params, active_layers=None, plan=False):
-    """Run the one-shot policy on an already-built goal.
-
-    The caller owns `instruction` (`goals.goal_from_command`) and `start_agg`,
-    so a caller comparing several arms builds each exactly once -- recomputing
-    them here would put another `model.features` (~17 ms) inside the policy
-    arm's own timing, which is the one number the comparison panel exists to
-    show. Builds the same observation layout `rl.candidates` builds for a
-    standalone policy query (`rl.oneshot_env.build_observation`).
-
-    `plan` refines the residual action through the checkpoint's dynamics
-    ensemble (`rl.model_based.plan`, no renders) when it has one.
-
-    Returns the new parameters. Raises `ValueError` when `policy` is None;
-    `model.features`/`model.solo_max` may also raise `FileNotFoundError` or
-    `KeyError` when the volume has no visibility cache."""
-    if policy is None:
-        raise ValueError(NO_POLICY_CHECKPOINT_MESSAGE)
-
-    solo_max_log = [math.log10(goals.class_ceiling(model, c, active_layers) + goals.EPSILON)
-                     for c in goals.GOAL_CLASSES]
-    controllable = [float(np.mean([start_params[i] for i in group])) for group in CONTROLLABLE]
-    observation = build_observation(instruction["goal"], model.histogram, start_agg,
-                                     solo_max_log, controllable)
-
-    action = _predict_action(policy, observation)
-    if plan and getattr(policy, "dynamics", None) is not None and getattr(policy, "action_mode", "") == "residual":
-        from rl.model_based import plan as plan_action
-        action = plan_action(policy.dynamics, instruction["goal"], instruction.get("weights"), model.histogram,
-                             solo_max_log, controllable, start_agg, action)
-    if getattr(policy, "action_mode", "absolute") == "residual":
-        # A residual policy (every model-based checkpoint, SAC v9) proposes a
-        # change to the current values, as OneShotEnv.step applies it.
-        action = np.clip(np.asarray(controllable) + action, -1.0, 1.0)
-    return apply_controllable(start_params, action)
-
-
-# The viewer's policy mode polishes the policy's one-shot proposal with a short
-# hill_climb started from it (~24 ms per evaluation on ts_s1379, so ~5 s for
-# 200). Task v2, 300 val episodes, 3 policy seeds (median attainment): the
-# proposal alone 0.50-0.54, after 30 evaluations 0.70-0.72, after 200 0.89 --
-# a 200-evaluation search from the start reaches 0.66
-# (docs/experiments/2026-10-17-task-v2.md). The comparison panel's "policy"
-# arm stays the bare proposal; POLICY_REFINE_EVALUATIONS=30 answers in
-# ~0.7 s, 0 shows the pure policy.
-POLICY_REFINE_EVALUATIONS = int(os.environ.get("POLICY_REFINE_EVALUATIONS", "200"))
-# Before the search, the policy's action is refined through the checkpoint's
-# own dynamics ensemble (rl.model_based.plan, ~0.2 s, no renders); 0 skips it.
-POLICY_PLAN = os.environ.get("POLICY_PLAN", "1") != "0"
-# The task the viewer runs (goals.TASK_VERSIONS). v2 opens on the transfer
-# function with the organs in view and scores a command the way the v2
-# policy was trained: occluders of a target are free to fade, targets are
-# clipped to what the class can reach. v3 (default) also fades the unlabelled
-# shell to 0.2 opacity and lets show_only hide the rest completely
-# (docs/experiments/2026-10-19-task-v3.md). TASK_VERSION=v2 or v1 restores an
-# earlier task; set POLICY_PATH to a policy trained on it.
-TASK_VERSION = os.environ.get("TASK_VERSION", "v3")
-# How many times the policy acts on one command: after each step the viewer
-# re-measures the render and the policy sees what is left of the goal
-# (rl.closed_loop.rollout's loop) -- still the policy alone, no search.
-POLICY_STEPS = int(os.environ.get("POLICY_STEPS", "1"))
-# After the policy (and its search), revert every peak of a class the command
-# never mentioned to where the command started, wherever that costs at most
-# 0.01 attainment (rl.keep_repair, ~one evaluation per changed peak). The
-# keep term lets unmentioned classes drift 0.15 per command for free; chained
-# in the viewer that drift added up (heart rendered black after 7 commands).
-KEEP_REPAIR = os.environ.get("KEEP_REPAIR", "1") != "0"
-# Also try reverting the instruction's occluders (task v2/v3: mentioned with
-# weight 0, e.g. soft tissue for "more lungs"), with the same 0.01 bar
-# (`keep_repair(include_occluders=True)`). Off until the measurement in
-# docs/experiments/2026-10-23-keep-repair-occluders.md decides it.
-KEEP_REPAIR_OCCLUDERS = os.environ.get("KEEP_REPAIR_OCCLUDERS", "0") == "1"
-# After the keep repair, give every class its colour back unless the command
-# asked for its brightness, and keep the hue of the ones it did ask about
-# (rl.colour_guard): the policy recolours hidden classes and occluders for
-# free, and chained in the viewer a hidden heart came back white, a skeleton
-# black (2026-10-25). Luminance -- what `bright` measures -- is kept, so the
-# goal metric only sees it where a colour garbled earlier is repaired.
-COLOUR_GUARD = os.environ.get("COLOUR_GUARD", "1") != "0"
-
-
-def initial_params(task_version: str = None) -> np.ndarray:
-    """The transfer function a viewer session starts from (and "reset" returns to)."""
-    return goals.starting_params(task_version or TASK_VERSION)
-POLICY_REFINE_STEP = 0.1
-
-
-def refine_policy_proposal(model, proposal, start_params, instruction, start_agg, evaluations,
-                           active_layers=None):
-    """`hill_climb` from the policy's `proposal`, measuring the instruction from
-    the command's own start (`reference_params`), keeping whichever of
-    {proposal, refined} scores higher -- the same contract as
-    `rl.vis_eval.run_policy_with_refinement`."""
-    refined = hill_climb(model, proposal, instruction, evaluations=evaluations,
-                         initial_step=POLICY_REFINE_STEP, active_layers=active_layers,
-                         reference_params=start_params)
-    weights = {} if instruction.get("weights") is None else {"weights": instruction["weights"]}
-
-    def score(params):
-        final = goals.aggregate(model.features(params, active_layers), active_layers)
-        return goals.attainment(instruction["goal"], start_agg, final, **weights)
-
-    return refined if score(refined) > score(proposal) else proposal
-
-
-def run_search_arm(model, start_params, instruction, evaluations, active_layers=None):
-    """Run the hill-climb baseline (`rl.baselines.hill_climb`) on an
-    already-built goal -- the search twin of `run_policy_arm`.
-
-    The caller owns `instruction` (`goals.goal_from_command`), the same
-    reason `run_policy_arm` takes a pre-built `instruction`/`start_agg`
-    rather than recomputing them: a caller comparing several arms builds the
-    goal exactly once instead of putting another `model.features` call
-    inside the arm's own timing.
-
-    `evaluations` is a budget on `model.features` calls inside `hill_climb`,
-    not a count of accepted moves: one evaluation scores the start state,
-    and each remaining one tries a single +-step on one of the 12
-    controllable groups. A full sweep (12 groups x 2 signs) costs ~24 --
-    below that, `hill_climb` can run out of budget before trying every
-    direction once and return the start state completely untouched. This
-    function does not detect that case; the caller (`Session._run_search`)
-    does, because only it knows the params it started from.
-
-    Returns the new parameters. `model.features`/`model.solo_max` may raise
-    `FileNotFoundError` or `KeyError` when the volume has no visibility
-    cache."""
-    kwargs = {} if active_layers is None else {"active_layers": active_layers}
-    try:
-        return hill_climb(model, start_params, instruction, evaluations=evaluations, **kwargs)
-    except TypeError as exc:
-        if active_layers is None or "active_layers" not in str(exc):
-            raise
-        return hill_climb(model, start_params, instruction, evaluations=evaluations)
-
-
-# The two search budgets the thesis reports: B3 (cheap, 10) and B4 (thorough,
-# 200). Showing both is what makes a no-move B3 column legible -- beside a B4
-# that did move and a policy that answered instantly, "10 evaluations buys
-# little here" reads as the finding rather than as a broken column.
-#
-# `hill_climb` spends 1 evaluation on the start state and 1 per proposal, and a
-# full coordinate sweep is 12 groups x 2 signs = 24, so B3 explores less than
-# half a sweep. Measured on ct_chest / "show only the lungs": B3 130 ms,
-# B4 2.7 s -- the whole panel is under three seconds.
-COMPARE_BUDGET_CHEAP = 10
-COMPARE_BUDGET_THOROUGH = 200
-
-
-def compare_arms(model, policy, cmd, instruction, start_params, camera,
-                 cheap=COMPARE_BUDGET_CHEAP, thorough=COMPARE_BUDGET_THOROUGH,
-                 layers=None):
-    """Answer one parsed command five ways from the same start state.
-
-    `exact` applies the command directly (0 evaluations), `search_cheap` and
-    `search_thorough` run the hill-climb the thesis measures as B3 and B4, and
-    `policy` runs the trained one-shot policy (0 evaluations); `policy_keep`
-    is that proposal after `rl.keep_repair` (its evaluations are the
-    repair's). The web panel shows the first four (static/app.js ARM_ORDER). Every arm is
-    scored with `goals.attainment` against the *shared* start aggregate, which
-    is what makes these numbers mean what the held-out table means.
-
-    `model` and `instruction` must come from a single read of the active
-    dataset, not two independent resolutions at different layers -- otherwise
-    an arm could be scored against a goal built for a different volume.
-
-    Does not touch session history: comparing is a side quest, not a step.
-
-    An arm that raises is reported as `unavailable` rather than failing the
-    whole comparison -- losing one column should not end a live demo."""
-    start_agg = goals.aggregate(goals.features(model, start_params, layers), layers)
-
-    # Warm every class's reachable ceiling before any stopwatch starts.
-    # `model.solo_max` probes four single-peak transfer functions and memoises
-    # per model instance -- ~250 ms once, free after. Left inside the policy
-    # arm it makes the FIRST comparison of a session report the policy as
-    # slower than the cheap search it is meant to beat, for a reason that has
-    # nothing to do with the policy, and the first comparison is the one an
-    # audience watches. `goal_from_command` warms only the classes the
-    # instruction mentions, so it does not cover this.
-    for goal_class in goals.GOAL_CLASSES:
-        for material in goals.MEASURED_FOR_GOAL[goal_class]:
-            model.solo_max(material)
-
-    def _answer(fn):
-        """Run one arm and time *only* the answering.
-
-        The timing column exists to show that the policy answers for free
-        while thorough search costs seconds. Scoring and rendering cost the
-        same for every arm, so folding them in inflates the cheap arms towards
-        the expensive one and the policy's number stops being the policy's
-        number -- the same mistake `run_policy_arm`'s seam was shaped to
-        avoid, one layer up."""
-        started = time.perf_counter()
-        params = fn()
-        return params, int((time.perf_counter() - started) * 1000)
-
-    def _finish(params, evaluations, elapsed_ms):
-        final_agg = goals.aggregate(goals.features(model, params, layers), layers)
-        if layers is None:
-            image_b64, _img, _png = _render_image_b64(params, camera)
-        else:
-            image_b64, _img, _png = _render_image_b64(params, camera, layers=layers)
-        return {
-            "params": params.tolist(),
-            "image_b64": image_b64,
-            "class_visibility": _class_visibility(params),
-            "anatomy_layers": normalize_layers(layers or default_layers()),
-            "effective_class_contribution": _class_effective_contribution(
-                params, layers or default_layers()),
-            "class_brightness": _class_brightness(params),
-            # `weights` is passed via **kwargs, not a bare keyword: at least one
-            # test (test_compare_arms_includes_anatomy_layers_in_each_arm)
-            # monkeypatches `server.goals.attainment` with a fixed-arity stub
-            # (`lambda *args: 0.0`) that takes no keyword arguments at all, and
-            # an unconditional `weights=` would break it even for an
-            # instruction with no "weights" key.
-            "attainment": float(goals.attainment(
-                instruction["goal"], start_agg, final_agg,
-                **({} if instruction.get("weights") is None else {"weights": instruction["weights"]}))),
-            # An arm that returned its own input is not an arm that *agrees*
-            # with the start -- it is an arm that did not move, and rendered
-            # side by side those two read identically (same image, same
-            # attainment, a confident evaluation count) while meaning opposite
-            # things. At B3's budget the search arm can legitimately land here.
-            "unchanged": bool(np.array_equal(params, start_params)),
-            "evaluations": evaluations,
-            "elapsed_ms": elapsed_ms,
-        }
-
-    def _unavailable(reason, exc, elapsed_ms):
-        # `str(exc)` is not user-facing copy: a KeyError stringifies to the
-        # bare repr of its key, and goal_from_command yields a dumped Python
-        # dict. Worse, reusing `NO_POLICY_CHECKPOINT_MESSAGE` here would have
-        # the column claim the command was "applied directly instead" when
-        # nothing was applied at all -- that message belongs to
-        # `Session.command`, which really does fall back. `reason` is written
-        # for a reader; `detail` keeps the original for debugging.
-        # Same keys as a successful arm, so a consumer iterating the arms never
-        # has to special-case a failed one before reading a field.
-        return {"params": None, "unavailable": reason, "detail": str(exc),
-                "attainment": None, "class_visibility": None, "class_brightness": None,
-                "anatomy_layers": normalize_layers(layers or default_layers()),
-                "effective_class_contribution": None,
-                "image_b64": None, "evaluations": None, "unchanged": None,
-                "elapsed_ms": elapsed_ms}
-
-    def _arm(fn, evaluations, cannot):
-        """Run one arm, reporting `cannot` if it cannot answer.
-
-        Only the *solve* is guarded. A failure in `_finish` -- rendering or
-        scoring -- is not an arm declining to answer, and reporting it as one
-        produces a confident, specific, wrong diagnosis with no traceback to
-        follow. Those propagate."""
-        started = time.perf_counter()
-        try:
-            params, elapsed_ms = _answer(fn)
-        except (ValueError, FileNotFoundError, KeyError) as exc:
-            print(f"[compare] {cannot}: {type(exc).__name__}: {exc}")
-            return _unavailable(cannot, exc, int((time.perf_counter() - started) * 1000))
-        return _finish(params, evaluations, elapsed_ms)
-
-    cannot_score = "cannot answer here -- this volume has no visibility cache"
-    arms = {"exact": _arm(functools.partial(apply_command, cmd, start_params), 0,
-                           "this instruction cannot be applied directly")}
-    for name, budget in (("search_cheap", cheap), ("search_thorough", thorough)):
-        arms[name] = _arm(
-            functools.partial(run_search_arm, model, start_params, instruction, budget,
-                              **({} if layers is None else {"active_layers": layers})),
-            budget, cannot_score)
-    arms["policy"] = _arm(
-        functools.partial(run_policy_arm, model, policy, instruction, start_agg, start_params,
-                          **({} if layers is None else {"active_layers": layers})),
-        0, "no trained policy checkpoint is loaded, so this arm has no answer")
-    repair_evals = []
-
-    def _policy_keep():
-        proposal = run_policy_arm(model, policy, instruction, start_agg, start_params,
-                                  **({} if layers is None else {"active_layers": layers}))
-        repaired, n_evals = keep_repair(model, instruction["goal"], start_params, proposal, layers=layers,
-                                        weights=instruction.get("weights"), start_agg=start_agg)
-        repair_evals.append(n_evals)
-        return repaired
-
-    arms["policy_keep"] = _arm(_policy_keep, None,
-                               "no trained policy checkpoint is loaded, so this arm has no answer")
-    if repair_evals:
-        arms["policy_keep"]["evaluations"] = repair_evals[0]
-    return arms
-
-
-SWEEP_EPISODES = 20
-
-
-def sweep_arms(model, policy, volume, start_params, episodes=SWEEP_EPISODES, seed=0,
-                thorough=None):
-    """Run the arms over many sampled instructions and summarise each.
-
-    A single comparison is one draw from a distribution: the thesis reports a
-    median over 200 held-out episodes, and the reliability gap means roughly
-    one instruction in four has the policy not improving. Showing one draw
-    invites a reader to generalise from an anecdote in either direction. This
-    reports what the arms do across `episodes` instructions sampled from the
-    same grammar the policy was trained and scored on.
-
-    Every episode starts from `start_params` -- the state the viewer is
-    actually in -- so the question is "from this view, across many different
-    instructions, what does each method do".
-
-    Thorough search is excluded unless a budget is passed: 200 evaluations per
-    episode is about 2.7 s, which at 20 episodes is a minute of waiting. The
-    cheap arm is the baseline the amortisation claim is about."""
-    rng = np.random.default_rng(seed)
-    # `sample_instruction` takes the AGGREGATED features, keyed by goal class,
-    # as every other caller passes (rl/oneshot_env.py, rl/vis_env.py,
-    # rl/candidates.py). Raw `model.features` is keyed by material, and three
-    # of the four goal classes share a material name -- so the wrong shape
-    # survives most instructions and raises KeyError('soft') on the one goal
-    # class that does not.
-    start_agg = goals.aggregate(model.features(start_params))
-
-    budgets = {"search_cheap": COMPARE_BUDGET_CHEAP}
-    if thorough:
-        budgets["search_thorough"] = thorough
-
-    scores = {name: [] for name in ("exact", "policy", *budgets)}
-    kinds = []
-    for _ in range(episodes):
-        instruction = goals.sample_instruction(volume, model, start_agg, rng)
-        kinds.append(instruction["kind"])
-
-        def _score(params):
-            # Bare keyword, unlike compare_arms's _finish above: no test
-            # monkeypatches goals.attainment through this closure, so there's
-            # no fixed-arity stub to break.
-            return float(goals.attainment(
-                instruction["goal"], start_agg, goals.aggregate(model.features(params)),
-                weights=instruction.get("weights")))
-
-        # `apply_command` takes a *parsed* command, not an instruction, so the
-        # sampled text goes through the same parser the viewer uses. That keeps
-        # this arm the same thing the single comparison calls "exact"; running
-        # `rl.baselines.current_executor` here instead would silently make the
-        # sweep measure a different implementation than the panel.
-        try:
-            parsed, _meta = parse_command_with_meta(instruction["text"], parser="rule")
-            scores["exact"].append(_score(apply_command(parsed, start_params)))
-        except (ValueError, KeyError, FileNotFoundError):
-            scores["exact"].append(None)
-        for name, budget in budgets.items():
-            scores[name].append(_score(
-                run_search_arm(model, start_params, instruction, budget)))
-        try:
-            scores["policy"].append(_score(
-                run_policy_arm(model, policy, instruction, start_agg, start_params)))
-        except (ValueError, KeyError, FileNotFoundError):
-            scores["policy"].append(None)
-
-    return {"episodes": episodes, "seed": seed, "volume": volume,
-            "kinds": sorted(set(kinds)),
-            "arms": {name: goals.summarise_attainment(values)
-                      for name, values in scores.items()}}
-
-
-class Session:
-    """All command/history logic, independent of FastAPI."""
-
-    def __init__(self, path: str, policy_provider=None, model_for_volume=visibility.for_volume):
-        self.path = path
-        self.history = []
-        self.cursor = 0
-        self.session_id = None
-        # Injectable, like collect.Collector's seams: policy_provider defaults
-        # to the lazily-loaded/cached checkpoint above, model_for_volume to
-        # the real visibility model -- tests substitute cheap stand-ins for
-        # both without touching VTK or a real checkpoint.
-        self.policy_provider = policy_provider or _load_policy
-        self.model_for_volume = model_for_volume
-        self.policy_refine_evaluations = POLICY_REFINE_EVALUATIONS
-        self.policy_plan = POLICY_PLAN
-        self.task_version = TASK_VERSION
-        goals.use_task_version(self.task_version)
-        self.policy_steps = POLICY_STEPS
-        self.keep_repair = KEEP_REPAIR
-        self.keep_repair_occluders = KEEP_REPAIR_OCCLUDERS
-        self.colour_guard = COLOUR_GUARD
-        # step id -> what `_refine_policy`/`_apply_refined` need to finish a
-        # two-stage policy answer (see `command(defer_refine=True)`).
-        self._pending_refines = {}
-        self._load_or_init()
-
-    def _load_or_init(self):
-        if os.path.exists(self.path):
-            with open(self.path, encoding="utf-8") as f:
-                data = json.load(f)
-            history = data.get("history", [])
-            # Persisted sessions from the four-peak viewer contain 24 values;
-            # they cannot be rendered by the eight-peak viewer. Reset stale
-            # sessions instead of passing invalid state to the browser.
-            if not history or any(len(step.get("params", [])) != TOTAL_PARAMS for step in history):
-                self.session_id = self._new_session_id()
-                step = _render_step(initial_params(), None, None, False, 0,
-                                    self.session_id, default_camera_for(_dataset_name),
-                                    layers=default_layers())
-                self.history = [step]
-                self.cursor = 0
-                self.save()
-                return
-            self.history, self.cursor = history, data["cursor"]
-            for step in self.history:
-                if step.get("label_layout") not in (None, "anatomy-v2"):
-                    raise ValueError("label_layout is stale and cannot be reinterpreted")
-                step["anatomy_layers"] = normalize_layers(
-                    step.get("anatomy_layers", default_layers()))
-                if step.get("refining"):
-                    # Its refine died with the process that started it.
-                    step["refining"] = False
-                    step["refine_discarded"] = True
-            self.session_id = data.get("session_id") or self._new_session_id()
-            return
-        self.session_id = self._new_session_id()
-        step = _render_step(initial_params(), None, None, False, 0, self.session_id,
-                            default_camera_for(_dataset_name), layers=default_layers())
-        self.history = [step]
-        self.cursor = 0
-        self.save()
-
-    @staticmethod
-    def _new_session_id():
-        return datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
-
-    def save(self):
-        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump({"history": self.history, "cursor": self.cursor, "session_id": self.session_id}, f)
-
-    def state(self):
-        volume, spacing = get_volume()
-        return {
-            "cursor": self.cursor,
-            "total": len(self.history),
-            "current": self.history[self.cursor],
-            "dataset": _dataset_name,
-            "session_id": self.session_id,
-            "render_info": {
-                "width": render_module.WIDTH,
-                "height": render_module.HEIGHT,
-                "mapper": render_module.MAPPER_NAME,
-                "volume_shape": list(volume.shape),
-                "spacing": list(spacing),
-                "dataset_version": _dataset_version(_dataset_name),
-            },
-            "anatomy": _anatomy_metadata(_dataset_name),
-            # The browser viewer shades the unlabelled row with this too (tf_table.js).
-            "unlabelled_opacity": transfer.UNLABELLED_OPACITY,
-        }
-
-    def switch_dataset(self, name: str):
-        set_dataset(name)  # raises ValueError for an unknown name
-        self.session_id = self._new_session_id()
-        step = _render_step(initial_params(), None, None, False, 0, self.session_id,
-                            default_camera_for(name), layers=default_layers())
-        self.history = [step]
-        self.cursor = 0
-        self.save()
-        return self.state()
-
-    def set_layer(self, class_name: str, *, opacity=None, rgb=None):
-        layers = normalize_layers(self.history[self.cursor].get("anatomy_layers", default_layers()))
-        try:
-            metadata = label_metadata(_dataset_name)
-        except FileNotFoundError:
-            metadata = None
-        if metadata is not None:
-            available = set(metadata.get("classes", metadata.get("class_ids", {})))
-            if class_name not in available:
-                raise ValueError(f"{class_name} is not available in active labeled dataset")
-        if opacity is not None:
-            layers[class_name]["opacity"] = opacity
-        if rgb is not None:
-            layers[class_name]["rgb"] = rgb
-        params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
-        camera = dict(self.history[self.cursor].get("camera", DEFAULT_CAMERA))
-        step = _render_step(params, f"set {class_name} layer", {
-            "attribute": "layers", "action": "set", "target": class_name,
-            "opacity": layers[class_name]["opacity"], "rgb": layers[class_name]["rgb"]},
-            False, self.history[-1]["id"] + 1, self.session_id, camera, mode="layers",
-            layers=layers)
-        self.history = self.history[:self.cursor + 1] + [step]
-        self.cursor = len(self.history) - 1
-        self.save()
-        return self.state()
-
-    def back(self):
-        self.cursor = max(0, self.cursor - 1)
-        self.save()
-        return self.state()
-
-    def forward(self):
-        self.cursor = min(len(self.history) - 1, self.cursor + 1)
-        self.save()
-        return self.state()
-
-    def _log_command(self, cmd, current_params, new_params, step):
-        jsonl_append(LOG_PATH, {
-            "timestamp": step["timestamp"], "command": cmd,
-            "params_before": current_params.tolist(), "params_after": new_params.tolist(),
-            "features_before": self.history[self.cursor]["features"], "features_after": step["features"],
-            "verdict": None,
-        })
-
-    def instruction_for(self, cmd, model, params, layers):
-        """The start aggregate and the goal `cmd` sets from `params`, as this
-        session's task version scores it (`goals.for_task_version`)."""
-        start_agg = goals.aggregate(model.features(params, layers), layers)
-        instruction = goals.goal_from_command(cmd, model, start_agg, volume=_dataset_name,
-                                              active_layers=layers)
-        return start_agg, goals.for_task_version(instruction, model, params, start_agg,
-                                                 self.task_version, layers)
-
-    def _policy_proposal(self, cmd, current_params):
-        """The policy's proposal for `cmd` (policy, planning, closed-loop
-        steps) before the warm search and the keep repair, plus everything the
-        later stages need to finish it (`job`): the model, goal, start
-        aggregate and layers it was built against.
-
-        The `policy is None` check stays ahead of `model_for_volume`: that call
-        is not total (`visibility.for_volume` raises `FileNotFoundError` when a
-        volume has no cache, which is why `_class_visibility` guards it), and
-        `command()` catches only `ValueError`. Resolving the model first would
-        turn a graceful "no checkpoint, applied directly" fallback into an
-        unhandled exception out of the route. The `ValueError` raised here is
-        what `command()` catches to fall back to exact application."""
-        policy = self.policy_provider()
-        if policy is None:
-            raise ValueError(NO_POLICY_CHECKPOINT_MESSAGE)
-        model = self.model_for_volume(_dataset_name)
-        layers = self.history[self.cursor].get("anatomy_layers", default_layers())
-        start_agg, instruction = self.instruction_for(cmd, model, current_params, layers)
-        proposal = run_policy_arm(model, policy, instruction, start_agg, current_params,
-                                  active_layers=layers, plan=self.policy_plan)
-        if self.policy_steps > 1:
-            from rl.closed_loop import remaining_goal_for
-            for _ in range(self.policy_steps - 1):
-                agg = goals.aggregate(model.features(proposal, layers), layers)
-                remaining = {**instruction, "goal": remaining_goal_for(
-                    instruction["goal"], start_agg, agg, instruction.get("weights"))}
-                proposal = run_policy_arm(model, policy, remaining, agg, proposal, active_layers=layers)
-        job = {"model": model, "instruction": instruction, "start_agg": start_agg,
-               "layers": layers, "start_params": current_params.copy(),
-               "proposal": proposal.copy(), "keep_repair": self.keep_repair,
-               "keep_repair_occluders": self.keep_repair_occluders,
-               "colour_guard": self.colour_guard,
-               "reference_params": initial_params(self.task_version),
-               "evaluations": self.policy_refine_evaluations}
-        return proposal, job
-
-    @staticmethod
-    def _keep_repaired(job, params):
-        """The keep repair, then the colour guard, each behind its switch:
-        how both policy stages end."""
-        instruction = job["instruction"]
-        if job["keep_repair"]:
-            params, _n_evals = keep_repair(job["model"], instruction["goal"], job["start_params"], params,
-                                           layers=job["layers"], weights=instruction.get("weights"),
-                                           start_agg=job["start_agg"],
-                                           include_occluders=job.get("keep_repair_occluders", False))
-        if job.get("colour_guard"):
-            params = colour_guard(instruction["goal"], job["start_params"], params, job["reference_params"],
-                                  weights=instruction.get("weights"))
-        return params
-
-    def _run_policy(self, cmd, current_params):
-        """mode="policy": the policy's proposal (`_policy_proposal`), the warm
-        search from it (`_refine_policy`) and the keep repair -- the whole
-        synchronous answer."""
-        _proposal, job = self._policy_proposal(cmd, current_params)
-        return self._refine_policy(job), job["instruction"]["text"]
-
-    def _fast_policy(self, cmd, current_params):
-        """The two-stage answer's first stage: the policy's proposal with the
-        keep repair and colour guard but without the warm search. Returns the params and the
-        `job` `_refine_policy` finishes later."""
-        proposal, job = self._policy_proposal(cmd, current_params)
-        return self._keep_repaired(job, proposal), job
-
-    @staticmethod
-    def _refine_policy(job):
-        """The warm search, keep repair and colour guard from the policy's proposal -- the
-        same functions in the same order the synchronous `_run_policy` ends
-        with, so the final params match it exactly. Pure visibility-model
-        work (no rendering, no session state), so it may run in a worker
-        thread."""
-        proposal = job["proposal"]
-        if job["evaluations"] > 0:
-            proposal = refine_policy_proposal(job["model"], proposal, job["start_params"],
-                                              job["instruction"], job["start_agg"], job["evaluations"],
-                                              active_layers=job["layers"])
-        return Session._keep_repaired(job, proposal)
-
-    def _step_index(self, step_id):
-        return next((i for i, step in enumerate(self.history) if step["id"] == step_id), None)
-
-    def _discard_refine(self, step_id, job=None):
-        """Drop a pending refine (e.g. its search raised); the step, if it is
-        still in the history, stops saying it is refining."""
-        if job is not None and self._pending_refines.get(step_id) is not job:
-            return
-        popped = self._pending_refines.pop(step_id, None)
-        if popped is not None and popped["session_id"] != self.session_id:
-            return
-        index = self._step_index(step_id)
-        if index is not None and self.history[index].get("refining"):
-            self.history[index]["refining"] = False
-            self.history[index]["refine_discarded"] = True
-            self.save()
-
-    def _apply_refined(self, step_id, params, job=None):
-        """Render the refined `params` and swap them into step `step_id` in
-        place (same id, same position). Only when that step is still the
-        cursor step of the same session with the fast params it was given;
-        otherwise the result is discarded. `job` (default: the one pending
-        for `step_id`) guards against a newer refine that reused the id after
-        a dataset switch. Renders, so it must run on the main/event-loop
-        thread. Returns whether the step was replaced."""
-        pending = self._pending_refines.get(step_id)
-        if pending is None or (job is not None and pending is not job):
-            return False
-        job = self._pending_refines.pop(step_id)
-        if job["session_id"] != self.session_id:
-            return False
-        index = self._step_index(step_id)
-        fast = self.history[index] if index is not None else None
-        if (index != self.cursor or not fast.get("refining")
-                or fast["params"] != job["fast_params"]):
-            if fast is not None and fast.get("refining"):
-                fast["refining"] = False
-                fast["refine_discarded"] = True
-                self.save()
-            return False
-        params = np.asarray(params, dtype=np.float64)
-        step = _render_step(params, fast["cmd_text"], fast["cmd_dict"], fast["search"], step_id,
-                            self.session_id, fast["camera"], mode=fast["mode"],
-                            message=job["message"], parser_meta=job["parser_meta"],
-                            layers=fast["anatomy_layers"])
-        if index > 0:
-            hint = _no_visible_change_hint(fast["cmd_dict"], self.history[index - 1], step)
-            if hint:
-                step["message"] = f"{step['message']} · {hint}" if step["message"] else hint
-        step["refining"] = False
-        step["refined"] = True
-        self.history[index] = step
-        self.save()
-        return True
-
-    def _run_search(self, cmd, current_params, steps):
-        """mode="search": resolve the volume model, build the goal, and hand
-        them to `run_search_arm` -- the search twin of `_run_policy`.
-
-        Unlike `_run_policy` there is no checkpoint to check for ahead of
-        `model_for_volume`, so this calls it directly; `command()` widens its
-        `except` to `(ValueError, FileNotFoundError, KeyError)` instead
-        (`visibility.for_volume` raises `FileNotFoundError` for a volume with
-        no cache, same as it does for the policy branch)."""
-        model = self.model_for_volume(_dataset_name)
-        layers = self.history[self.cursor].get("anatomy_layers", default_layers())
-        start_agg, instruction = self.instruction_for(cmd, model, current_params, layers)
-        return run_search_arm(model, current_params, instruction, steps,
-                              active_layers=layers), instruction["text"]
-
-    def command(self, text, parser="rule", model=commands.DEFAULT_LLM_MODEL, search=False, steps=10, mode=None,
-                defer_refine=False):
-        """Parse `text`, answer it and append the step.
-
-        `defer_refine` (policy mode with a warm search only): answer with the
-        fast stage (`_fast_policy`) and mark the step `refining`; the caller
-        then runs `_refine_policy` on `self._pending_refines[step_id]` and
-        hands the result to `_apply_refined`. The route does that in the
-        background (`_schedule_refine`)."""
-        cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)  # raises ValueError on failure
-
-        current_params = np.array(self.history[self.cursor]["params"], dtype=np.float64)
-        current_camera = dict(self.history[self.cursor].get("camera", DEFAULT_CAMERA))
-        current_layers = self.history[self.cursor].get("anatomy_layers", default_layers())
-
-        if cmd.get("attribute") == "layers" or "layer_action" in cmd:
-            new_params, new_layers = apply_command_state(cmd, current_params, current_layers)
-            step = _render_step(new_params, text, cmd, False, self.history[-1]["id"] + 1,
-                                self.session_id, current_camera, mode="layers",
-                                parser_meta=parser_meta, layers=new_layers)
-            self.history = self.history[:self.cursor + 1] + [step]
-            self.cursor = len(self.history) - 1
-            self.save()
-            return self.state()
-
-        if "camera" in cmd:
-            new_camera = apply_camera_command(cmd["camera"], current_camera)
-            step = _render_step(current_params, text, cmd, False,
-                                 self.history[-1]["id"] + 1, self.session_id, new_camera,
-                                 mode="camera", parser_meta=parser_meta,
-                                 layers=self.history[self.cursor].get("anatomy_layers",
-                                                                       default_layers()))
-            self.history = self.history[:self.cursor + 1] + [step]
-            self.cursor = len(self.history) - 1
-            self.save()
-            return self.state()
-
-        # mode wins over the legacy `search` bool when given; `search=True`
-        # alone still means mode="search", so existing callers (and the UI's
-        # search toggle) keep working unchanged.
-        effective_mode = mode or ("search" if search else "exact")
-
-        # "add X" of a hidden class restores it (RESTORE_BELOW_SHARE, or
-        # RESTORE_BELOW_FRACTION of its start share): the step stores the
-        # rewritten command; the restores are applied exactly first and only
-        # the rest (`run_cmd`) takes the mode's path, from `base_params`.
-        visibility_now = self.history[self.cursor].get("class_visibility")
-        visibility_start = (_start_visibility(self.task_version)
-                            if _mentions_opacity_increase(cmd) else None)
-        stored_cmd, restored = restore_hidden(cmd, visibility_now, visibility_start)
-        reset_params = initial_params(self.task_version)
-        if restored:
-            _restored, run_cmd = split_restores(cmd, visibility_now, visibility_start)
-            base_params = apply_command(_class_reset(restored if len(restored) > 1 else restored[0]),
-                                        current_params, reset_params=reset_params)
-            if "understood" in parser_meta:
-                parser_meta = {**parser_meta, "understood": _restore_understood(restored, run_cmd)}
-        else:
-            run_cmd, base_params = cmd, current_params
-
-        message = None
-        refine_job = None
-        if run_cmd is None or _only_resets(run_cmd):
-            # A reset is an intended exact command, not a policy fallback.
-            new_params = (base_params if run_cmd is None
-                          else apply_command(run_cmd, base_params, reset_params=reset_params))
-            actual_mode, search_flag = "exact", False
-        elif effective_mode == "policy":
-            try:
-                if defer_refine and self.policy_refine_evaluations > 0:
-                    new_params, refine_job = self._fast_policy(run_cmd, base_params)
-                else:
-                    new_params, _goal_text = self._run_policy(run_cmd, base_params)
-                actual_mode, search_flag = "policy", False
-            except ValueError as exc:
-                message = str(exc)
-                new_params = apply_command(run_cmd, base_params, reset_params=reset_params)
-                actual_mode, search_flag = "exact", False
-        elif effective_mode == "search":
-            try:
-                new_params, _goal_text = self._run_search(run_cmd, base_params, steps)
-                actual_mode, search_flag = "search", True
-                if np.array_equal(new_params, base_params):
-                    # hill_climb ran -- search_flag stays True -- but a
-                    # budget short of a full sweep (12 groups x 2 signs, plus
-                    # 1 to score the start = ~25 evaluations) can spend its
-                    # whole budget without finding a single improving move
-                    # and return the start state untouched. Silence here is
-                    # exactly the "search toggle active, nothing happened"
-                    # failure this task exists to eliminate, so say so.
-                    full_sweep = 2 * len(CONTROLLABLE) + 1
-                    message = (f"search spent {steps} evaluations without improving on the "
-                               f"start; a full sweep needs about {full_sweep}")
-            except (ValueError, FileNotFoundError, KeyError) as exc:
-                message = str(exc)
-                new_params = apply_command(run_cmd, base_params, reset_params=reset_params)
-                actual_mode, search_flag = "exact", False
-        else:
-            new_params = apply_command(run_cmd, base_params, reset_params=reset_params)
-            actual_mode, search_flag = "exact", False
-        cmd = stored_cmd
-
-        if parser_meta["parser_fallback"] and not message:
-            # The viewer asked for the LLM parser and got a rule parse; say so
-            # in the same channel policy-mode fallbacks already use.
-            message = f"LLM parse rejected, used the rule parser -- {parser_meta['parser_fallback']}"
-
-        step = _render_step(new_params, text, cmd, search_flag,
-                             self.history[-1]["id"] + 1, self.session_id, current_camera,
-                             mode=actual_mode, message=message, parser_meta=parser_meta,
-                             layers=self.history[self.cursor].get("anatomy_layers",
-                                                                   default_layers()))
-        hint = _no_visible_change_hint(cmd, self.history[self.cursor], step)
-        if hint:
-            step["message"] = f"{step['message']} · {hint}" if step["message"] else hint
-        if restored:
-            note = _restore_message(restored)
-            step["message"] = f"{step['message']} · {note}" if step["message"] else note
-        if refine_job is not None:
-            step["refining"] = True
-            self._pending_refines[step["id"]] = {
-                **refine_job, "session_id": self.session_id, "fast_params": step["params"],
-                "message": message, "parser_meta": parser_meta}
-
-        if actual_mode == "exact":
-            self._log_command(cmd, current_params, new_params, step)
-
-        self.history = self.history[:self.cursor + 1] + [step]
-        self.cursor = len(self.history) - 1
-        self.save()
-        return self.state()
-
-
-UI_SESSION_PATH = os.environ.get("UI_SESSION_PATH", "out/ui_session.json")
-session = Session(UI_SESSION_PATH)
 
 app = FastAPI()
-if os.path.isdir("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(collect.router)
 
 
 @app.middleware("http")
 async def revalidate_static(request, call_next):
-    """Browsers may reuse a cached script without asking (heuristic freshness);
-    the headset browser kept a stale xr_logic.js across reloads. `no-cache`
-    makes every load revalidate, and the ETag keeps an unchanged file a 304."""
+    """The headset browser kept stale scripts across reloads: `no-cache` makes
+    every load revalidate (an unchanged file is still a 304)."""
     response = await call_next(request)
     if request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
-app.include_router(collect.router)
 
 
 @app.get("/")
@@ -1378,101 +86,79 @@ async def index():
 
 @app.get("/api/state")
 async def get_state():
-    return session.state()
+    return session().state()
 
 
 @app.post("/api/back")
 async def back():
-    return session.back()
+    return session().back()
 
 
 @app.post("/api/forward")
 async def forward():
-    return session.forward()
-
-
-@app.get("/api/datasets")
-async def datasets_list():
-    names = _scan_list()
-    if _dataset_name not in names:
-        names = [_dataset_name] + names
-    return {"available": names, "current": _dataset_name,
-            "labels": {n: _scan_label(n) for n in names if totalseg.is_totalseg(n)}}
-
-
-@app.get("/api/datasets/{name}/metadata")
-async def dataset_metadata_route(name: str):
-    if name not in list_datasets():
-        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
-    try:
-        return dataset_metadata(name)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/api/datasets/{name}/chunks/{index}")
-async def dataset_chunk(name: str, index: str):
-    try:
-        index = int(index)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="chunk index must be an integer")
-    if name not in list_datasets():
-        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
-    try:
-        chunk = get_volume_chunk(name, index)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except IndexError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-    return Response(
-        content=chunk,
-        media_type="application/octet-stream",
-        headers={"X-Dataset-Version": _dataset_version(name)},
-    )
-
-
-@app.get("/api/datasets/{name}/labels/metadata")
-async def label_metadata_route(name: str):
-    if name not in list_datasets():
-        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
-    try:
-        return label_metadata(name)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/api/datasets/{name}/labels/chunks/{index}")
-async def label_chunk(name: str, index: str):
-    try:
-        index = int(index)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="label chunk index must be an integer")
-    if name not in list_datasets():
-        raise HTTPException(status_code=404, detail=f"unknown dataset {name!r}")
-    try:
-        chunk = get_label_chunk(name, index)
-        metadata = label_metadata(name)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except (ValueError, IndexError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-    return Response(content=chunk, media_type="application/octet-stream",
-                    headers={"X-Dataset-Version": metadata["dataset_version"]})
+    return session().forward()
 
 
 @app.get("/api/commands")
 async def commands_reference():
-    return {"commands": COMMAND_REFERENCE}
+    return {"commands": commands.COMMAND_REFERENCE}
+
+
+# --- scans ----------------------------------------------------------------------
+
+@app.get("/api/datasets")
+async def datasets_list():
+    current = session().scan
+    names = scan_list(SHOW_ALL_SCANS)
+    if current not in names:
+        names = [current] + names
+    return {"available": names, "current": current, "labels": {n: scan_label(n) for n in names}}
+
+
+def _scan_or_404(name: str):
+    if name not in scans.available_names():
+        raise HTTPException(status_code=404, detail=f"unknown scan {name!r}")
+
+
+def _chunk_index(index: str) -> int:
+    try:
+        return int(index)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="chunk index must be an integer")
+
+
+@app.get("/api/datasets/{name}/metadata")
+async def volume_metadata(name: str):
+    _scan_or_404(name)
+    return scans.volume_metadata(name)
+
+
+@app.get("/api/datasets/{name}/chunks/{index}")
+async def volume_chunk(name: str, index: str):
+    _scan_or_404(name)
+    try:
+        chunk = scans.volume_chunk(name, _chunk_index(index))
+    except IndexError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return Response(content=chunk, media_type="application/octet-stream",
+                    headers={"X-Dataset-Version": scans.version(name)})
+
+
+@app.get("/api/datasets/{name}/labels/metadata")
+async def label_metadata(name: str):
+    _scan_or_404(name)
+    return scans.label_metadata(name)
+
+
+@app.get("/api/datasets/{name}/labels/chunks/{index}")
+async def label_chunk(name: str, index: str):
+    _scan_or_404(name)
+    try:
+        chunk = scans.label_chunk(name, _chunk_index(index))
+    except IndexError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return Response(content=chunk, media_type="application/octet-stream",
+                    headers={"X-Dataset-Version": scans.version(name)})
 
 
 class DatasetRequest(BaseModel):
@@ -1481,258 +167,133 @@ class DatasetRequest(BaseModel):
 
 @app.post("/api/dataset")
 async def dataset_switch(req: DatasetRequest):
-    try:
-        return session.switch_dataset(req.name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    if req.name not in scans.available_names():
+        raise HTTPException(status_code=400, detail=f"unknown scan {req.name!r}")
+    return session().switch_dataset(req.name)
 
+
+# --- commands ---------------------------------------------------------------------
 
 class CommandRequest(BaseModel):
     text: str
-    # hybrid is the default: rule parser for fully covered sentences, LLM for
-    # the rest (which matters most for voice, where phrasing varies most); the
+    # Rule parser for fully covered sentences, the local LLM for the rest; the
     # LLM falls back to the rule parser when Ollama is down.
-    # static/app.js defaults its own `config.parser` to "hybrid" for the
-    # same reason; this is the same default for any caller that hits the API
-    # directly instead of through the viewer.
     parser: str = "hybrid"
     model: str = commands.DEFAULT_LLM_MODEL
-    search: bool = False
-    steps: int = 10
-    mode: str | None = None  # "exact" | "search" | "policy"; overrides `search` when given
-
-
-class LayerRequest(BaseModel):
-    class_name: str
-    opacity: float | None = Field(None, ge=0.0, le=1.0)
-    rgb: list[float] | None = None
-
-
-# Two-stage policy answers: /api/command renders the fast stage (policy +
-# keep repair, ~0.6 s) and returns; the 200-evaluation warm search (~3 s)
-# then runs in a worker thread and its render swaps into the same step on
-# the event-loop thread (VTK must stay on the main thread -- see the module
-# docstring). The client long-polls /api/refined/{step_id} for it.
-# POLICY_TWO_STAGE=0 restores the single synchronous answer.
-POLICY_TWO_STAGE = os.environ.get("POLICY_TWO_STAGE", "1") != "0"
-REFINE_WAIT_SECONDS = 20.0
-_refine_events = {}   # step id -> asyncio.Event, set when its refine settles
-_refine_tasks = set()  # strong references, so pending tasks are not collected
+    mode: str | None = None   # "exact" | "search" | "policy"
+    search: bool = False      # older clients: search=True means mode="search"
+    steps: int = Field(10, ge=1, le=500)
 
 
 async def _finish_refine(sess, step_id, job, event):
     try:
-        loop = asyncio.get_running_loop()
-        params = await loop.run_in_executor(None, sess._refine_policy, job)
-        # Back on the loop (main) thread: render and swap.
-        sess._apply_refined(step_id, params, job)
-    except Exception as exc:  # a failed refine must not leave the step "refining"
+        params = await asyncio.get_running_loop().run_in_executor(None, answers.full_answer, job)
+        sess.apply_refined(step_id, params, job)   # back on the loop (main) thread: renders
+    except Exception as exc:   # a failed refine must not leave the step "refining"
         print(f"[refine] step {step_id} failed: {exc!r}", file=sys.stderr)
-        sess._discard_refine(step_id, job)
+        sess.discard_refine(step_id, job)
     finally:
         event.set()
         if _refine_events.get(step_id) is event:
             del _refine_events[step_id]
 
 
-def _schedule_refine(sess, step_id):
-    """Start the background refine of a step `Session.command(defer_refine=True)`
-    answered with its fast stage. Must be called from the event loop."""
-    job = sess._pending_refines.get(step_id)
-    if job is None:
-        return None
-    event = asyncio.Event()
-    _refine_events[step_id] = event
-    task = asyncio.create_task(_finish_refine(sess, step_id, job, event))
-    _refine_tasks.add(task)
-    task.add_done_callback(_refine_tasks.discard)
-    return task
-
-
 @app.post("/api/command")
 async def command(req: CommandRequest):
-    start = time.perf_counter()
+    started = time.perf_counter()
+    sess = session()
+    mode = req.mode or ("search" if req.search else "exact")
     try:
-        result = session.command(req.text, req.parser, req.model, req.search, req.steps, req.mode,
-                                 defer_refine=POLICY_TWO_STAGE)
+        result = sess.command(req.text, req.parser, req.model, mode=mode, steps=req.steps, defer_refine=TWO_STAGE)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    current = result.get("current") or {}
-    if current.get("refining"):
-        _schedule_refine(session, current["id"])
-    total_ms = round((time.perf_counter() - start) * 1000, 1)
-    # The parser meta (parse_ms, parser_used, ...) is spread into the step
-    # (_render_step), i.e. result["current"].
-    result["timings"] = {"parse_ms": (result.get("current") or {}).get("parse_ms"), "total_ms": total_ms}
+    current = result["current"]
+    job = sess.pending_refines.get(current["id"]) if current.get("refining") else None
+    if job is not None:
+        event = asyncio.Event()
+        _refine_events[current["id"]] = event
+        task = asyncio.create_task(_finish_refine(sess, current["id"], job, event))
+        _refine_tasks.add(task)
+        task.add_done_callback(_refine_tasks.discard)
+    result["timings"] = {"parse_ms": current.get("parse_ms"),
+                         "total_ms": round((time.perf_counter() - started) * 1000, 1)}
     return result
 
 
 @app.get("/api/refined/{step_id}")
-async def refined_route(step_id: int):
-    """Long-poll for a two-stage step's refined answer: waits (up to
-    REFINE_WAIT_SECONDS) while its refine is pending, then returns the session
-    state plus `refined` -- whether the cursor step is that step, refined.
-    Returns at once when nothing is pending for `step_id`."""
+async def refined(step_id: int):
+    """Long-poll for a two-stage step's final answer: waits while its refine
+    is pending, then returns the state and whether the cursor step is that
+    step, refined."""
     event = _refine_events.get(step_id)
     if event is not None:
         try:
             await asyncio.wait_for(event.wait(), REFINE_WAIT_SECONDS)
         except asyncio.TimeoutError:
             pass
-    state = session.state()
-    current = state["current"]
-    return {**state, "refined": current["id"] == step_id and bool(current.get("refined"))}
+    state = session().state()
+    return {**state, "refined": state["current"]["id"] == step_id and bool(state["current"].get("refined"))}
 
 
-@app.post("/api/layers")
-async def update_layer(req: LayerRequest):
-    if req.rgb is not None and (len(req.rgb) != 3 or any(not 0 <= value <= 1 for value in req.rgb)):
-        raise HTTPException(status_code=400, detail="rgb must contain three values in [0, 1]")
-    try:
-        return session.set_layer(req.class_name, opacity=req.opacity, rgb=req.rgb)
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
+# --- comparison panel -------------------------------------------------------------
 
 class CompareRequest(BaseModel):
     text: str
-    parser: str = "hybrid"  # see CommandRequest.parser
+    parser: str = "hybrid"
     model: str = commands.DEFAULT_LLM_MODEL
-    # Bounded because these handlers run on the event loop: a hill-climb of
-    # 100000 evaluations would freeze every other route, the UI and the state
-    # poll for minutes, with no way to cancel it.
-    cheap: int = Field(COMPARE_BUDGET_CHEAP, ge=1, le=500)
-    thorough: int = Field(COMPARE_BUDGET_THOROUGH, ge=1, le=500)
+    # Bounded: these handlers run on the event loop, a huge search would freeze the UI.
+    cheap: int = Field(answers.COMPARE_CHEAP, ge=1, le=500)
+    thorough: int = Field(answers.COMPARE_THOROUGH, ge=1, le=500)
 
 
 @app.post("/api/compare")
-async def compare_route(req: CompareRequest):
-    """Answer one instruction four ways without advancing the session.
-
-    Parses once and builds the goal once, so all four arms answer the
-    identical parsed command: a bad parse then makes all four wrong together
-    and the panel shows a parsing problem, not a policy problem. `model` and
-    `instruction` come from a single read of the active dataset for the same
-    reason -- an arm scored against a goal built for a different volume would
-    be quietly meaningless."""
+async def compare(req: CompareRequest):
+    """Answer one instruction several ways without advancing the session."""
+    sess = session()
     try:
-        cmd, parser_meta = parse_command_with_meta(req.text, parser=req.parser, model=req.model)
+        cmd, parser_meta = commands.parse_command_with_meta(req.text, parser=req.parser, model=req.model)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-    start_params = np.array(session.history[session.cursor]["params"], dtype=np.float64)
-    camera = dict(session.history[session.cursor].get("camera", DEFAULT_CAMERA))
-
+    step = sess.history[sess.cursor]
+    start_params = np.array(step["params"], dtype=np.float64)
+    camera = dict(step.get("camera", DEFAULT_CAMERA))
+    model = sess.model()
     try:
-        volume_model = session.model_for_volume(_dataset_name)
-        layers = session.history[session.cursor].get("anatomy_layers", default_layers())
-        start_agg, instruction = session.instruction_for(cmd, volume_model, start_params, layers)
+        start_agg, instruction = sess.instruction_for(cmd, model, start_params)
     except ValueError as exc:
-        # Camera, reset, width and centre commands are not goals, and neither
-        # is a goal this volume cannot support (lungs on an abdominal scan).
-        #
-        # `str(exc)` is developer copy -- it names `commands.apply_command` and
-        # can carry a dumped command dict. The panel shows `reason`, so that is
-        # written for a reader; `detail` keeps the original for debugging.
-        return {"applicable": False,
-                "reason": "this instruction is not a visibility goal, so there is "
-                          "nothing to score four ways",
-                "detail": str(exc), "text": req.text, **parser_meta}
-    except (FileNotFoundError, KeyError) as exc:
-        return {"applicable": False,
-                "reason": "this volume has no visibility cache, so it cannot be scored",
-                "detail": f"{type(exc).__name__}: {exc}", "text": req.text, **parser_meta}
-
-    try:
-        loaded_policy = session.policy_provider()
-    except Exception as exc:
-        # `SAC.load` raises on a corrupt or version-mismatched checkpoint.
-        # Outside the arm's guard that is an unhandled 500 taking all four
-        # columns down -- the opposite of "losing one column should not end a
-        # live demo".
-        print(f"[compare] policy unavailable: {type(exc).__name__}: {exc}")
-        loaded_policy = None
-
-    arms = compare_arms(volume_model, loaded_policy, cmd, instruction,
-                         start_params, camera, cheap=req.cheap, thorough=req.thorough,
-                         layers=layers)
+        return {"applicable": False, "detail": str(exc), "text": req.text, **parser_meta,
+                "reason": "this instruction is not a visibility goal, so there is nothing to score"}
+    arms = answers.compare(model, sess.policy_provider(), cmd, instruction, start_agg, start_params,
+                           lambda params: sess.view(params, camera), cheap=req.cheap, thorough=req.thorough)
+    n = len(goals.GOAL_CLASSES)
+    channels = {name: [c for i, c in enumerate(goals.GOAL_CLASSES) if instruction["goal"][offset + i]]
+                for name, offset in (("vis", n), ("bright", 3 * n))}
     return {"applicable": True, "text": req.text, "goal_text": instruction["text"],
-            "budgets": {"cheap": req.cheap, "thorough": req.thorough}, "arms": arms,
-            "channels": goal_channels(instruction["goal"]),
-            "start": {"class_visibility": _class_visibility(start_params),
-                       "class_brightness": _class_brightness(start_params)},
-            **parser_meta}
+            "budgets": {"cheap": req.cheap, "thorough": req.thorough}, "arms": arms, "channels": channels,
+            "start": sess.readout(start_params), **parser_meta}
 
 
 class SweepRequest(BaseModel):
-    episodes: int = Field(SWEEP_EPISODES, ge=1, le=200)
+    episodes: int = Field(answers.SWEEP_EPISODES, ge=1, le=200)
     seed: int = 0
     thorough: int | None = Field(None, ge=1, le=500)
 
 
 @app.post("/api/compare/sweep")
-async def sweep_route(req: SweepRequest):
-    """What the arms do across many instructions, not just the one you typed."""
-    start_params = np.array(session.history[session.cursor]["params"], dtype=np.float64)
-    try:
-        model = session.model_for_volume(_dataset_name)
-    except (ValueError, KeyError, FileNotFoundError) as exc:
-        raise HTTPException(status_code=400,
-                            detail=f"this volume cannot be scored: {type(exc).__name__}")
-    return sweep_arms(model, session.policy_provider(), _dataset_name, start_params,
-                       episodes=req.episodes, seed=req.seed, thorough=req.thorough)
+async def sweep(req: SweepRequest):
+    """What the arms do across many instructions, not just the one typed."""
+    sess = session()
+    start_params = np.array(sess.history[sess.cursor]["params"], dtype=np.float64)
+    return answers.sweep(sess.model(), sess.policy_provider(), sess.scan, start_params,
+                         episodes=req.episodes, seed=req.seed, thorough=req.thorough)
 
 
-@app.post("/api/scenes/transition")
-async def scene_transition_route(payload: dict):
-    try:
-        for field in ("event_id", "dedupe_key"):
-            if field in payload and (not isinstance(payload[field], str) or not payload[field].strip()):
-                raise ValueError(f"{field} must be a non-empty string")
-        after = payload["after"]
-        if payload.get("boundary"):
-            transition = normalize_scene(after)
-            before = None
-            if transition["parent_scene_id"] is not None or transition["command"] != {"attribute": "neutral", "kind": "dataset_boundary"}:
-                raise ValueError("boundary event must be a root dataset_boundary scene")
-        else:
-            before = normalize_scene(payload["before"])
-            transition = normalize_scene_transition(
-                before,
-                after,
-                verdict=payload.get("verdict"),
-                accepted=payload.get("accepted"),
-                ended=payload.get("ended"),
-            )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+# --- speech -----------------------------------------------------------------------
 
-    event_id = _scene_event_id(before, transition, payload.get("event_id"))
-    dedupe_key = payload.get("dedupe_key") or event_id
-    event = {"event_id": event_id, "dedupe_key": dedupe_key,
-             "before_scene": before, "after_scene": transition}
-    os.makedirs(os.path.dirname(SCENE_TRANSITIONS_PATH) or ".", exist_ok=True)
-    with _SCENE_WRITE_LOCK:
-        if os.path.exists(SCENE_TRANSITIONS_PATH):
-            with open(SCENE_TRANSITIONS_PATH, encoding="utf-8") as stream:
-                for line in stream:
-                    if not line.strip():
-                        continue
-                    existing = json.loads(line)
-                    if existing.get("event_id") == event_id or existing.get("dedupe_key") == dedupe_key:
-                        if existing.get("after_scene") != transition or existing.get("before_scene") != before:
-                            raise HTTPException(status_code=409, detail="event_id conflicts with existing scene transition")
-                        return existing["after_scene"]
-        jsonl_append(SCENE_TRANSITIONS_PATH, event)
-    return transition
-
-
-MIN_AUDIO_BYTES = 1000
 try:
-    import av as _av
-    # faster-whisper decodes with PyAV (av.error.FFmpegError and subclasses);
-    # mlx-whisper runs ffmpeg in a subprocess and raises RuntimeError.
-    _AUDIO_DECODE_ERRORS = (_av.error.FFmpegError, RuntimeError)
+    import av
+    # faster-whisper decodes with PyAV; mlx-whisper runs ffmpeg and raises RuntimeError.
+    _AUDIO_DECODE_ERRORS = (av.error.FFmpegError, RuntimeError)
 except ImportError:
     _AUDIO_DECODE_ERRORS = (RuntimeError,)
 
@@ -1743,58 +304,53 @@ async def transcribe(audio: UploadFile = File(...)):
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     wav_path = os.path.join(AUDIO_DIR, f"{stamp}.wav")
     data = await audio.read()
-    with open(wav_path, "wb") as f:
-        f.write(data)
-
-    start = time.time()
-    # A trigger tap uploads an empty or near-empty clip; the decoders fail on it
-    # (PyAV: EOFError). The client shows "No speech recognised" for empty text.
+    with open(wav_path, "wb") as stream:
+        stream.write(data)
+    started = time.time()
+    # A trigger tap uploads a near-empty clip the decoders fail on; the client
+    # shows "No speech recognised" for an empty text.
     if len(data) < MIN_AUDIO_BYTES:
-        print(f"[asr] skipped {wav_path}: only {len(data)} bytes")
-        return {"text": "", "heard": "", "duration": time.time() - start}
+        return {"text": "", "heard": "", "duration": 0.0}
     try:
         text = asr_transcribe_path(wav_path, "en", ASR_MODEL, initial_prompt=lexicon.get()["asr_prompt"])
-    except _AUDIO_DECODE_ERRORS as e:
-        print(f"[asr] could not decode {wav_path}: {type(e).__name__}: {e}")
-        return {"text": "", "heard": "", "duration": time.time() - start}
-    duration = time.time() - start
-
-    with open(os.path.join(AUDIO_DIR, f"{stamp}.txt"), "w", encoding="utf-8") as f:
-        f.write(text)
+    except _AUDIO_DECODE_ERRORS as exc:
+        print(f"[asr] could not decode {wav_path}: {type(exc).__name__}: {exc}")
+        return {"text": "", "heard": "", "duration": time.time() - started}
+    duration = time.time() - started
+    with open(os.path.join(AUDIO_DIR, f"{stamp}.txt"), "w", encoding="utf-8") as stream:
+        stream.write(text)
     if is_hallucination(text):
-        # The client shows "No speech recognised" for an empty text.
         return {"text": "", "heard": text, "duration": duration}
     return {"text": text, "duration": duration}
 
 
-if __name__ == "__main__":
+def main():
     import argparse
-    import uvicorn
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default=_dataset_name,
-                     help="a real CT/MRI dataset name (see datasets.DATASETS), or 'synthetic' "
-                          "-- already applied above; listed here only for --help")
-    ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--host", default="127.0.0.1",
-                     help="0.0.0.0 to reach the UI from another device on the LAN (e.g. a headset)")
-    # Mic capture and WebXR need a secure context, which off-localhost means HTTPS.
-    ap.add_argument("--ssl-certfile", help="TLS certificate (e.g. from mkcert) to serve over HTTPS")
-    ap.add_argument("--ssl-keyfile", help="TLS private key matching --ssl-certfile")
-    args = ap.parse_args()
-
-    print(f"[server] dataset: {_dataset_name}")
-    if not _scan_list():
-        print("\n[server] WARNING: no TotalSegmentator scans downloaded -- run `make scans`\n")
     import threading
 
-    def _llm_ready():
+    import uvicorn
+
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dataset", help="scan to open, e.g. ts_s0591 (default: the first demo patient)")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to reach it from a headset on the LAN")
+    # Mic capture and WebXR need a secure context, which off-localhost means HTTPS.
+    parser.add_argument("--ssl-certfile", help="TLS certificate (e.g. from mkcert)")
+    parser.add_argument("--ssl-keyfile", help="TLS private key matching --ssl-certfile")
+    args = parser.parse_args()
+    print(f"[server] scan: {session().scan}")
+
+    def warm_llm():
         problem = commands.check_llm()
         if problem:
             print(f"\n[llm-parser] WARNING: {problem}\n[llm-parser] voice commands use the rule parser only\n")
             return
         commands.warm_llm()
         print(f"[llm-parser] {commands.DEFAULT_LLM_MODEL} loaded")
-    threading.Thread(target=_llm_ready, daemon=True).start()
-    uvicorn.run(app, host=args.host, port=args.port,
-                ssl_certfile=args.ssl_certfile, ssl_keyfile=args.ssl_keyfile)
+
+    threading.Thread(target=warm_llm, daemon=True).start()
+    uvicorn.run(app, host=args.host, port=args.port, ssl_certfile=args.ssl_certfile, ssl_keyfile=args.ssl_keyfile)
+
+
+if __name__ == "__main__":
+    main()

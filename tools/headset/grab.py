@@ -1,5 +1,6 @@
 """Usage: grab.py <url-substring> <js-expression-returning-dataURL> <out.png>"""
-import base64, sys
+import base64
+import sys
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from rdp import RDP
 from page import target_for, evaluate
@@ -13,7 +14,8 @@ if isinstance(v, dict) and v.get("type") == "longString":
     while True:
         m = r.recv()
         if m.get("from") == v["actor"]:
-            v = m["substring"]; break
+            v = m["substring"]
+            break
 if not isinstance(v, str):
     sys.exit(f"unexpected result: {str(res)[:300]}")
 open(sys.argv[3], "wb").write(base64.b64decode(v.split(",", 1)[1]))

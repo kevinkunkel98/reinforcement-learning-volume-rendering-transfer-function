@@ -1,11 +1,18 @@
-"""Offscreen VTK volume rendering, pixel grab, image features."""
+"""Offscreen VTK rendering of a labelled scan with a transfer function.
+
+Each labelled class is shaded by its own peak (`transfer.label_scoped_tables`),
+the same label-scoped transfer function `visibility` measures: the volume is
+smoothed once, then every voxel's HU is moved into its label's band of one
+scalar, so one 1-D VTK transfer function holds one lookup per label row.
+"""
 import collections
+
 import numpy as np
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy  # pyright: ignore[reportMissingImports]
+
 from anatomy import CANONICAL_CLASSES
-from anatomy_layers import normalize_layers
-from transfer import CENTER_RANGE, N_PEAKS, label_scoped_tables, peak_internal, vector_to_vtk
+from transfer import CENTER_RANGE, N_PEAKS, label_scoped_tables, peak_internal
 
 WIDTH, HEIGHT = 1024, 800
 _MAPPER_ANNOUNCED = False
@@ -66,8 +73,9 @@ def frame_bounds(volume: np.ndarray, params: np.ndarray, spacing) -> list | None
 
 
 def _smoothed(volume: np.ndarray, spacing=(1.0, 1.0, 1.0)) -> np.ndarray:
-    """`volume` through the same Gaussian smooth `_get_pipeline` applies to
-    unlabelled renders (see the comment there)."""
+    """`volume` through a light Gaussian smooth: the grain in CT renders is the
+    scan's own HU noise passed through the transfer function, which no ray
+    sampling quality fixes (~115 ms on a 512x512x139 CT, once per volume)."""
     image = vtk.vtkImageData()
     image.SetDimensions(*volume.shape)
     image.SetSpacing(*spacing)
@@ -107,36 +115,20 @@ def label_scoped_volume(volume: np.ndarray, labels: np.ndarray) -> np.ndarray:
     return banded
 
 
-def label_scoped_vtk(params: np.ndarray, layers: dict | None = None, n: int = 256):
+def label_scoped_vtk(params: np.ndarray, n: int = 256):
     """(color, opacity) VTK functions over `label_scoped_volume`'s bands: row 0
-    (unlabelled) and one row per canonical class, each class row scaled by
-    that layer's opacity."""
-    normalized = normalize_layers(layers or {})
+    (unlabelled) and one row per canonical class."""
     lo, _ = CENTER_RANGE
     hu = np.linspace(*CENTER_RANGE, n)
     ctf = vtk.vtkColorTransferFunction()
     otf = vtk.vtkPiecewiseFunction()
     rows = label_scoped_tables(np.asarray(params, dtype=np.float64), hu, CANONICAL_CLASSES)
     for row, (opacity, rgb) in enumerate(rows):
-        scale = 1.0 if row == 0 else normalized[CANONICAL_CLASSES[row - 1]]["opacity"]
         offset = row * LABEL_BAND - lo
         for i in range(n):
             ctf.AddRGBPoint(float(hu[i] + offset), *[float(v) for v in rgb[i]])
-            otf.AddPoint(float(hu[i] + offset), float(opacity[i] * scale))
+            otf.AddPoint(float(hu[i] + offset), float(opacity[i]))
     return ctf, otf
-
-
-def clear_pipeline_cache() -> None:
-    """Release cached VTK and masked-volume state between isolated renders/tests."""
-    global _PIPELINE_CACHE
-    _MASKED_VOLUME_CACHE.clear()
-    if _PIPELINE_CACHE:
-        for entry in _PIPELINE_CACHE.values():
-            _, renderer, win, actor = entry
-            if actor is not None:
-                renderer.RemoveViewProp(actor)
-            win.Finalize()
-        _PIPELINE_CACHE.clear()
 
 
 def _make_mapper(vtk_image):
@@ -165,8 +157,8 @@ PIPELINE_CACHE_SIZE = 4
 _PIPELINE_CACHE = collections.OrderedDict()  # key -> (prop, renderer, win, actor)
 
 
-def _get_pipeline(volume: np.ndarray, spacing, pipeline_key=None, labelled: bool = False):
-    """Build (or reuse) the offscreen render pipeline for `volume`.
+def _get_pipeline(volume: np.ndarray, spacing, pipeline_key):
+    """Build (or reuse) the offscreen render pipeline for a banded volume.
 
     Every vtkRenderWindow.Render() call re-binds a native offscreen GL
     surface via a macOS WindowServer/IOKit round trip (vtkCocoaRenderWindow
@@ -181,12 +173,10 @@ def _get_pipeline(volume: np.ndarray, spacing, pipeline_key=None, labelled: bool
     creating new surfaces at all after the first render, which also makes
     each subsequent render ~150x faster (no context-creation overhead).
 
-    Keyed on `id(volume)`: every hot-loop caller in this codebase holds one
-    volume array alive for the caller's entire lifetime, so identity is a
-    safe, cheap cache key here -- it is not a general-purpose memoization.
+    Keyed on the identity of the scan's arrays: every caller holds them alive
+    for its whole lifetime, so identity is a safe, cheap key here.
     """
-    global _PIPELINE_CACHE
-    key = (pipeline_key or id(volume), tuple(spacing))
+    key = (pipeline_key, tuple(spacing))
     cached = _PIPELINE_CACHE.get(key)
     if cached is not None:
         _PIPELINE_CACHE.move_to_end(key)
@@ -201,30 +191,12 @@ def _get_pipeline(volume: np.ndarray, spacing, pipeline_key=None, labelled: bool
     image.SetSpacing(*spacing)
     image.GetPointData().SetScalars(vtk_arr)
 
-    # The grainy look in real CT renders is the scan's own HU sensor noise,
-    # passed straight through the transfer function -- not a sampling
-    # artifact, so no amount of ray-sampling quality fixes it. A light
-    # Gaussian smooth of the volume itself does: measured negligible cost on
-    # the synthetic phantom (96^3, ~2ms) and ~115ms on real CT (512x512x139).
-    # Done once per volume here, not per render, since it doesn't depend on
-    # the transfer function.
-    # A labelled volume arrives already smoothed and banded
-    # (label_scoped_volume); it must be sampled nearest, since interpolating
-    # between two label bands lands in a third class's band.
-    if not labelled:
-        smoother = vtk.vtkImageGaussianSmooth()
-        smoother.SetInputData(image)
-        smoother.SetStandardDeviations(1.0, 1.0, 1.0)
-        smoother.SetRadiusFactors(2.0, 2.0, 2.0)
-        smoother.Update()
-        image = smoother.GetOutput()
-
+    # The banded volume (label_scoped_volume) is already smoothed and must be
+    # sampled nearest: interpolating between two label bands lands in a third
+    # class's band.
     prop = vtk.vtkVolumeProperty()
     prop.ShadeOn()
-    if labelled:
-        prop.SetInterpolationTypeToNearest()
-    else:
-        prop.SetInterpolationTypeToLinear()
+    prop.SetInterpolationTypeToNearest()
 
     mapper = _make_mapper(image)
     # This render is offscreen batch rendering, not an interactive loop --
@@ -255,19 +227,14 @@ def _get_pipeline(volume: np.ndarray, spacing, pipeline_key=None, labelled: bool
     return prop, renderer, win, None
 
 
-def render(volume: np.ndarray, params: np.ndarray, spacing=(1.0, 1.0, 1.0), camera: dict | None = None,
-           frame_bounds: list | None = None, labels: np.ndarray | None = None,
-           layers: dict | None = None) -> vtk.vtkRenderWindow:
-    labelled = labels is not None
-    if labelled:
-        # Validate layers before any VTK work, so a bad request fails fast.
-        normalize_layers(layers or {})
-    render_volume = label_scoped_volume(volume, labels) if labelled else volume
-    pipeline_key = ((id(volume), volume.shape, id(labels), labels.shape)
-                    if labelled else id(volume))
-    prop, renderer, win, _ = _get_pipeline(render_volume, spacing, pipeline_key, labelled)
+def render(volume: np.ndarray, params: np.ndarray, spacing, camera: dict | None = None,
+           frame_bounds: list | None = None, labels: np.ndarray = None) -> vtk.vtkRenderWindow:
+    """Render `volume` (HU) with its `labels` and the transfer function `params`."""
+    banded = label_scoped_volume(volume, labels)
+    pipeline_key = (id(volume), volume.shape, id(labels), labels.shape)
+    prop, renderer, win, _ = _get_pipeline(banded, spacing, pipeline_key)
 
-    ctf, otf = label_scoped_vtk(params, layers) if labelled else vector_to_vtk(params)
+    ctf, otf = label_scoped_vtk(params)
     prop.SetColor(ctf)
     prop.SetScalarOpacity(otf)
 
@@ -323,18 +290,3 @@ def grab(win: vtk.vtkRenderWindow) -> np.ndarray:
     arr = vtk_to_numpy(vtk_image.GetPointData().GetScalars())
     arr = arr.reshape(h, w, 3).astype(np.uint8)
     return arr[::-1]  # VTK draws bottom-up
-
-
-def features(rgb: np.ndarray) -> dict:
-    gray = rgb.astype(np.float64).mean(axis=2)
-    coverage = float((gray > 2.0).mean())
-    hist, _ = np.histogram(gray, bins=32, range=(0, 255), density=False)
-    p = hist.astype(np.float64) / max(hist.sum(), 1)
-    p = p[p > 0]
-    entropy = float(-(p * np.log2(p)).sum())
-    return {
-        "mean": float(gray.mean()),
-        "std": float(gray.std()),
-        "coverage": coverage,
-        "entropy": entropy,
-    }

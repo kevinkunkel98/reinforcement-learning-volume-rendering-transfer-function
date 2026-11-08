@@ -5,8 +5,8 @@
 set -euo pipefail
 PY=.venv/bin/python
 O=${O:-out/rl_mb_v3}
-B="--splits train,train_extra --task-version v3"
-T="--task-version v3"
+B="--splits train,train_extra"
+T=""
 mkdir -p $O
 step() { echo "[pipeline $(date +%H:%M:%S)] $*"; }
 done_ckpt() { [ -f "$1/checkpoint.pt" ]; }

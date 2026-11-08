@@ -1,5 +1,6 @@
 """Minimal Firefox Remote Debugging Protocol client (length-prefixed JSON)."""
-import json, socket, sys
+import json
+import socket
 
 class RDP:
     def __init__(self, port=6000, timeout=15):
@@ -10,13 +11,15 @@ class RDP:
     def recv(self):
         while b":" not in self.buf:
             chunk = self.s.recv(65536)
-            if not chunk: raise EOFError("closed")
+            if not chunk:
+                raise EOFError("closed")
             self.buf += chunk
         n, rest = self.buf.split(b":", 1)
         n = int(n)
         while len(rest) < n:
             chunk = self.s.recv(65536)
-            if not chunk: raise EOFError("closed")
+            if not chunk:
+                raise EOFError("closed")
             rest += chunk
         self.buf = rest[n:]
         return json.loads(rest[:n])

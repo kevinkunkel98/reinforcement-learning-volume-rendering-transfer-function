@@ -48,7 +48,7 @@ def occluder_classes(goal, weights) -> set:
     return {c for c in mentioned_classes(goal) if weights.get(c, 1.0) == 0.0}
 
 
-def keep_repair(model, goal, start_params, params, layers=None, weights=None, eps=DEFAULT_EPS,
+def keep_repair(model, goal, start_params, params, weights=None, eps=DEFAULT_EPS,
                 start_agg=None, include_occluders=False):
     """Revert unmentioned peaks of `params` to `start_params` where that
     costs at most `eps` attainment. Returns (params, n_evals).
@@ -87,7 +87,7 @@ def keep_repair(model, goal, start_params, params, layers=None, weights=None, ep
     def measure(p):
         nonlocal n_evals
         n_evals += 1
-        return goals.aggregate(goals.features(model, p, layers), layers)
+        return goals.aggregate(model.features(p))
 
     if start_agg is None:
         start_agg = measure(start_params)

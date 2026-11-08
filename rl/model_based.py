@@ -2,9 +2,10 @@
 does to the measured visibility, then train the policy through that model with
 the exact goal metric.
 
-Why not SAC: model-free SAC on `OneShotEnv` (E3-E9, docs/experiments/) stays at
-a median attainment of about 0. Its critic has to learn instruction x physics
-jointly from a scalar reward. Here the two are split:
+Why not model-free RL: SAC on the same task (E1-E9, docs/experiments/, code at
+tag pre-refactor-2026-11-08) stayed at a median attainment of at most 0.09. Its
+critic has to learn instruction x physics jointly from a scalar reward. Here the
+two are split:
 
 1. **Dynamics.** An ensemble of MLPs maps (volume histogram, solo_max ceilings,
    start controllable values, start state, residual action) to the change in
@@ -13,22 +14,21 @@ jointly from a scalar reward. Here the two are split:
    the instruction, so random TF changes on training-split starts teach it
    (`collect`).
 2. **Policy.** An MLP with the one-shot observation layout
-   (`rl.oneshot_env.build_observation`) and residual actions, trained by
+   (`rl.episodes.build_observation`) and residual actions, trained by
    backpropagating `goal_distance` -- a torch twin of `goals.distance` -- through
    the frozen ensemble (SVG(0)/Dreamer-style actor training with a known
    reward). An ensemble-disagreement penalty keeps it where the model is sure.
 3. **Dyna.** Rendering the policy's own proposals and refitting the model
    closes most of the model-exploitation gap (`collect --policy`).
 
-`ModelBasedPolicy` has SB3's `predict` and space attributes, so `policy.py`
-(the viewer) and `rl.vis_eval` run it like a SAC checkpoint.
+At use, `plan` refines the policy's answer by gradient descent through the
+ensemble (no renders). The full recipe is
+docs/experiments/2026-10-19-scripts/pipeline_v3.sh:
 
     .venv/bin/python -m rl.model_based collect --out out/rl_mb/data_r0.npz --starts 3000
     .venv/bin/python -m rl.model_based train --data out/rl_mb/data_r0.npz --out out/rl_mb/r0_seed0
     .venv/bin/python -m rl.model_based collect --out out/rl_mb/data_r1.npz --starts 1500 \\
-        --seed-base 2000000 --policy out/rl_mb/r0_seed0/checkpoint.pt
-    .venv/bin/python -m rl.model_based train --data out/rl_mb/data_r0.npz,out/rl_mb/data_r1.npz \\
-        --out out/rl_mb/r1_seed0
+        --seed-base 8000000 --policy out/rl_mb/r0_seed0/checkpoint.pt
 """
 import argparse
 import collections
@@ -43,18 +43,15 @@ import torch
 import torch.nn as nn
 
 import goals
-from rl.baselines import CONTROLLABLE, apply_controllable
-from rl.oneshot_env import (ACTION_SIZE, OBSERVATION_BOUND, OBSERVATION_SIZE, V9_POLICY_VERSION,
-                            observation_metadata)
+from rl.episodes import (ACTION_SIZE, HISTOGRAM_SIZE, N_CLASSES, OBSERVATION_BOUND, OBSERVATION_SIZE,
+                         EpisodeSampler, contract_metadata, controllable_values, solo_max_log)
+from rl.search import apply_controllable
 
-N_CLASSES = len(goals.GOAL_CLASSES)
-HISTOGRAM_SIZE = 16
 # log10 visibility per goal class + "other", brightness per goal class, coverage
 STATE_SIZE = (N_CLASSES + 1) + N_CLASSES + 1
 CONTEXT_SIZE = HISTOGRAM_SIZE + N_CLASSES + ACTION_SIZE + STATE_SIZE
 CHECKPOINT_NAME = "checkpoint.pt"
 METADATA_NAME = "metadata.json"
-ENV_KWARGS = {"policy_version": V9_POLICY_VERSION, "action_mode": "residual", "reward_mode": "target"}
 
 # Random actions for the dynamics data: dense small moves, sparse large moves of
 # 1-4 groups (one organ's peak, say), and no-ops -- the policy's proposals fall
@@ -115,27 +112,21 @@ def goal_distance(goal, weights, delta):
 
 
 def policy_observation(goal, histogram, start_state, solo_max_log, controllable):
-    """`rl.oneshot_env.build_observation`'s layout from batched tensors."""
+    """`rl.episodes.build_observation`'s layout from batched tensors."""
     n = N_CLASSES
     obs = torch.cat([goal, histogram, start_state[:, :n], start_state[:, n + 1:2 * n + 1],
                      solo_max_log, controllable, start_state[:, -1:]], -1)
     return obs.clamp(-OBSERVATION_BOUND, OBSERVATION_BOUND)
 
 
-class _Space:
-    def __init__(self, shape):
-        self.shape = shape
-
-
 class ModelBasedPolicy:
-    """The trained actor behind SB3's interface (`predict`, `observation_space`,
-    `action_space`): observation -> residual action in [-1, 1]."""
+    """The trained actor: observation -> residual action in [-1, 1], plus the
+    dynamics ensemble it was trained through (`dynamics`, for `plan`)."""
 
     def __init__(self, net: nn.Module, metadata: dict = None):
         self.net = net.eval()
         self.metadata = dict(metadata or {})
-        self.observation_space = _Space((OBSERVATION_SIZE,))
-        self.action_space = _Space((ACTION_SIZE,))
+        self.dynamics = None
 
     @staticmethod
     def new_net(hidden: int = 256, depth: int = 2) -> nn.Module:
@@ -157,10 +148,9 @@ class ModelBasedPolicy:
                     "arch": {"hidden": self.net[0].out_features, "depth": (len(self.net) - 1) // 2},
                     "dynamics": None if dynamics is None else dynamics.state_dict(),
                     "metadata": self.metadata}, path)
-        # rl.oneshot_env.load_policy_metadata reads this, as for a SAC run.
-        with open(os.path.join(out_dir, METADATA_NAME), "w") as stream:
-            task_version = self.metadata.get("task_version", "v1")
-            json.dump({**observation_metadata(**ENV_KWARGS, task_version=task_version), "algorithm": "model_based",
+        # rl.episodes.policy_metadata checks this against the task.
+        with open(os.path.join(out_dir, METADATA_NAME), "w", encoding="utf-8") as stream:
+            json.dump({**contract_metadata(), "algorithm": "model_based",
                        **self.metadata, **({"report": report} if report else {})}, stream, indent=2)
         return path
 
@@ -254,27 +244,26 @@ def plan(ensemble, goal, weights, histogram, solo_max_log, controllable, start_a
 # --- data -------------------------------------------------------------------
 
 def _collect_chunk(args):
-    seeds, actions_per_start, policy_path, volume_ids, start_variety, task_version = args
+    seeds, actions_per_start, policy_path, volume_ids = args
     torch.set_num_threads(1)
-    from rl.oneshot_train import build_env
-    env = build_env(volume_ids=volume_ids, **ENV_KWARGS, balance_classes=True, start_variety=start_variety,
-                    task_version=task_version)
+    sampler = EpisodeSampler(volume_ids, balance_classes=True)
     policy = ModelBasedPolicy.load(policy_path) if policy_path else None
-    return collect_starts(env, seeds, actions_per_start, policy)
+    return collect_starts(sampler, seeds, actions_per_start, policy)
 
 
-def collect_starts(env, seeds, actions_per_start: int = ACTIONS_PER_START, policy=None) -> dict:
-    """For each seeded start of `env` (a `OneShotEnv`): render `actions_per_start`
-    TF changes and record the resulting `state_vector`, and sample
-    `INSTRUCTIONS_PER_START` real instructions for policy training. With
+def collect_starts(sampler, seeds, actions_per_start: int = ACTIONS_PER_START, policy=None) -> dict:
+    """For each seeded start of `sampler` (`rl.episodes.EpisodeSampler`): render
+    `actions_per_start` TF changes and record the resulting `state_vector`, and
+    sample `INSTRUCTIONS_PER_START` real instructions for policy training. With
     `policy`, the first half of the actions are its proposals plus noise
     (Dyna: data where the policy actually acts)."""
     out = {k: [] for k in ("hist", "solo", "ctrl", "s0", "act", "s1", "useless", "goal", "weights", "kind",
                            "volume")}
     for seed in seeds:
-        obs, _ = env.reset(seed=int(seed))
+        episode = sampler.reset(int(seed))
+        obs = episode.observation()
         rng = np.random.default_rng(int(seed))
-        ctrl = np.asarray(env._controllable_values(env._start_params))
+        ctrl = np.asarray(controllable_values(episode.start_params))
         actions, states, useless = [], [], []
         for j in range(actions_per_start):
             draw = rng.random()
@@ -290,41 +279,37 @@ def collect_starts(env, seeds, actions_per_start: int = ACTIONS_PER_START, polic
             else:
                 action = np.zeros(ACTION_SIZE)
             action = np.clip(ctrl + np.clip(action, -1, 1), -1, 1) - ctrl   # the residual actually applied
-            raw = goals.features(env._model, apply_controllable(env._start_params, ctrl + action))
+            raw = episode.model.features(apply_controllable(episode.start_params, ctrl + action))
             actions.append(action)
             states.append(state_vector(goals.aggregate(raw)))
             useless.append(goals.is_useless(raw))
         goal_rows, weight_rows, kinds = [], [], []
         for _ in range(INSTRUCTIONS_PER_START):
-            instruction = env.sample_real_instruction(rng, env._volume, env._model, env._start_params,
-                                                      env._start_agg)
+            instruction = sampler.sample_instruction(rng, episode.volume, episode.model, episode.start_params,
+                                                     episode.start_agg)
             weights = instruction.get("weights") or {}
             goal_rows.append(instruction["goal"])
             weight_rows.append([weights.get(c, 1.0) for c in goals.GOAL_CLASSES] + [weights.get("other", 1.0)])
             kinds.append(instruction["kind"])
-        out["hist"].append(np.asarray(env._model.histogram, np.float32))
-        out["solo"].append(np.asarray(env._solo_max_log(env._volume, env._model), np.float32))
+        out["hist"].append(np.asarray(episode.model.histogram, np.float32))
+        out["solo"].append(np.asarray(solo_max_log(episode.model), np.float32))
         out["ctrl"].append(ctrl.astype(np.float32))
-        out["s0"].append(state_vector(env._start_agg))
+        out["s0"].append(state_vector(episode.start_agg))
         out["act"].append(np.asarray(actions, np.float32))
         out["s1"].append(np.asarray(states, np.float32))
         out["useless"].append(np.asarray(useless, bool))
         out["goal"].append(np.asarray(goal_rows, np.float32))
         out["weights"].append(np.asarray(weight_rows, np.float32))
         out["kind"].append(kinds)
-        out["volume"].append(env._volume)
+        out["volume"].append(episode.volume)
     return {k: np.array(v) for k, v in out.items()}
 
 
-def collect(seeds, workers: int = 3, actions_per_start: int = ACTIONS_PER_START,
-            policy_path: str = None, volume_ids=None, start_variety: float = 0.0,
-            task_version: str = "v1") -> dict:
-    """`collect_starts` over `workers` processes. `start_variety` is
-    `OneShotEnv`'s: that share of starts dims soft tissue and raises the organs,
-    so the model also sees states where organs are visible."""
+def collect(seeds, volume_ids, workers: int = 3, actions_per_start: int = ACTIONS_PER_START,
+            policy_path: str = None) -> dict:
+    """`collect_starts` over `workers` processes."""
     seeds = list(seeds)
-    chunks = [(seeds[i::workers * 4], actions_per_start, policy_path, volume_ids, start_variety, task_version)
-              for i in range(workers * 4)]
+    chunks = [(seeds[i::workers * 4], actions_per_start, policy_path, volume_ids) for i in range(workers * 4)]
     chunks = [chunk for chunk in chunks if chunk[0]]
     with mp.get_context("spawn").Pool(workers) as pool:
         parts = pool.map(_collect_chunk, chunks)
@@ -418,7 +403,9 @@ def dynamics_report(ensemble, data, val_starts, context=None) -> dict:
         keep = start > 1e-6
         real = (1 - goal_distance(goal, weights, delta) / start.clamp_min(1e-6))[keep].numpy()
         guess = (1 - goal_distance(goal, weights, pred) / start.clamp_min(1e-6))[keep].numpy()
-    rank = lambda v: np.argsort(np.argsort(v))
+    def rank(v):
+        return np.argsort(np.argsort(v))
+
     return {"r2_log_vis": round(float(r2[:N_CLASSES + 1].mean()), 3),
             "r2_bright": round(float(r2[N_CLASSES + 1:2 * N_CLASSES + 1].mean()), 3),
             "attainment_spearman": round(float(np.corrcoef(rank(real), rank(guess))[0, 1]), 3),
@@ -469,23 +456,20 @@ def train_policy(ensemble, data, train_starts, steps: int = 6000, beta: float = 
     return policy, {"model_predicted_median": model_attainment}
 
 
-def evaluate(policy, episodes: int = 200, seed_base: int = VALIDATION_SEED_BASE, split: str = "val",
-             volume_ids=None, model_for_volume=None, task_version: str = "v1") -> dict:
-    """The policy alone on real renders: one `OneShotEnv` step per episode."""
-    import datasets
-    from rl.oneshot_env import OneShotEnv
-    ids = volume_ids if volume_ids is not None else datasets.volumes_for_split(split)
-    kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
-    env = OneShotEnv(ids, **kwargs, **ENV_KWARGS, task_version=task_version)
+def evaluate(policy, episodes: int = 200, seed_base: int = VALIDATION_SEED_BASE, split: str = "val") -> dict:
+    """The policy alone on real renders, on seeded validation episodes."""
+    import scans
+    sampler = EpisodeSampler(scans.split_names(split))
     rows, by_kind = [], collections.defaultdict(list)
     for seed in range(seed_base, seed_base + episodes):
-        obs, _ = env.reset(seed=seed)
-        action, _ = policy.predict(obs)
-        _, _, _, _, info = env.step(action)
-        rows.append({"seed": seed, "kind": info["kind"], "attainment": info["attainment"],
-                     "solvable": info["solvable"], "useless": info["useless"]})
-        by_kind[info["kind"]].append(info["attainment"])
-        by_kind["ALL"].append(info["attainment"])
+        episode = sampler.reset(seed)
+        action, _ = policy.predict(episode.observation())
+        params = episode.params_for(action)
+        attainment = episode.attainment(params)
+        rows.append({"seed": seed, "kind": episode.kind, "attainment": attainment,
+                     "useless": goals.is_useless(episode.model.features(params))})
+        by_kind[episode.kind].append(attainment)
+        by_kind["ALL"].append(attainment)
     return {"medians": {k: float(np.median(v)) for k, v in sorted(by_kind.items())},
             "useless_share": float(np.mean([r["useless"] for r in rows])), "rows": rows}
 
@@ -493,8 +477,7 @@ def evaluate(policy, episodes: int = 200, seed_base: int = VALIDATION_SEED_BASE,
 def run_training(data_paths, out: str, seed: int = 0, model_epochs: int = 60, policy_steps: int = 6000,
                  beta: float = 1.0, useless_weight: float = 1.0, eval_episodes: int = 200,
                  dynamics_path: str = None, hidden: int = 256, depth: int = 2,
-                 learning_rate: float = 3e-4, cosine: bool = False, task_version: str = "v1",
-                 log=print) -> dict:
+                 learning_rate: float = 3e-4, cosine: bool = False, log=print) -> dict:
     """Fit the dynamics ensemble (or reuse the one in `dynamics_path`, a
     checkpoint.pt trained on the same data), then the policy through it."""
     data = load_data(data_paths)
@@ -515,15 +498,14 @@ def run_training(data_paths, out: str, seed: int = 0, model_epochs: int = 60, po
     policy.metadata = {"seed": seed, "data": list(data_paths), "starts": int(len(data["s0"])),
                        "model_epochs": model_epochs, "policy_steps": policy_steps, "beta": beta,
                        "useless_weight": useless_weight, "hidden": hidden, "depth": depth,
-                       "learning_rate": learning_rate, "cosine": cosine, "dynamics": dynamics_path,
-                       "task_version": task_version}
+                       "learning_rate": learning_rate, "cosine": cosine, "dynamics": dynamics_path}
     report = {"dynamics": dyn_report, "policy": pol_report, "train_seconds": round(time.time() - t0)}
     if eval_episodes:
-        result = evaluate(policy, episodes=eval_episodes, task_version=task_version)
+        result = evaluate(policy, episodes=eval_episodes)
         report["val"] = {"medians": result["medians"], "useless_share": result["useless_share"]}
         log(f"[model_based] real val medians: {result['medians']}")
         os.makedirs(out, exist_ok=True)
-        with open(os.path.join(out, "eval_val.json"), "w") as stream:
+        with open(os.path.join(out, "eval_val.json"), "w", encoding="utf-8") as stream:
             json.dump(result, stream, indent=1)
     path = policy.save(out, ensemble, report)
     log(f"[model_based] wrote {path}")
@@ -540,11 +522,8 @@ def parse_args(argv=None):
     c.add_argument("--workers", type=int, default=3)
     c.add_argument("--actions", type=int, default=ACTIONS_PER_START)
     c.add_argument("--policy", default=None, help="checkpoint.pt whose proposals fill half the actions (Dyna)")
-    c.add_argument("--splits", default="train",
-                   help="comma-separated volume splits to draw starts from, e.g. train,train_extra")
-    c.add_argument("--task-version", choices=goals.TASK_VERSIONS, default="v1")
-    c.add_argument("--start-variety", type=float, default=0.0,
-                   help="share of starts with soft tissue dimmed and organs raised (OneShotEnv)")
+    c.add_argument("--splits", default="train,train_extra",
+                   help="comma-separated volume splits to draw starts from")
     t = sub.add_parser("train", help="fit the dynamics ensemble, then the policy through it")
     t.add_argument("--data", required=True, help="comma-separated .npz files from `collect`")
     t.add_argument("--out", required=True)
@@ -560,19 +539,16 @@ def parse_args(argv=None):
     t.add_argument("--policy-depth", type=int, default=2)
     t.add_argument("--policy-lr", type=float, default=3e-4)
     t.add_argument("--policy-cosine", action="store_true", help="cosine-anneal the policy learning rate")
-    t.add_argument("--task-version", choices=goals.TASK_VERSIONS, default="v1")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
     if args.command == "collect":
-        import datasets
-        volume_ids = [name for split in args.splits.split(",") for name in datasets.volumes_for_split(split)]
-        data = collect(range(args.seed_base, args.seed_base + args.starts), workers=args.workers,
-                       volume_ids=volume_ids,
-                       actions_per_start=args.actions, policy_path=args.policy,
-                       start_variety=args.start_variety, task_version=args.task_version)
+        import scans
+        volume_ids = [name for split in args.splits.split(",") for name in scans.split_names(split)]
+        data = collect(range(args.seed_base, args.seed_base + args.starts), volume_ids, workers=args.workers,
+                       actions_per_start=args.actions, policy_path=args.policy)
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         np.savez_compressed(args.out, **data)
         print(f"[model_based] wrote {args.out}: {len(data['s0'])} starts x {data['act'].shape[1]} actions")
@@ -582,7 +558,7 @@ def main(argv=None):
                      policy_steps=args.policy_steps, beta=args.beta, useless_weight=args.useless_weight,
                      eval_episodes=args.eval_episodes, dynamics_path=args.dynamics,
                      hidden=args.policy_hidden, depth=args.policy_depth, learning_rate=args.policy_lr,
-                     cosine=args.policy_cosine, task_version=args.task_version)
+                     cosine=args.policy_cosine)
 
 
 if __name__ == "__main__":

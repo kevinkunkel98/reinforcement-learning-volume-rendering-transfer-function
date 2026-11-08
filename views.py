@@ -1,7 +1,7 @@
 """The fixed set of views RL v2 looks at a volume from.
 
 Volumes are in canonical RAS axis order (axis 0 -> patient right, 1 ->
-anterior, 2 -> superior; see datasets.load_dataset(..., canonical=True)).
+anterior, 2 -> superior; see scans.load_volume(..., canonical=True)).
 View 0 looks from in front of the patient towards the back; views 1-5 are
 that direction rotated around the patient's head-to-foot axis in 60 degree
 steps. The same views are used by the visibility estimate, by the rendered

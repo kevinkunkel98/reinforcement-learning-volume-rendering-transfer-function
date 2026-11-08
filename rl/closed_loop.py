@@ -8,12 +8,11 @@ step 1 is still a plain one-shot policy. Training backpropagates the goal
 distance through a K-step rollout in the frozen dynamics ensemble (final step
 weight 1, earlier steps `intermediate_weight`).
 
-On task v2 the first step of a K=2 fine-tune is the best pure policy so far
+The first step of a K=2 fine-tune is the best pure policy so far
 (docs/experiments/2026-10-17-task-v2.md); evaluation re-renders after every step.
 
-    .venv/bin/python -m rl.closed_loop --init out/rl_mb_v2/r2_seed0/checkpoint.pt \\
-        --data out/rl_mb_v2/data_r0b.npz,out/rl_mb_v2/data_r1.npz,out/rl_mb_v2/data_r2.npz \\
-        --out out/rl_mb_v2/cl2_r2_seed0 --task-version v2
+    .venv/bin/python -m rl.closed_loop --init out/rl_mb_v3/r3_seed1/checkpoint.pt \\
+        --data out/rl_mb_v3/data_r0.npz,out/rl_mb_v3/data_r1.npz --out out/rl_mb_v3/clb_r3_seed1 --balance-kinds
 """
 import argparse
 import collections
@@ -25,7 +24,8 @@ import torch
 
 import goals
 from rl import model_based as mb
-from rl.baselines import apply_controllable
+from rl.episodes import EpisodeSampler, build_observation, controllable_values, solo_max_log
+from rl.search import apply_controllable
 
 N = mb.N_CLASSES
 
@@ -107,43 +107,35 @@ def finetune(policy, ensemble, data, train_starts, steps: int = 20_000, horizon:
     return policy, {"model_predicted_median": model_attainment}
 
 
-def rollout(policy, env, horizon: int = 2) -> list:
-    """Run `policy` for `horizon` steps from the episode `env` (a `OneShotEnv`
-    after `reset`, or frozen into an episode) is in, re-rendering and
+def rollout(policy, episode, horizon: int = 2) -> list:
+    """Run `policy` for `horizon` steps from `episode`'s start, re-rendering and
     re-observing the remaining goal after each step. Returns the attainment
     after every step, measured from the episode start; the first is the
-    one-shot score. Leaves `env._params` at the final transfer function."""
-    from rl.oneshot_env import build_observation
-    if env.action_mode != "residual":
-        raise ValueError("closed-loop rollout needs a residual-action policy")
-    model, instruction, start_agg, layers = env._model, env._instruction, env._start_agg, env._active_layers
-    solo = env._solo_max_log(env._volume, model)
-    params, agg, scores = np.asarray(env._start_params, dtype=np.float64).copy(), start_agg, []
+    one-shot score."""
+    instruction, start_agg, model = episode.instruction, episode.start_agg, episode.model
+    ceilings = solo_max_log(model)
+    params, agg, scores = episode.start_params.copy(), start_agg, []
     for _ in range(horizon):
-        ctrl = np.asarray(env._controllable_values(params))
+        ctrl = np.asarray(controllable_values(params))
         goal = remaining_goal_for(instruction["goal"], start_agg, agg, instruction.get("weights"))
-        action, _ = policy.predict(build_observation(goal, model.histogram, agg, solo, ctrl))
+        action, _ = policy.predict(build_observation(goal, model.histogram, agg, ceilings, ctrl))
         params = apply_controllable(params, np.clip(ctrl + action, -1, 1))
-        agg = goals.aggregate(env._features(params), layers)
-        scores.append(env._attainment(agg))
-    env._params = params
+        agg = episode.aggregate(params)
+        scores.append(episode.attainment(params))
     return scores
 
 
 def evaluate(policy, horizon: int = 2, episodes: int = 200, seed_base: int = mb.VALIDATION_SEED_BASE,
-             split: str = "val", task_version: str = "v1", volume_ids=None, model_for_volume=None) -> dict:
+             split: str = "val") -> dict:
     """The policy alone on real renders (`rollout`), per kind and per step
     ("t1" is the one-shot score)."""
-    import datasets
-    from rl.oneshot_env import OneShotEnv
-    ids = volume_ids if volume_ids is not None else datasets.volumes_for_split(split)
-    kwargs = {} if model_for_volume is None else {"model_for_volume": model_for_volume}
-    env = OneShotEnv(ids, **kwargs, **mb.ENV_KWARGS, task_version=task_version)
+    import scans
+    sampler = EpisodeSampler(scans.split_names(split))
     by_kind, rows = collections.defaultdict(lambda: collections.defaultdict(list)), []
     for seed in range(seed_base, seed_base + episodes):
-        env.reset(seed=seed)
-        row = {"seed": seed, "kind": env._instruction["kind"], "solvable": env._solvable}
-        for t, score in enumerate(rollout(policy, env, horizon), start=1):
+        episode = sampler.reset(seed)
+        row = {"seed": seed, "kind": episode.kind}
+        for t, score in enumerate(rollout(policy, episode, horizon), start=1):
             row[f"t{t}"] = score
             by_kind[row["kind"]][f"t{t}"].append(score)
             by_kind["ALL"][f"t{t}"].append(score)
@@ -166,7 +158,6 @@ def parse_args(argv=None):
                         help="draw every instruction kind equally often")
     parser.add_argument("--eval-episodes", type=int, default=200)
     parser.add_argument("--threads", type=int, default=3)
-    parser.add_argument("--task-version", choices=goals.TASK_VERSIONS, default="v1")
     return parser.parse_args(argv)
 
 
@@ -186,15 +177,14 @@ def main(argv=None):
     policy.metadata = {"init": args.init, "data": args.data.split(","), "closed_loop_horizon": args.horizon,
                        "train_steps": args.steps, "seed": args.seed, "learning_rate": args.learning_rate,
                        "intermediate_weight": args.intermediate_weight,
-                       "balance_kinds": args.balance_kinds, "task_version": args.task_version}
+                       "balance_kinds": args.balance_kinds}
     os.makedirs(args.out, exist_ok=True)
     if args.eval_episodes:
-        result = evaluate(policy, horizon=args.horizon, episodes=args.eval_episodes,
-                          task_version=args.task_version)
+        result = evaluate(policy, horizon=args.horizon, episodes=args.eval_episodes)
         report["val"] = result["medians"]
         for kind, steps in result["medians"].items():
             print(f"[closed_loop] {kind:10s} " + "  ".join(f"{t} {v:+.3f}" for t, v in steps.items()))
-        with open(os.path.join(args.out, "eval_closed_loop.json"), "w") as stream:
+        with open(os.path.join(args.out, "eval_closed_loop.json"), "w", encoding="utf-8") as stream:
             json.dump(result, stream, indent=1)
     print(f"[closed_loop] wrote {policy.save(args.out, ensemble, report)}")
 
