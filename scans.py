@@ -1,7 +1,8 @@
 """The CT scans: TotalSegmentator patients with eight organ classes labelled.
 
 `data/totalseg_manifest.json` (tracked) lists every patient, its split
-(train / train_extra / val / test) and the checksum of its CT;
+(train / train_extra / val / test, and val_extra / test_extra from the full
+dataset, `tools.extend_eval_splits`) and the checksum of its CT;
 `tools.fetch_scans` downloads them to data/totalseg/<id>/. Volumes load in
 canonical RAS axis order (numpy axis 0 -> patient right, 1 -> anterior,
 2 -> superior) as float32 Hounsfield units, labels as uint8 class ids
@@ -24,7 +25,7 @@ from anatomy import CANONICAL_CLASSES, CLASS_LAYOUT_VERSION
 MANIFEST_PATH = "data/totalseg_manifest.json"
 DEMO_SCANS_PATH = "data/demo_scans.json"
 NAME_PREFIX = "ts_"
-SPLITS = ("train", "val", "test", "train_extra")
+SPLITS = ("train", "val", "test", "train_extra", "val_extra", "test_extra")
 CHUNK_BYTES = 8 * 1024 * 1024
 _FETCH_HINT = "run `make scans` (python -m tools.fetch_scans) to download it"
 

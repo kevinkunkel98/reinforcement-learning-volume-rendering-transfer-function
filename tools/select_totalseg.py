@@ -37,6 +37,14 @@ REGION_BY_STUDY_TYPE = {
     "ct angiography thorax-abdomen-pelvis": "trunk",
     "ct polytrauma": "whole_body",
     "ct whole body": "whole_body",
+    # Only in the full dataset (tools.extend_eval_splits); none of the small
+    # subset's 100 patients has one of these, so its selection is unchanged.
+    "ct abdomen-pelvis": "abdomen_pelvis",
+    "ct thorax-abdomen": "trunk",
+    "ct thorax-chest": "thorax",
+    "ct chest": "thorax",
+    "ct angiography thorax": "thorax",
+    "ct angiography neck-thx-abd-pelvis-leg": "whole_body",
 }
 
 # (train, val, test) subjects per region; totals 20 / 4 / 6.

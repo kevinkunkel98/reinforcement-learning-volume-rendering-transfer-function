@@ -11,7 +11,7 @@ import scans
 import visibility
 
 SPLITS = ("train", "val", "test")
-OPTIONAL_SPLITS = ("train_extra",)
+OPTIONAL_SPLITS = ("train_extra", "val_extra", "test_extra")
 
 
 def build(splits=SPLITS, cache_dir=None) -> list:

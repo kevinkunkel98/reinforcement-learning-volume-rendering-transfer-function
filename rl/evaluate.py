@@ -169,7 +169,7 @@ def summary(paths) -> str:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("checkpoint", nargs="?")
-    parser.add_argument("--split", default="val", choices=("val", "test"))
+    parser.add_argument("--split", default="val", choices=("val", "test", "val_extra", "test_extra"))
     parser.add_argument("--out")
     parser.add_argument("--range", nargs=2, type=int, default=(0, EVAL_EPISODES), metavar=("LO", "HI"),
                         help="episodes lo:hi of the fixed 300, to split a run over processes")
