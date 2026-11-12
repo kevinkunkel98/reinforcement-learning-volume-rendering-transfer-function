@@ -57,7 +57,8 @@
            "silo", "border", "timer", "torn", "lover"],
   "filler": ["please", "can", "could", "would", "you", "the", "a", "an", "now", "again", "even", "just", "me", "i",
              "want", "to", "see", "make", "let's", "let", "us", "okay", "ok", "um", "uh", "it", "them", "they",
-             "those", "these", "that", "this", "is", "are", "be", "should", "some", "bit", "lot"],
+             "those", "these", "that", "this", "is", "are", "be", "should", "some", "bit", "lot", "by",
+             "wanna", "gonna", "cool", "nice", "great", "alright"],
   "grammar": ["increase", "decrease", "opacity", "width", "sharpness", "brightness", "center", "centre",
               "position", "peak", "window", "edges", "more", "less", "show", "display", "only", "isolate",
               "exclusively", "nothing", "but", "set", "low", "medium", "high", "rotate", "turn", "tilt", "zoom",
@@ -68,6 +69,6 @@
               "washed", "missing", "visible", "stronger", "fade", "get", "rid", "of", "eliminate", "weaken",
               "through", "dominating", "dominate", "drown", "drowning", "obscure", "obscuring", "block",
               "blocking", "cut", "back", "too", "strong", "prominent", "dense", "tone", "dial", "pull", "reset",
-              "revert", "start", "over", "from", "scratch", "default", "defaults", "original", "settings", "and",
-              "then", "plus", "while", "so", "for", "on", "with", "everything", "view", "level", "instead", "also", "as", "well"]
+              "revert", "restore", "start", "over", "from", "scratch", "default", "defaults", "original", "settings",
+              "and", "then", "plus", "while", "so", "for", "on", "with", "everything", "view", "level", "instead", "also", "as", "well"]
 }

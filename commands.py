@@ -234,7 +234,7 @@ def _fuzzy_classes(text: str) -> list:
     return classes
 
 
-_RESET_RE = re.compile(r"\b(reset|revert|start over|start again|from scratch|defaults?|original settings)\b"
+_RESET_RE = re.compile(r"\b(reset|revert|restore|start over|start again|from scratch|defaults?|original settings)\b"
                        r"|\bput (?:\w+ ){1,3}back\b")
 _PRONOUN_RE = re.compile(r"\b(it|them|they|those|these|that|this)\b")
 _RELATIVE_CUE_RE = re.compile(r"\b(more|less|increase\w*|decrease\w*|brighte\w*|darke\w*|lighte\w*)\b")

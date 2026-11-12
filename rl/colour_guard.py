@@ -2,7 +2,7 @@
 instruction asks for its brightness, and never loses its hue.
 
 The policy's action moves each peak's (r, g, b) as one group
-(`rl.baselines.apply_controllable`: one value, the channels' offsets kept,
+(`rl.search.apply_controllable`: one value, the channels' offsets kept,
 clipped to the bounds), and planning and the warm search do the same. Pushed
 far, every channel clips at 1 or 0 and the hue is gone: red -> white, anything
 -> black. `goals.distance` charges colour only through `bright` -- of the
@@ -70,11 +70,16 @@ def is_garbled(rgb, rgb_ref, min_cosine=HUE_MIN_COSINE, dark=DARK_LUMINANCE) -> 
     return luminance(rgb) >= dark and not hue_matches(rgb, rgb_ref, min_cosine, dark)
 
 
-def brightness_classes(goal) -> set:
-    """Goal classes the goal sets a brightness target for (mask n != 0)."""
+def brightness_classes(goal, weights=None) -> set:
+    """Goal classes the goal sets a brightness target for (mask n != 0) with a
+    non-zero weight. An occluder (`goals.occlusion_aware`) is "mentioned with
+    weight 0" so the keep terms let it fade -- that is no request for its
+    colour: read as one, "a bit more skeleton" kept the policy's black soft
+    tissue (2026-11-12, ts_s0477), which also tinted the unlabelled shell blue."""
     goal = np.asarray(goal, dtype=np.float64)
+    weights = weights or {}
     n = len(goals.GOAL_CLASSES)
-    return {c for i, c in enumerate(goals.GOAL_CLASSES) if goal[3 * n + i]}
+    return {c for i, c in enumerate(goals.GOAL_CLASSES) if goal[3 * n + i] and weights.get(c, 1.0) != 0}
 
 
 def _rgb(params, index) -> np.ndarray:
@@ -83,14 +88,12 @@ def _rgb(params, index) -> np.ndarray:
 
 def colour_guard(goal, start_params, params, reference_params, weights=None) -> np.ndarray:
     """`params` with every peak's rgb set by the rules in the module
-    docstring; heights, widths and centres are `params`' own. `weights` is
-    accepted for symmetry with `keep_repair` and unused: colour rules do not
-    depend on how the instruction weighs a class."""
-    del weights
+    docstring; heights, widths and centres are `params`' own. `weights`
+    only tells occluders (weight 0) apart from classes asked about."""
     start_params = np.asarray(start_params, dtype=np.float64)
     reference_params = np.asarray(reference_params, dtype=np.float64)
     guarded = np.asarray(params, dtype=np.float64).copy()
-    asked = brightness_classes(goal)
+    asked = brightness_classes(goal, weights)
     for goal_class, index in transfer.ANATOMICAL_PEAK_INDEX.items():
         reference = _rgb(reference_params, index)
         before = _rgb(start_params, index)

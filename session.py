@@ -25,6 +25,7 @@ from PIL import Image
 import answers
 import commands
 import goals
+import hue
 import policy as policy_module
 import render as render_module
 import scans
@@ -44,6 +45,10 @@ SESSION_PATH = os.environ.get("UI_SESSION_PATH", "out/ui_session.json")
 # 0.57 %. NO_VISIBLE_CHANGE_SHARE separates the first two from the third.
 VISIBLE_PIXEL_DELTA = 16
 NO_VISIBLE_CHANGE_SHARE = 0.003
+# A class at or above this luminance has no brightening left to show: the
+# skeleton starts at ~0.95, so "brighten the bones" moved it to 1.0 and the
+# hint blamed occlusion (2026-11-12, ts_s0477).
+FULL_BRIGHTNESS = 0.94
 
 # "add X" of a class a command hid restores it to its start: a relative
 # increase of an invisible class stays invisible ("add liver" after "show only
@@ -116,6 +121,27 @@ def changed_pixel_share(before_step, after_step):
     return float((np.abs(a - b).max(axis=-1) > VISIBLE_PIXEL_DELTA).mean())
 
 
+def _brightness_at_limit(cmd, step) -> list:
+    """Classes a brightness command asks to brighten (darken) that are already
+    at FULL_BRIGHTNESS (the darkening floor) in `step`: no room left to move."""
+    reference = goals.starting_params()
+    at_limit = []
+    for sub in _subs(cmd):
+        if sub.get("attribute") != "brightness" or sub.get("direction") not in ("increase", "decrease"):
+            continue
+        target = sub.get("target")
+        for name in (target if isinstance(target, list) else [target]):
+            if name not in transfer.ANATOMICAL_PEAK_INDEX:
+                continue
+            index = transfer.ANATOMICAL_PEAK_INDEX[name]
+            level = hue.luminance(transfer.peak_internal(np.asarray(step["params"]), index)["rgb"])
+            ref = transfer.peak_internal(reference, index)["rgb"]
+            if (level >= FULL_BRIGHTNESS if sub["direction"] == "increase"
+                    else level <= hue.MIN_LUMINANCE_FRACTION * hue.luminance(ref) + 1e-6):
+                at_limit.append((name, sub["direction"]))
+    return at_limit
+
+
 def no_visible_change_hint(cmd, before_step, after_step):
     """A note for a targeted command whose render barely changed, else None."""
     targets = target_classes(cmd)
@@ -124,6 +150,11 @@ def no_visible_change_hint(cmd, before_step, after_step):
     share = changed_pixel_share(before_step, after_step)
     if share is None or share >= NO_VISIBLE_CHANGE_SHARE:
         return None
+    at_limit = _brightness_at_limit(cmd, after_step)
+    if at_limit:
+        name, direction = at_limit[0]
+        limit = "full brightness" if direction == "increase" else "as dark as it goes"
+        return f"no visible change -- {commands.CLASS_LABEL.get(name, name)} already near {limit}"
     labels = [commands.CLASS_LABEL.get(name, name) for name in targets]
     return (f"no visible change -- {' and '.join(labels)} mostly hidden behind other "
             f"tissue; try 'show only {labels[0]}'")
