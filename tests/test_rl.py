@@ -43,6 +43,14 @@ def test_episodes_are_seeded():
     assert [e.volume for e in fixed_episodes("test", 3)] == ["ts_s9001"] * 3
 
 
+def test_a_shard_of_fixed_episodes_equals_that_slice_of_the_full_list():
+    full = fixed_episodes(None, 8, volume_ids=SCANS)
+    shard = fixed_episodes(None, 8, volume_ids=SCANS, start=5)
+    for a, b in zip(full[5:], shard, strict=True):
+        assert a.volume == b.volume and np.array_equal(a.start_params, b.start_params)
+        assert np.array_equal(a.instruction["goal"], b.instruction["goal"]) and a.kind == b.kind
+
+
 def test_search_improves_on_the_start_and_the_rule_executor_answers():
     episode = EpisodeSampler(SCANS).reset(1)
     found = hill_climb(episode.model, episode.start_params, episode.instruction, evaluations=60)

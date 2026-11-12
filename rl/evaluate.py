@@ -108,7 +108,7 @@ def run(checkpoint: str, split: str, out: str, lo: int = 0, hi: int = EVAL_EPISO
     """Evaluate `checkpoint` on fixed episodes `lo:hi` of `split`, writing the rows to `out` as it goes."""
     policy_metadata(checkpoint)
     policy = model_based.ModelBasedPolicy.load(checkpoint)
-    episodes = fixed_episodes(split, hi)[lo:hi]
+    episodes = fixed_episodes(split, hi, start=lo)
     rows = []
     for index, episode in enumerate(episodes, start=lo):
         rows.append(evaluate_episode(policy, episode, index, **options))
