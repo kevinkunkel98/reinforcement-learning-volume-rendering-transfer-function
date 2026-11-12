@@ -6,7 +6,7 @@ learning policy turns the instruction into a transfer function, which works on
 patients it has never seen. It also works in VR.
 
 <p align="center">
-  <img src="docs/screenshots/ui.png" width="85%" alt="The viewer: a render, the instruction history with each command's effect, and the transfer function panel" />
+  <img src="docs/screenshots/ui.png" width="85%" alt="The viewer: a CT render, the instruction history with each command's effect on visible anatomy, and the anatomy visibility panel" />
 </p>
 
 ## How it works
@@ -51,8 +51,10 @@ shows the vessels. Type a command, or hold Space to talk.
 (~1 GB). `make scans-all` fetches all 100 (~3 GB). `make run SCANS=all` lists
 every downloaded patient in the viewer.
 
-**Free-form voice commands:** install [Ollama](https://ollama.com/download),
-then run `make llm`. Without it, only the rule parser answers.
+**Free-form voice commands:** run `make llm`. It installs
+[Ollama](https://ollama.com) if it is missing (pacman, Homebrew, or the
+official script on other Linux distributions; asks for sudo), starts it, and
+pulls the model (~5 GB). Without it, only the rule parser answers.
 
 **VR headset** (tested on a Vive Focus 3) on the same network:
 

@@ -28,7 +28,7 @@ help:
 	@echo "make scans        download the 7 demo patients (data/demo_scans.json) from Zenodo"
 	@echo "make scans-candidates  the 24 patients the demo set was picked from (~1 GB); view them: make run SCANS=all"
 	@echo "make scans-all    all 100 scans, for retraining (~3 GB)"
-	@echo "make llm          pull the local LLM ($(LLM)) for free-form voice commands (needs Ollama)"
+	@echo "make llm          install and start Ollama if needed, then pull the local LLM ($(LLM)) for free-form voice commands"
 	@echo "make run          viewer on http://127.0.0.1:$(PORT)"
 	@echo "make certs        HTTPS certificate for this machine's LAN address ($(IP)) with mkcert"
 	@echo "make run-vr       viewer on https://$(IP):$(PORT) for a headset on the same network"
@@ -69,8 +69,29 @@ scans-candidates: $(PY)
 scans-all: $(PY)
 	$(PY) -u -m tools.fetch_scans --splits all
 
+# Installs Ollama when it is missing (pacman, Homebrew, or the official script
+# on other Linux distributions), starts its server when nothing answers, then
+# pulls the model. The packages and the script also set up a service that
+# starts Ollama on boot.
 llm:
-	@command -v ollama >/dev/null || { echo "Ollama is not installed: https://ollama.com/download (Arch: sudo pacman -S ollama)"; exit 1; }
+	@if command -v ollama >/dev/null 2>&1; then \
+		echo "Ollama is installed: $$(ollama --version 2>/dev/null | tail -n1)"; \
+	elif command -v pacman >/dev/null 2>&1; then \
+		pkg=ollama; command -v nvidia-smi >/dev/null 2>&1 && pkg=ollama-cuda; \
+		set -x; sudo pacman -S --needed --noconfirm $$pkg && sudo systemctl enable --now ollama; \
+	elif [ "$$(uname -s)" = Darwin ]; then \
+		command -v brew >/dev/null 2>&1 || { echo "Homebrew is missing: https://brew.sh, or install Ollama from https://ollama.com/download"; exit 1; }; \
+		set -x; brew install ollama && brew services start ollama; \
+	elif [ "$$(uname -s)" = Linux ]; then \
+		set -x; curl -fsSL https://ollama.com/install.sh | sh; \
+	else \
+		echo "install Ollama yourself: https://ollama.com/download"; exit 1; \
+	fi
+	@for i in 1 2 3 4 5; do ollama list >/dev/null 2>&1 && exit 0; sleep 1; done; \
+	echo "Ollama is not running: starting ollama serve in the background (log: out/ollama.log)"; \
+	mkdir -p out; nohup ollama serve >out/ollama.log 2>&1 & \
+	for i in $$(seq 30); do ollama list >/dev/null 2>&1 && exit 0; sleep 1; done; \
+	echo "Ollama did not start: see out/ollama.log"; exit 1
 	ollama pull $(LLM)
 
 # SCANS=all lists every downloaded patient, not only the demo set

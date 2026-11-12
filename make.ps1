@@ -47,6 +47,17 @@ function Ensure-Venv {
     Invoke-Checked $Py @("-m", "pip", "install", "--upgrade", "pip")
 }
 
+function Wait-Ollama([int] $Seconds) {
+    # The same address the app uses (commands.OLLAMA_HOST).
+    $url = if ($env:OLLAMA_HOST) { $env:OLLAMA_HOST } else { "http://localhost:11434" }
+    if ($url -notmatch "^https?://") { $url = "http://$url" }
+    for ($i = 0; $i -lt $Seconds; $i++) {
+        try { Invoke-WebRequest "$url/api/version" -UseBasicParsing -TimeoutSec 2 | Out-Null; return $true }
+        catch { Start-Sleep -Seconds 1 }
+    }
+    return $false
+}
+
 function Get-LanIp {
     if ($Ip) { return $Ip }
     # The local address of a UDP "connection" to a public IP: no packet is sent.
@@ -65,7 +76,7 @@ switch ($Target) {
 .\make.ps1 scans              download the 7 demo patients from Zenodo (~300 MB)
 .\make.ps1 scans-candidates   the 24 patients the demo set was picked from (~1 GB)
 .\make.ps1 scans-all          all 100 scans, for retraining (~3 GB)
-.\make.ps1 llm                pull the local LLM ($Llm) for free-form voice commands
+.\make.ps1 llm                install and start Ollama if needed, then pull the local LLM ($Llm)
 .\make.ps1 run [-Scans all]   viewer on http://127.0.0.1:$Port
 .\make.ps1 certs              HTTPS certificate for this machine's LAN address (mkcert)
 .\make.ps1 run-vr             viewer over HTTPS for a headset on the same network
@@ -92,7 +103,20 @@ switch ($Target) {
     "scans-candidates" { Ensure-Venv; Invoke-Checked $Py @("-u", "-m", "tools.fetch_scans", "--candidates", "--splits") }
     "scans-all" { Ensure-Venv; Invoke-Checked $Py @("-u", "-m", "tools.fetch_scans", "--splits", "all") }
     "llm" {
-        if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) { throw "Ollama is not installed: https://ollama.com/download" }
+        # Install Ollama when it is missing, start it when nothing answers, then pull the model.
+        if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+            if (-not $OnWindows) { throw "on macOS/Linux use: make llm" }
+            Invoke-Checked "winget" @("install", "--id", "Ollama.Ollama", "--exact", "--accept-source-agreements", "--accept-package-agreements")
+            # winget does not update this session's PATH: reread it from the registry.
+            $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+            if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) { throw "Ollama installed but not on PATH yet: open a new terminal and run .\make.ps1 llm again" }
+        }
+        if (-not (Wait-Ollama 5)) {
+            Write-Host "Ollama is not running: starting ollama serve in the background"
+            if ($OnWindows) { Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden }
+            else { Start-Process ollama -ArgumentList "serve" }
+            if (-not (Wait-Ollama 30)) { throw "Ollama did not start: run 'ollama serve' to see why" }
+        }
         Invoke-Checked "ollama" @("pull", $Llm)
     }
     "run" {
