@@ -10,7 +10,7 @@ import answers
 import goals
 import server
 import transfer
-from session import Session, no_visible_change_hint, restore_hidden, scan_label, scan_list
+from session import Session, drop_unsupported, no_visible_change_hint, restore_hidden, scan_label, scan_list
 
 
 @pytest.fixture
@@ -95,6 +95,20 @@ def test_no_visible_change_hint_skips_a_class_that_is_not_a_goal(session):
     unmeasured = {**step, "class_visibility": {**step["class_visibility"], "vessels": None}}
     cmd = {"target": "vessels", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
     assert no_visible_change_hint(cmd, unmeasured, unmeasured) is None
+
+
+def test_unsupported_classes_are_dropped_from_a_multi_class_command():
+    # "everything except the heart semi transparent" on a scan without
+    # contrast: vessels made the whole compound fall back to exact mode, so
+    # the policy never ran (2026-11-15 session).
+    sub = lambda c: {"target": c, "attribute": "opacity", "direction": "decrease", "strength": "moderately"}
+    cmd = {"compound": [sub("liver"), sub("vessels"), sub("soft")]}
+    kept, dropped = drop_unsupported(cmd, {"liver", "soft", "heart"})
+    assert kept == {"compound": [sub("liver"), sub("soft")]} and dropped == ["vessels"]
+    kept, dropped = drop_unsupported({"compound": [sub("liver"), sub("vessels")]}, {"liver"})
+    assert kept == sub("liver") and dropped == ["vessels"]
+    # a single command keeps its own message path ("vessels is not a goal")
+    assert drop_unsupported(sub("vessels"), {"liver"}) == (sub("vessels"), [])
 
 
 def test_no_visible_change_hint_at_full_brightness(session):

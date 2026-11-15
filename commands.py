@@ -494,6 +494,23 @@ _EXCEPT_RE = re.compile(r"\b(?:everything|everyone|all|the rest|anything|every c
                         r"\b(?:except(?: for)?|apart from|other than|besides|but)\b")
 
 
+# "the picture is too dark overall", "make everything a bit darker".
+_GLOBAL_RE = re.compile(r"\b(?:everything|overall|all over|the whole (?:image|picture|view|scene|thing|volume|body)"
+                        r"|the (?:image|picture|view|scene|render\w*|volume))\b")
+
+
+def _every_class(attribute: str, direction: str, strength: str) -> dict:
+    return {"compound": [{"target": c, "attribute": attribute, "direction": direction, "strength": strength}
+                         for c in CLASS_SYNONYMS]}
+
+
+def _global_brightness(t: str):
+    """A brightness change to the whole image (no class named), else None."""
+    if not _GLOBAL_RE.search(t) or not _BRIGHTNESS_RE.search(t) or _EXCEPT_RE.search(t) or _find_classes(t):
+        return None
+    return _every_class("brightness", _free_direction(t, "brightness"), _strength_in(t))
+
+
 _HIDE_ALL_RE = re.compile(r"\b(?:hide|remove|get rid of|lose|drop|clear|fade out|kill|make invisible)\b"
                           r"|\b(?:go away|disappear|vanish|be gone|be hidden)\b")
 
@@ -514,6 +531,9 @@ def parse_command_rule(text: str) -> dict:
     "except" turned "everything except the heart semi transparent" into
     "less heart" (2026-11-15 session)."""
     t = _normalise_text(text)
+    whole = _global_brightness(t)
+    if whole:
+        return whole
     keep = _hide_everything_but(t)
     if keep:
         return {"target": keep[0] if len(keep) == 1 else keep, "attribute": "opacity",
@@ -592,12 +612,17 @@ def _parse_command_rule(text: str) -> dict:
         previous = parsed[-1]["target"]
         if isinstance(previous, list):
             previous = previous[-1]
-    # "the heart is too strong, tone it down" says one thing twice.
+    # "the heart is too strong, tone it down" says one thing twice; a
+    # modifier in either clause ("..., dim them heavily") wins over the
+    # default strength.
     unique = []
     for sub in subcommands:
-        if not any((u["target"], u["attribute"], u["direction"]) == (sub["target"], sub["attribute"], sub["direction"])
-                   for u in unique):
+        same = next((k for k, u in enumerate(unique) if (u["target"], u["attribute"], u["direction"])
+                     == (sub["target"], sub["attribute"], sub["direction"])), None)
+        if same is None:
             unique.append(sub)
+        elif unique[same].get("strength") == "moderately" and sub.get("strength") not in (None, "moderately"):
+            unique[same] = {**unique[same], "strength": sub["strength"]}
     return unique[0] if len(unique) == 1 else {"compound": unique}
 
 
@@ -1051,6 +1076,11 @@ def _repair_cmd(obj, text: str):
         return {"compound": [_repair_single(sub, text) for sub in subs]}
     if isinstance(obj, dict) and obj.get("direction") == "set":
         return {"compound": [_repair_single(obj, text)]}
+    if (isinstance(obj, dict) and obj.get("target") is None and obj.get("attribute") == "brightness"
+            and obj.get("direction") in ("increase", "decrease")):
+        # "the picture is too dark overall": no class -> the whole image.
+        strength = _repair_single(obj, text)["strength"]
+        return _every_class("brightness", obj["direction"], strength)
     return _repair_single(obj, text)
 
 
@@ -1073,8 +1103,8 @@ def _ungrounded_reason(cmd, text: str):
     if any(isinstance(sub, dict) and sub.get("direction") == "reset" for sub in subs) and not _is_reset(t):
         return "reset without a reset word"
     named = set(_find_classes(t)) | set(_fuzzy_classes(t))
-    if _EXCEPT_RE.search(t):
-        named |= set(CLASS_SYNONYMS)   # "everything except X" names all the others
+    if _EXCEPT_RE.search(t) or (_GLOBAL_RE.search(t) and set(_command_targets(cmd)) == set(CLASS_SYNONYMS)):
+        named |= set(CLASS_SYNONYMS)   # "everything except X", "the whole image" name all the others
     missing = [c for c in _command_targets(cmd) if c not in named]
     if missing:
         return f"target(s) {missing} not named in the text"
@@ -1432,7 +1462,16 @@ def describe_command(cmd) -> str:
     "show only liver and spleen", "more liver + less lungs"), so a listener can
     check what was understood."""
     if isinstance(cmd, dict) and isinstance(cmd.get("compound"), list):
-        return " + ".join(describe_command(sub) for sub in cmd["compound"])
+        subs = cmd["compound"]
+        shapes = {(s.get("attribute"), s.get("direction"), s.get("strength")) for s in subs if isinstance(s, dict)}
+        if len(shapes) == 1 and len(subs) > 1:
+            targets = [s.get("target") for s in subs]
+            rest = [c for c in CLASS_SYNONYMS if c not in targets]
+            if set(targets) <= set(CLASS_SYNONYMS) and len(rest) <= 1:
+                # every class (but one): "brighten everything", "less everything except heart"
+                said = _describe_single({**subs[0], "target": "everything"}).replace("the everything", "everything")
+                return said + (f" except {CLASS_LABEL.get(rest[0], rest[0])}" if rest else "")
+        return " + ".join(describe_command(sub) for sub in subs)
     if isinstance(cmd, dict) and isinstance(cmd.get("camera"), dict):
         cam = cmd["camera"]
         said = _STRENGTH_SAID.get(cam.get("strength"), "")

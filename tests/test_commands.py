@@ -17,8 +17,7 @@ NEEDS_LLM = {"Leitenlangs", "Revered skeleton.", "the muscles are hiding everyth
              # 2026-11-15 viewer session
              "can I see the organs without the skeleton",
              "put the heart in focus and push everything else into the background",
-             "make everything except the heart semi transparent",
-             "the bones are blinding, dim them heavily"}
+             "make everything except the heart semi transparent"}
 
 
 def _eval_set(name):
@@ -150,6 +149,35 @@ def test_everything_except_x_changes_every_other_class(monkeypatch):
     targets = [sub["target"] for sub in cmd["compound"]]
     assert sorted(targets) == sorted(c for c in commands.CLASS_SYNONYMS if c != "heart")
     assert all(sub["direction"] == "decrease" for sub in cmd["compound"])
+
+
+def test_a_repeated_instruction_keeps_the_explicit_strength():
+    # "the bones are blinding, dim them heavily" says one thing twice; the
+    # merge kept the first clause's default strength (2026-11-15 session).
+    assert _rule("the bones are blinding, dim them heavily")["strength"] == "strongly"
+    assert _rule("the liver is too faint, bring it up a lot")["strength"] == "strongly"
+    assert _rule("dim the bones a bit, the bones are blinding")["strength"] == "slightly"
+
+
+def _every_class(attribute, direction, strength):
+    return {"compound": [{"target": c, "attribute": attribute, "direction": direction, "strength": strength}
+                         for c in commands.CLASS_SYNONYMS]}
+
+
+def test_global_brightness_changes_every_class():
+    # "the picture is too dark overall" was refused (2026-11-15 session).
+    assert _rule("the picture is too dark overall") == _every_class("brightness", "increase", "moderately")
+    assert _rule("make everything a bit darker") == _every_class("brightness", "decrease", "slightly")
+    assert _rule("brighten the whole image a lot") == _every_class("brightness", "increase", "strongly")
+    assert _rule("darken the liver")["target"] == "liver"   # a named class stays a single command
+    assert commands.describe_command(_rule("make everything a bit darker")) == "darken everything slightly"
+
+
+def test_llm_global_brightness_is_every_class(monkeypatch):
+    llm_cmd = {"target": None, "attribute": "brightness", "direction": "increase", "strength": "moderately"}
+    monkeypatch.setattr(commands, "urlopen", _fake_ollama(llm_cmd))
+    cmd = commands.parse_command_llm("the scene looks gloomy, lift it")
+    assert cmd == _every_class("brightness", "increase", "moderately")
 
 
 def test_hide_everything_but_x_is_show_only():
