@@ -11,6 +11,7 @@ data/totalseg/<id>/ct.nii.gz and labels.nii.gz exactly as
     python -m tools.fetch_scans --names ts_s0358     # plus single scans by name
     python -m tools.fetch_scans --splits test val train
     python -m tools.fetch_scans --splits all         # all 100 (~3 GB of reads), for retraining
+    python -m tools.fetch_scans --splits val_extra test_extra   # the larger held-out splits (full dataset)
 
 Scans already on disk with the manifest's checksum are skipped.
 """
@@ -31,8 +32,35 @@ from tools.select_totalseg import DEFAULT_OUT_DIR, ZENODO_RECORD, _sha256_file, 
 
 ZIP_NAME = "Totalsegmentator_dataset_small_v201.zip"
 ZIP_URL = f"https://zenodo.org/records/{ZENODO_RECORD}/files/{ZIP_NAME}?download=1"
+# The full dataset (1228 CTs, 24 GB), for the val_extra/test_extra patients
+# (tools.extend_eval_splits); their manifest entries say `source: "full"`.
+FULL_ZIP_URL = "https://zenodo.org/records/10047292/files/Totalsegmentator_dataset_v201.zip?download=1"
+SOURCE_URLS = {"small": ZIP_URL, "full": FULL_ZIP_URL}
 USER_AGENT = "tf-rl-fetch-scans/1.0"
-ALL_SPLITS = ("train", "val", "test", "train_extra")
+ALL_SPLITS = ("train", "val", "test", "train_extra")   # "all": what retraining needs
+EVAL_EXTRA_SPLITS = ("val_extra", "test_extra")
+# HTTP 429 handling: wait Retry-After (else DEFAULT_RETRY_AFTER s), at most
+# this many times per request.
+DEFAULT_RETRY_AFTER = 60
+MAX_THROTTLED_WAITS = 30
+
+
+def _retry_after_seconds(headers, now: float = None) -> float:
+    """Seconds to wait after a 429: until X-RateLimit-Reset (epoch seconds,
+    Zenodo's window end; its Retry-After is often 0), else a positive
+    Retry-After, else DEFAULT_RETRY_AFTER."""
+    headers = headers or {}
+    now = time.time() if now is None else now
+    try:
+        reset = float(headers.get("X-RateLimit-Reset", 0)) - now
+        if reset > 0:
+            return min(reset + 1.0, 600.0)
+        retry_after = float(headers.get("Retry-After", 0))
+        if retry_after > 0:
+            return retry_after
+    except (TypeError, ValueError):
+        pass
+    return float(DEFAULT_RETRY_AFTER)
 
 
 class HttpRangeFile(io.RawIOBase):
@@ -58,7 +86,8 @@ class HttpRangeFile(io.RawIOBase):
     def _get(self, start: int, end: int) -> tuple:
         request = urllib.request.Request(self.url, headers={"Range": f"bytes={start}-{end}",
                                                             "User-Agent": USER_AGENT})
-        for attempt in range(self.retries):
+        attempt, throttled = 0, 0
+        while True:
             try:
                 with urllib.request.urlopen(request, timeout=60) as response:
                     if response.status != 206:
@@ -67,10 +96,18 @@ class HttpRangeFile(io.RawIOBase):
                     if len(data) != end - start + 1:
                         raise http.client.IncompleteRead(data, end - start + 1 - len(data))
                     return data, response.headers.get("Content-Range", "")
+            except urllib.error.HTTPError as exc:
+                # Zenodo rate-limits range requests (HTTP 429): wait as told
+                # instead of spending the retries on it.
+                if exc.code != 429 or throttled >= MAX_THROTTLED_WAITS:
+                    raise OSError(f"download failed: {exc}") from exc
+                throttled += 1
+                time.sleep(_retry_after_seconds(exc.headers))
             except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ConnectionError) as exc:
-                if attempt == self.retries - 1:
+                attempt += 1
+                if attempt >= self.retries:
                     raise OSError(f"download failed after {self.retries} tries: {exc}") from exc
-                time.sleep(2 ** attempt)
+                time.sleep(2 ** (attempt - 1))
 
     def _probe_size(self) -> int:
         _, content_range = self._get(0, 0)  # "bytes 0-0/<size>"
@@ -124,14 +161,25 @@ def is_present(entry: dict) -> bool:
             and _sha256_file(entry["path"]) == entry["sha256"])
 
 
-def fetch(splits, out_dir: str = DEFAULT_OUT_DIR, url: str = ZIP_URL, workers: int = 4, names=()) -> list:
+def fetch(splits, out_dir: str = DEFAULT_OUT_DIR, url: str = None, workers: int = 4, names=()) -> list:
+    """Download the missing subjects of `splits` (plus `names`), each from its
+    entry's source zip -- or from `url` for all of them."""
     entries = wanted_subjects(splits, names)
     if not entries:
         raise SystemExit(f"no subjects of split(s) {', '.join(splits)} in {scans.MANIFEST_PATH}")
     missing = [e for e in entries if not is_present(e)]
     print(f"[fetch_scans] {len(entries) - len(missing)}/{len(entries)} already present")
-    if not missing:
-        return []
+    if url is not None:
+        return _fetch_from(url, missing, out_dir, workers) if missing else []
+    fetched = []
+    for source, source_url in SOURCE_URLS.items():
+        part = [e for e in missing if e.get("source", "small") == source]
+        if part:
+            fetched += _fetch_from(source_url, part, out_dir, workers)
+    return fetched
+
+
+def _fetch_from(url: str, missing: list, out_dir: str, workers: int) -> list:
     remote = HttpRangeFile(url)
     zipfile.ZipFile(io.BufferedReader(remote, buffer_size=1 << 20)).close()  # caches the central directory
     workers = max(1, min(workers, len(missing)))
@@ -163,7 +211,8 @@ def fetch(splits, out_dir: str = DEFAULT_OUT_DIR, url: str = ZIP_URL, workers: i
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--splits", nargs="*", default=["test"], choices=list(ALL_SPLITS) + ["all"])
+    parser.add_argument("--splits", nargs="*", default=["test"],
+                        choices=list(ALL_SPLITS) + list(EVAL_EXTRA_SPLITS) + ["all"])
     parser.add_argument("--names", nargs="*", default=[], help="single scans on top, e.g. ts_s0358")
     parser.add_argument("--demo", action="store_true", help="the viewer's showcase set, data/demo_scans.json")
     parser.add_argument("--candidates", action="store_true", help="the 24 patients the showcase set was picked from")

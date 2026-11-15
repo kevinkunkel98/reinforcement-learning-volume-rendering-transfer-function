@@ -36,7 +36,21 @@
     "n_candidates": 100,
     "numpy_version": "2.5.2",
     "extra_split": "train_extra",
-    "n_extra": 70
+    "n_extra": 70,
+    "eval_extra": {
+      "seed": 0,
+      "val_per_region": 8,
+      "test_per_region": 15,
+      "n_candidates": 703,
+      "n_eligible": 594,
+      "eligible_per_region": {
+        "whole_body": 67,
+        "trunk": 263,
+        "thorax": 108,
+        "abdomen_pelvis": 156
+      },
+      "numpy_version": "2.5.2"
+    }
   },
   "subjects": [
     {
@@ -3196,6 +3210,3551 @@
         "vessels"
       ],
       "contrast": true
+    },
+    {
+      "id": "s0004",
+      "name": "ts_s0004",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        255,
+        177,
+        440
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0004/ct.nii.gz",
+      "sha256": "baa9c991baf4d7d24b32e6e1149e1972b6a29694a208c37b4697b7275aeb6c1e",
+      "labels_path": "data/totalseg/s0004/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "no_pathology",
+      "age": "71.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0006",
+      "name": "ts_s0006",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen-pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        216,
+        216,
+        217
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0006/ct.nii.gz",
+      "sha256": "e5201750084a555d4a7bad305f79c2196b6bede905c1ffa9804247ad2f0f176f",
+      "labels_path": "data/totalseg/s0006/labels.nii.gz",
+      "classes_present": [
+        "kidneys",
+        "liver",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "other",
+      "age": "46.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0040",
+      "name": "ts_s0040",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        291,
+        291,
+        421
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0040/ct.nii.gz",
+      "sha256": "6e8c916af1e3018f3ca35349e462c2f8b142d140dfa13415040a274b02d36c4f",
+      "labels_path": "data/totalseg/s0040/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "tumor",
+      "age": "52.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0046",
+      "name": "ts_s0046",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        247,
+        247,
+        213
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0046/ct.nii.gz",
+      "sha256": "5767b25774af7580c0c099121ec0ba98caf1bb424b9220d2ce6e25e19944a2fd",
+      "labels_path": "data/totalseg/s0046/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "B",
+      "manufacturer": "siemens",
+      "scanner_model": "sensation 16",
+      "pathology": "unclear",
+      "age": "78.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0057",
+      "name": "ts_s0057",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-chest",
+      "region": "thorax",
+      "shape": [
+        293,
+        293,
+        184
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0057/ct.nii.gz",
+      "sha256": "a0ce733e563142526171751500778d06e9581d4d67a79b32205c24f851f83c51",
+      "labels_path": "data/totalseg/s0057/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "sensation 64",
+      "pathology": "no_pathology",
+      "age": "63.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0059",
+      "name": "ts_s0059",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        233,
+        233,
+        449
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0059/ct.nii.gz",
+      "sha256": "3017726463301c0682f5412b0a807ca78c840d83fad66c5b1b93b90f382806a4",
+      "labels_path": "data/totalseg/s0059/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "sensation 64",
+      "pathology": "inflammation",
+      "age": "48.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0062",
+      "name": "ts_s0062",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        273,
+        205,
+        273
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0062/ct.nii.gz",
+      "sha256": "3353e217124e05c0d193b3aead1fcb2b54168fe3f3234a624985efaa452af796",
+      "labels_path": "data/totalseg/s0062/labels.nii.gz",
+      "classes_present": [
+        "kidneys",
+        "skeleton",
+        "soft",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "no_pathology",
+      "age": "63.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0075",
+      "name": "ts_s0075",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen-pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        220,
+        363,
+        317
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0075/ct.nii.gz",
+      "sha256": "f3d20455b787a9688a1c3a8445fa2dc775cd721a811adb8ed4fceda328ed2549",
+      "labels_path": "data/totalseg/s0075/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "other",
+      "age": "58.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0080",
+      "name": "ts_s0080",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        306,
+        306,
+        233
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0080/ct.nii.gz",
+      "sha256": "61775c520da940cb4714ebea900cc33326d351b187c107ac661a95087575a72a",
+      "labels_path": "data/totalseg/s0080/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "inflammation",
+      "age": "68.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0115",
+      "name": "ts_s0115",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography thorax",
+      "region": "thorax",
+      "shape": [
+        303,
+        303,
+        283
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0115/ct.nii.gz",
+      "sha256": "a3a36db2f3119527ae3dbe721ba3aae16db1a565566533270d9f485476ff9607",
+      "labels_path": "data/totalseg/s0115/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "49.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0140",
+      "name": "ts_s0140",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        196,
+        196,
+        125
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0140/ct.nii.gz",
+      "sha256": "a88097a63cb639e0240dab3ee6a1b9ce0a8e608327467d9981fa081fb50b7c78",
+      "labels_path": "data/totalseg/s0140/labels.nii.gz",
+      "classes_present": [
+        "lungs",
+        "skeleton",
+        "soft",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "tumor",
+      "age": "66.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0145",
+      "name": "ts_s0145",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        222,
+        219,
+        447
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0145/ct.nii.gz",
+      "sha256": "3f7a97e2623d5631e73deeae4cc3ed42789e8f5eff33ddf6bda9d1cd2197ba55",
+      "labels_path": "data/totalseg/s0145/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "no_pathology",
+      "age": "54.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0150",
+      "name": "ts_s0150",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        247,
+        247,
+        296
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0150/ct.nii.gz",
+      "sha256": "d046d5f903c1438d15ab3583541d27ba1c7daafe55620d3f6fd5b2b9486d916c",
+      "labels_path": "data/totalseg/s0150/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "B",
+      "manufacturer": "siemens",
+      "scanner_model": "sensation 16",
+      "pathology": "unclear",
+      "age": "78.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0153",
+      "name": "ts_s0153",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen-pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        248,
+        195,
+        299
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0153/ct.nii.gz",
+      "sha256": "6d98e3471cf0c4fb5275a42b72fe4fef819469a3262ac090714ac0907a15e5aa",
+      "labels_path": "data/totalseg/s0153/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "tumor",
+      "age": "38.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0190",
+      "name": "ts_s0190",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        257,
+        257,
+        237
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0190/ct.nii.gz",
+      "sha256": "a0664c12761f916447840705714e0b4442d394223950f2eb19dca596519cbde3",
+      "labels_path": "data/totalseg/s0190/labels.nii.gz",
+      "classes_present": [
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "59.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0196",
+      "name": "ts_s0196",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        295,
+        295,
+        367
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0196/ct.nii.gz",
+      "sha256": "5283f3ddbe6a4a935c84c5f66fd75762ab05c0bb4532fc40b99a04e3c03894a3",
+      "labels_path": "data/totalseg/s0196/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "73.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0222",
+      "name": "ts_s0222",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen-pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        280,
+        280,
+        137
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0222/ct.nii.gz",
+      "sha256": "9044452e1ab951edc0444bda58a2745601d446991b5a02fb9574e2dd85636172",
+      "labels_path": "data/totalseg/s0222/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "67.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0242",
+      "name": "ts_s0242",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen-pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        248,
+        194,
+        250
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0242/ct.nii.gz",
+      "sha256": "95d0a0457cce9d0d05ea53f48f8ec48ff4f4df86e58a1c11de5f77d9af8e1d0c",
+      "labels_path": "data/totalseg/s0242/labels.nii.gz",
+      "classes_present": [
+        "kidneys",
+        "liver",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "19.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0243",
+      "name": "ts_s0243",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen-pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        253,
+        253,
+        285
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0243/ct.nii.gz",
+      "sha256": "8013337c89323a191002dd53e6c20850e183efb2f76c946bda66d1e5e7d005c9",
+      "labels_path": "data/totalseg/s0243/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "tumor",
+      "age": "56.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0253",
+      "name": "ts_s0253",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-chest",
+      "region": "thorax",
+      "shape": [
+        253,
+        253,
+        266
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0253/ct.nii.gz",
+      "sha256": "3471e165e3f1dc3c9cea1e9ecf9aa89a00c90fa2acd98772647f358da486c85a",
+      "labels_path": "data/totalseg/s0253/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "sensation 64",
+      "pathology": "other",
+      "age": "60.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0271",
+      "name": "ts_s0271",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography thorax",
+      "region": "thorax",
+      "shape": [
+        221,
+        221,
+        255
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0271/ct.nii.gz",
+      "sha256": "a7412d1f46ffb17f36cb49d019d6a14daaf609b5facc7b909ba4466972f024f4",
+      "labels_path": "data/totalseg/s0271/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "vascular",
+      "age": "59.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0285",
+      "name": "ts_s0285",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        333,
+        333,
+        181
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0285/ct.nii.gz",
+      "sha256": "e9c69134205d6c22ccaf58d56e1b9641a56e87193116c6ba3f69187047e51cea",
+      "labels_path": "data/totalseg/s0285/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "tumor",
+      "age": "72.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0325",
+      "name": "ts_s0325",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen-pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        315,
+        315,
+        293
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0325/ct.nii.gz",
+      "sha256": "95e04c341bcb7f4b860dee547635bd79e7e5c5c09072c8e1437d663c21cf20cf",
+      "labels_path": "data/totalseg/s0325/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "sensation 64",
+      "pathology": "other",
+      "age": "65.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0332",
+      "name": "ts_s0332",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        269,
+        269,
+        505
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0332/ct.nii.gz",
+      "sha256": "867af2b3062893ca89d42dd1d74e23dd2122261e10e35a670820b52b84f8b9d0",
+      "labels_path": "data/totalseg/s0332/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "vascular",
+      "age": "68.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0342",
+      "name": "ts_s0342",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        233,
+        233,
+        284
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0342/ct.nii.gz",
+      "sha256": "86c9fd5d4428abe43ef59242119cb4b9377477a0b6dff0f5473276d3d81ea0b0",
+      "labels_path": "data/totalseg/s0342/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "E",
+      "manufacturer": "philips",
+      "scanner_model": "ingenuity core 128",
+      "pathology": "unclear",
+      "age": "60.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0364",
+      "name": "ts_s0364",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        211,
+        211,
+        167
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0364/ct.nii.gz",
+      "sha256": "62ba5d653dd21e0f05406a0c146984f875839bdeec931a8a63565833a723fab8",
+      "labels_path": "data/totalseg/s0364/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "36.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0377",
+      "name": "ts_s0377",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        248,
+        248,
+        259
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0377/ct.nii.gz",
+      "sha256": "2c3fa37241a14b783e1ffe0b94dc21c778a12d7f540d68fcfeda3c5eeb6e841e",
+      "labels_path": "data/totalseg/s0377/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "vascular",
+      "age": "52.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0390",
+      "name": "ts_s0390",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        247,
+        247,
+        299
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0390/ct.nii.gz",
+      "sha256": "a37ba2aa58daf7e219d9d5c8bd38a0a87a39c18591e3fd1a4ef7c3873e3d2516",
+      "labels_path": "data/totalseg/s0390/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "B",
+      "manufacturer": "philips",
+      "scanner_model": "iqon - spectral ct",
+      "pathology": "unclear",
+      "age": "73.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0392",
+      "name": "ts_s0392",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-chest",
+      "region": "thorax",
+      "shape": [
+        267,
+        267,
+        270
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0392/ct.nii.gz",
+      "sha256": "28242a82469d5502c7a4e634ca826338c918a869b31f16c7f0dc63aa82eb482c",
+      "labels_path": "data/totalseg/s0392/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "21.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0393",
+      "name": "ts_s0393",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        221,
+        221,
+        206
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0393/ct.nii.gz",
+      "sha256": "535faf6cbaa9da4c19183b2809506ec443e4d0606b51fc111dae9ba632c6606b",
+      "labels_path": "data/totalseg/s0393/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "no_pathology",
+      "age": "86.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0408",
+      "name": "ts_s0408",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        279,
+        279,
+        391
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0408/ct.nii.gz",
+      "sha256": "c4f4fd3f52e6f03f6227f4abf766e1a06db077720f2b07ff124e5c90fec18667",
+      "labels_path": "data/totalseg/s0408/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "tumor",
+      "age": "88.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0412",
+      "name": "ts_s0412",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        313,
+        313,
+        431
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0412/ct.nii.gz",
+      "sha256": "50eea935d97b37c92bbf4b6f11b153252bb881a965776b2615e1adeef34a2289",
+      "labels_path": "data/totalseg/s0412/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "72.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0442",
+      "name": "ts_s0442",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        264,
+        264,
+        178
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0442/ct.nii.gz",
+      "sha256": "5964637838a9e7d76a106a6d3e8740788f3ff477383c24e9e04211bfcafcdba7",
+      "labels_path": "data/totalseg/s0442/labels.nii.gz",
+      "classes_present": [
+        "skeleton",
+        "soft",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "74.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0495",
+      "name": "ts_s0495",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        247,
+        247,
+        332
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0495/ct.nii.gz",
+      "sha256": "b0d5c8efe41ad80519724aff4199e3e575cab66b482d2d1843d5906491fa70b2",
+      "labels_path": "data/totalseg/s0495/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "lightspeed vct",
+      "pathology": "tumor",
+      "age": "64.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0502",
+      "name": "ts_s0502",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        215,
+        215,
+        402
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0502/ct.nii.gz",
+      "sha256": "5e2b841ede4457b96e7329839ea7de90713da790f1e379772b1c10b019ce02c7",
+      "labels_path": "data/totalseg/s0502/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "E",
+      "manufacturer": "philips",
+      "scanner_model": "ingenuity core 128",
+      "pathology": "unclear",
+      "age": "70.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0505",
+      "name": "ts_s0505",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        366,
+        252,
+        366
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0505/ct.nii.gz",
+      "sha256": "2dfaefd30b228419c2598147bed7a7fbdb1248468b10fc8d966158e63ed56b5c",
+      "labels_path": "data/totalseg/s0505/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "B",
+      "manufacturer": "siemens",
+      "scanner_model": "sensation 16",
+      "pathology": "unclear",
+      "age": "78.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0508",
+      "name": "ts_s0508",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography thorax",
+      "region": "thorax",
+      "shape": [
+        221,
+        221,
+        219
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0508/ct.nii.gz",
+      "sha256": "fe048986f415d9671b32922b136cac574920bb92fa577abde3262180c71b3d8b",
+      "labels_path": "data/totalseg/s0508/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "vascular",
+      "age": "63.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0541",
+      "name": "ts_s0541",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        319,
+        319,
+        320
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0541/ct.nii.gz",
+      "sha256": "6a69142b0d7ec152c3bdb7ea99b522875a0f393d3bdd1a4d87e1ea2a6684685b",
+      "labels_path": "data/totalseg/s0541/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "71.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0588",
+      "name": "ts_s0588",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        184,
+        184,
+        117
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0588/ct.nii.gz",
+      "sha256": "f490ab3531f3edf214e955aaea0791416c8ca554201bb646c741257d65bceaf1",
+      "labels_path": "data/totalseg/s0588/labels.nii.gz",
+      "classes_present": [
+        "skeleton",
+        "soft"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "E",
+      "manufacturer": "philips",
+      "scanner_model": "ingenuity core 128",
+      "pathology": "unclear",
+      "age": "44.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0589",
+      "name": "ts_s0589",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        265,
+        265,
+        423
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0589/ct.nii.gz",
+      "sha256": "f66e3b281b746871feda39501c73e8348270b04026f436cc8d8c9539266e281f",
+      "labels_path": "data/totalseg/s0589/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "tumor",
+      "age": "58.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0601",
+      "name": "ts_s0601",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        218,
+        218,
+        150
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0601/ct.nii.gz",
+      "sha256": "d1b8d75ef38ad7f629ea386f7f1c9f798c683c601c183d021a74e7065be791fb",
+      "labels_path": "data/totalseg/s0601/labels.nii.gz",
+      "classes_present": [
+        "skeleton",
+        "soft",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "B",
+      "manufacturer": "siemens",
+      "scanner_model": "sensation 16",
+      "pathology": "unclear",
+      "age": "54.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0605",
+      "name": "ts_s0605",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        267,
+        267,
+        223
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0605/ct.nii.gz",
+      "sha256": "bc1a2650ff0358d564b2544c849b0a8b785fda53d089f47e0ce5c7901f4c3249",
+      "labels_path": "data/totalseg/s0605/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "vascular",
+      "age": "54.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0606",
+      "name": "ts_s0606",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        297,
+        297,
+        226
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0606/ct.nii.gz",
+      "sha256": "6d5a88d71bd06ecdcab3d92e514c9efa087ab3b6f9544da6de02ea794a729e80",
+      "labels_path": "data/totalseg/s0606/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "tumor",
+      "age": "82.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0608",
+      "name": "ts_s0608",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        168,
+        168,
+        162
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0608/ct.nii.gz",
+      "sha256": "0f64bd64f4f94b25e4a215d42e86ec5f934d8e298ec246080d9d2caa97581474",
+      "labels_path": "data/totalseg/s0608/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "78.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0616",
+      "name": "ts_s0616",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        337,
+        261,
+        644
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0616/ct.nii.gz",
+      "sha256": "c6376f4e24880a5f79d5c4f9bba14eda26c12f565fb9461f8a2dbaa40cc8e621",
+      "labels_path": "data/totalseg/s0616/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "trauma",
+      "age": "56.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0654",
+      "name": "ts_s0654",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography thorax",
+      "region": "thorax",
+      "shape": [
+        222,
+        222,
+        205
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0654/ct.nii.gz",
+      "sha256": "1c43625ea54e2c523273cc33d796f9b252ad3339a8e2275a08ef29a41176e976",
+      "labels_path": "data/totalseg/s0654/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "vascular",
+      "age": "77.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0657",
+      "name": "ts_s0657",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        297,
+        297,
+        488
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0657/ct.nii.gz",
+      "sha256": "357ac2aae65adfc18bf8c3df5847e135b9e310b196fa8aa9f6f47e3f115412fc",
+      "labels_path": "data/totalseg/s0657/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "no_pathology",
+      "age": "53.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0675",
+      "name": "ts_s0675",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        309,
+        309,
+        209
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0675/ct.nii.gz",
+      "sha256": "6496ba728dd963814d54458f8b87be0a46edcfc1beea62309c914085e460390a",
+      "labels_path": "data/totalseg/s0675/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "68.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0704",
+      "name": "ts_s0704",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-chest",
+      "region": "thorax",
+      "shape": [
+        187,
+        187,
+        242
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0704/ct.nii.gz",
+      "sha256": "8c97565500c0dad936588ea323a2549208d061d0b0c72b0378d2c94ea75de20e",
+      "labels_path": "data/totalseg/s0704/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "E",
+      "manufacturer": "philips",
+      "scanner_model": "ingenuity core 128",
+      "pathology": "unclear",
+      "age": "62.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0718",
+      "name": "ts_s0718",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-chest",
+      "region": "thorax",
+      "shape": [
+        205,
+        205,
+        229
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0718/ct.nii.gz",
+      "sha256": "e0346715f22a4138209d379b10dd65b79fa6c1fabe7711b16f062517293a8cc6",
+      "labels_path": "data/totalseg/s0718/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "inflammation",
+      "age": "61.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0743",
+      "name": "ts_s0743",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        231,
+        231,
+        207
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0743/ct.nii.gz",
+      "sha256": "8ee16f0539524ee0f9f3098722b7ef9a4ea2d66ef5018b6947d336e341c1a7e3",
+      "labels_path": "data/totalseg/s0743/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "tumor",
+      "age": "55.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0749",
+      "name": "ts_s0749",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        260,
+        260,
+        313
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0749/ct.nii.gz",
+      "sha256": "0f064d10e0ac2cb611765c5cdf42fa8896197aad9ca08365b04d45c64a41983f",
+      "labels_path": "data/totalseg/s0749/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "B",
+      "manufacturer": "siemens",
+      "scanner_model": "sensation 16",
+      "pathology": "unclear",
+      "age": "75.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0753",
+      "name": "ts_s0753",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        218,
+        218,
+        193
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0753/ct.nii.gz",
+      "sha256": "28f6f4b857501a6558bba13465e42c74948bd5d408cabf71a1b4787e9eb0fcaf",
+      "labels_path": "data/totalseg/s0753/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "C",
+      "manufacturer": "siemens",
+      "scanner_model": "emotion 16",
+      "pathology": "no_pathology",
+      "age": "72.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0768",
+      "name": "ts_s0768",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        219,
+        174,
+        258
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0768/ct.nii.gz",
+      "sha256": "5ee73bd7fd814147e7ba4795b76c505a25c984f5d9ac3a2e37027612ce607f8b",
+      "labels_path": "data/totalseg/s0768/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom go.top",
+      "pathology": "unclear",
+      "age": "75.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0775",
+      "name": "ts_s0775",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        224,
+        175,
+        174
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0775/ct.nii.gz",
+      "sha256": "c81d73a7f8678ef57cbd41e509f5ca074ff848db68693d4813882d6c5d116550",
+      "labels_path": "data/totalseg/s0775/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom go.top",
+      "pathology": "tumor",
+      "age": "73.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0790",
+      "name": "ts_s0790",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        291,
+        291,
+        538
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0790/ct.nii.gz",
+      "sha256": "b3815d049ddecea8cf44ffe494979bb81d819b5eb864f0947e890c9389ee7357",
+      "labels_path": "data/totalseg/s0790/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom force",
+      "pathology": "no_pathology",
+      "age": "40.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0793",
+      "name": "ts_s0793",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        223,
+        223,
+        171
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0793/ct.nii.gz",
+      "sha256": "23e2b137d54a6db1e14b6924b68831044d5c344bcf3024b2f0cf7dbb4c152276",
+      "labels_path": "data/totalseg/s0793/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition edge",
+      "pathology": "inflammation",
+      "age": "65.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0808",
+      "name": "ts_s0808",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        246,
+        209,
+        200
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0808/ct.nii.gz",
+      "sha256": "39d09a8b03dd2a31b2c5a65d9dc8511350bebcef3400cd9c330ebed0e4553ad9",
+      "labels_path": "data/totalseg/s0808/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom go.top",
+      "pathology": "vascular",
+      "age": "80.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0821",
+      "name": "ts_s0821",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        213,
+        213,
+        244
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0821/ct.nii.gz",
+      "sha256": "0e9f5284d5f356486d43b819c139971d076b15a9a002e05e36d7df9a8f7986e6",
+      "labels_path": "data/totalseg/s0821/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "trauma",
+      "age": "42.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0824",
+      "name": "ts_s0824",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        265,
+        184,
+        200
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0824/ct.nii.gz",
+      "sha256": "7f9ab26d732aa2e9b996c587dd672ba15fc24b196993f07cc24059d2d4d51b9f",
+      "labels_path": "data/totalseg/s0824/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom go.top",
+      "pathology": "tumor",
+      "age": "78.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0863",
+      "name": "ts_s0863",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        263,
+        263,
+        435
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0863/ct.nii.gz",
+      "sha256": "06b984ded8b9558495158fb00b9ac66313a279f81f0df869f1893249a3fc23d6",
+      "labels_path": "data/totalseg/s0863/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition edge",
+      "pathology": "no_pathology",
+      "age": "61.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0889",
+      "name": "ts_s0889",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        251,
+        251,
+        203
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0889/ct.nii.gz",
+      "sha256": "48fe8503038938cc266ddc7beb7af83dbf410edb053b8601b5d6d1b90d1fd98c",
+      "labels_path": "data/totalseg/s0889/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "tumor",
+      "age": "56.00",
+      "gender": "m"
+    },
+    {
+      "id": "s0898",
+      "name": "ts_s0898",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        233,
+        233,
+        185
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0898/ct.nii.gz",
+      "sha256": "28717d9ae5e81e7e4222af73110016af51667c340441bfc456b9e9f88d910eb8",
+      "labels_path": "data/totalseg/s0898/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "no_pathology",
+      "age": "81.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0927",
+      "name": "ts_s0927",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        333,
+        333,
+        519
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0927/ct.nii.gz",
+      "sha256": "2bc21ba414dcff6fc51dcf2fed72a2746e5604ee185c8a3e62a0b0c3bb931f91",
+      "labels_path": "data/totalseg/s0927/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom force",
+      "pathology": "trauma",
+      "age": "93.00",
+      "gender": "f"
+    },
+    {
+      "id": "s0931",
+      "name": "ts_s0931",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        245,
+        187,
+        479
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s0931/ct.nii.gz",
+      "sha256": "eed990b661c46dcb9f13bcd9adf989730ea8c1192c3e1f3eeca1b9d4722d7293",
+      "labels_path": "data/totalseg/s0931/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom force",
+      "pathology": "no_pathology",
+      "age": "86.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1057",
+      "name": "ts_s1057",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        263,
+        263,
+        172
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1057/ct.nii.gz",
+      "sha256": "821712b400ccd1ab2dde996e5901f3e1ad028e2543c8d6d2f8fea8972d7677cb",
+      "labels_path": "data/totalseg/s1057/labels.nii.gz",
+      "classes_present": [
+        "skeleton",
+        "soft",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "discovery ste",
+      "pathology": "no_pathology",
+      "age": "71.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1062",
+      "name": "ts_s1062",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        236,
+        236,
+        477
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1062/ct.nii.gz",
+      "sha256": "7801d8de3f67468054c1606f4084ab6a193620ffb094f839f6c57ef042602523",
+      "labels_path": "data/totalseg/s1062/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom force",
+      "pathology": "no_pathology",
+      "age": "73.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1063",
+      "name": "ts_s1063",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        291,
+        291,
+        332
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1063/ct.nii.gz",
+      "sha256": "dfc3cb1aa1eded2a3388777f231489b0c4d5d50a60d6f4ad185dd80862c82277",
+      "labels_path": "data/totalseg/s1063/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "discovery ste",
+      "pathology": "tumor",
+      "age": "49.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1077",
+      "name": "ts_s1077",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        221,
+        221,
+        278
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1077/ct.nii.gz",
+      "sha256": "33d99c501f782d9fc5472a616475e236fca768e9aa91ec3ad5d063a88436db65",
+      "labels_path": "data/totalseg/s1077/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "vascular",
+      "age": "81.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1089",
+      "name": "ts_s1089",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        265,
+        265,
+        550
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1089/ct.nii.gz",
+      "sha256": "ae7208c672affa23e2e6cbce83c517e217038aa797b53eeb1964ccfa3b72f6a3",
+      "labels_path": "data/totalseg/s1089/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition edge",
+      "pathology": "trauma",
+      "age": "65.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1094",
+      "name": "ts_s1094",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        227,
+        227,
+        183
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1094/ct.nii.gz",
+      "sha256": "3df99d4c889142c9f175550297ff7244af445c11cdd18b36c3aaa96e4b4f3def",
+      "labels_path": "data/totalseg/s1094/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition edge",
+      "pathology": "no_pathology",
+      "age": "68.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1100",
+      "name": "ts_s1100",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-chest",
+      "region": "thorax",
+      "shape": [
+        231,
+        231,
+        286
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1100/ct.nii.gz",
+      "sha256": "365fb12a28eb63cae177da76c915f7ca1df0a76fec0a41e78cd96bd09086f03b",
+      "labels_path": "data/totalseg/s1100/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition edge",
+      "pathology": "inflammation",
+      "age": "59.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1130",
+      "name": "ts_s1130",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen ",
+      "region": "abdomen_pelvis",
+      "shape": [
+        280,
+        280,
+        283
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1130/ct.nii.gz",
+      "sha256": "e8463781f90c5138d675790ca82f13b496a3039501a059354c824528b2e526d9",
+      "labels_path": "data/totalseg/s1130/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "B",
+      "manufacturer": "philips",
+      "scanner_model": "iqon - spectral ct",
+      "pathology": "unclear",
+      "age": "82.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1159",
+      "name": "ts_s1159",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        329,
+        329,
+        537
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1159/ct.nii.gz",
+      "sha256": "eb9420e62c75dbc817941afaefae3d72ce2b805e6814bc65e1cab494a4ca2713",
+      "labels_path": "data/totalseg/s1159/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom force",
+      "pathology": "no_pathology",
+      "age": "47.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1168",
+      "name": "ts_s1168",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        177,
+        177,
+        128
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1168/ct.nii.gz",
+      "sha256": "c45c517422949af6c27869566a6d4bacede785c2bb19c85dcfadf0a1f75f36ca",
+      "labels_path": "data/totalseg/s1168/labels.nii.gz",
+      "classes_present": [
+        "lungs",
+        "skeleton",
+        "soft",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "lightspeed vct",
+      "pathology": "tumor",
+      "age": "52.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1173",
+      "name": "ts_s1173",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-chest",
+      "region": "thorax",
+      "shape": [
+        255,
+        255,
+        229
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1173/ct.nii.gz",
+      "sha256": "7955aa6e0b065c404842be81815d6dbf5c0169a9c31da4514102ceda638ef787",
+      "labels_path": "data/totalseg/s1173/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "lightspeed vct",
+      "pathology": "tumor",
+      "age": "67.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1182",
+      "name": "ts_s1182",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        261,
+        261,
+        207
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1182/ct.nii.gz",
+      "sha256": "9f6834b722567757836c9d6671d5f7e3c8ec5e572d67a94967bb72d63bec6a33",
+      "labels_path": "data/totalseg/s1182/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition edge",
+      "pathology": "no_pathology",
+      "age": "81.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1228",
+      "name": "ts_s1228",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        321,
+        321,
+        402
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1228/ct.nii.gz",
+      "sha256": "11f84851fc96ddf22daa9a65745fc9b4f8ed30476ad2e15d0c5471e95aed4be2",
+      "labels_path": "data/totalseg/s1228/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "lightspeed vct",
+      "pathology": "no_pathology",
+      "age": "62.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1255",
+      "name": "ts_s1255",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        277,
+        277,
+        193
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1255/ct.nii.gz",
+      "sha256": "ce88132f53645071ab208adc3f02831b239270fea9bf0b4cfb365f2bfb7a12c5",
+      "labels_path": "data/totalseg/s1255/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "lightspeed vct",
+      "pathology": "no_pathology",
+      "age": "74.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1261",
+      "name": "ts_s1261",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        240,
+        240,
+        138
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1261/ct.nii.gz",
+      "sha256": "b34e8042059a10512240a0b7394f3bfb5ad1fa1255fffea3ee85ad0c004cd7f0",
+      "labels_path": "data/totalseg/s1261/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "lungs",
+        "skeleton",
+        "soft",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "lightspeed vct",
+      "pathology": "tumor",
+      "age": "78.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1281",
+      "name": "ts_s1281",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax",
+      "region": "thorax",
+      "shape": [
+        211,
+        211,
+        217
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1281/ct.nii.gz",
+      "sha256": "b93fe8707b134d4e58c03d2e66f3025f775df7e11b7620e8399e0d9b477ca30b",
+      "labels_path": "data/totalseg/s1281/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "no_pathology",
+      "age": "66.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1291",
+      "name": "ts_s1291",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        245,
+        245,
+        314
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1291/ct.nii.gz",
+      "sha256": "c8f816be2c00fe25459547b45b0999519c7cb379e405f8801e4f5ddd6728cbfd",
+      "labels_path": "data/totalseg/s1291/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "lightspeed vct",
+      "pathology": "no_pathology",
+      "age": "71.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1304",
+      "name": "ts_s1304",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        333,
+        333,
+        546
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1304/ct.nii.gz",
+      "sha256": "f4a6c43f1e47a3d6ef1a11b3509bf8c4b0c4cd73502563f10b3bbcecb4fc7d70",
+      "labels_path": "data/totalseg/s1304/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "67.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1309",
+      "name": "ts_s1309",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct abdomen",
+      "region": "abdomen_pelvis",
+      "shape": [
+        275,
+        275,
+        311
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1309/ct.nii.gz",
+      "sha256": "a936f4085edb4f9f91626f34e1bf35ff2f2eb0baae1d4151900dbc8f1e7b0bab",
+      "labels_path": "data/totalseg/s1309/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "E",
+      "manufacturer": "philips",
+      "scanner_model": "ingenuity core 128",
+      "pathology": "unclear",
+      "age": "65.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1318",
+      "name": "ts_s1318",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct neck-thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        236,
+        236,
+        100
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1318/ct.nii.gz",
+      "sha256": "c183aed1cb92a4f34ba79c55984e5c1edf9b2bf163a92ff80408bf23dd1858c7",
+      "labels_path": "data/totalseg/s1318/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "lungs",
+        "skeleton",
+        "soft",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "A",
+      "manufacturer": "ge",
+      "scanner_model": "lightspeed vct",
+      "pathology": "tumor",
+      "age": "52.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1321",
+      "name": "ts_s1321",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        275,
+        275,
+        540
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1321/ct.nii.gz",
+      "sha256": "f10fd819cb58fa99e23ee817d406b67a966eec8559ef7449545963ca75da9146",
+      "labels_path": "data/totalseg/s1321/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "trauma",
+      "age": "50.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1323",
+      "name": "ts_s1323",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct thorax-neck",
+      "region": "thorax",
+      "shape": [
+        227,
+        227,
+        191
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1323/ct.nii.gz",
+      "sha256": "1bdc5489e1a29a12cdf5f5a3a73490cec602b332662e8a4eca01c8815ce0c2ac",
+      "labels_path": "data/totalseg/s1323/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "74.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1344",
+      "name": "ts_s1344",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        212,
+        183,
+        438
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1344/ct.nii.gz",
+      "sha256": "8d8fe4ca8e93551b7e92953199de071e80c0fb3996d0a9a67ddb916f34ebfa9b",
+      "labels_path": "data/totalseg/s1344/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "vascular",
+      "age": "67.00",
+      "gender": "f"
+    },
+    {
+      "id": "s1349",
+      "name": "ts_s1349",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography neck-thx-abd-pelvis-leg",
+      "region": "whole_body",
+      "shape": [
+        255,
+        255,
+        517
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1349/ct.nii.gz",
+      "sha256": "dca8c225c66cb2ded9cb2c7e34c184a5de0302cd1f2c092e8688ed0750608a39",
+      "labels_path": "data/totalseg/s1349/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition as+",
+      "pathology": "no_pathology",
+      "age": "66.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1363",
+      "name": "ts_s1363",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography thorax-abdomen-pelvis",
+      "region": "trunk",
+      "shape": [
+        296,
+        296,
+        389
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1363/ct.nii.gz",
+      "sha256": "a0964897e828e5c3fed163ce7f8a2c29483bc22a4b1b7734857728c68d783b6b",
+      "labels_path": "data/totalseg/s1363/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom definition flash",
+      "pathology": "vascular",
+      "age": "63.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1394",
+      "name": "ts_s1394",
+      "split": "val_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct angiography abdomen-pelvis",
+      "region": "abdomen_pelvis",
+      "shape": [
+        261,
+        261,
+        306
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1394/ct.nii.gz",
+      "sha256": "190d6b2e0430aa05ac0296728a4733b9407df537252a1111ecc36ced1ad89046",
+      "labels_path": "data/totalseg/s1394/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": true,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "siemens",
+      "scanner_model": "somatom force",
+      "pathology": "vascular",
+      "age": "57.00",
+      "gender": "m"
+    },
+    {
+      "id": "s1412",
+      "name": "ts_s1412",
+      "split": "test_extra",
+      "label_layout_version": "anatomy-v2",
+      "study_type": "ct polytrauma",
+      "region": "whole_body",
+      "shape": [
+        255,
+        255,
+        311
+      ],
+      "spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "path": "data/totalseg/s1412/ct.nii.gz",
+      "sha256": "52a219fba33dea94d981f8bfacb986e895d0da13bafc769cfd0a8ec2f0008f53",
+      "labels_path": "data/totalseg/s1412/labels.nii.gz",
+      "classes_present": [
+        "heart",
+        "kidneys",
+        "liver",
+        "lungs",
+        "skeleton",
+        "soft",
+        "spleen",
+        "vessels"
+      ],
+      "contrast": false,
+      "source": "full",
+      "institute": "I",
+      "manufacturer": "",
+      "scanner_model": "",
+      "pathology": "",
+      "age": "43.00",
+      "gender": "m"
     }
-  ]
+  ],
+  "sources": {
+    "full": {
+      "dataset": "TotalSegmentator v2.0.1 (full)",
+      "zenodo_record": "10047292",
+      "zip": "Totalsegmentator_dataset_v201.zip",
+      "license": "CC-BY-4.0"
+    }
+  }
 }

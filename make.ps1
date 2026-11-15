@@ -76,6 +76,7 @@ switch ($Target) {
 .\make.ps1 scans              download the 7 demo patients from Zenodo (~300 MB)
 .\make.ps1 scans-candidates   the 24 patients the demo set was picked from (~1 GB)
 .\make.ps1 scans-all          all 100 scans, for retraining (~3 GB)
+.\make.ps1 scans-eval         the larger held-out splits val_extra + test_extra (~2 GB)
 .\make.ps1 llm                install and start Ollama if needed, then pull the local LLM ($Llm)
 .\make.ps1 run [-Scans all]   viewer on http://127.0.0.1:$Port
 .\make.ps1 certs              HTTPS certificate for this machine's LAN address (mkcert)
@@ -102,6 +103,7 @@ switch ($Target) {
     "scans" { Ensure-Venv; Invoke-Checked $Py @("-u", "-m", "tools.fetch_scans", "--demo", "--splits") }
     "scans-candidates" { Ensure-Venv; Invoke-Checked $Py @("-u", "-m", "tools.fetch_scans", "--candidates", "--splits") }
     "scans-all" { Ensure-Venv; Invoke-Checked $Py @("-u", "-m", "tools.fetch_scans", "--splits", "all") }
+    "scans-eval" { Ensure-Venv; Invoke-Checked $Py @("-u", "-m", "tools.fetch_scans", "--splits", "val_extra", "test_extra") }
     "llm" {
         # Install Ollama when it is missing, start it when nothing answers, then pull the model.
         if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {

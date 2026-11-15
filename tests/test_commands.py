@@ -57,6 +57,14 @@ def test_compound_and_reset():
     assert [(c["target"], c["direction"]) for c in cmd["compound"]] == [("liver", "increase"), ("lungs", "decrease")]
     assert _rule("reset")["direction"] == "reset"
     assert _rule("reset the heart") == {"target": "heart", "attribute": None, "direction": "reset", "strength": None}
+    assert _rule("restore heart") == {"target": "heart", "attribute": None, "direction": "reset", "strength": None}
+
+
+@pytest.mark.parametrize("text", ["darken the skeleton by a lot", "I wanna see a little more of the bones",
+                                  "cool I want to see only lungs"])
+def test_casual_fillers_are_covered_by_the_rule_parser(text):
+    # each went to the LLM (1-9 s) over one uncovered word (2026-11-12 session)
+    assert lexicon.uncovered_words(text, lexicon.get()) == []
 
 
 def test_unparseable_and_retired_words_raise():

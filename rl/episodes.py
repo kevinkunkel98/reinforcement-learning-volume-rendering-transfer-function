@@ -149,12 +149,15 @@ class EpisodeSampler:
 
 
 def fixed_episodes(split: str, count: int = EVAL_EPISODES, seed: int = 0, volume_ids=None,
-                   model_for_volume=visibility.for_volume) -> list:
-    """The evaluation's fixed episodes: `reset(seed + i)` over the split's
-    volumes, the same list every time."""
+                   model_for_volume=visibility.for_volume, start: int = 0) -> list:
+    """The evaluation's fixed episodes `start:count`: `reset(seed + i)` over
+    the split's volumes, the same list every time. Without class balancing
+    each episode depends on its own seed only, so a shard builds just its
+    range (building 0:hi in every shard loaded every patient 16 times over
+    and took a 31 GB machine down, 2026-11-13)."""
     ids = volume_ids if volume_ids is not None else scans.split_names(split)
     sampler = EpisodeSampler(ids, model_for_volume)
-    return [sampler.reset(seed + i) for i in range(count)]
+    return [sampler.reset(seed + i) for i in range(start, count)]
 
 
 def policy_metadata(checkpoint_path: str) -> dict:

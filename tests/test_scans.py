@@ -84,3 +84,38 @@ def test_label_volume_folds_masks_with_later_classes_on_top():
     with zipfile.ZipFile(buffer) as zf:
         streamed, _affine = _subject_label_volume(zf, "s1", shape)
     assert np.array_equal(streamed, labels) and set(np.unique(labels)) == {0, 3, 5}
+
+
+def test_eval_extra_selection_skips_known_patients_and_is_stratified():
+    from tools import extend_eval_splits as ext
+    meta = ([{"image_id": f"s{i:04d}", "study_type": st} for i, st in enumerate(
+        ["ct polytrauma", "ct thorax-abdomen-pelvis", "ct thorax", "ct abdomen-pelvis"] * 5)]
+        + [{"image_id": "s9999", "study_type": "ct head"}])
+    rows = ext.candidate_rows(meta, known={"s0000"})
+    assert "s0000" not in {r["image_id"] for r in rows} and "s9999" not in {r["image_id"] for r in rows}
+    candidates = [{"id": r["image_id"], "region": r["region"]} for r in rows]
+    assignment = ext.pick(candidates, val_per_region=1, test_per_region=2, seed=0)
+    assert assignment == ext.pick(list(reversed(candidates)), 1, 2, seed=0)   # order-independent
+    for region in ext.REGIONS:
+        splits = [assignment[c["id"]] for c in candidates if c["region"] == region and c["id"] in assignment]
+        assert sorted(splits) == ["test_extra", "test_extra", "val_extra"]
+    with pytest.raises(ValueError):
+        ext.pick(candidates, val_per_region=3, test_per_region=3)
+
+
+def test_fetch_reads_each_subject_from_its_source_zip(monkeypatch):
+    entries = [{"name": "ts_a", "split": "test"}, {"name": "ts_b", "split": "test_extra", "source": "full"}]
+    monkeypatch.setattr(fetch_scans, "wanted_subjects", lambda splits, names=(): entries)
+    monkeypatch.setattr(fetch_scans, "is_present", lambda entry: False)
+    calls = []
+    monkeypatch.setattr(fetch_scans, "_fetch_from",
+                        lambda url, missing, out_dir, workers: calls.append((url, [e["name"] for e in missing])) or [])
+    fetch_scans.fetch(("test", "test_extra"))
+    assert calls == [(fetch_scans.ZIP_URL, ["ts_a"]), (fetch_scans.FULL_ZIP_URL, ["ts_b"])]
+
+
+def test_rate_limit_waits_until_the_window_resets():
+    wait = fetch_scans._retry_after_seconds
+    assert wait({"X-RateLimit-Reset": "1030", "Retry-After": "0"}, now=1000.0) == 31.0
+    assert wait({"Retry-After": "12"}, now=1000.0) == 12.0
+    assert wait({"Retry-After": "0"}, now=1000.0) == fetch_scans.DEFAULT_RETRY_AFTER

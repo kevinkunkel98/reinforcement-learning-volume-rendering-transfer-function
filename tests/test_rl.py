@@ -43,6 +43,14 @@ def test_episodes_are_seeded():
     assert [e.volume for e in fixed_episodes("test", 3)] == ["ts_s9001"] * 3
 
 
+def test_a_shard_of_fixed_episodes_equals_that_slice_of_the_full_list():
+    full = fixed_episodes(None, 8, volume_ids=SCANS)
+    shard = fixed_episodes(None, 8, volume_ids=SCANS, start=5)
+    for a, b in zip(full[5:], shard, strict=True):
+        assert a.volume == b.volume and np.array_equal(a.start_params, b.start_params)
+        assert np.array_equal(a.instruction["goal"], b.instruction["goal"]) and a.kind == b.kind
+
+
 def test_search_improves_on_the_start_and_the_rule_executor_answers():
     episode = EpisodeSampler(SCANS).reset(1)
     found = hill_climb(episode.model, episode.start_params, episode.instruction, evaluations=60)
@@ -99,3 +107,19 @@ def test_model_based_learner_end_to_end(tmp_path):
     assert policy_metadata(path)["task_version"] == "v3" and reloaded.dynamics is not None
     episode = EpisodeSampler(SCANS).reset(0)
     assert len(closed_loop.rollout(reloaded, episode, horizon=2)) == 2
+
+
+def test_colour_guard_restores_an_occluders_colour():
+    # "a bit more skeleton" on ts_s0477 (2026-11-12): soft tissue occluded the
+    # skeleton, so occlusion_aware marked it "mentioned with weight 0" -- and the
+    # guard read that brightness mask as a request and kept the policy's black.
+    from rl.colour_guard import colour_guard
+    n = len(goals.GOAL_CLASSES)
+    start = goals.starting_params()
+    instruction = goals.occlusion_aware(
+        {"goal": np.zeros(4 * n), "weights": None}, {"soft"})
+    soft = transfer.ANATOMICAL_PEAK_INDEX["soft"] * transfer.PARAMS_PER_PEAK
+    darkened = start.copy()
+    darkened[soft + 3:soft + 6] = -0.8
+    guarded = colour_guard(instruction["goal"], start, darkened, start, weights=instruction["weights"])
+    np.testing.assert_allclose(guarded[soft + 3:soft + 6], start[soft + 3:soft + 6])

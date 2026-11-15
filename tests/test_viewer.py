@@ -87,6 +87,19 @@ def test_no_visible_change_hint(session):
     assert hint == "no visible change -- kidneys mostly hidden behind other tissue; try 'show only kidneys'"
 
 
+def test_no_visible_change_hint_at_full_brightness(session):
+    # "brighten the bones a little" with the skeleton already at ~0.95
+    # luminance: nothing left to brighten, not hidden (2026-11-12 session).
+    step = session.state()["current"]
+    params = np.array(step["params"])
+    base = transfer.ANATOMICAL_PEAK_INDEX["skeleton"] * transfer.PARAMS_PER_PEAK
+    params[base + 3:base + 6] = 1.0
+    bright = {**step, "params": params.tolist()}
+    hint = no_visible_change_hint({"target": "skeleton", "attribute": "brightness", "direction": "increase"},
+                                  bright, bright)
+    assert hint == "no visible change -- skeleton already near full brightness"
+
+
 def test_comparison_panel_answers_every_arm(session, policy):
     model = session.model()
     params = goals.starting_params()

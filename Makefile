@@ -19,7 +19,7 @@ TORCH  := $(shell sed -n 's/^torch==//p' requirements.txt)
 IP ?= $(shell { ipconfig getifaddr en0 || ipconfig getifaddr en1 \
 	|| ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($$i == "src") print $$(i + 1)}'; } 2>/dev/null | head -n1)
 
-.PHONY: help system-deps setup scans scans-candidates scans-all llm run certs run-vr test
+.PHONY: help system-deps setup scans scans-candidates scans-all scans-eval llm run certs run-vr test
 
 help:
 	@echo "make system-deps  system packages: Python 3.12-3.14, OpenGL, mkcert (apt, dnf, pacman or brew; uses sudo)"
@@ -28,6 +28,7 @@ help:
 	@echo "make scans        download the 7 demo patients (data/demo_scans.json) from Zenodo"
 	@echo "make scans-candidates  the 24 patients the demo set was picked from (~1 GB); view them: make run SCANS=all"
 	@echo "make scans-all    all 100 scans, for retraining (~3 GB)"
+	@echo "make scans-eval   the larger held-out splits val_extra + test_extra (full dataset, ~2 GB)"
 	@echo "make llm          install and start Ollama if needed, then pull the local LLM ($(LLM)) for free-form voice commands"
 	@echo "make run          viewer on http://127.0.0.1:$(PORT)"
 	@echo "make certs        HTTPS certificate for this machine's LAN address ($(IP)) with mkcert"
@@ -68,6 +69,9 @@ scans-candidates: $(PY)
 
 scans-all: $(PY)
 	$(PY) -u -m tools.fetch_scans --splits all
+
+scans-eval: $(PY)
+	$(PY) -u -m tools.fetch_scans --splits val_extra test_extra
 
 # Installs Ollama when it is missing (pacman, Homebrew, or the official script
 # on other Linux distributions), starts its server when nothing answers, then

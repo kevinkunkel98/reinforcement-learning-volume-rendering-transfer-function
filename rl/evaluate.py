@@ -108,7 +108,7 @@ def run(checkpoint: str, split: str, out: str, lo: int = 0, hi: int = EVAL_EPISO
     """Evaluate `checkpoint` on fixed episodes `lo:hi` of `split`, writing the rows to `out` as it goes."""
     policy_metadata(checkpoint)
     policy = model_based.ModelBasedPolicy.load(checkpoint)
-    episodes = fixed_episodes(split, hi)[lo:hi]
+    episodes = fixed_episodes(split, hi, start=lo)
     rows = []
     for index, episode in enumerate(episodes, start=lo):
         rows.append(evaluate_episode(policy, episode, index, **options))
@@ -169,7 +169,7 @@ def summary(paths) -> str:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("checkpoint", nargs="?")
-    parser.add_argument("--split", default="val", choices=("val", "test"))
+    parser.add_argument("--split", default="val", choices=("val", "test", "val_extra", "test_extra"))
     parser.add_argument("--out")
     parser.add_argument("--range", nargs=2, type=int, default=(0, EVAL_EPISODES), metavar=("LO", "HI"),
                         help="episodes lo:hi of the fixed 300, to split a run over processes")
