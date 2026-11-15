@@ -144,7 +144,10 @@ def _brightness_at_limit(cmd, step) -> list:
 
 def no_visible_change_hint(cmd, before_step, after_step):
     """A note for a targeted command whose render barely changed, else None."""
-    targets = target_classes(cmd)
+    # A class the scan does not measure (vessels without contrast) is not a
+    # goal; the step already says so, "mostly hidden" would contradict it.
+    measured = after_step.get("class_visibility") or {}
+    targets = [name for name in target_classes(cmd) if measured.get(name, 0.0) is not None]
     if not targets:
         return None
     share = changed_pixel_share(before_step, after_step)

@@ -87,6 +87,16 @@ def test_no_visible_change_hint(session):
     assert hint == "no visible change -- kidneys mostly hidden behind other tissue; try 'show only kidneys'"
 
 
+def test_no_visible_change_hint_skips_a_class_that_is_not_a_goal(session):
+    # "highlight the blood vessels" on a scan without contrast already says
+    # "vessels is not a goal"; "mostly hidden ... try 'show only vessels'"
+    # contradicted it (2026-11-15 session).
+    step = session.state()["current"]
+    unmeasured = {**step, "class_visibility": {**step["class_visibility"], "vessels": None}}
+    cmd = {"target": "vessels", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+    assert no_visible_change_hint(cmd, unmeasured, unmeasured) is None
+
+
 def test_no_visible_change_hint_at_full_brightness(session):
     # "brighten the bones a little" with the skeleton already at ~0.95
     # luminance: nothing left to brighten, not hidden (2026-11-12 session).
