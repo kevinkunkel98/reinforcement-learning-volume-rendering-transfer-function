@@ -1,4 +1,4 @@
-# Status — 2026-10-19, updated 2026-11-08
+# Status — 2026-10-19, updated 2026-11-15
 
 Snapshot after the switch to model-based RL, task v2 and v3, the instruction
 parser work, planning through the learned model, and the second VR lab
@@ -16,7 +16,10 @@ own learned model (no renders, ~0.2 s), 0.77–0.78 with 30 renders of search
 on top — level with 200 renders of search from scratch (0.70, p = 0.14–0.9)
 — and 0.90–0.92 with 200. Model-free SAC never got past 0.09. The viewer
 runs the same pipeline on desktop and in a standalone VR headset at 57–58 fps
-head-on.
+head-on. On 92 further held-out patients (statistics over patients), the
+frozen viewer model and a fresh three-seed retrain give the same picture:
+policy 0.45–0.50, planning 0.61–0.65, planning + 30 0.73–0.77 (level with
+search 200 from scratch, 0.74–0.75), planning + 200 0.91–0.93.
 
 ## Code cleanup (2026-11-08)
 
@@ -49,6 +52,8 @@ synthetic scans).
 | 10-21 | **Voice lexicon** (`data/lexicon.json`): one vocabulary for Whisper's prompt, normalization of ASR errors, rule parser and LLM prompt/schema; hybrid parser (rule when every word is covered, else LLM); Whisper hallucination filter; per-class reset. Realistic set: rule parser held-out 58 → 94 % (phrases written by the developer) | `superpowers/specs/2026-10-21-voice-lexicon-design.md`, `superpowers/plans/2026-10-21-voice-lexicon.md` |
 | 10-22 | Voice end to end over 36 scripted commands × 2 synthetic voices: 29 / 30 of 36 right; latency dominated by the 200-evaluation refine (3 s) | `experiments/2026-10-22-voice-e2e-run.md` |
 | 10-23 | **Keep repair** + **two-stage answer**: unmentioned-class brightness drift 0.25 → 0.10 at equal attainment (plan + 200 + keep 0.89–0.91); first image after ~0.7 s (plan + keep, 0.66–0.71), final after ~3.8 s; "no visible change" hint from the render | `experiments/2026-10-23-keep-repair-and-refine-budget.md` |
+| 11-13 | **Larger held-out splits**: `val_extra` (32) / `test_extra` (60) patients from the full TotalSegmentator v2; frozen v3c seed 1 evaluated once; statistics over patients | `experiments/2026-11-14-larger-held-out-splits.md` |
+| 11-14 | **Fresh retrain** (`out/rl_mb_v3d`, Leipzig PC, 8 h 10): three new seeds reproduce v3c within ±0.04 on every arm of the extra splits | same |
 | 10-23 | Occluders as keep-repair candidates: never changes the final answer — the goal itself asks for the occluder fade; left off | `experiments/2026-10-23-keep-repair-occluders.md` |
 
 The 10-14 TODO list, item by item:
@@ -92,6 +97,21 @@ renderer, `down=2`, `xrscale=0.8`, `fovstep=2`.
 | + planning + 200 renders (viewer) | 0.89 / 0.90 / 0.90 | 0.91 / 0.92 / 0.90 |
 | search from scratch, 200 | 0.75 | 0.70 |
 
+On the larger splits (median over patients; v3c seed 1 / v3d seeds 0–2,
+`experiments/2026-11-14-larger-held-out-splits.md`):
+
+| | val_extra (32 patients) | test_extra (60 patients) |
+|---|---|---|
+| policy alone | 0.48 / 0.45–0.47 | 0.50 / 0.47–0.48 |
+| + planning (0 renders) | 0.61 / 0.61–0.65 | 0.63 / 0.61–0.63 |
+| + planning + 30 renders | 0.74 / 0.75–0.77 | 0.77 / 0.73–0.75 |
+| + planning + 200 renders (viewer) | 0.93 / 0.92–0.93 | 0.91 / 0.91–0.92 |
+| search from scratch, 200 | 0.74 | 0.75 |
+
+Wilcoxon over patients, all four models: planning > policy (p ≤ 1.2e-5),
+planning + 30 = search 200 from scratch (p = 0.19–0.8), planning + 200 >
+search 200 (p ≤ 1.6e-6, 90–97 % of patients higher).
+
 Paired Wilcoxon: planning > policy (p ≤ 2e-7), planning + 30 > policy + 30
 (p ≤ 3e-5), planning + 30 = search 200 from scratch (p = 0.14–0.9). Weakest
 kind: show only (planning + 30: 0.48–0.56). Earlier tasks (v1, v2) are
@@ -116,8 +136,10 @@ on another.
   user study or preference data on the current rendering; the 54 pilot
   pairs from 09-17 predate label-scoped rendering. This is the largest gap
   for the thesis.
-- **Small evaluation set:** 4 val / 6 test patients, CT only, one scanner
-  source. The task was revised several times while looking at val.
+- **Evaluation set:** 4 val / 6 test patients, CT only; the task was
+  revised several times while looking at val. Since 11-13 also 32 + 60
+  untouched patients from the full TotalSegmentator, which
+  confirm every result -- still CT only, no breakdown by region or scanner yet.
 - **Weak spots that renders show:** "increase X strongly" can stay timid
   (policy alone 0.14 on one liver case); "a bit more" can overshoot when the
   search clears an occluder; brightness on organs below ~2 % of the image is
