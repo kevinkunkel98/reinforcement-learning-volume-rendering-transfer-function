@@ -28,6 +28,22 @@ matches what a search from scratch reaches with 200 (0.77 vs. 0.70), and with
   <img src="docs/figures/budget_curve.png" width="65%" alt="Median attainment against search budget: starting from the policy and planning needs far fewer renders than searching from scratch" />
 </p>
 
+## What you can say
+
+Plain sentences work; there is no command syntax to learn. Name an organ
+(skeleton or bones, lungs, heart, liver, kidneys, spleen, vessels, soft
+tissue) and say what should happen to it: more or less of it, brighter or
+darker, only these, everything but these, or back to the start. Each render
+below starts from the same default view and shows how the sentence was
+understood. Phrasings the rule parser knows answer at once; the rest go to the
+local LLM (about 2–3 s).
+
+<p align="center">
+  <img src="docs/figures/phrasing_gallery.png" width="85%" alt="Eight free-form instructions and the renders they produce on one CT scan: show only the liver, more heart, less soft tissue, only lungs and heart, only the skeleton, more liver and spleen, more transparent lungs, a brighter image overall" />
+</p>
+
+Made by `docs/figures/make_phrasing_gallery.py`.
+
 ## Quick start
 
 macOS, Ubuntu/Debian, Fedora or Arch. You need `git` and `make`.
