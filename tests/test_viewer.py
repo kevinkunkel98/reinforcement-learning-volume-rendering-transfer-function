@@ -155,3 +155,17 @@ def test_routes(session, monkeypatch):
     assert result["current"]["cmd_text"] == "more liver"
     switched = asyncio.run(server.dataset_switch(server.DatasetRequest(name="ts_s9002")))
     assert switched["dataset"] == "ts_s9002" and switched["total"] == 1
+
+
+def test_the_unlabelled_shell_does_not_follow_the_lungs_peak():
+    # "show only lungs" drew a blue box: unlabelled voxels at lung density are
+    # air -- around the body, in the scanner's field of view, bowel gas -- and
+    # the shell was shaded by the lungs peak too (2026-11-15 session).
+    params = np.full(transfer.N_PEAKS * transfer.PARAMS_PER_PEAK, -1.0)   # every height 0
+    lungs = transfer.ANATOMICAL_PEAK_INDEX["lungs"] * transfer.PARAMS_PER_PEAK
+    params[lungs:lungs + 6] = goals.starting_params()[lungs:lungs + 6]
+    params[lungs + 2] = 1.0                                                # lungs at full height
+    hu = np.array([-1000.0, -850.0])
+    (shell_opacity, _), *rows = transfer.label_scoped_tables(params, hu)
+    lungs_row = rows[transfer.CANONICAL_CLASSES.index("lungs")][0]
+    assert np.all(shell_opacity == 0.0) and lungs_row.max() > 0.5
