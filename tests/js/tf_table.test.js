@@ -40,9 +40,14 @@ test("a class row is shaded by its own peak only", () => {
   assert.equal(Math.max(...skeletonRow.map((s) => s.alpha)), 0);
 });
 
-test("row 0 (unlabelled tissue) uses skeleton, lungs and soft only", () => {
+test("row 0 (unlabelled tissue) uses skeleton and soft only", () => {
   const rows = tf.tfRows(paramsWith({ liver: { center: 65, width: 45, height: 0.6 } }), {}, true);
   assert.equal(Math.max(...rows[0].map((s) => s.alpha)), 0);
+  // Unlabelled voxels at lung density are air: the lungs peak must not light
+  // them, or "show only lungs" draws a box around the body (2026-11-15).
+  const lungs = tf.tfRows(paramsWith({ lungs: { center: -850, width: 150, height: 1 } }), {}, true);
+  assert.equal(Math.max(...lungs[0].map((s) => s.alpha)), 0);
+  assert.ok(Math.max(...lungs[1 + tf.CLASS_ORDER.indexOf("lungs")].map((s) => s.alpha)) > 0.5);
 });
 
 test("layer opacity scales its class row", () => {

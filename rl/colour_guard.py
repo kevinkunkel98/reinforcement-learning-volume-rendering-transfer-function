@@ -21,7 +21,7 @@ rgb (up to the lookup's 1e-6 blend floor), and it is linear in rgb. Visibility
 the same luminance gives the same `bright` and the same `vis`: the guard below
 keeps luminance wherever a brightness target or the keep term could see it,
 and changes nothing the goal metric measures except where it repairs a
-colour. (The unlabelled row blends the skeleton, lungs and soft peaks; their
+colour. (The unlabelled row blends the skeleton and soft peaks; their
 luminance is kept too, so its brightness only moves where a colour is
 repaired.)
 

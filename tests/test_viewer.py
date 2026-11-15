@@ -10,7 +10,7 @@ import answers
 import goals
 import server
 import transfer
-from session import Session, no_visible_change_hint, restore_hidden, scan_label, scan_list
+from session import Session, drop_unsupported, no_visible_change_hint, restore_hidden, scan_label, scan_list
 
 
 @pytest.fixture
@@ -87,6 +87,30 @@ def test_no_visible_change_hint(session):
     assert hint == "no visible change -- kidneys mostly hidden behind other tissue; try 'show only kidneys'"
 
 
+def test_no_visible_change_hint_skips_a_class_that_is_not_a_goal(session):
+    # "highlight the blood vessels" on a scan without contrast already says
+    # "vessels is not a goal"; "mostly hidden ... try 'show only vessels'"
+    # contradicted it (2026-11-15 session).
+    step = session.state()["current"]
+    unmeasured = {**step, "class_visibility": {**step["class_visibility"], "vessels": None}}
+    cmd = {"target": "vessels", "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+    assert no_visible_change_hint(cmd, unmeasured, unmeasured) is None
+
+
+def test_unsupported_classes_are_dropped_from_a_multi_class_command():
+    # "everything except the heart semi transparent" on a scan without
+    # contrast: vessels made the whole compound fall back to exact mode, so
+    # the policy never ran (2026-11-15 session).
+    sub = lambda c: {"target": c, "attribute": "opacity", "direction": "decrease", "strength": "moderately"}
+    cmd = {"compound": [sub("liver"), sub("vessels"), sub("soft")]}
+    kept, dropped = drop_unsupported(cmd, {"liver", "soft", "heart"})
+    assert kept == {"compound": [sub("liver"), sub("soft")]} and dropped == ["vessels"]
+    kept, dropped = drop_unsupported({"compound": [sub("liver"), sub("vessels")]}, {"liver"})
+    assert kept == sub("liver") and dropped == ["vessels"]
+    # a single command keeps its own message path ("vessels is not a goal")
+    assert drop_unsupported(sub("vessels"), {"liver"}) == (sub("vessels"), [])
+
+
 def test_no_visible_change_hint_at_full_brightness(session):
     # "brighten the bones a little" with the skeleton already at ~0.95
     # luminance: nothing left to brighten, not hidden (2026-11-12 session).
@@ -131,3 +155,17 @@ def test_routes(session, monkeypatch):
     assert result["current"]["cmd_text"] == "more liver"
     switched = asyncio.run(server.dataset_switch(server.DatasetRequest(name="ts_s9002")))
     assert switched["dataset"] == "ts_s9002" and switched["total"] == 1
+
+
+def test_the_unlabelled_shell_does_not_follow_the_lungs_peak():
+    # "show only lungs" drew a blue box: unlabelled voxels at lung density are
+    # air -- around the body, in the scanner's field of view, bowel gas -- and
+    # the shell was shaded by the lungs peak too (2026-11-15 session).
+    params = np.full(transfer.N_PEAKS * transfer.PARAMS_PER_PEAK, -1.0)   # every height 0
+    lungs = transfer.ANATOMICAL_PEAK_INDEX["lungs"] * transfer.PARAMS_PER_PEAK
+    params[lungs:lungs + 6] = goals.starting_params()[lungs:lungs + 6]
+    params[lungs + 2] = 1.0                                                # lungs at full height
+    hu = np.array([-1000.0, -850.0])
+    (shell_opacity, _), *rows = transfer.label_scoped_tables(params, hu)
+    lungs_row = rows[transfer.CANONICAL_CLASSES.index("lungs")][0]
+    assert np.all(shell_opacity == 0.0) and lungs_row.max() > 0.5

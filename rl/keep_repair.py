@@ -14,8 +14,8 @@ Peak <-> class: one peak per canonical goal class, at index
 vessels, skeleton). Centres are fixed (neither policy nor search moves them),
 so `commands._find_or_create_peak`'s nearest-centre lookup lands on the same
 index for every anatomical class. In label-scoped rendering a voxel labelled c
-is shaded by peak c alone; unlabelled voxels by the skeleton, lungs and soft
-peaks (`transfer.UNLABELLED_PEAKS`). Those three are still just their class's
+is shaded by peak c alone; unlabelled voxels by the skeleton and soft
+peaks (`transfer.UNLABELLED_PEAKS`). Those two are still just their class's
 peak here: reverting an unmentioned one also moves the unlabelled shell back
 toward the start, which is the point, and when the shell matters to the goal
 (an occluder, or "other" is charged) the attainment check below keeps it.

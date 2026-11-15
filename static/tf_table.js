@@ -14,7 +14,7 @@
   const SAMPLES = 256;
   // Mirrors transfer.CANONICAL_PEAK_ORDER and transfer.UNLABELLED_PEAKS.
   const PEAK_ORDER = ["lungs", "soft", "liver", "kidneys", "spleen", "heart", "vessels", "skeleton"];
-  const UNLABELLED_PEAKS = ["skeleton", "lungs", "soft"];
+  const UNLABELLED_PEAKS = ["skeleton", "soft"];
   // Label id - 1 -> class (viewer.js CLASS_IDS).
   const CLASS_ORDER = ["skeleton", "lungs", "heart", "vessels", "liver", "kidneys", "spleen", "soft"];
   // transfer.UNLABELLED_OPACITY: the unlabelled row's opacity multiplier for

@@ -14,7 +14,10 @@ from eval_parsers import matches
 # Realistic spoken phrasings the rule parser alone does not cover (the hybrid
 # parser sends them to the LLM).
 NEEDS_LLM = {"Leitenlangs", "Revered skeleton.", "the muscles are hiding everything, get rid of them",
-             "everything except the skeleton should go away"}
+             # 2026-11-15 viewer session
+             "can I see the organs without the skeleton",
+             "put the heart in focus and push everything else into the background",
+             "make everything except the heart semi transparent"}
 
 
 def _eval_set(name):
@@ -94,6 +97,101 @@ def test_hybrid_uses_rules_for_covered_phrases_and_the_llm_for_the_rest(monkeypa
     assert meta["parser_used"] == "rule"
     cmd, meta = commands.parse_command_with_meta("the heart is hiding, bring it forward", parser="hybrid")
     assert meta["parser_used"] == "llm" and cmd["target"] == "heart"
+
+
+def test_llm_one_element_target_list_is_unwrapped(monkeypatch):
+    # qwen2.5:7b answered "can I see the organs without the skeleton" with
+    # target ["skeleton"] on a decrease; the validator looked the list up as a
+    # dict key and the server returned 500 (2026-11-15 session).
+    llm_cmd = {"compound": [{"target": ["skeleton"], "attribute": "opacity", "direction": "decrease",
+                             "strength": "strongly"}]}
+    monkeypatch.setattr(commands, "urlopen", _fake_ollama(llm_cmd))
+    cmd, meta = commands.parse_command_with_meta("can I see the organs without the skeleton", parser="hybrid")
+    assert meta["parser_used"] == "llm"
+    assert cmd == {"target": "skeleton", "attribute": "opacity", "direction": "decrease", "strength": "strongly"}
+
+
+def test_a_list_target_outside_show_only_is_invalid_not_a_crash():
+    cmd = {"target": ["skeleton", "lungs"], "attribute": "opacity", "direction": "decrease", "strength": "strongly"}
+    assert commands._validate_cmd(cmd) is False
+
+
+def test_llm_show_only_plus_reset_everything_else_is_show_only(monkeypatch):
+    # "focus on X, hide everything else": the model appends a target-less
+    # reset to the show_only, which failed validation (2026-11-15 session).
+    llm_cmd = {"compound": [{"target": "heart", "attribute": None, "direction": "show_only"},
+                            {"target": None, "attribute": None, "direction": "reset"}]}
+    monkeypatch.setattr(commands, "urlopen", _fake_ollama(llm_cmd))
+    for text in ("put the heart in focus and push everything else into the background",
+                 "I want to focus on the heart, hide everything else"):
+        cmd, meta = commands.parse_command_with_meta(text, parser="hybrid")
+        assert meta["parser_used"] == "llm" and not meta["parser_fallback"], text
+        assert cmd == {"target": "heart", "attribute": None, "direction": "show_only", "strength": None}
+
+
+def test_into_the_background_is_not_the_retired_air_class():
+    commands._check_retired("push the rest into the background")
+    commands._check_retired("keep the skeleton in the background")
+    with pytest.raises(commands.RetiredClassError):
+        commands._check_retired("hide the background")
+
+
+def test_everything_except_x_changes_every_other_class(monkeypatch):
+    # The model listed the other classes but left out soft tissue; the answer
+    # was rejected as ungrounded and the rule parser turned it into "less
+    # heart" -- the opposite (2026-11-15 session).
+    others = ["skeleton", "lungs", "vessels", "liver", "kidneys", "spleen"]
+    llm_cmd = {"compound": [{"target": c, "attribute": "opacity", "direction": "decrease", "strength": "moderately"}
+                            for c in others]}
+    monkeypatch.setattr(commands, "urlopen", _fake_ollama(llm_cmd))
+    cmd, meta = commands.parse_command_with_meta("make everything except the heart semi transparent", parser="hybrid")
+    assert meta["parser_used"] == "llm" and not meta["parser_fallback"]
+    targets = [sub["target"] for sub in cmd["compound"]]
+    assert sorted(targets) == sorted(c for c in commands.CLASS_SYNONYMS if c != "heart")
+    assert all(sub["direction"] == "decrease" for sub in cmd["compound"])
+
+
+def test_a_repeated_instruction_keeps_the_explicit_strength():
+    # "the bones are blinding, dim them heavily" says one thing twice; the
+    # merge kept the first clause's default strength (2026-11-15 session).
+    assert _rule("the bones are blinding, dim them heavily")["strength"] == "strongly"
+    assert _rule("the liver is too faint, bring it up a lot")["strength"] == "strongly"
+    assert _rule("dim the bones a bit, the bones are blinding")["strength"] == "slightly"
+
+
+def _every_class(attribute, direction, strength):
+    return {"compound": [{"target": c, "attribute": attribute, "direction": direction, "strength": strength}
+                         for c in commands.CLASS_SYNONYMS]}
+
+
+def test_global_brightness_changes_every_class():
+    # "the picture is too dark overall" was refused (2026-11-15 session).
+    assert _rule("the picture is too dark overall") == _every_class("brightness", "increase", "moderately")
+    assert _rule("make everything a bit darker") == _every_class("brightness", "decrease", "slightly")
+    assert _rule("brighten the whole image a lot") == _every_class("brightness", "increase", "strongly")
+    assert _rule("darken the liver")["target"] == "liver"   # a named class stays a single command
+    assert commands.describe_command(_rule("make everything a bit darker")) == "darken everything slightly"
+
+
+def test_llm_global_brightness_is_every_class(monkeypatch):
+    llm_cmd = {"target": None, "attribute": "brightness", "direction": "increase", "strength": "moderately"}
+    monkeypatch.setattr(commands, "urlopen", _fake_ollama(llm_cmd))
+    cmd = commands.parse_command_llm("the scene looks gloomy, lift it")
+    assert cmd == _every_class("brightness", "increase", "moderately")
+
+
+def test_hide_everything_but_x_is_show_only():
+    show = lambda *t: {"target": t[0] if len(t) == 1 else list(t), "attribute": "opacity",
+                       "direction": "show_only", "strength": None}
+    assert _rule("hide everything but the lungs") == show("lungs")
+    assert _rule("everything except the skeleton should go away") == show("skeleton")
+    assert _rule("remove everything except the liver and the spleen") == show("liver", "spleen")
+
+
+def test_rule_parser_refuses_an_except_it_cannot_model():
+    with pytest.raises(ValueError):
+        _rule("make everything except the heart semi transparent")
+    assert _rule("show only the heart")["direction"] == "show_only"
 
 
 def test_hybrid_falls_back_to_rules_when_the_llm_is_offline(monkeypatch):

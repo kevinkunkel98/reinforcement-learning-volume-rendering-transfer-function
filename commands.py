@@ -42,7 +42,13 @@ class RetiredClassError(ValueError):
     """A retired class (fat/air/spongy) was named: refused, never remapped."""
 
 
+# "push the rest into the background" is an idiom, not the retired air class
+# (2026-11-15 session: it refused a valid show-only).
+_BACKGROUND_IDIOM = re.compile(r"\b(?:in|into|to) the background\b")
+
+
 def _check_retired(t: str) -> None:
+    t = _BACKGROUND_IDIOM.sub(" ", t)
     for phrase, name in _RETIRED_LOOKUP:
         if re.search(rf"\b{re.escape(phrase)}\b", t):
             raise RetiredClassError(
@@ -482,7 +488,65 @@ def _split_clauses(t: str) -> list:
     return _merge_modifier_clauses([c for c in _CLAUSE_SPLIT_RE.split(t) if c])
 
 
+# "everything except the heart", "all but the lungs", "the rest apart from ...":
+# a change to every class but the named ones.
+_EXCEPT_RE = re.compile(r"\b(?:everything|everyone|all|the rest|anything|every class)\b.*?"
+                        r"\b(?:except(?: for)?|apart from|other than|besides|but)\b")
+
+
+# "the picture is too dark overall", "make everything a bit darker".
+_GLOBAL_RE = re.compile(r"\b(?:everything|overall|all over|the whole (?:image|picture|view|scene|thing|volume|body)"
+                        r"|the (?:image|picture|view|scene|render\w*|volume))\b")
+
+
+def _every_class(attribute: str, direction: str, strength: str) -> dict:
+    return {"compound": [{"target": c, "attribute": attribute, "direction": direction, "strength": strength}
+                         for c in CLASS_SYNONYMS]}
+
+
+def _global_brightness(t: str):
+    """A brightness change to the whole image (no class named), else None."""
+    if not _GLOBAL_RE.search(t) or not _BRIGHTNESS_RE.search(t) or _EXCEPT_RE.search(t) or _find_classes(t):
+        return None
+    return _every_class("brightness", _free_direction(t, "brightness"), _strength_in(t))
+
+
+_HIDE_ALL_RE = re.compile(r"\b(?:hide|remove|get rid of|lose|drop|clear|fade out|kill|make invisible)\b"
+                          r"|\b(?:go away|disappear|vanish|be gone|be hidden)\b")
+
+
+def _hide_everything_but(t: str):
+    """The classes kept by "hide everything but X" / "everything except X
+    should go away" -- show_only X -- else None."""
+    match = _EXCEPT_RE.search(t)
+    if not match or not _HIDE_ALL_RE.search(t):
+        return None
+    keep = _find_classes(t[match.end():])
+    return keep or None
+
+
 def parse_command_rule(text: str) -> dict:
+    """`_parse_command_rule`, refusing "everything except X" unless it parsed
+    as show_only: the grammar has no "every class but", and dropping the
+    "except" turned "everything except the heart semi transparent" into
+    "less heart" (2026-11-15 session)."""
+    t = _normalise_text(text)
+    whole = _global_brightness(t)
+    if whole:
+        return whole
+    keep = _hide_everything_but(t)
+    if keep:
+        return {"target": keep[0] if len(keep) == 1 else keep, "attribute": "opacity",
+                "direction": "show_only", "strength": None}
+    cmd = _parse_command_rule(text)
+    if _EXCEPT_RE.search(t):
+        subs = cmd["compound"] if isinstance(cmd.get("compound"), list) else [cmd]
+        if not all(s.get("direction") in ("show_only", "reset") for s in subs):
+            raise ValueError(f"could not parse {text!r}: 'everything except' needs the language model")
+    return cmd
+
+
+def _parse_command_rule(text: str) -> dict:
     """Text -> command, without a language model.
 
     The fixed grammar in COMMANDS.md parses exactly as before; everyday
@@ -548,12 +612,17 @@ def parse_command_rule(text: str) -> dict:
         previous = parsed[-1]["target"]
         if isinstance(previous, list):
             previous = previous[-1]
-    # "the heart is too strong, tone it down" says one thing twice.
+    # "the heart is too strong, tone it down" says one thing twice; a
+    # modifier in either clause ("..., dim them heavily") wins over the
+    # default strength.
     unique = []
     for sub in subcommands:
-        if not any((u["target"], u["attribute"], u["direction"]) == (sub["target"], sub["attribute"], sub["direction"])
-                   for u in unique):
+        same = next((k for k, u in enumerate(unique) if (u["target"], u["attribute"], u["direction"])
+                     == (sub["target"], sub["attribute"], sub["direction"])), None)
+        if same is None:
             unique.append(sub)
+        elif unique[same].get("strength") == "moderately" and sub.get("strength") not in (None, "moderately"):
+            unique[same] = {**unique[same], "strength": sub["strength"]}
     return unique[0] if len(unique) == 1 else {"compound": unique}
 
 
@@ -946,6 +1015,10 @@ def _repair_single(obj, text: str):
         return obj
     obj = dict(obj)
     direction = obj.get("direction")
+    # A one-class list on a single-class command ("organs without the
+    # skeleton" -> target ["skeleton"] on a decrease) is that class.
+    if direction != "show_only" and isinstance(obj.get("target"), list) and len(obj["target"]) == 1:
+        obj["target"] = obj["target"][0]
     if direction == "set":
         obj.pop("strength", None)
         if obj.get("attribute") is None:
@@ -968,11 +1041,46 @@ def _repair_single(obj, text: str):
     return obj
 
 
+def _complete_everything_except(subs, text: str):
+    """"Make everything except the heart semi transparent": the model lists
+    the other classes and tends to forget one (soft tissue). When the text
+    says "everything except X" and the answer is one change to several
+    classes, none of them X, that change goes to every class but X."""
+    t = _normalise_text(text)
+    match = _EXCEPT_RE.search(t)
+    if not match or len(subs) < 2 or not all(isinstance(s, dict) for s in subs):
+        return subs
+    shape = {(s.get("attribute"), s.get("direction"), s.get("strength")) for s in subs}
+    excluded = set(_find_classes(t[match.end():]))
+    if len(shape) != 1 or not excluded or any(s.get("target") in excluded for s in subs):
+        return subs
+    if any(s.get("direction") not in ("increase", "decrease") for s in subs):
+        return subs
+    template = subs[0]
+    return [{**template, "target": c} for c in CLASS_SYNONYMS if c not in excluded]
+
+
+def _is_reset_everything(obj) -> bool:
+    return isinstance(obj, dict) and obj.get("direction") == "reset" and not obj.get("target")
+
+
 def _repair_cmd(obj, text: str):
     if isinstance(obj, dict) and isinstance(obj.get("compound"), list):
-        return {"compound": [_repair_single(sub, text) for sub in obj["compound"]]}
+        subs = obj["compound"]
+        # "focus on the heart, hide everything else": qwen2.5:7b adds a
+        # target-less reset to the show_only. Hiding the rest is what
+        # show_only means; a full reset there would undo it.
+        if any(isinstance(s, dict) and s.get("direction") == "show_only" for s in subs):
+            subs = [s for s in subs if not _is_reset_everything(s)] or subs
+        subs = _complete_everything_except(subs, text)
+        return {"compound": [_repair_single(sub, text) for sub in subs]}
     if isinstance(obj, dict) and obj.get("direction") == "set":
         return {"compound": [_repair_single(obj, text)]}
+    if (isinstance(obj, dict) and obj.get("target") is None and obj.get("attribute") == "brightness"
+            and obj.get("direction") in ("increase", "decrease")):
+        # "the picture is too dark overall": no class -> the whole image.
+        strength = _repair_single(obj, text)["strength"]
+        return _every_class("brightness", obj["direction"], strength)
     return _repair_single(obj, text)
 
 
@@ -995,6 +1103,8 @@ def _ungrounded_reason(cmd, text: str):
     if any(isinstance(sub, dict) and sub.get("direction") == "reset" for sub in subs) and not _is_reset(t):
         return "reset without a reset word"
     named = set(_find_classes(t)) | set(_fuzzy_classes(t))
+    if _EXCEPT_RE.search(t) or (_GLOBAL_RE.search(t) and set(_command_targets(cmd)) == set(CLASS_SYNONYMS)):
+        named |= set(CLASS_SYNONYMS)   # "everything except X", "the whole image" name all the others
     missing = [c for c in _command_targets(cmd) if c not in named]
     if missing:
         return f"target(s) {missing} not named in the text"
@@ -1062,7 +1172,7 @@ def _validate_single_cmd(obj) -> bool:
         if not targets or any(t is None or t not in CLASS_SYNONYMS for t in targets):
             return False
     else:
-        if obj["target"] is not None and obj["target"] not in CLASS_SYNONYMS:
+        if obj["target"] is not None and (not isinstance(obj["target"], str) or obj["target"] not in CLASS_SYNONYMS):
             return False
         if obj["direction"] == "increase" or obj["direction"] == "decrease":
             if obj["target"] is None:
@@ -1352,7 +1462,16 @@ def describe_command(cmd) -> str:
     "show only liver and spleen", "more liver + less lungs"), so a listener can
     check what was understood."""
     if isinstance(cmd, dict) and isinstance(cmd.get("compound"), list):
-        return " + ".join(describe_command(sub) for sub in cmd["compound"])
+        subs = cmd["compound"]
+        shapes = {(s.get("attribute"), s.get("direction"), s.get("strength")) for s in subs if isinstance(s, dict)}
+        if len(shapes) == 1 and len(subs) > 1:
+            targets = [s.get("target") for s in subs]
+            rest = [c for c in CLASS_SYNONYMS if c not in targets]
+            if set(targets) <= set(CLASS_SYNONYMS) and len(rest) <= 1:
+                # every class (but one): "brighten everything", "less everything except heart"
+                said = _describe_single({**subs[0], "target": "everything"}).replace("the everything", "everything")
+                return said + (f" except {CLASS_LABEL.get(rest[0], rest[0])}" if rest else "")
+        return " + ".join(describe_command(sub) for sub in subs)
     if isinstance(cmd, dict) and isinstance(cmd.get("camera"), dict):
         cam = cmd["camera"]
         said = _STRENGTH_SAID.get(cam.get("strength"), "")

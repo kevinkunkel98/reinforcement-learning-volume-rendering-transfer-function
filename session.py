@@ -87,6 +87,27 @@ def _subs(cmd):
     return cmd["compound"] if isinstance(cmd.get("compound"), list) else [cmd]
 
 
+def drop_unsupported(cmd, supported):
+    """(`cmd` without the sub-commands whose class this scan cannot score,
+    the classes dropped). Only a compound loses parts: one unsupported class
+    (vessels on a scan without contrast) used to send the whole command to
+    the exact fallback, so the policy never ran. A single command is left to
+    its own "not a goal" message."""
+    if not isinstance(cmd, dict) or not isinstance(cmd.get("compound"), list):
+        return cmd, []
+    kept, dropped = [], []
+    for sub in cmd["compound"]:
+        target = sub.get("target")
+        if isinstance(target, str) and target in goals.GOAL_CLASSES and target not in supported \
+                and sub.get("direction") != "reset":
+            dropped.append(target)
+        else:
+            kept.append(sub)
+    if not dropped or not kept:
+        return cmd, []
+    return (kept[0] if len(kept) == 1 else {"compound": kept}), dropped
+
+
 def target_classes(cmd) -> list:
     """Goal classes a command singles out, in order (show_only and resets name none)."""
     found = []
@@ -144,7 +165,10 @@ def _brightness_at_limit(cmd, step) -> list:
 
 def no_visible_change_hint(cmd, before_step, after_step):
     """A note for a targeted command whose render barely changed, else None."""
-    targets = target_classes(cmd)
+    # A class the scan does not measure (vessels without contrast) is not a
+    # goal; the step already says so, "mostly hidden" would contradict it.
+    measured = after_step.get("class_visibility") or {}
+    targets = [name for name in target_classes(cmd) if measured.get(name, 0.0) is not None]
     if not targets:
         return None
     share = changed_pixel_share(before_step, after_step)
@@ -430,6 +454,12 @@ class Session:
         else:
             rest = cmd
 
+        dropped = []
+        if rest is not None and mode in ("policy", "search"):
+            rest, dropped = drop_unsupported(rest, set(goals.goal_classes_for_volume(self.scan)))
+            # a note only for a class the user named, not for "everything"
+            dropped = [c for c in dropped if c in commands._find_classes(commands._normalise_text(text))]
+
         job = None
         if rest is None:
             new_params, used, message = params, "exact", None
@@ -439,6 +469,8 @@ class Session:
         else:
             new_params, used, message, job = self._answer(rest, params, mode, steps, defer_refine)
 
+        if dropped:
+            message = _join(message, f"{' and '.join(dropped)} skipped -- not a goal on this scan")
         if parser_meta["parser_fallback"] and not message:
             message = f"LLM parse rejected, used the rule parser -- {parser_meta['parser_fallback']}"
         step = self.render_step(new_params, text, stored_cmd, next_id, camera, mode=used, message=message,

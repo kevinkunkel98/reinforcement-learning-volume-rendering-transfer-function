@@ -184,8 +184,11 @@ def _opacity_and_color_at(params: np.ndarray, hu: np.ndarray, peaks=None):
 # Labelled voxels are shaded by their own class's peak alone, so peaks that
 # share a Hounsfield range (soft 40, kidneys 45, heart 50, spleen 55, liver
 # 65 HU) do not light each other's organs. Unlabelled voxels (skin, fat,
-# muscle) see only the peaks HU alone can identify.
-UNLABELLED_PEAKS = ("skeleton", "lungs", "soft")
+# muscle) see only the peaks HU alone can identify. Not the lungs peak:
+# unlabelled voxels at lung density are air -- around the body, in the
+# scanner's field of view, bowel gas -- and "show only lungs" drew them as a
+# box around the body (2026-11-15).
+UNLABELLED_PEAKS = ("skeleton", "soft")
 
 # The unlabelled shell would cover about half the image at full opacity, so an
 # organ changing a lot in log visibility would barely change on screen. Task
