@@ -1,0 +1,31 @@
+# docker compose up: the viewer on http://127.0.0.1:8000 and Ollama for
+# free-form commands. Scans and sessions stay on the host (bind mounts),
+# so a rebuild keeps them. See "Docker" in the README.
+services:
+  viewer:
+    build: .
+    image: say-what-you-see
+    # files the viewer writes to out/ belong to the host user (1000 by default)
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "127.0.0.1:${PORT:-8000}:8000"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      SCANS: ${SCANS:-demo}
+      HOME: /tmp
+    volumes:
+      - ./data/totalseg:/app/data/totalseg
+      - ./out:/app/out
+      - ./certs:/app/certs
+      - whisper:/cache/huggingface
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:0.21.0
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  whisper:
+  ollama:
