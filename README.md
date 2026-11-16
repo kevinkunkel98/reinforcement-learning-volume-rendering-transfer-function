@@ -128,6 +128,29 @@ ollama pull qwen2.5:7b
 `server.py --dataset ts_s0591` starts on another scan. With `--port 8001`
 it uses another port.
 
+### Docker
+
+For systems too old for the pinned packages (torch and vtk need glibc 2.28,
+so not Ubuntu 18.04) or to keep the system clean. CPU only, rendering in
+software. Needs Docker with Compose; on old hosts Docker 20.10.10 or newer.
+
+```bash
+mkdir -p out data/totalseg certs
+docker compose build
+docker compose run --rm viewer python -m tools.fetch_scans --demo --splits
+docker compose up -d                                   # http://127.0.0.1:8000
+docker compose exec ollama ollama pull qwen2.5:7b      # free-form commands, ~5 GB
+```
+
+Scans (`data/totalseg`) and sessions (`out/`) stay on the host. The LLM runs
+on the CPU in the container, so free-form commands take several seconds. For VR,
+make the certificate on the host (`make certs`) and run:
+
+```bash
+docker compose run --rm -p 8000:8000 viewer python server.py --host 0.0.0.0 \
+    --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
+```
+
 ## Code
 
 | | |
