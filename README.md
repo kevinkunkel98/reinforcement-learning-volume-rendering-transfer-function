@@ -19,13 +19,14 @@ patients it has never seen. It also works in VR.
    improve the suggestion in about 0.2 s, without a single render.
 4. **Polish.** A short search on the real objective finishes the job.
 
-On held-out patients, the policy reaches about half of the goal (median
-attainment 0.48). Planning raises that to 0.64. With 30 search steps on top it
-matches what a search from scratch reaches with 200 (0.77 vs. 0.70), and with
-200 it reaches 0.90. Model-free RL (SAC) stayed below 0.1.
+On 60 patients never used during development, the policy reaches about half
+of the goal (median attainment 0.49). Planning raises that to 0.64. With 30
+search steps on top it matches what a search from scratch reaches with 200
+(0.76 each; from scratch, 30 steps reach 0.23), and with 200 it reaches 0.91.
+Model-free RL (SAC) stayed below 0.1 on an earlier version of the task.
 
 <p align="center">
-  <img src="docs/figures/budget_curve.png" width="65%" alt="Median attainment against search budget: starting from the policy and planning needs far fewer renders than searching from scratch" />
+  <img src="docs/figures/budget_curve.png" width="65%" alt="Median attainment against search budget on 60 held-out patients: policy plus planning reaches with 30 renders what a search from scratch needs 200 for" />
 </p>
 
 ## What you can say
