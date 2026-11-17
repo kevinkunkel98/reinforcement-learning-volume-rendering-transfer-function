@@ -178,6 +178,19 @@ docker compose run --rm -p 8000:8000 viewer python server.py --host 0.0.0.0 \
     --ssl-certfile certs/public.pem --ssl-keyfile certs/public-key.pem
 ```
 
+## Architecture
+
+Training happens once, offline: an ensemble of networks learns to predict
+what the renderer would show, and the policy is trained by gradients through
+it. Each instruction then runs policy, planning and a short search.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/figures/pipeline_rl_warmstart.dark.png" />
+    <img src="docs/figures/pipeline_rl_warmstart.drawio.png" width="100%" alt="Pipeline: offline, real renders train an ensemble surrogate of the renderer and the policy is trained through it; per instruction, parser, policy (0.48), planning through the model (0.64), search (0.77 after 30 renders, 0.90 after 200), keep repair and colour guard, rendering" />
+  </picture>
+</p>
+
 ## Code
 
 | | |
