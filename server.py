@@ -37,8 +37,8 @@ MIN_AUDIO_BYTES = 1000
 # POLICY_TWO_STAGE=0 answers in one synchronous stage.
 TWO_STAGE = os.environ.get("POLICY_TWO_STAGE", "1") != "0"
 REFINE_WAIT_SECONDS = 20.0
-# SCANS=all lists every downloaded patient, not only the demo set.
-SHOW_ALL_SCANS = os.environ.get("SCANS", "demo") == "all"
+# Every downloaded patient is listed, the demo set first; SCANS=demo lists only the demo set.
+SHOW_ALL_SCANS = os.environ.get("SCANS", "all") != "demo"
 
 _session = None
 _refine_events = {}   # step id -> asyncio.Event, set when its refine settles

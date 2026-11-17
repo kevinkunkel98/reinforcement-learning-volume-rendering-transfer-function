@@ -26,7 +26,7 @@ help:
 	@echo "make setup        virtualenv in .venv + pinned dependencies (Python: $(or $(PYTHON),none found))"
 	@echo "                  (Linux without an NVIDIA GPU: make setup CPU=1)"
 	@echo "make scans        download the 7 demo patients (data/demo_scans.json) from Zenodo"
-	@echo "make scans-candidates  the 24 patients the demo set was picked from (~1 GB); view them: make run SCANS=all"
+	@echo "make scans-candidates  the 24 patients the demo set was picked from (~1 GB); they show up in make run"
 	@echo "make scans-all    all 100 scans, for retraining (~3 GB)"
 	@echo "make scans-eval   the larger held-out splits val_extra + test_extra (full dataset, ~2 GB)"
 	@echo "make llm          install and start Ollama if needed, then pull the local LLM ($(LLM)) for free-form voice commands"
@@ -98,9 +98,9 @@ llm:
 	echo "Ollama did not start: see out/ollama.log"; exit 1
 	ollama pull $(LLM)
 
-# SCANS=all lists every downloaded patient, not only the demo set
+# Lists every downloaded patient, the demo set first; SCANS=demo lists only the demo set
 run: $(PY)
-	SCANS=$(or $(SCANS),demo) $(PY) server.py --port $(PORT)
+	SCANS=$(or $(SCANS),all) $(PY) server.py --port $(PORT)
 
 certs:
 	@command -v mkcert >/dev/null || { echo "mkcert is not installed: make system-deps"; exit 1; }
@@ -111,7 +111,7 @@ certs:
 run-vr: $(PY)
 	@test -f certs/lan.pem || { echo "no certificate yet: make certs"; exit 1; }
 	@echo "headset browser: https://$(IP):$(PORT)/"
-	SCANS=$(or $(SCANS),demo) $(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
+	SCANS=$(or $(SCANS),all) $(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
 
 test: $(PY)
 	$(PY) -m pytest -q

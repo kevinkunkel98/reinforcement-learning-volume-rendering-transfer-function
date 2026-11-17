@@ -58,14 +58,14 @@ make scans         # the 7 demo patients from Zenodo, ~300 MB
 make run           # http://127.0.0.1:8000
 ```
 
-The scan list holds a fixed demo set of seven patients, picked because they
-render well (`data/demo_scans.json`). Five of them were never seen in
+The scan list shows every downloaded patient, led by a fixed demo set of
+seven picked because they render well (`data/demo_scans.json`). Five of them were never seen in
 training, including s0477, the start scan, and s1379, a contrast scan that
 shows the vessels. Type a command, or hold Space to talk.
 
 `make scans-candidates` fetches the 24 patients the demo set was picked from
-(~1 GB). `make scans-all` fetches all 100 (~3 GB). `make run SCANS=all` lists
-every downloaded patient in the viewer.
+(~1 GB), `make scans-all` all 100 (~3 GB). `make run SCANS=demo` lists only the
+demo set.
 
 **Free-form voice commands:** run `make llm`. It installs
 [Ollama](https://ollama.com) if it is missing (pacman, Homebrew, or the
@@ -97,7 +97,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned   # once, so .\make.ps1 may 
 .\make.ps1 system-deps   # Python 3.13, mkcert, Ollama via winget; then open a new terminal
 .\make.ps1 setup
 .\make.ps1 scans
-.\make.ps1 run           # .\make.ps1 run -Scans all, .\make.ps1 certs, .\make.ps1 run-vr, .\make.ps1 help
+.\make.ps1 run           # .\make.ps1 run -Scans demo, .\make.ps1 certs, .\make.ps1 run-vr, .\make.ps1 help
 ```
 
 On Windows, pip installs the CPU build of torch by default, so you don't need
@@ -112,7 +112,7 @@ python3 -m venv .venv                          # Python 3.12-3.14
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m tools.fetch_scans --demo --splits   # demo patients
 .venv/bin/python server.py                     # http://127.0.0.1:8000
-SCANS=all .venv/bin/python server.py           # list every downloaded patient
+SCANS=demo .venv/bin/python server.py          # list only the demo patients
 
 # VR: certificate for this machine's LAN address, then serve over HTTPS
 mkcert -cert-file certs/lan.pem -key-file certs/lan-key.pem <lan-ip> localhost 127.0.0.1

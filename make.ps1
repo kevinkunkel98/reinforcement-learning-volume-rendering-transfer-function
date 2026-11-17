@@ -4,7 +4,7 @@
 param(
     [Parameter(Position = 0)] [string] $Target = "help",
     [switch] $Cpu,                  # setup: CPU build of torch (no NVIDIA GPU)
-    [string] $Scans = "demo",       # run / run-vr: "all" lists every downloaded patient
+    [string] $Scans = "all",        # run / run-vr: "demo" lists only the demo patients
     [int] $Port = 8000,
     [string] $Ip = "",              # certs / run-vr: override the LAN address
     [string] $Llm = "qwen2.5:7b"
@@ -78,7 +78,7 @@ switch ($Target) {
 .\make.ps1 scans-all          all 100 scans, for retraining (~3 GB)
 .\make.ps1 scans-eval         the larger held-out splits val_extra + test_extra (~2 GB)
 .\make.ps1 llm                install and start Ollama if needed, then pull the local LLM ($Llm)
-.\make.ps1 run [-Scans all]   viewer on http://127.0.0.1:$Port
+.\make.ps1 run [-Scans demo]  viewer on http://127.0.0.1:$Port
 .\make.ps1 certs              HTTPS certificate for this machine's LAN address (mkcert)
 .\make.ps1 run-vr             viewer over HTTPS for a headset on the same network
 .\make.ps1 test               the tests (~30 s, synthetic scans, no download needed)
