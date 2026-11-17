@@ -1,7 +1,9 @@
 # Say what you want to see
 
 Turning words into a transfer function has so far meant optimising from
-scratch for every request, at hundreds of renders each. This project learns it
+scratch for every request, at hundreds of renders each
+([T2TF](https://arxiv.org/abs/2304.04083),
+[IntuiTF](https://arxiv.org/abs/2506.18407)). This project learns it
 once: a policy trained with model-based reinforcement learning answers in a
 single forward pass, on patients it has never seen, and a learned model of the
 renderer refines that answer without rendering.
