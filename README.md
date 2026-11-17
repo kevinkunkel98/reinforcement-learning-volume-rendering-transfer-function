@@ -29,6 +29,20 @@ Model-free RL (SAC) stayed below 0.1 on an earlier version of the task.
   <img src="docs/figures/budget_curve.png" width="65%" alt="Median attainment against search budget on 60 held-out patients: policy plus planning reaches with 30 renders what a search from scratch needs 200 for" />
 </p>
 
+Each command prints where its time went, in the server console and the
+browser console. A policy answer comes in two stages: the first line is the
+answer on screen (policy, planning, repairs, one render), the second the
+200-render search that replaces it in the background:
+
+```
+[latency] #61 policy 'I want to only see bones the heart and the lungs': parse 7 ms (rule) · goal 933 · policy 12 · planning 1636 · repair 42 · render 209 · total 2875 ms
+[latency] #61 refined: search 4841 ms · repair 48 · render 274 · end to end 8094 ms
+```
+
+This was the first command after a start, which loads models and fills
+caches. Repeated, the same sentence takes 0.8 s to the first answer (goal 279,
+planning 254 ms). A free-form sentence adds the LLM's 2–3 s to `parse`.
+
 ## What you can say
 
 Plain sentences work; there is no command syntax to learn. Name an organ
