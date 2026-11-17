@@ -4,6 +4,13 @@ Drive and measure the web app running in the headset's browser from the Mac.
 The VIVE Browser is Wolvic on **Gecko 105** (Firefox engine), so this talks the
 Firefox Remote Debugging Protocol, not Chrome DevTools.
 
+The **Vive Focus Vision** (2026-11) runs VIVE Browser 2.6 on **Chromium**
+instead: these tools don't apply to it, and it refuses the mkcert certificate
+without a warning to click through ("cannot complete request", `net_error
+-202` in `adb logcat`). `make run-vr` serves the *.local-ip.sh certificate,
+which it trusts. Its 2D file picker also ignores clicks, so installing your own
+CA on it doesn't work.
+
 ## Setup
 
 ```bash

@@ -7,6 +7,7 @@ param(
     [string] $Scans = "all",        # run / run-vr: "demo" lists only the demo patients
     [int] $Port = 8000,
     [string] $Ip = "",              # certs / run-vr: override the LAN address
+    [string] $Cert = "public",      # run-vr: "mkcert" uses the .\make.ps1 certs certificate
     [string] $Llm = "qwen2.5:7b"
 )
 $ErrorActionPreference = "Stop"
@@ -79,8 +80,8 @@ switch ($Target) {
 .\make.ps1 scans-eval         the larger held-out splits val_extra + test_extra (~2 GB)
 .\make.ps1 llm                install and start Ollama if needed, then pull the local LLM ($Llm)
 .\make.ps1 run [-Scans demo]  viewer on http://127.0.0.1:$Port
-.\make.ps1 certs              HTTPS certificate for this machine's LAN address (mkcert)
-.\make.ps1 run-vr             viewer over HTTPS for a headset on the same network
+.\make.ps1 certs              mkcert certificate for this machine's LAN address, for run-vr -Cert mkcert
+.\make.ps1 run-vr [-Cert mkcert]  viewer over HTTPS for a headset on the same network
 .\make.ps1 test               the tests (~30 s, synthetic scans, no download needed)
 "@ | Write-Host
     }
@@ -134,11 +135,27 @@ switch ($Target) {
     }
     "run-vr" {
         Ensure-Venv
-        if (-not (Test-Path "certs/lan.pem")) { throw "no certificate yet: .\make.ps1 certs" }
-        Write-Host "headset browser: https://$(Get-LanIp):$Port/"
+        $lan = Get-LanIp
         $env:SCANS = $Scans
+        if ($Cert -eq "mkcert") {
+            if (-not (Test-Path "certs/lan.pem")) { throw "no certificate yet: .\make.ps1 certs" }
+            Write-Host "headset browser: https://${lan}:$Port/"
+            Invoke-Checked $Py @("server.py", "--host", "0.0.0.0", "--port", "$Port",
+                "--ssl-certfile", "certs/lan.pem", "--ssl-keyfile", "certs/lan-key.pem")
+            break
+        }
+        # local-ip.sh's Let's Encrypt certificate for *.local-ip.sh (see the Makefile).
+        New-Item -ItemType Directory -Force certs | Out-Null
+        try {
+            Invoke-WebRequest "https://local-ip.sh/server.pem" -OutFile "certs/public.pem" -UseBasicParsing -TimeoutSec 20
+            Invoke-WebRequest "https://local-ip.sh/server.key" -OutFile "certs/public-key.pem" -UseBasicParsing -TimeoutSec 20
+        } catch {
+            if (-not (Test-Path "certs/public.pem")) { throw "local-ip.sh unreachable and no saved certificate: .\make.ps1 run-vr -Cert mkcert" }
+            Write-Host "local-ip.sh unreachable; using the saved certificate"
+        }
+        Write-Host "headset browser: https://$($lan -replace '\.', '-').local-ip.sh:$Port/"
         Invoke-Checked $Py @("server.py", "--host", "0.0.0.0", "--port", "$Port",
-            "--ssl-certfile", "certs/lan.pem", "--ssl-keyfile", "certs/lan-key.pem")
+            "--ssl-certfile", "certs/public.pem", "--ssl-keyfile", "certs/public-key.pem")
     }
     "test" {
         Ensure-Venv

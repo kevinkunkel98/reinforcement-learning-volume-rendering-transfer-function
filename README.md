@@ -72,15 +72,26 @@ demo set.
 official script on other Linux distributions; asks for sudo), starts it, and
 pulls the model (~5 GB). Without it, only the rule parser answers.
 
-**VR headset** (tested on a Vive Focus 3) on the same network:
+**VR headset** (tested on a Vive Focus 3 and a Vive Focus Vision) on the same
+network:
 
 ```bash
-make certs     # HTTPS certificate for this machine's address
 make run-vr    # prints the address to open in the headset browser
 ```
 
-The headset browser warns once about the certificate. Accept the warning.
+The address looks like `https://192-168-1-10.local-ip.sh:8000/`: a public name
+for your machine's LAN address with a real certificate from
+[local-ip.sh](https://local-ip.sh), so the headset needs no setup. The page
+and scans still go directly over your network, but the name lookup needs
+internet. The certificate's key is public, so use a network you trust.
 Hold the trigger to talk and use the thumbstick to turn the volume.
+
+If the headset can't connect, the network probably keeps devices apart
+(campus or hotel Wi-Fi often does). Use a phone hotspot, or connect the headset
+by USB and open `http://localhost:8000/` after `make run` and
+`adb reverse tcp:8000 tcp:8000`. Offline, `make certs` and `make run-vr
+CERT=mkcert` use your own certificate instead. Only the Vive Focus 3 browser
+lets you accept it; the Focus Vision browser refuses it.
 
 `make help` lists every target, and `make test` runs the tests (~30 s, on
 small synthetic scans, so no download needed).
@@ -114,9 +125,10 @@ python3 -m venv .venv                          # Python 3.12-3.14
 .venv/bin/python server.py                     # http://127.0.0.1:8000
 SCANS=demo .venv/bin/python server.py          # list only the demo patients
 
-# VR: certificate for this machine's LAN address, then serve over HTTPS
-mkcert -cert-file certs/lan.pem -key-file certs/lan-key.pem <lan-ip> localhost 127.0.0.1
-.venv/bin/python server.py --host 0.0.0.0 --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
+# VR: the *.local-ip.sh certificate, then open https://<lan-ip with dashes>.local-ip.sh:8000/
+curl -o certs/public.pem https://local-ip.sh/server.pem
+curl -o certs/public-key.pem https://local-ip.sh/server.key
+.venv/bin/python server.py --host 0.0.0.0 --ssl-certfile certs/public.pem --ssl-keyfile certs/public-key.pem
 
 # voice: local LLM for free-form commands
 ollama pull qwen2.5:7b
@@ -144,11 +156,11 @@ docker compose exec ollama ollama pull qwen2.5:7b      # free-form commands, ~5 
 
 Scans (`data/totalseg`) and sessions (`out/`) stay on the host. The LLM runs
 on the CPU in the container, so free-form commands take several seconds. For VR,
-make the certificate on the host (`make certs`) and run:
+fetch the certificate on the host (`make public-cert`) and run:
 
 ```bash
 docker compose run --rm -p 8000:8000 viewer python server.py --host 0.0.0.0 \
-    --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
+    --ssl-certfile certs/public.pem --ssl-keyfile certs/public-key.pem
 ```
 
 ## Code

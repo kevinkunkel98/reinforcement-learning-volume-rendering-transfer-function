@@ -19,7 +19,15 @@ TORCH  := $(shell sed -n 's/^torch==//p' requirements.txt)
 IP ?= $(shell { ipconfig getifaddr en0 || ipconfig getifaddr en1 \
 	|| ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($$i == "src") print $$(i + 1)}'; } 2>/dev/null | head -n1)
 
-.PHONY: help system-deps setup scans scans-candidates scans-all scans-eval llm run certs run-vr test
+.PHONY: help system-deps setup scans scans-candidates scans-all scans-eval llm run certs public-cert run-vr test
+
+# run-vr certificate. public (default): local-ip.sh's Let's Encrypt certificate
+# for *.local-ip.sh, whose names resolve to the LAN address they spell
+# (172-20-10-5.local-ip.sh -> 172.20.10.5). Every headset browser trusts it,
+# and the Vive Focus Vision browser refuses mkcert's. Its key is public, so the
+# connection is only as private as the network; the name lookup needs internet.
+# mkcert: this machine's own CA (make certs), for a network without internet.
+CERT ?= public
 
 help:
 	@echo "make system-deps  system packages: Python 3.12-3.14, OpenGL, mkcert (apt, dnf, pacman or brew; uses sudo)"
@@ -31,8 +39,9 @@ help:
 	@echo "make scans-eval   the larger held-out splits val_extra + test_extra (full dataset, ~2 GB)"
 	@echo "make llm          install and start Ollama if needed, then pull the local LLM ($(LLM)) for free-form voice commands"
 	@echo "make run          viewer on http://127.0.0.1:$(PORT)"
-	@echo "make certs        HTTPS certificate for this machine's LAN address ($(IP)) with mkcert"
-	@echo "make run-vr       viewer on https://$(IP):$(PORT) for a headset on the same network"
+	@echo "make certs        mkcert certificate for this machine's LAN address ($(IP)), for run-vr CERT=mkcert"
+	@echo "make run-vr       viewer on https://$(subst .,-,$(IP)).local-ip.sh:$(PORT) for a headset on the same network"
+	@echo "                  (CERT=mkcert: https://$(IP):$(PORT) with the make certs certificate)"
 	@echo "make test         the tests (~30 s, synthetic scans, no download needed)"
 
 system-deps:
@@ -108,10 +117,31 @@ certs:
 	mkdir -p certs
 	mkcert -cert-file certs/lan.pem -key-file certs/lan-key.pem $(IP) localhost 127.0.0.1
 
+# Refreshed on every run-vr (local-ip.sh renews it monthly); the saved copy is
+# used when the site is unreachable.
+public-cert:
+	@mkdir -p certs
+	@if curl -fsS -m 20 -o certs/public.pem.tmp https://local-ip.sh/server.pem \
+		&& curl -fsS -m 20 -o certs/public-key.pem.tmp https://local-ip.sh/server.key; then \
+		mv certs/public.pem.tmp certs/public.pem; mv certs/public-key.pem.tmp certs/public-key.pem; \
+		chmod 600 certs/public-key.pem; \
+	else \
+		rm -f certs/public.pem.tmp certs/public-key.pem.tmp; \
+		test -f certs/public.pem || { echo "local-ip.sh unreachable and no saved certificate: make run-vr CERT=mkcert"; exit 1; }; \
+		echo "local-ip.sh unreachable; using the saved certificate"; \
+	fi
+
 run-vr: $(PY)
+ifeq ($(CERT),mkcert)
 	@test -f certs/lan.pem || { echo "no certificate yet: make certs"; exit 1; }
 	@echo "headset browser: https://$(IP):$(PORT)/"
 	SCANS=$(or $(SCANS),all) $(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
+else
+	@test -n "$(IP)" || { echo "no LAN address found; pass one: make run-vr IP=..."; exit 1; }
+	@$(MAKE) --no-print-directory public-cert
+	@echo "headset browser: https://$(subst .,-,$(IP)).local-ip.sh:$(PORT)/"
+	SCANS=$(or $(SCANS),all) $(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/public.pem --ssl-keyfile certs/public-key.pem
+endif
 
 test: $(PY)
 	$(PY) -m pytest -q
