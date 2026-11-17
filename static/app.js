@@ -47,6 +47,7 @@ function applyTheme(theme) {
   const label = button?.querySelector("#theme-label");
   if (label) label.textContent = `${resolved[0].toUpperCase()}${resolved.slice(1)} mode`;
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", resolved === "light" ? "#f3f5f7" : "#161719");
+  if (typeof state !== "undefined") drawTransferFunction(state.current?.params);
 }
 
 function initTheme() {
@@ -115,6 +116,24 @@ const sendBtn = el("send-btn");
 const loadingOverlay = el("loading-overlay");
 let loadingCount = 0;
 
+// The server's per-stage latency (session.latency_line) for the browser console.
+const LATENCY_STAGES = [["parse_ms", "parse"], ["goal_ms", "goal"], ["policy_ms", "policy"], ["plan_ms", "planning"],
+  ["search_ms", "search"], ["repair_ms", "repair"], ["apply_ms", "apply"], ["render_ms", "render"]];
+
+function latencyLine(step, timings, refine = false) {
+  if (!timings) return `[latency] #${step?.id}: no timings`;
+  const parts = LATENCY_STAGES.filter(([key]) => timings[key] != null).map(([key, name], i) => {
+    const via = key === "parse_ms" && step.parser_used ? ` (${step.parser_used})` : "";
+    return `${name} ${Math.round(timings[key])}${i ? "" : " ms"}${via}`;
+  });
+  if (refine) {
+    if (timings.end_to_end_ms != null) parts.push(`end to end ${Math.round(timings.end_to_end_ms)} ms`);
+    return `[latency] #${step.id} refined: ${parts.join(" · ")}`;
+  }
+  parts.push(`total ${Math.round(timings.total_ms)} ms`);
+  return `[latency] #${step.id} ${step.mode} "${step.cmd_text}": ${parts.join(" · ")}`;
+}
+
 // Status events for listeners outside this file (static/xr.js's VR panel,
 // which cannot see toasts or the chat thread while in an immersive session).
 function emitAppEvent(type, detail = {}) {
@@ -170,9 +189,114 @@ async function refresh(data) {
   }
 
   updateTelemetry(state.current.class_visibility, state.current.class_brightness);
+  drawTransferFunction(state.current.params);
   lastState = data;
   return data;
 }
+
+// --- transfer-function panel -------------------------------------------------
+// Each class's opacity over CT intensity (its one Gaussian peak, in its own
+// colour) and the unlabelled shell dashed, from the step's params through the
+// same table the renderers use (tf_table.js).
+const TF_HU_TICKS = [-1000, -500, 0, 500, 1000, 1500, 2000];
+
+function cssColour(token, alpha = 1) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(`--${token}`).trim();
+  return alpha === 1 ? `hsl(${value})` : `hsl(${value} / ${alpha})`;
+}
+
+function rgbCss(rgb, alpha = 1) {
+  const [r, g, b] = rgb.map((v) => Math.round(v * 255));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function drawTransferFunction(params) {
+  const canvas = el("tf-canvas");
+  if (!canvas || !params || !window.tfTable) return;
+  const curves = window.tfTable.classCurves(params);
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (!width || !height) return;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const pad = { left: 30, right: 18, top: 8, bottom: 22 };
+  const [huMin, huMax] = window.tfTable.CENTER_RANGE;
+  // The opacity axis zooms to the tallest peak (in steps of 0.1, at least
+  // 0.2), so low peaks stay readable; the tick labels show the scale.
+  const top = Math.min(1, Math.max(0.2, Math.ceil(Math.max(...curves.map((c) => c.peak)) * 10 + 0.5) / 10));
+  const x = (hu) => pad.left + (hu - huMin) / (huMax - huMin) * (width - pad.left - pad.right);
+  const y = (alpha) => height - pad.bottom - alpha / top * (height - pad.top - pad.bottom);
+
+  ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.fillStyle = cssColour("muted-foreground");
+  ctx.strokeStyle = cssColour("border");
+  ctx.lineWidth = 1;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (const level of [0, top / 2, top]) {
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y(level));
+    ctx.lineTo(width - pad.right, y(level));
+    ctx.stroke();
+    ctx.fillText(level.toFixed(2).replace(/0$/, ""), pad.left - 5, y(level));
+  }
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (const hu of TF_HU_TICKS) ctx.fillText(String(hu), x(hu), height - pad.bottom + 6);
+
+  const path = (curve) => {
+    ctx.beginPath();
+    curve.hu.forEach((hu, i) => (i ? ctx.lineTo(x(hu), y(curve.alpha[i])) : ctx.moveTo(x(hu), y(curve.alpha[i]))));
+  };
+  const [shell, ...classes] = curves;
+  // Tallest last, so a small peak is not buried under a big one's fill.
+  for (const curve of classes.filter((c) => c.peak > 0.002).sort((a, b) => b.peak - a.peak).reverse()) {
+    path(curve);
+    ctx.lineTo(x(huMax), y(0));
+    ctx.lineTo(x(huMin), y(0));
+    ctx.closePath();
+    ctx.fillStyle = rgbCss(curve.rgb, 0.18);
+    ctx.fill();
+    path(curve);   // a halo in the text colour keeps dark and light peaks visible on either theme
+    ctx.strokeStyle = cssColour("foreground", 0.35);
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+    ctx.strokeStyle = rgbCss(curve.rgb);
+    ctx.lineWidth = 1.75;
+    ctx.stroke();
+  }
+  if (shell.peak > 0.002) {
+    path(shell);
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = cssColour("muted-foreground");
+    ctx.lineWidth = 1.25;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  const legend = el("tf-legend");
+  legend.innerHTML = "";
+  for (const curve of curves) {
+    const item = document.createElement("li");
+    const hidden = curve.peak <= 0.002;
+    item.classList.toggle("tf-hidden", hidden);
+    const swatch = document.createElement("span");
+    swatch.className = curve.name === "other" ? "tf-swatch tf-shell" : "tf-swatch";
+    if (curve.name !== "other") swatch.style.background = rgbCss(curve.rgb);
+    item.appendChild(swatch);
+    const label = curve.name === "other" ? "unlabelled" : CLASS_LABEL[curve.name];
+    item.appendChild(document.createTextNode(`${label} ${curve.peak.toFixed(2)}`));
+    item.title = hidden ? `${label}: hidden` : `${label}: peak opacity ${curve.peak.toFixed(2)}`;
+    legend.appendChild(item);
+  }
+}
+
+window.addEventListener("resize", () => drawTransferFunction(state.current?.params));
 
 // The readout is per-goal-class visibility (share of the rendered image), the
 // same quantity the policy is scored on -- not opacity mass over the retired
@@ -345,6 +469,7 @@ async function awaitRefinement(stepId, before, replyDiv) {
     return false;
   }
   await refresh(reply);
+  if (reply.current.timings?.refine) console.info(latencyLine(reply.current, reply.current.timings.refine, true));
   const updated = buildReply(reply.current, before);
   replyDiv.replaceWith(updated);
   emitAppEvent("applied", {
@@ -400,6 +525,7 @@ async function sendCommandImpl(text) {
   }
   const data = await r.json();
   await refresh(data);
+  console.info(latencyLine(data.current, data.timings));
   appendMessage(data.current);
   const replyDiv = appendReply(data.current, before);
   emitAppEvent("applied", {

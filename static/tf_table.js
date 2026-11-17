@@ -70,6 +70,19 @@
     }));
   }
 
+  // The curves the viewer's transfer-function panel draws: the unlabelled
+  // shell ("other") first, then one per class, each its opacity over HU
+  // (SAMPLES points over CENTER_RANGE) and its colour at its own peak.
+  function classCurves(params) {
+    const rows = tfRows(params, null, true);
+    return ["other"].concat(CLASS_ORDER).map((name, index) => {
+      const row = rows[index];
+      const alpha = row.map((sample) => sample.alpha);
+      const top = alpha.indexOf(Math.max(...alpha));
+      return { name, hu: row.map((sample) => sample.hu), alpha, rgb: row[top].rgb, peak: alpha[top] };
+    });
+  }
+
   // RGBA8 texture data, row after row (height = rows.length, width = SAMPLES).
   function tfTextureData(rows) {
     const out = new Uint8Array(rows.length * rows[0].length * 4);
@@ -87,6 +100,6 @@
 
   return {
     CENTER_RANGE, WIDTH_RANGE, SAMPLES, PEAK_ORDER, UNLABELLED_PEAKS, CLASS_ORDER,
-    tfRows, tfTextureData, setUnlabelledOpacity,
+    tfRows, tfTextureData, setUnlabelledOpacity, classCurves,
   };
 });

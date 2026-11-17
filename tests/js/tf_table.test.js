@@ -72,3 +72,21 @@ test("the unlabelled row follows the server's shell opacity", () => {
     tf.setUnlabelledOpacity(1);
   }
 });
+
+test("classCurves: the shell first, then one curve per class with its colour at its peak", () => {
+  tf.setUnlabelledOpacity(0.2);
+  const params = paramsWith({
+    liver: { center: 65, width: 45, height: 0.6, rgb: [0.8, 0.3, 0.2] },
+    soft: { center: 40, width: 120, height: 0.5, rgb: [0.9, 0.7, 0.6] },
+  });
+  const curves = tf.classCurves(params);
+  assert.deepEqual(curves.map((c) => c.name), ["other"].concat(tf.CLASS_ORDER));
+  const liver = curves.find((c) => c.name === "liver");
+  assert.ok(Math.abs(liver.peak - 0.6) < 0.01);
+  liver.rgb.forEach((v, i) => assert.ok(Math.abs(v - [0.8, 0.3, 0.2][i]) < 1e-4));
+  assert.equal(liver.hu.length, tf.SAMPLES);
+  assert.equal(curves.find((c) => c.name === "heart").peak, 0);
+  // the shell is soft tissue (and bone) at the unlabelled opacity
+  assert.ok(Math.abs(curves[0].peak - 0.1) < 0.01);
+  tf.setUnlabelledOpacity(1);
+});

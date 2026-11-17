@@ -39,20 +39,33 @@ KEEP_REPAIR = os.environ.get("KEEP_REPAIR", "1") != "0"
 COLOUR_GUARD = os.environ.get("COLOUR_GUARD", "1") != "0"
 
 
-def policy_answer(model, policy, instruction, start_agg, start_params, plan: bool = PLAN) -> np.ndarray:
+def _lap(timings, key, started) -> float:
+    """Store the milliseconds since `started` under `key` (when `timings` is a
+    dict) and return the time now, for the next lap."""
+    now = time.perf_counter()
+    if timings is not None:
+        timings[key] = round((now - started) * 1000.0, 1)
+    return now
+
+
+def policy_answer(model, policy, instruction, start_agg, start_params, plan: bool = PLAN,
+                  timings: dict = None) -> np.ndarray:
     """The policy's transfer function for `instruction` from `start_params`,
     refined through its dynamics ensemble when `plan`. Raises ValueError when
-    there is no policy."""
+    there is no policy. `timings` (a dict) receives "policy_ms" and "plan_ms"."""
     if policy is None:
         raise ValueError(NO_POLICY_MESSAGE)
     ceilings = solo_max_log(model)
     controllable = controllable_values(start_params)
     observation = build_observation(instruction["goal"], model.histogram, start_agg, ceilings, controllable)
+    started = time.perf_counter()
     action, _ = policy.predict(observation)
+    started = _lap(timings, "policy_ms", started)
     if plan and policy.dynamics is not None:
         from rl.model_based import plan as plan_action
         action = plan_action(policy.dynamics, instruction["goal"], instruction.get("weights"), model.histogram,
                              ceilings, controllable, start_agg, action)
+        _lap(timings, "plan_ms", started)
     # Not rl.episodes.apply_residual: a planned residual can exceed [-1, 1]
     # (it is clip(controllable + a) - controllable), and the viewer has always
     # applied it unclipped.
@@ -72,9 +85,10 @@ def warm_search(model, proposal, start_params, instruction, start_agg, evaluatio
     return refined if score(refined) > score(proposal) else proposal
 
 
-def repaired(job, params) -> np.ndarray:
+def repaired(job, params, timings: dict = None) -> np.ndarray:
     """The keep repair, then the colour guard, each behind its switch: how
-    both stages of a policy answer end."""
+    both stages of a policy answer end. `timings` receives "repair_ms"."""
+    started = time.perf_counter()
     instruction = job["instruction"]
     if job["keep_repair"]:
         params, _evaluations = keep_repair(job["model"], instruction["goal"], job["start_params"], params,
@@ -82,32 +96,36 @@ def repaired(job, params) -> np.ndarray:
     if job["colour_guard"]:
         params = colour_guard(instruction["goal"], job["start_params"], params, goals.starting_params(),
                               weights=instruction.get("weights"))
+    _lap(timings, "repair_ms", started)
     return params
 
 
 def policy_job(model, policy, instruction, start_agg, start_params, plan: bool = PLAN,
-               evaluations: int = REFINE_EVALUATIONS) -> dict:
+               evaluations: int = REFINE_EVALUATIONS, timings: dict = None) -> dict:
     """Everything a policy answer needs, with the policy's proposal in it:
     `fast_answer` gives the first stage, `full_answer` the final one."""
-    proposal = policy_answer(model, policy, instruction, start_agg, start_params, plan)
+    proposal = policy_answer(model, policy, instruction, start_agg, start_params, plan, timings)
     return {"model": model, "instruction": instruction, "start_agg": start_agg,
             "start_params": np.asarray(start_params, dtype=np.float64).copy(), "proposal": proposal,
             "evaluations": evaluations, "keep_repair": KEEP_REPAIR, "colour_guard": COLOUR_GUARD}
 
 
-def fast_answer(job) -> np.ndarray:
+def fast_answer(job, timings: dict = None) -> np.ndarray:
     """The two-stage answer's first stage: the proposal, repaired, no search."""
-    return repaired(job, job["proposal"])
+    return repaired(job, job["proposal"], timings)
 
 
-def full_answer(job) -> np.ndarray:
+def full_answer(job, timings: dict = None) -> np.ndarray:
     """The warm search from the proposal, then the repairs -- the final answer.
-    Pure visibility-model work, so it may run in a worker thread."""
+    Pure visibility-model work, so it may run in a worker thread. `timings`
+    receives "search_ms" and "repair_ms"."""
     params = job["proposal"]
     if job["evaluations"] > 0:
+        started = time.perf_counter()
         params = warm_search(job["model"], params, job["start_params"], job["instruction"],
                              job["start_agg"], job["evaluations"])
-    return repaired(job, params)
+        _lap(timings, "search_ms", started)
+    return repaired(job, params, timings)
 
 
 def search_answer(model, start_params, instruction, evaluations) -> np.ndarray:
