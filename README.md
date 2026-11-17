@@ -19,14 +19,29 @@ patients it has never seen. It also works in VR.
    improve the suggestion in about 0.2 s, without a single render.
 4. **Polish.** A short search on the real objective finishes the job.
 
-On held-out patients, the policy reaches about half of the goal (median
-attainment 0.48). Planning raises that to 0.64. With 30 search steps on top it
-matches what a search from scratch reaches with 200 (0.77 vs. 0.70), and with
-200 it reaches 0.90. Model-free RL (SAC) stayed below 0.1.
+On 60 patients never used during development, the policy reaches about half
+of the goal (median attainment 0.49). Planning raises that to 0.64. With 30
+search steps on top it matches what a search from scratch reaches with 200
+(0.76 each; from scratch, 30 steps reach 0.23), and with 200 it reaches 0.91.
+Model-free RL (SAC) stayed below 0.1 on an earlier version of the task.
 
 <p align="center">
-  <img src="docs/figures/budget_curve.png" width="65%" alt="Median attainment against search budget: starting from the policy and planning needs far fewer renders than searching from scratch" />
+  <img src="docs/figures/budget_curve.png" width="65%" alt="Median attainment against search budget on 60 held-out patients: policy plus planning reaches with 30 renders what a search from scratch needs 200 for" />
 </p>
+
+Each command prints where its time went, in the server console and the
+browser console. A policy answer comes in two stages: the first line is the
+answer on screen (policy, planning, repairs, one render), the second the
+200-render search that replaces it in the background:
+
+```
+[latency] #61 policy 'I want to only see bones the heart and the lungs': parse 7 ms (rule) · goal 933 · policy 12 · planning 1636 · repair 42 · render 209 · total 2875 ms
+[latency] #61 refined: search 4841 ms · repair 48 · render 274 · end to end 8094 ms
+```
+
+This was the first command after a start, which loads models and fills
+caches. Repeated, the same sentence takes 0.8 s to the first answer (goal 279,
+planning 254 ms). A free-form sentence adds the LLM's 2–3 s to `parse`.
 
 ## What you can say
 

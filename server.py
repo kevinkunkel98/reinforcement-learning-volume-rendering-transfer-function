@@ -187,7 +187,8 @@ class CommandRequest(BaseModel):
 
 async def _finish_refine(sess, step_id, job, event):
     try:
-        params = await asyncio.get_running_loop().run_in_executor(None, answers.full_answer, job)
+        params = await asyncio.get_running_loop().run_in_executor(
+            None, answers.full_answer, job, job.setdefault("refine_timings", {}))
         sess.apply_refined(step_id, params, job)   # back on the loop (main) thread: renders
     except Exception as exc:   # a failed refine must not leave the step "refining"
         print(f"[refine] step {step_id} failed: {exc!r}", file=sys.stderr)
@@ -215,8 +216,8 @@ async def command(req: CommandRequest):
         task = asyncio.create_task(_finish_refine(sess, current["id"], job, event))
         _refine_tasks.add(task)
         task.add_done_callback(_refine_tasks.discard)
-    result["timings"] = {"parse_ms": current.get("parse_ms"),
-                         "total_ms": round((time.perf_counter() - started) * 1000, 1)}
+    result["timings"] = {**(current.get("timings") or {}),
+                         "server_ms": round((time.perf_counter() - started) * 1000, 1)}
     return result
 
 

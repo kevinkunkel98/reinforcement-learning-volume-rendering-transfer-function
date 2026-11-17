@@ -17,6 +17,7 @@ import datetime
 import io
 import json
 import os
+import time
 import uuid
 
 import numpy as np
@@ -36,6 +37,10 @@ from commands import apply_command, parse_command_with_meta
 from rl.search import CONTROLLABLE
 
 IMAGE_DIR = "out/ui_images"
+
+# The stages a command's latency line names, in pipeline order (all optional).
+LATENCY_STAGES = (("parse_ms", "parse"), ("goal_ms", "goal"), ("policy_ms", "policy"), ("plan_ms", "planning"),
+                  ("search_ms", "search"), ("repair_ms", "repair"), ("apply_ms", "apply"), ("render_ms", "render"))
 SESSION_PATH = os.environ.get("UI_SESSION_PATH", "out/ui_session.json")
 
 # A command that targets a class but leaves the picture unchanged reads as
@@ -391,30 +396,36 @@ class Session:
         instruction = goals.goal_from_command(cmd, model, start_agg, volume=self.scan)
         return start_agg, goals.well_posed(instruction, model, params, start_agg)
 
-    def _policy_job(self, cmd, params):
+    def _policy_job(self, cmd, params, timings=None):
         policy = self.policy_provider()
         if policy is None:   # before resolving the model: the fallback is a ValueError
             raise ValueError(answers.NO_POLICY_MESSAGE)
+        started = time.perf_counter()
         model = self.model()
         start_agg, instruction = self.instruction_for(cmd, model, params)
+        answers._lap(timings, "goal_ms", started)
         return answers.policy_job(model, policy, instruction, start_agg, params,
-                                  evaluations=self.refine_evaluations)
+                                  evaluations=self.refine_evaluations, timings=timings)
 
-    def _answer(self, cmd, params, mode, steps, defer_refine):
-        """(new params, mode actually used, message, refine job or None)."""
+    def _answer(self, cmd, params, mode, steps, defer_refine, timings=None):
+        """(new params, mode actually used, message, refine job or None).
+        `timings` (a dict) receives the milliseconds of each stage."""
         if mode == "policy":
             try:
-                job = self._policy_job(cmd, params)
+                job = self._policy_job(cmd, params, timings)
             except ValueError as exc:
                 return apply_command(cmd, params, reset_params=goals.starting_params()), "exact", str(exc), None
             if defer_refine and job["evaluations"] > 0:
-                return answers.fast_answer(job), "policy", None, job
-            return answers.full_answer(job), "policy", None, None
+                return answers.fast_answer(job, timings), "policy", None, job
+            return answers.full_answer(job, timings), "policy", None, None
         if mode == "search":
             try:
+                started = time.perf_counter()
                 model = self.model()
                 _start_agg, instruction = self.instruction_for(cmd, model, params)
+                started = answers._lap(timings, "goal_ms", started)
                 new_params = answers.search_answer(model, params, instruction, steps)
+                answers._lap(timings, "search_ms", started)
             except (ValueError, FileNotFoundError, KeyError) as exc:
                 return apply_command(cmd, params, reset_params=goals.starting_params()), "exact", str(exc), None
             message = None
@@ -426,8 +437,11 @@ class Session:
 
     def command(self, text, parser="rule", model=commands.DEFAULT_LLM_MODEL, mode="exact", steps=10,
                 defer_refine=False) -> dict:
-        """Parse `text`, answer it in `mode` ("exact", "search" or "policy") and append the step."""
+        """Parse `text`, answer it in `mode` ("exact", "search" or "policy") and append the step.
+        The step's "timings" holds the milliseconds of each stage, also printed as one line."""
+        started = time.perf_counter()
         cmd, parser_meta = parse_command_with_meta(text, parser=parser, model=model)   # ValueError on failure
+        timings = {"parse_ms": round((time.perf_counter() - started) * 1000.0, 1)}
         current = self.history[self.cursor]
         params = np.array(current["params"], dtype=np.float64)
         camera = dict(current.get("camera", DEFAULT_CAMERA))
@@ -436,7 +450,7 @@ class Session:
         if "camera" in cmd:
             step = self.render_step(params, text, cmd, next_id, apply_camera_command(cmd["camera"], camera),
                                     mode="camera", parser_meta=parser_meta)
-            return self._append(step)
+            return self._append(self._timed(step, timings, started))
 
         # "add X" of a hidden class restores X first; the rest takes the mode's path.
         visibility_now = current.get("class_visibility")
@@ -467,25 +481,36 @@ class Session:
             # A reset is an intended exact command, never a policy fallback.
             new_params, used, message = apply_command(rest, params, reset_params=goals.starting_params()), "exact", None
         else:
-            new_params, used, message, job = self._answer(rest, params, mode, steps, defer_refine)
+            new_params, used, message, job = self._answer(rest, params, mode, steps, defer_refine, timings)
 
         if dropped:
             message = _join(message, f"{' and '.join(dropped)} skipped -- not a goal on this scan")
         if parser_meta["parser_fallback"] and not message:
             message = f"LLM parse rejected, used the rule parser -- {parser_meta['parser_fallback']}"
+        render_started = time.perf_counter()
         step = self.render_step(new_params, text, stored_cmd, next_id, camera, mode=used, message=message,
                                 parser_meta=parser_meta)
+        answers._lap(timings, "render_ms", render_started)
         hint = no_visible_change_hint(stored_cmd, current, step)
         if hint:
             step["message"] = _join(step["message"], hint)
         if restored:
             step["message"] = _join(step["message"], restore_message(restored))
+        self._timed(step, timings, started)
         if job is not None:
             step["refining"] = True
             self.pending_refines[step["id"]] = {**job, "session_id": self.session_id,
                                                 "fast_params": step["params"], "message": message,
-                                                "parser_meta": parser_meta}
+                                                "parser_meta": parser_meta, "started": started,
+                                                "refine_timings": {}}
         return self._append(step)
+
+    def _timed(self, step, timings, started) -> dict:
+        """Put `timings` (+ the total since `started`) into `step` and print its latency line."""
+        timings["total_ms"] = round((time.perf_counter() - started) * 1000.0, 1)
+        step["timings"] = timings
+        print(latency_line(step, timings))
+        return step
 
     # --- two-stage policy answers --------------------------------------------------
 
@@ -521,9 +546,16 @@ class Session:
                 fast["refining"], fast["refine_discarded"] = False, True
                 self.save()
             return False
+        render_started = time.perf_counter()
         step = self.render_step(np.asarray(params, dtype=np.float64), fast["cmd_text"], fast["cmd_dict"],
                                 step_id, fast["camera"], mode=fast["mode"], message=job["message"],
                                 parser_meta=job["parser_meta"])
+        refine = dict(job.get("refine_timings") or {})
+        answers._lap(refine, "render_ms", render_started)
+        if "started" in job:
+            refine["end_to_end_ms"] = round((time.perf_counter() - job["started"]) * 1000.0, 1)
+        step["timings"] = {**(fast.get("timings") or {}), "refine": refine}
+        print(latency_line(step, refine, refine=True))
         if index > 0:
             hint = no_visible_change_hint(fast["cmd_dict"], self.history[index - 1], step)
             if hint:
@@ -532,3 +564,24 @@ class Session:
         self.history[index] = step
         self.save()
         return True
+
+
+def latency_line(step, timings, refine=False) -> str:
+    """One console line: where a command's time went, stage by stage.
+
+        [latency] #4 policy "more liver": parse 1843 ms (llm) · goal 15 · policy 4 · planning 192 · repair 38 · render 412 · total 2504 ms
+        [latency] #4 refined: search 2810 ms · repair 40 · render 395 · end to end 5755 ms
+    """
+    parts = []
+    for key, name in LATENCY_STAGES:
+        if timings.get(key) is None:
+            continue
+        unit = " ms" if not parts else ""
+        extra = f" ({step['parser_used']})" if key == "parse_ms" and step.get("parser_used") else ""
+        parts.append(f"{name} {timings[key]:.0f}{unit}{extra}")
+    if refine:
+        if timings.get("end_to_end_ms") is not None:
+            parts.append(f"end to end {timings['end_to_end_ms']:.0f} ms")
+        return f"[latency] #{step['id']} refined: " + " · ".join(parts)
+    parts.append(f"total {timings['total_ms']:.0f} ms")
+    return f"[latency] #{step['id']} {step.get('mode')} {step.get('cmd_text')!r}: " + " · ".join(parts)

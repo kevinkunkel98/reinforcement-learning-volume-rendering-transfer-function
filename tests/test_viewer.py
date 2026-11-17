@@ -51,6 +51,24 @@ def test_policy_answers_in_two_stages(session):
     assert final["id"] == fast["id"] and final["refined"] and not final["refining"]
 
 
+def test_every_command_logs_where_its_time_went(session, capsys):
+    fast = session.command("more liver", mode="policy", defer_refine=True)["current"]
+    timings = fast["timings"]
+    for key in ("parse_ms", "goal_ms", "policy_ms", "plan_ms", "repair_ms", "render_ms", "total_ms"):
+        assert timings[key] >= 0, key
+    assert timings["total_ms"] >= timings["render_ms"] + timings["policy_ms"]
+    job = session.pending_refines[fast["id"]]
+    assert session.apply_refined(fast["id"], answers.full_answer(job, job["refine_timings"]), job)
+    refine = session.state()["current"]["timings"]["refine"]
+    assert {"search_ms", "repair_ms", "render_ms", "end_to_end_ms"} <= set(refine)
+    exact = session.command("less lungs", mode="exact")["current"]["timings"]
+    assert "policy_ms" not in exact and exact["render_ms"] >= 0
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[latency]")]
+    assert len(lines) == 3
+    assert "'more liver': parse" in lines[0] and "planning" in lines[0] and lines[0].endswith(" ms")
+    assert "refined: search" in lines[1] and "end to end" in lines[1]
+
+
 def test_a_stale_refine_is_discarded(session):
     fast = session.command("more liver", mode="policy", defer_refine=True)["current"]
     job = session.pending_refines[fast["id"]]
