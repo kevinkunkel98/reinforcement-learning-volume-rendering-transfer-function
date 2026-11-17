@@ -1,9 +1,15 @@
 # Say what you want to see
 
+Turning words into a transfer function has so far meant optimising from
+scratch for every request, at hundreds of renders each. This project learns it
+once: a policy trained with model-based reinforcement learning answers in a
+single forward pass, on patients it has never seen, and a learned model of the
+renderer refines that answer without rendering.
+
 Speak to a CT scan and it renders what you asked for: "show only the
-skeleton", "a bit more kidneys", "make the lungs darker". A reinforcement
-learning policy turns the instruction into a transfer function, which works on
-patients it has never seen. It also works in VR.
+skeleton", "a bit more kidneys", "make the lungs darker". Everything runs on
+one workstation with a small local language model, by voice, in the browser
+and in VR.
 
 <p align="center">
   <img src="docs/screenshots/ui.png" width="85%" alt="The viewer: a CT render, the instruction history with each command's effect on visible anatomy, and the anatomy visibility panel" />
