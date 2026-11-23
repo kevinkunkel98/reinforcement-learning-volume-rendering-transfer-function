@@ -99,7 +99,7 @@ switch ($Target) {
             Invoke-Checked $Py @("-m", "pip", "install", "torch==$torch", "--index-url", "https://download.pytorch.org/whl/cpu")
         }
         Invoke-Checked $Py @("-m", "pip", "install", "-r", "requirements.txt")
-        Write-Host "`nnext: .\make.ps1 scans; .\make.ps1 run"
+        Write-Host "`nnext: .\make.ps1 scans; .\make.ps1 llm; .\make.ps1 run"
     }
     "scans" { Ensure-Venv; Invoke-Checked $Py @("-u", "-m", "tools.fetch_scans", "--demo", "--splits") }
     "scans-candidates" { Ensure-Venv; Invoke-Checked $Py @("-u", "-m", "tools.fetch_scans", "--candidates", "--splits") }

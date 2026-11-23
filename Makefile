@@ -1,4 +1,4 @@
-# Clone, then:  make system-deps && make setup && make scans && make run
+# Clone, then:  make system-deps && make setup && make scans && make llm && make run
 # (macOS, Ubuntu/Debian, Fedora, Arch). `make help` lists every target.
 
 # The first interpreter in the supported range (3.12-3.14): torch, vtk and
@@ -45,8 +45,17 @@ help:
 	@echo "make test         the tests (~30 s, synthetic scans, no download needed)"
 
 system-deps:
+	@if [ "$$(uname -s)" = Linux ] && v=$$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $$2}') && [ -n "$$v" ] \
+		&& [ "$$(printf '%s\n' 2.28 "$$v" | sort -V | head -n1)" != 2.28 ]; then \
+		echo "glibc $$v is older than 2.28 (e.g. Ubuntu 18.04): torch and vtk have no wheels for it. Use Docker instead (README, Docker)"; exit 1; \
+	fi
 	@if command -v apt-get >/dev/null 2>&1; then \
 		set -x; sudo apt-get update; sudo apt-get install -y python3 python3-venv make curl libgl1 libegl1 mkcert; \
+		if ! python3 -c 'import sys; sys.exit(not (3, 12) <= sys.version_info[:2] <= (3, 14))'; then \
+			: "python3 is outside 3.12-3.14 (Ubuntu 22.04 has 3.10): Python 3.12 from the deadsnakes PPA"; \
+			sudo apt-get install -y software-properties-common && sudo add-apt-repository -y ppa:deadsnakes/ppa \
+			&& sudo apt-get update && sudo apt-get install -y python3.12 python3.12-venv; \
+		fi; \
 	elif command -v dnf >/dev/null 2>&1; then \
 		set -x; sudo dnf install -y python3.14 make curl mesa-libGL mesa-libEGL mesa-dri-drivers mkcert; \
 	elif command -v pacman >/dev/null 2>&1; then \
@@ -58,6 +67,10 @@ system-deps:
 	fi
 
 $(PY):
+	@if [ "$$(uname -s)" = Linux ] && v=$$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $$2}') && [ -n "$$v" ] \
+		&& [ "$$(printf '%s\n' 2.28 "$$v" | sort -V | head -n1)" != 2.28 ]; then \
+		echo "glibc $$v is older than 2.28 (e.g. Ubuntu 18.04): torch and vtk have no wheels for it. Use Docker instead (README, Docker)"; exit 1; \
+	fi
 	@test -n "$(PYTHON)" || { echo "no Python 3.12-3.14 found (python3.14, python3.13, python3.12 or python3): make system-deps"; exit 1; }
 	@echo "using $(PYTHON) ($$($(PYTHON) --version))"
 	$(PYTHON) -m venv $(VENV)
@@ -68,7 +81,7 @@ ifneq ($(CPU),)
 	$(PY) -m pip install torch==$(TORCH) --index-url https://download.pytorch.org/whl/cpu
 endif
 	$(PY) -m pip install -r requirements.txt
-	@echo; echo "next: make scans && make run"
+	@echo; echo "next: make scans && make llm && make run"
 
 scans: $(PY)
 	$(PY) -u -m tools.fetch_scans --demo --splits

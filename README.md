@@ -69,8 +69,10 @@ Made by `docs/figures/make_phrasing_gallery.py`.
 
 ## Quick start
 
-macOS, Ubuntu/Debian, Fedora or Arch. You need `git` and `make`.
-For Windows, see [below](#windows).
+macOS, Ubuntu/Debian (22.04 or newer; 22.04 gets Python 3.12 from the
+deadsnakes PPA), Fedora or Arch. You need `git` and `make`. For Windows, see
+[below](#windows); for older systems such as Ubuntu 18.04 or 20.04,
+[Docker](#docker).
 
 ```bash
 git clone https://github.com/kevinkunkel98/reinforcement-learning-volume-rendering-transfer-function.git
@@ -78,6 +80,7 @@ cd reinforcement-learning-volume-rendering-transfer-function
 make system-deps   # Python 3.12-3.14, OpenGL, mkcert (asks for sudo)
 make setup         # Linux without an NVIDIA GPU: make setup CPU=1
 make scans         # the 7 demo patients from Zenodo, ~300 MB
+make llm           # Ollama + the local LLM for free-form commands, ~5 GB
 make run           # http://127.0.0.1:8000
 ```
 
@@ -90,10 +93,10 @@ shows the vessels. Type a command, or hold Space to talk.
 (~1 GB), `make scans-all` all 100 (~3 GB). `make run SCANS=demo` lists only the
 demo set.
 
-**Free-form voice commands:** run `make llm`. It installs
-[Ollama](https://ollama.com) if it is missing (pacman, Homebrew, or the
-official script on other Linux distributions; asks for sudo), starts it, and
-pulls the model (~5 GB). Without it, only the rule parser answers.
+`make llm` installs [Ollama](https://ollama.com) if it is missing (pacman,
+Homebrew, or the official script on other Linux distributions; asks for sudo),
+starts it, and pulls the model. It understands the sentences the built-in rule
+parser doesn't; without it, only those answer.
 
 **VR headset** (tested on a Vive Focus 3 and a Vive Focus Vision) on the same
 network:
@@ -131,6 +134,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned   # once, so .\make.ps1 may 
 .\make.ps1 system-deps   # Python 3.13, mkcert, Ollama via winget; then open a new terminal
 .\make.ps1 setup
 .\make.ps1 scans
+.\make.ps1 llm
 .\make.ps1 run           # .\make.ps1 run -Scans demo, .\make.ps1 certs, .\make.ps1 run-vr, .\make.ps1 help
 ```
 
