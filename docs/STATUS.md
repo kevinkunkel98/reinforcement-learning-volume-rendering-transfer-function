@@ -152,7 +152,8 @@ on another.
   gemma4:e4b, granite4:3b, compared 10-22 without them) waits on those.
 - **Nothing from 10-21 to 10-23 has been tried in the headset**: two-stage
   answer, "Understood: …" / "no visible change" panel lines (long lines may
-  be cut), voice path latency (extrapolated from loaded runs).
+  be cut), voice path latency (extrapolated from loaded runs; the
+  2026-11-26 speed-ups are unmeasured there too, see Next 3).
 - **VR numbers come from one scan, one sitting**, and depend ~3× on the TF.
 - **Drift accumulates over a session** (found 2026-10-22, live VR session on
   ts_s0477). Each policy step keeps unmentioned classes within
@@ -185,6 +186,26 @@ on another.
    fading) → discussion chapter, and the bridge to RLHF as future work. If
    not, that supports the objective as designed.
 3. **Scripted VR benchmark** over 2–3 patients × 2 TFs with fixed placement.
+   - **Voice latency in the headset, after the 2026-11-26 speed-ups**
+     (branch `perf/voice-latency`). On the desktop (RTX 5080) a voice
+     command now reaches its refined image in ~0.4 s from releasing Space,
+     down from 1.1–2.6 s; the headset has not been measured since. It should
+     gain without changes: every server-side gain applies to all clients,
+     and the browser fix does too -- in XR, `refresh()` still runs
+     `setTransferFunction` (viewer.js), whose 2304 one-by-one `addPoint`
+     calls (each re-sorting all nodes) took ~1.1 s per image on the desktop
+     CPU, likely several times that on the headset's, twice per command
+     (fast + refined answer); it now sets the nodes in one call.
+   - **Measure first**, headset on USB: `adb logcat | grep -E
+     'voice-timing|viewer-timing'` (`asr`/`first`/`final` from releasing the
+     trigger; `[viewer-timing]` the page's TF update + render).
+   - **Only if `first`/`final` stay well above ~1 s** or `[viewer-timing]`
+     is high: (a) leave the server's PNG (`image_b64`, ~250 KB base64, twice
+     per command) out of responses to an XR client -- the headset receives
+     and decodes it over Wi-Fi but never shows it; (b) skip building the
+     vtk.js transfer function while in XR, where the custom ray marcher
+     draws from its own 9×256 texture (vr_renderer.js); small after the
+     `setNodes` fix.
 4. **Missing evaluation pieces for the thesis:** render-budget curve
    (10/30/100/200) on v3c with and without planning; per-stage training
    ablation; per-patient table; planning ablation re-run on v3c. Plus the
