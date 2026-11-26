@@ -1,4 +1,4 @@
-# Status — 2026-10-19, updated 2026-11-15
+# Status — 2026-10-19, updated 2026-11-26
 
 Snapshot after the switch to model-based RL, task v2 and v3, the instruction
 parser work, planning through the learned model, and the second VR lab
@@ -144,7 +144,8 @@ on another.
 - **Weak spots that renders show:** "increase X strongly" can stay timid
   (policy alone 0.14 on one liver case); "a bit more" can overshoot when the
   search clears an occluder; brightness on organs below ~2 % of the image is
-  invisible even when scored 0.9+; occluders fade as a side effect.
+  invisible even when scored 0.9+; occluders fade as a side effect —
+  "a lot more lungs" removes the skeleton (2026-11-26, see Next 5).
 - **Parser held-out sets written by the developer** (base and realistic,
   `data/parser_eval_realistic.json`) — optimistic until phrases from other
   people are tested; the LLM model choice (qwen2.5:7b vs qwen3.5:4b,
@@ -208,7 +209,21 @@ on another.
    - *Open thesis decisions* (each changes every reported number):
      occluders at weight 0 let "more lungs" erase soft tissue completely —
      a reduced occluder weight instead
-     (`experiments/2026-10-23-keep-repair-occluders.md`); vessel goals exist
+     (`experiments/2026-10-23-keep-repair-occluders.md`). The same rule
+     erases the skeleton too (desktop session, 2026-11-26, ts_s0477): after
+     "show only bones" → "add lungs and heart back" → "lungs less opaque,
+     darken them", the voice command "Extremely increased opacity of lungs."
+     parsed correctly (lungs / opacity / increase / strongly), but
+     `find_occluders` returned {skeleton, other} (ribs and spine lie in front
+     of the lungs), so `occlusion_aware` exempted both from the keep terms.
+     The policy shrank the skeleton peak (width 319 → 10 HU, height 0.95 →
+     0.28): skeleton 14.8 % → 0.3 % of the image, lungs 6.1 % → 12.4 %,
+     distance 0.316 (do nothing) → 0.009. The objective is met, but a user
+     asking for more lungs likely expects the ribs to stay. Options: a
+     minimum hidden fraction or a higher `OCCLUDER_GAIN` before a class
+     counts as an occluder; never exempt the skeleton (orientation context);
+     an explicit override ("… but keep the bones"). Each changes the
+     objective, so retrain or at least re-evaluate. Vessel goals exist
      only on "angiography" scans although e.g. `ts_s0477` is contrast-enhanced
      (vessels median 127 HU) — define contrast by measured vessel HU.
    - *Retraining (possible feature):* train on multi-step episodes (starts
