@@ -42,6 +42,26 @@ VISIBILITY_RENDERER_VERSION = "visibility-v1"
 # existing caches stay valid.
 LAYER_LAYOUT_VERSION = "anatomy-layers-v1"
 
+# Where `features` / `vis_only` composite. "cpu" (the default, what training
+# and every reported number use) runs the original code; "cuda" the same
+# arithmetic on the GPU: 9.0 -> 0.56 ms per call on an RTX 5080, a
+# 200-evaluation hill climb 1645 -> 114 ms with the identical answer, values
+# within ~5e-7 relative of the CPU's (float32 summation order; 2026-11-26).
+# The viewer switches with `use_device("auto")`; VISIBILITY_DEVICE overrides.
+DEVICE = os.environ.get("VISIBILITY_DEVICE", "cpu")
+
+
+def use_device(name: str = "auto") -> str:
+    """Set where visibility is computed ("auto": CUDA when available, else
+    the CPU, e.g. on a Mac); returns the device used."""
+    global DEVICE
+    if name == "auto":
+        name = "cuda" if torch.cuda.is_available() else "cpu"
+    if name == "cuda" and not torch.cuda.is_available():
+        raise ValueError("visibility device cuda requested, but CUDA is not available")
+    DEVICE = name
+    return DEVICE
+
 
 def quantize(values: np.ndarray) -> np.ndarray:
     """HU -> index into a LUT_SIZE-entry table over CENTER_RANGE."""
@@ -130,6 +150,7 @@ class VisibilityModel:
         flat = (self._labels.long() + 1).reshape(-1)
         self._class_order = torch.argsort(flat, stable=True).to(torch.int32)
         self._class_counts = torch.bincount(flat, minlength=len(CLASSES) + 1).tolist()
+        self._device_tensors = {}   # device -> (label index, class order), see _on_device
 
     @property
     def n_views(self) -> int:
@@ -184,24 +205,63 @@ class VisibilityModel:
         classes: `goals.distance` charges for it under the same keep tolerance
         any unmentioned class gets, or "show only X" could be met by an opaque
         wall of unclassified material."""
+        if DEVICE != "cpu":
+            totals, lit, coverage = self._sums_on_device(params, DEVICE, with_luminance=True)
+            return self._features_from(totals, lit, coverage)
         alpha, luminance = self._alpha_luminance(params)
         weights, accumulated = self._composite(alpha)
         totals, lit = self._class_sums(weights), self._class_sums(weights * luminance)
+        coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
+        return self._features_from(totals, lit, coverage)
+
+    def _features_from(self, totals, lit, coverage) -> dict:
         vis, bright = {}, {}
         for index, name in enumerate(CLASSES):
             total = totals[index + 1]
             vis[name] = total / self._rays
             bright[name] = lit[index + 1] / total if total / self._rays > 1e-4 else 0.0
         vis["other"] = totals[0] / self._rays
-        coverage = float((accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean())
         return {"vis": vis, "bright": bright, "coverage": coverage}
+
+    def _on_device(self, device):
+        """(label index, class order) on `device`, copied once per model."""
+        if device not in self._device_tensors:
+            self._device_tensors[device] = (self._label_index().to(device),
+                                            self._class_order.long().to(device))
+        return self._device_tensors[device]
+
+    def _sums_on_device(self, params, device, with_luminance: bool):
+        """`features`' per-class totals (and luminance-weighted totals and
+        coverage) computed on `device`: the CPU path's arithmetic, with one
+        host transfer at the end. Per-class sums are block sums over the
+        class-sorted samples, as on the CPU (a scatter-add into 9 bins is
+        4 ms of atomic contention on the GPU)."""
+        index, order = self._on_device(device)
+        opacity_table, luminance_table = label_transfer_tables(params)
+        opacity = torch.from_numpy(opacity_table.reshape(-1)).to(device)
+        alpha = (1.0 - (1.0 - opacity) ** (self.step_mm / 1.0))[index]
+        weights, accumulated = self._composite(alpha)
+        rows = [weights.reshape(-1)[order]]
+        if with_luminance:
+            luminance = torch.from_numpy(luminance_table.reshape(-1)).to(device)[index]
+            rows.append((weights * luminance).reshape(-1)[order])
+        grouped = torch.stack(rows)
+        sums = torch.stack([block.sum(dim=1) for block in torch.split(grouped, self._class_counts, dim=1)], dim=1)
+        if not with_luminance:
+            return sums[0].tolist(), None, None
+        coverage = (accumulated >= COVERAGE_THRESHOLD).to(torch.float32).mean()
+        totals, lit = sums.tolist()
+        return totals, lit, float(coverage)
 
     def vis_only(self, params) -> dict:
         """Per-class vis only (`{class: float, "other": float}`), skipping
         luminance, brightness and coverage."""
-        alpha, _ = self._alpha_luminance(params)
-        weights, _ = self._composite(alpha)
-        totals = self._class_sums(weights)
+        if DEVICE != "cpu":
+            totals, _, _ = self._sums_on_device(params, DEVICE, with_luminance=False)
+        else:
+            alpha, _ = self._alpha_luminance(params)
+            weights, _ = self._composite(alpha)
+            totals = self._class_sums(weights)
         vis = {name: totals[index + 1] / self._rays for index, name in enumerate(CLASSES)}
         vis["other"] = totals[0] / self._rays
         return vis

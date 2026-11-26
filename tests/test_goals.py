@@ -73,3 +73,21 @@ def test_occluders_of_a_hidden_target_are_found(model):
     params[lungs + 2] = 1.0                        # opaque lungs in front of the heart
     instruction = {"targets": {"heart": {"vis": 0.3}}}
     assert "lungs" in goals.find_occluders(model, params, instruction)
+
+
+@pytest.mark.skipif(not __import__("torch").cuda.is_available(), reason="needs CUDA")
+def test_visibility_on_the_gpu_matches_the_cpu(model, monkeypatch):
+    """The viewer composites on the GPU (`visibility.use_device`); every
+    number training and evaluation report comes from the CPU path."""
+    import visibility
+    rng = np.random.default_rng(0)
+    for _ in range(5):
+        params = np.clip(goals.starting_params() + rng.normal(0, 0.2, transfer.TOTAL_PARAMS), -1, 1)
+        monkeypatch.setattr(visibility, "DEVICE", "cpu")
+        cpu, cpu_vis = model.features(params), model.vis_only(params)
+        monkeypatch.setattr(visibility, "DEVICE", "cuda")
+        gpu, gpu_vis = model.features(params), model.vis_only(params)
+        for key in ("vis", "bright"):
+            assert gpu[key] == pytest.approx(cpu[key], rel=1e-5, abs=1e-9)
+        assert gpu["coverage"] == pytest.approx(cpu["coverage"], abs=1e-6)
+        assert gpu_vis == pytest.approx(cpu_vis, rel=1e-5, abs=1e-9)

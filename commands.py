@@ -830,6 +830,17 @@ def _apply_brightness(cmd: dict, params: np.ndarray, reset_params=None) -> np.nd
 
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+# A llama-server with n-gram speculative decoding (`tools/llm_server.py`,
+# started by `make llm`/`make run` on Linux) answers the same request in
+# ~103 ms instead of Ollama's ~185 ms (median, qwen2.5:7b, RTX 5080), with
+# byte-identical answers on all 185 parser-eval phrases: greedy decoding
+# verifies every drafted token (2026-11-26). Ollama cannot pass the flags.
+# Used when it serves the requested model; Ollama otherwise (and on macOS).
+# LLM_BACKEND=ollama turns it off.
+LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "http://127.0.0.1:11436")
+LLM_BACKEND = os.environ.get("LLM_BACKEND", "auto")  # "auto" | "ollama"
+LLAMA_PROBE_INTERVAL_S = 30.0   # how long a probe result is trusted
+_LLAMA_PROBE = {"model": None, "checked": None}
 VALID_DIRECTIONS = {"increase", "decrease", "show_only", "reset"}
 VALID_STRENGTHS = set(STRENGTH_WORDS) | {None}
 VALID_LEVELS = set(LEVEL_WORDS)
@@ -1241,8 +1252,56 @@ def _log_llm_request(text, model, host, raw_response, parsed_cmd, final_cmd, fal
     })
 
 
+def llama_server_model(force: bool = False):
+    """The model name the speculative llama-server serves, or None when it
+    is not running (or LLM_BACKEND=ollama). Probed at most every
+    LLAMA_PROBE_INTERVAL_S, so a server started later is picked up."""
+    if LLM_BACKEND == "ollama":
+        return None
+    now = time.monotonic()
+    checked = _LLAMA_PROBE["checked"]
+    if not force and checked is not None and now - checked < LLAMA_PROBE_INTERVAL_S:
+        return _LLAMA_PROBE["model"]
+    model = None
+    try:
+        with urlopen(Request(f"{LLAMA_SERVER_URL}/v1/models"), timeout=0.5) as resp:
+            data = _json.loads(resp.read().decode()).get("data") or []
+        model = data[0].get("id") if data else None
+    except (URLError, OSError, ValueError, AttributeError, IndexError, TypeError):
+        model = None
+    _LLAMA_PROBE.update(model=model, checked=now)
+    return model
+
+
+def _llama_server_generate(text: str, timeout: float = 30) -> str:
+    """The same request as Ollama's (system prompt, user text, JSON schema,
+    temperature 0) through llama-server's chat endpoint; the JSON text."""
+    body = {"messages": [{"role": "system", "content": _SYSTEM_PROMPT}, {"role": "user", "content": text}],
+            "temperature": 0, "seed": 0, "max_tokens": 256, "cache_prompt": True}
+    if LLM_FORMAT == "schema":
+        body["response_format"] = {"type": "json_schema", "json_schema": {"name": "command", "schema": command_schema()}}
+    else:
+        body["response_format"] = {"type": "json_object"}
+    req = Request(f"{LLAMA_SERVER_URL}/v1/chat/completions", data=_json.dumps(body).encode(),
+                  headers={"Content-Type": "application/json"})
+    with urlopen(req, timeout=timeout) as resp:
+        return _json.loads(resp.read().decode())["choices"][0]["message"]["content"]
+
+
 def parse_command_llm(text: str, model: str = DEFAULT_LLM_MODEL, host: str = None,
                        _on_fallback=None) -> dict:
+    # An explicit `host` means that Ollama; otherwise the speculative
+    # llama-server when it serves `model`, falling back to Ollama.
+    if host is None and llama_server_model() == model:
+        try:
+            raw_response = _llama_server_generate(text)
+            cmd = _json.loads(raw_response)
+        except (URLError, OSError, ValueError, KeyError, IndexError) as exc:
+            print(f"[llm-parser] llama-server failed ({exc}); using Ollama")
+            _LLAMA_PROBE.update(model=None, checked=time.monotonic())
+        else:
+            # Outside the try: a refusal (ValueError) is an answer, not a server failure.
+            return _finish_llm_parse(text, model, LLAMA_SERVER_URL, raw_response, cmd, _on_fallback)
     # `host` defaults at call time, not at import time, so a test (or a
     # deployment) that points OLLAMA_HOST somewhere else is honoured by
     # callers that never pass it explicitly.
@@ -1293,7 +1352,12 @@ def parse_command_llm(text: str, model: str = DEFAULT_LLM_MODEL, host: str = Non
             raise
         _log_llm_request(text, model, host, None, None, final, reason)
         return final
+    return _finish_llm_parse(text, model, host, raw_response, cmd, _on_fallback)
 
+
+def _finish_llm_parse(text, model, host, raw_response, cmd, _on_fallback):
+    """Normalise, validate and log the model's answer `cmd`; the rule parser
+    answers when it is unusable. Shared by the Ollama and llama-server paths."""
     # The model sometimes echoes an alias ("bones") instead of the canonical
     # class name ("skeleton") despite the prompt asking it not to -- normalize
     # through the same synonym table the rule parser uses (`_find_class`)
@@ -1509,7 +1573,10 @@ def _missed_clauses(cmd, normalized: str) -> list:
 
 
 def check_llm(model: str = DEFAULT_LLM_MODEL, host: str = None):
-    """None when Ollama answers and has `model`, else what is wrong."""
+    """None when Ollama (or the speculative llama-server) answers and has
+    `model`, else what is wrong."""
+    if host is None and llama_server_model(force=True) == model:
+        return None
     host = host if host is not None else OLLAMA_HOST
     try:
         with urlopen(Request(f"{host}/api/tags"), timeout=3) as resp:
@@ -1521,10 +1588,17 @@ def check_llm(model: str = DEFAULT_LLM_MODEL, host: str = None):
     return None
 
 
-def warm_llm(model: str = DEFAULT_LLM_MODEL, host: str = None) -> None:
-    """Load the model now so the first voice command has no cold start."""
+def warm_llm(model: str = DEFAULT_LLM_MODEL, host: str = None) -> str:
+    """Load the model now so the first voice command has no cold start;
+    returns which backend will answer."""
+    if host is None and llama_server_model(force=True) == model:
+        # One real request also fills llama-server's prompt cache with the
+        # system prompt, which every later request shares.
+        _llama_server_generate("reset", timeout=60)
+        return f"llama-server at {LLAMA_SERVER_URL}, speculative decoding"
     host = host if host is not None else OLLAMA_HOST
     body = _json.dumps({"model": model, "prompt": "", "keep_alive": "30m"}).encode()
     with urlopen(Request(f"{host}/api/generate", data=body, headers={"Content-Type": "application/json"}),
                  timeout=60) as resp:
         resp.read()
+    return f"Ollama at {host}"

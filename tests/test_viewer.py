@@ -171,8 +171,12 @@ def test_routes(session, monkeypatch):
         asyncio.run(server.command(server.CommandRequest(text="what a lovely day", parser="rule")))
     result = asyncio.run(server.command(server.CommandRequest(text="more liver", parser="rule", mode="exact")))
     assert result["current"]["cmd_text"] == "more liver"
-    switched = asyncio.run(server.dataset_switch(server.DatasetRequest(name="ts_s9002")))
+    background = server.BackgroundTasks()
+    switched = asyncio.run(server.dataset_switch(server.DatasetRequest(name="ts_s9002"), background))
     assert switched["dataset"] == "ts_s9002" and switched["total"] == 1
+    assert len(background.tasks) == 1          # the new scan's warm-up, after the response
+    asyncio.run(background())
+    assert session.state()["total"] == 1 and session.scan == "ts_s9002"
 
 
 def test_the_unlabelled_shell_does_not_follow_the_lungs_peak():
@@ -187,3 +191,15 @@ def test_the_unlabelled_shell_does_not_follow_the_lungs_peak():
     (shell_opacity, _), *rows = transfer.label_scoped_tables(params, hu)
     lungs_row = rows[transfer.CANONICAL_CLASSES.index("lungs")][0]
     assert np.all(shell_opacity == 0.0) and lungs_row.max() > 0.5
+
+
+def test_warm_up_answers_off_the_record(session):
+    """The server answers one command before serving; the session must not
+    see it -- no step, no saved history, no pending refine."""
+    before = session.state()
+    timings = session.warm_up()
+    assert {"render_ms", "goal_ms", "plan_ms", "repair_ms", "total_ms"} <= set(timings)
+    assert "search_ms" in timings["refine"]
+    after = session.state()
+    assert after["total"] == before["total"] and after["current"] == before["current"]
+    assert not session.pending_refines

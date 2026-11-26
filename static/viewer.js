@@ -293,13 +293,22 @@
     const opacity = vtk.Common.DataModel.vtkPiecewiseFunction.newInstance();
     // The same table the VR ray marcher uses (tf_table.js), laid out over
     // the banded scalar: row r covers [r * LABEL_BAND, r * LABEL_BAND + 3050].
+    // All nodes are handed over at once: addRGBPoint/addPoint re-sort every
+    // node on each call, which for 9 rows x 256 samples took ~1.1 s per step
+    // on the desktop (2026-11-26). Same nodes and defaults (midpoint 0.5,
+    // sharpness 0) as the add calls; a later node at the same x replaces an
+    // earlier one, as add does.
+    const colorNodes = new Map();
+    const opacityNodes = new Map();
     window.tfTable.tfRows(params, activeLayers, hasLabels()).forEach((row, rowIndex) => {
       for (const { hu, rgb, alpha } of row) {
         const x = hasLabels() ? rowIndex * LABEL_BAND + hu - CENTER_RANGE[0] : hu;
-        color.addRGBPoint(x, ...rgb);
-        opacity.addPoint(x, alpha);
+        colorNodes.set(x, { x, r: rgb[0], g: rgb[1], b: rgb[2], midpoint: 0.5, sharpness: 0.0 });
+        opacityNodes.set(x, { x, y: alpha, midpoint: 0.5, sharpness: 0.0 });
       }
     });
+    color.setNodes([...colorNodes.values()]);
+    opacity.setNodes([...opacityNodes.values()]);
     transferFunction = params.slice();
     volume.getProperty().setRGBTransferFunction(0, color);
     volume.getProperty().setScalarOpacity(0, opacity);

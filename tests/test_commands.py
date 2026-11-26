@@ -1,6 +1,7 @@
 """Instructions: parsing (rule, LLM, hybrid), the lexicon, and applying a command exactly."""
 import io
 import json
+import os
 
 import numpy as np
 import pytest
@@ -200,6 +201,33 @@ def test_hybrid_falls_back_to_rules_when_the_llm_is_offline(monkeypatch):
     monkeypatch.setattr(commands, "urlopen", offline)
     cmd, meta = commands.parse_command_with_meta("more liver mate", parser="hybrid")
     assert cmd["target"] == "liver" and meta["parser_fallback"]
+
+
+def test_llm_uses_llama_server_and_a_refusal_does_not_mark_it_down(monkeypatch):
+    """The speculative llama-server answers when it serves the model; a phrase
+    the model calls "not an instruction" is a refusal, not a server failure."""
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        url = request.full_url
+        calls.append(url)
+        if url.endswith("/v1/models"):
+            return io.BytesIO(json.dumps({"data": [{"id": commands.DEFAULT_LLM_MODEL}]}).encode())
+        if url.endswith("/v1/chat/completions"):
+            text = json.loads(request.data)["messages"][-1]["content"]
+            answer = ({"none": True} if text == "thank you" else
+                      {"target": "heart", "attribute": "opacity", "direction": "increase", "strength": "moderately"})
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(answer)}}]}).encode())
+        raise AssertionError(f"Ollama was asked: {url}")
+
+    monkeypatch.setattr(commands, "urlopen", fake_urlopen)
+    monkeypatch.setattr(commands, "_LLAMA_PROBE", {"model": None, "checked": None})
+    monkeypatch.setattr(commands, "LLM_LOG_PATH", os.devnull)
+    assert commands.parse_command_llm("the heart is hiding, bring it forward")["target"] == "heart"
+    with pytest.raises(ValueError):
+        commands.parse_command_llm("thank you")
+    assert commands.llama_server_model() == commands.DEFAULT_LLM_MODEL   # still trusted
+    assert sum(url.endswith("/v1/models") for url in calls) == 1
 
 
 def _height(params, name):

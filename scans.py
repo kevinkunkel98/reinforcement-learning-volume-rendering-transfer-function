@@ -139,14 +139,38 @@ def _file_digest(path: str, mtime_ns: int, size: int) -> str:
     return digest.hexdigest()
 
 
+@functools.lru_cache(maxsize=64)
+def _label_shape(name: str, path: str, mtime_ns: int, size: int, layout: tuple) -> tuple:
+    # Keyed on the file's stat and the manifest's layout pair, so a rewritten
+    # file or manifest is loaded (and validated) again.
+    return load_labels(name).shape
+
+
+def _labels_stat(name: str):
+    """(labels path, its os.stat) -- FileNotFoundError when there is none."""
+    path = subject(name).get("labels_path")
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError(f"{name} has no label volume; {_FETCH_HINT}")
+    return path, os.stat(path)
+
+
+def label_shape(name: str) -> tuple:
+    """The label volume's shape, as `load_labels(name).shape`, without
+    decompressing the file again while it is unchanged: callers on every
+    viewer command (`label_cache_identity`, `label_metadata` via
+    Session.state) paid ~45-60 ms each for it (2026-11-26)."""
+    path, stat = _labels_stat(name)
+    layout = (subject(name).get("label_layout_version"), manifest().get("label_layout_version"))
+    return _label_shape(name, path, stat.st_mtime_ns, stat.st_size, layout)
+
+
 def label_cache_identity(name: str) -> str:
     """Identity of a scan's labels for caches built on them (visibility.py)."""
-    labels = load_labels(name)
-    path = subject(name)["labels_path"]
-    stat = os.stat(path)
+    path, stat = _labels_stat(name)
+    shape = label_shape(name)
     class_ids = _class_ids(name)
     classes = ",".join(f"{key}={value}" for key, value in sorted(class_ids.items()))
-    return "|".join((CLASS_LAYOUT_VERSION, ",".join(map(str, labels.shape)), classes, version(name),
+    return "|".join((CLASS_LAYOUT_VERSION, ",".join(map(str, shape)), classes, version(name),
                      _file_digest(path, stat.st_mtime_ns, stat.st_size)))
 
 
@@ -184,13 +208,14 @@ def volume_chunk(name: str, index: int) -> bytes:
 
 
 def label_metadata(name: str) -> dict:
-    labels = load_labels(name)
+    shape = label_shape(name)
+    nbytes = math.prod(shape)   # uint8 (load_labels checks)
     class_ids = _class_ids(name)
-    return {"name": name, "dataset_version": version(name), "dimensions": list(labels.shape),
+    return {"name": name, "dataset_version": version(name), "dimensions": list(shape),
             "scalar_type": "uint8", "byte_order": "little", "order": "F",
             "label_layout_version": CLASS_LAYOUT_VERSION, "class_ids": class_ids, "classes": list(class_ids),
-            "chunk_bytes": CHUNK_BYTES, "total_bytes": labels.nbytes, "chunk_count": len(_chunks(labels.nbytes)),
-            "chunks": _chunks(labels.nbytes)}
+            "chunk_bytes": CHUNK_BYTES, "total_bytes": nbytes, "chunk_count": len(_chunks(nbytes)),
+            "chunks": _chunks(nbytes)}
 
 
 def label_chunk(name: str, index: int) -> bytes:

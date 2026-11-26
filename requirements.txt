@@ -12,6 +12,8 @@ torch==2.14.0
 # speech recognition (CPU, int8); mlx-whisper is an optional Apple-silicon
 # accelerator that asr.py prefers when installed (pip install mlx-whisper)
 faster-whisper==1.2.1
+# faster-whisper 1.2.1 passes av.open(metadata_errors=...), which PyAV 19 removed
+av==18.1.1
 # tests and figures
 pytest==9.1.1
 httpx==0.28.1
