@@ -14,6 +14,8 @@ LLM    ?= qwen2.5:7b
 # of ~3 GB of CUDA libraries) on a machine without an NVIDIA GPU.
 CPU    ?=
 TORCH  := $(shell sed -n 's/^torch==//p' requirements.txt)
+# Linux + NVIDIA GPU only (see setup): the cuBLAS faster-whisper's CTranslate2 build links.
+CUBLAS12 := 12.9.3.13
 
 # This machine's LAN address, for the headset (override: make certs IP=192.168.1.20)
 IP ?= $(shell { ipconfig getifaddr en0 || ipconfig getifaddr en1 \
@@ -81,6 +83,11 @@ ifneq ($(CPU),)
 	$(PY) -m pip install torch==$(TORCH) --index-url https://download.pytorch.org/whl/cpu
 endif
 	$(PY) -m pip install -r requirements.txt
+ifeq ($(CPU),)
+	@# Speech recognition on the GPU (asr.py): CTranslate2 needs cuBLAS 12, torch's CUDA 13 wheels bring only 13.
+	@if [ "$$(uname -s)" = Linux ] && command -v nvidia-smi >/dev/null 2>&1; then \
+		set -x; $(PY) -m pip install nvidia-cublas-cu12==$(CUBLAS12); fi
+endif
 	@echo; echo "next: make scans && make llm && make run"
 
 scans: $(PY)
@@ -119,9 +126,12 @@ llm:
 	for i in $$(seq 30); do ollama list >/dev/null 2>&1 && exit 0; sleep 1; done; \
 	echo "Ollama did not start: see out/ollama.log"; exit 1
 	ollama pull $(LLM)
+	@# Faster parsing: the same model in a llama-server with speculative decoding (tools/llm_server.py; Linux)
+	@if [ -x $(PY) ]; then $(PY) -m tools.llm_server ensure --model $(LLM); fi
 
 # Lists every downloaded patient, the demo set first; SCANS=demo lists only the demo set
 run: $(PY)
+	@$(PY) -m tools.llm_server ensure
 	SCANS=$(or $(SCANS),all) $(PY) server.py --port $(PORT)
 
 certs:
@@ -148,11 +158,13 @@ run-vr: $(PY)
 ifeq ($(CERT),mkcert)
 	@test -f certs/lan.pem || { echo "no certificate yet: make certs"; exit 1; }
 	@echo "headset browser: https://$(IP):$(PORT)/"
+	@$(PY) -m tools.llm_server ensure
 	SCANS=$(or $(SCANS),all) $(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/lan.pem --ssl-keyfile certs/lan-key.pem
 else
 	@test -n "$(IP)" || { echo "no LAN address found; pass one: make run-vr IP=..."; exit 1; }
 	@$(MAKE) --no-print-directory public-cert
 	@echo "headset browser: https://$(subst .,-,$(IP)).local-ip.sh:$(PORT)/"
+	@$(PY) -m tools.llm_server ensure
 	SCANS=$(or $(SCANS),all) $(PY) server.py --host 0.0.0.0 --port $(PORT) --ssl-certfile certs/public.pem --ssl-keyfile certs/public-key.pem
 endif
 

@@ -15,7 +15,7 @@ import sys
 import time
 
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -26,7 +26,8 @@ import commands
 import goals
 import lexicon
 import scans
-from asr import ASR_MODEL, _transcribe_path as asr_transcribe_path, is_hallucination
+import visibility
+from asr import ASR_MODEL, _transcribe_path as asr_transcribe_path, is_hallucination, warm as warm_asr
 from camera import DEFAULT_CAMERA
 from session import Session, scan_label, scan_list
 
@@ -165,11 +166,31 @@ class DatasetRequest(BaseModel):
     name: str
 
 
+def _log_warm_up(sess: Session) -> None:
+    timings = sess.warm_up()
+    refine = timings.get("refine", {}).get("search_ms")
+    print(f"[warm-up] {sess.scan}: {timings['total_ms']:.0f} ms"
+          + (f" (planning {timings.get('plan_ms')} ms, refine search {refine} ms)" if refine is not None else ""))
+
+
+async def _warm_up_after_switch(sess: Session) -> None:
+    # Async on purpose: it runs on the event loop like the command handlers
+    # (which call the session synchronously), so it never overlaps a command.
+    try:
+        _log_warm_up(sess)
+    except Exception as exc:   # a failed warm-up only means a slower first command
+        print(f"[warm-up] failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
 @app.post("/api/dataset")
-async def dataset_switch(req: DatasetRequest):
+async def dataset_switch(req: DatasetRequest, background: BackgroundTasks):
     if req.name not in scans.available_names():
         raise HTTPException(status_code=400, detail=f"unknown scan {req.name!r}")
-    return session().switch_dataset(req.name)
+    sess = session()
+    state = sess.switch_dataset(req.name)
+    # After the response: the browser downloads the new volume meanwhile.
+    background.add_task(_warm_up_after_switch, sess)
+    return state
 
 
 # --- commands ---------------------------------------------------------------------
@@ -339,17 +360,34 @@ def main():
     parser.add_argument("--ssl-certfile", help="TLS certificate (e.g. from mkcert)")
     parser.add_argument("--ssl-keyfile", help="TLS private key matching --ssl-certfile")
     args = parser.parse_args()
+    # The goal, planning repairs and the refine search all score through the
+    # visibility model; on a GPU the 200-evaluation refine takes ~0.1 s, not ~1.6 s.
+    print(f"[server] visibility on {visibility.use_device(os.environ.get('VISIBILITY_DEVICE', 'auto'))}")
     print(f"[server] scan: {session().scan}")
+    # Before serving, on the main thread (VTK renders there): the first real
+    # command then answers as fast as any later one.
+    try:
+        _log_warm_up(session())
+    except Exception as exc:   # a failed warm-up only means a slower first command
+        print(f"[warm-up] failed: {type(exc).__name__}: {exc}", file=sys.stderr)
 
     def warm_llm():
         problem = commands.check_llm()
         if problem:
             print(f"\n[llm-parser] WARNING: {problem}\n[llm-parser] voice commands use the rule parser only\n")
             return
-        commands.warm_llm()
-        print(f"[llm-parser] {commands.DEFAULT_LLM_MODEL} loaded")
+        backend = commands.warm_llm()
+        print(f"[llm-parser] {commands.DEFAULT_LLM_MODEL} loaded ({backend})")
+
+    def warm_speech():
+        # The first voice command otherwise pays the model load (seconds on a cold disk).
+        try:
+            warm_asr()
+        except Exception as exc:   # the viewer still works typed
+            print(f"[asr] WARNING: speech recognition did not load: {type(exc).__name__}: {exc}")
 
     threading.Thread(target=warm_llm, daemon=True).start()
+    threading.Thread(target=warm_speech, daemon=True).start()
     uvicorn.run(app, host=args.host, port=args.port, ssl_certfile=args.ssl_certfile, ssl_keyfile=args.ssl_keyfile)
 
 

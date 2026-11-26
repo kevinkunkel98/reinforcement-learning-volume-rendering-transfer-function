@@ -396,6 +396,34 @@ class Session:
         instruction = goals.goal_from_command(cmd, model, start_agg, volume=self.scan)
         return start_agg, goals.well_posed(instruction, model, params, start_agg)
 
+    def warm_up(self) -> dict:
+        """Answer one command off the record before the first real one: the
+        first command after a start took ~1.2 s against ~0.3 s warm (torch's
+        first planning call, the visibility model and its ceilings, VTK's
+        first render; 2026-11-26). An opacity increase takes the whole policy
+        path: occluders, planning, the refine search, both repairs. Nothing
+        is appended or saved. Returns the milliseconds per stage ("refine"
+        for the search); the policy stages are skipped without a checkpoint."""
+        timings, started = {}, time.perf_counter()
+        current = self.history[self.cursor]
+        params = np.array(current["params"], dtype=np.float64)
+        camera = dict(current.get("camera", DEFAULT_CAMERA))
+        self.render_png(params, camera)
+        self.readout(params)
+        self.start_visibility()
+        answers._lap(timings, "render_ms", started)
+        classes = goals.goal_classes_for_volume(self.scan)
+        if classes and self.policy_provider() is not None:
+            cmd = {"target": classes[0], "attribute": "opacity", "direction": "increase", "strength": "moderately"}
+            try:
+                job = self._policy_job(cmd, params, timings)
+                answers.fast_answer(job, timings)
+                answers.full_answer(job, timings.setdefault("refine", {}))
+            except (ValueError, FileNotFoundError, KeyError) as exc:
+                print(f"[warm-up] policy stages skipped: {exc}")
+        timings["total_ms"] = round((time.perf_counter() - started) * 1000.0, 1)
+        return timings
+
     def _policy_job(self, cmd, params, timings=None):
         policy = self.policy_provider()
         if policy is None:   # before resolving the model: the fallback is a ValueError

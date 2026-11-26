@@ -184,8 +184,19 @@ async function refresh(data) {
     window.tfTable.setUnlabelledOpacity(data.unlabelled_opacity);
   }
   if (window.volumeViewer && state.dataset && state.current) {
+    // The browser's own share of a step's latency (TF rebuild + vtk.js
+    // render), which no server timing sees.
+    const viewerStarted = performance.now();
     await window.volumeViewer.load(state.dataset, state.current.params, state.current.camera,
       {}, data.anatomy);
+    const stepId = state.current.id;
+    const issued = performance.now() - viewerStarted;
+    // render() returns once WebGL has the commands; the frame after next is
+    // when the GPU has drawn it. Logged without awaiting, so nothing waits.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      console.info(`[viewer-timing] step ${stepId}: transfer function + render issued ${Math.round(issued)}ms, `
+        + `on screen ${Math.round(performance.now() - viewerStarted)}ms`);
+    }));
   }
 
   updateTelemetry(state.current.class_visibility, state.current.class_brightness);
