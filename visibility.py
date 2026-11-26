@@ -51,14 +51,39 @@ LAYER_LAYOUT_VERSION = "anatomy-layers-v1"
 DEVICE = os.environ.get("VISIBILITY_DEVICE", "cpu")
 
 
+def _cuda_problem():
+    """None when CUDA can run what `_sums_on_device` runs, else why not.
+    `torch.cuda.is_available()` is not enough: a GPU the installed torch
+    build has no kernels for (e.g. an older architecture) still reports
+    available and fails only at the first kernel launch, which would fail
+    every viewer command instead of slowing it."""
+    if not torch.cuda.is_available():
+        return "CUDA is not available"
+    try:
+        device = torch.device("cuda")
+        table = torch.linspace(0.0, 0.5, 8, device=device)
+        index = torch.tensor([[0, 3, 7], [1, 2, 5]], device=device)
+        alpha = (1.0 - (1.0 - table) ** 1.5)[index]
+        before = torch.cumprod(1.0 - alpha, dim=1) * alpha
+        sums = torch.stack([block.sum(dim=1) for block in torch.split(before.reshape(1, -1), [2, 4], dim=1)], dim=1)
+        sums.tolist()
+    except Exception as exc:   # RuntimeError / torch.AcceleratorError ("no kernel image ...")
+        return f"{type(exc).__name__}: {exc}".splitlines()[0]
+    return None
+
+
 def use_device(name: str = "auto") -> str:
-    """Set where visibility is computed ("auto": CUDA when available, else
-    the CPU, e.g. on a Mac); returns the device used."""
+    """Set where visibility is computed ("auto": CUDA when it works, else
+    the CPU, e.g. on a Mac or a GPU this torch build cannot run on); returns
+    the device used. "cuda" raises when CUDA does not work."""
     global DEVICE
-    if name == "auto":
-        name = "cuda" if torch.cuda.is_available() else "cpu"
-    if name == "cuda" and not torch.cuda.is_available():
-        raise ValueError("visibility device cuda requested, but CUDA is not available")
+    if name in ("auto", "cuda"):
+        problem = _cuda_problem()
+        if problem is not None and name == "cuda":
+            raise ValueError(f"visibility device cuda requested, but {problem}")
+        if problem is not None and torch.cuda.is_available():
+            print(f"[visibility] GPU not usable, computing on the CPU: {problem}")
+        name = "cuda" if problem is None else "cpu"
     DEVICE = name
     return DEVICE
 

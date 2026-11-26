@@ -1,0 +1,1068 @@
+% =========================================================================
+% Master's thesis — Universität Leipzig, Institut für Informatik
+%
+% Based on a template by Daniel San Martín Reyes (USM format).
+% Adapted for Leipzig: A4 paper, German front matter, Selbstständigkeits-
+% erklärung, Leipzig title page.
+%
+% Structure:
+%   One file. Images go in figures/ (optional: a missing image shows as a
+%   grey placeholder box). references.bib is optional until you cite.
+%
+% Compile with pdfLaTeX + BibTeX.
+%
+% SKELETON NOTE: grey italic text (\plan{...}) says what a section must
+% contain; \figplaceholder{...} marks a figure still to be produced. Numbers
+% in tables come from the repository's experiment logs (docs/experiments/,
+% docs/STATUS.md) as of 2026-11-26 -- re-check them before submission.
+% Figures in figures/ are made by docs/thesis/scripts/ in the repository
+% (light theme; the README keeps its dark versions).
+% =========================================================================
+\documentclass[12pt, a4paper]{book}
+
+%%% PACKAGES %%%
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[main=english, ngerman]{babel}
+\usepackage[margin=1.1in]{geometry}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, fit, backgrounds}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{multirow}
+\usepackage{booktabs}
+\usepackage{mathtools}
+\usepackage[makeroom]{cancel}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tablefootnote}
+\usepackage{fancyhdr}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{pdfpages}
+\usepackage{siunitx}
+\usepackage{microtype}
+\usepackage[nosectionbib]{apacite}
+\usepackage[capitalise, noabbrev]{cleveref}
+\usepackage{titlesec}
+
+%%% SETUP %%%
+
+% ---- thesis metadata (edit these) ---------------------------------------
+% TITLE: the current one promises *human-preferred* adjustments, but the
+% delivered result learns from a designed visibility objective; human
+% preference enters only through the user study (Sec. sec:eval-user). Either keep
+% the title and make the preference study central, or use something like:
+%   "Learning to Edit Transfer Functions from Natural-Language Instructions
+%    with Model-Based Reinforcement Learning for Interactive and Immersive
+%    Medical Volume Rendering"
+\newcommand{\thesisTitle}{Learning Human-Preferred Transfer-Function
+                          Adjustments for Interactive Medical Volume Rendering}
+\newcommand{\thesisAuthor}{Kevin Kunkel}
+\newcommand{\thesisMatriculation}{3738957}
+\newcommand{\thesisProgramme}{M.Sc. Informatik}
+\newcommand{\thesisSupervisorOne}{Prof. Dr. Gerik Scheuermann}
+\newcommand{\thesisSupervisorTwo}{Dr. Thomas Wischgoll}
+\newcommand{\thesisSupervisorThree}{Dr. Baldwin Nsonga}
+\newcommand{\thesisDate}{\today}
+% -------------------------------------------------------------------------
+
+\hypersetup{
+    hidelinks,
+    linktoc=all,
+    pdftitle={\thesisTitle},
+    pdfauthor={\thesisAuthor},
+}
+
+\lstset{
+    basicstyle=\footnotesize\ttfamily,
+    literate={~} {$\sim$}{1},
+    breaklines=true,
+    showstringspaces=false,
+}
+
+\pgfplotsset{
+    compat=newest,
+    colormap={yellowgreen}{
+        rgb255=(255,255,0)
+        rgb255=(76,153,0)
+    },
+}
+
+\bibliographystyle{apacite}
+
+\DeclareSIUnit{\HU}{HU}
+
+\providecommand{\keywords}[1]{\textbf{\textit{Keywords}}: #1.}
+
+% ---- skeleton helpers (delete once the text is written) ------------------
+% What a section has to contain, in grey.
+\newcommand{\plan}[1]{{\color{gray}\itshape #1\par}}
+% A figure that still has to be made: a framed box with the brief.
+\newcommand{\figplaceholder}[2][0.9\linewidth]{%
+  \fbox{\parbox[c][4.5cm][c]{#1}{\centering\small\color{gray}\itshape #2}}}
+% ---------------------------------------------------------------------------
+
+% An image that may not be uploaded yet: placeholder box instead of an error.
+\newcommand{\maybegraphic}[2][width=0.9\linewidth]{%
+  \IfFileExists{#2}{\includegraphics[#1]{#2}}{\figplaceholder{Missing image: \texttt{\detokenize{#2}}}}}
+
+% Shared notation
+\newcommand{\att}{\mathcal{A}}            % attainment
+\newcommand{\vis}{v}                      % visibility vector
+\newcommand{\tf}{\theta}                  % transfer-function parameters
+
+% Chapter headings as "1  Title" (no "Chapter 1" line), and the running
+% header as "1  Title" instead of "CHAPTER 1. TITLE".
+\titleformat{\chapter}[hang]{\normalfont\huge\bfseries}{\thechapter}{0.7em}{}
+\titlespacing*{\chapter}{0pt}{0pt}{2.5em}
+\renewcommand{\chaptermark}[1]{\markboth{\ifnum\value{chapter}>0 \thechapter\quad\fi #1}{}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[RO, LE]{\leftmark}
+\fancyfoot[C]{\thepage}
+
+\hyphenation{Trans-fer-funk-tion Volu-men Houns-field trans-fer-func-tion}
+
+\begin{document}
+
+% =========================================================================
+% FRONT MATTER
+% =========================================================================
+\begin{titlepage}
+  \centering
+  \IfFileExists{figures/leipzig-logo.png}{\includegraphics[width=0.45\linewidth]{figures/leipzig-logo.png}\par}{}
+  \vspace*{1.0cm}
+  {\large Universität Leipzig\\Fakultät für Mathematik und Informatik\\Institut für Informatik\par}
+  \vspace{1.6cm}
+  {\LARGE\bfseries \thesisTitle\par}
+  \vspace{1.0cm}
+  % Four instructions and what the viewer renders for them (one CT scan,
+  % policy + planning + 200-render refine): docs/thesis/scripts/make_title_strip.py
+  \maybegraphic[width=\linewidth]{figures/title_renders.png}\par
+  \vspace{1.0cm}
+  {\large Masterarbeit\\[0.3em] \thesisProgramme\par}
+  \vspace{1.0cm}
+  {\large vorgelegt von\\[0.3em] \textbf{\thesisAuthor}\\ Matrikelnummer \thesisMatriculation\par}
+  \vfill
+  {\large Betreuer:\\ \thesisSupervisorOne\\ \thesisSupervisorTwo\\ \thesisSupervisorThree\par}
+  \vspace{0.8cm}
+  {\large Leipzig, \thesisDate\par}
+\end{titlepage}
+
+\newgeometry{top=2.5cm, bottom=2.5cm, inner=3.5cm, outer=2.5cm,
+             headheight=15pt, headsep=0.5cm, includehead}
+\pagenumbering{Roman}
+\let\cleardoublepage\clearpage
+
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+\plan{One paragraph, about 200 words: the problem (transfer functions are hard to design, impossible to edit by hand in VR), the approach (a measurable instruction task and a model-based RL policy refined by planning), the main result with numbers (e.g.\ test attainment 0.77 with 30 renders, level with 200 renders of search from scratch; 0.91 with 200), and the system (voice-driven editing in a standalone VR headset at about 58\,fps).}
+\keywords{volume rendering, transfer function, reinforcement learning, natural language, virtual reality}
+
+\vspace{1.5em}
+\begin{center}
+  \maybegraphic[width=\linewidth]{figures/arch.png}
+  \captionof{figure}[Overview of the approach]{Overview. An instruction about a CT volume is answered by a model-based RL agent in three increasingly refined ways -- a one-shot policy proposal, planning in its learned model, and a search with real renders -- and the result is scored by its visibility change, shown in a VR viewer, and rated by people. Icons: OpenMoji (openmoji.org), CC BY-SA 4.0.}
+  \label{fig:abstract-overview}
+\end{center}
+
+\tableofcontents
+\addcontentsline{toc}{chapter}{Contents}
+\listoffigures
+\addcontentsline{toc}{chapter}{List of Figures}
+\listoftables
+\addcontentsline{toc}{chapter}{List of Tables}
+\listofalgorithms
+\addcontentsline{toc}{chapter}{List of Algorithms}
+
+\clearpage
+\pagenumbering{arabic}
+
+% =========================================================================
+% CHAPTERS
+% =========================================================================
+% =========================================================================
+\chapter{Introduction}
+\label{ch:introduction}
+
+\section{Motivation}
+\label{sec:intro-motivation}
+\plan{Direct volume rendering shows CT data only through a transfer function, and designing one is a slow expert task of moving control points in a histogram editor. Motivate why a clinician or student would rather say ``more liver, less bone'' -- especially in VR, where there is no mouse and no histogram widget. End with the gap: nobody has shown that a learned agent can turn such instructions into transfer-function edits on real patient data.}
+
+\begin{figure}[ht]
+  \centering
+  \maybegraphic[width=0.85\linewidth]{figures/viewer_ui.png}
+  \caption[The interactive viewer]{The viewer: a spoken or typed instruction (left) changes the transfer function of a CT volume (right). Replace with a final screenshot that shows one instruction and its before/after.}
+  \label{fig:intro-teaser}
+\end{figure}
+
+\section{Problem Statement and Research Questions}
+\label{sec:intro-questions}
+\plan{State the problem formally in one paragraph: given a CT volume with organ labels, the current transfer function and an instruction, produce a new transfer function whose rendered image fulfils the instruction. Then list the research questions explicitly; every later chapter should answer one of them.}
+
+\begin{description}
+  \item[RQ1] Can reinforcement learning learn to edit transfer functions from instructions at all, and on patients it has never seen? \hfill (\cref{sec:eval-main})
+  \item[RQ2] Which learning formulation works -- model-free or model-based -- and why does the other fail? \hfill (\cref{sec:eval-modelfree,sec:eval-ablations})
+  \item[RQ3] How does the learned policy compare to, and combine with, black-box search over the same objective? \hfill (\cref{sec:eval-search})
+  \item[RQ4] Does the system run interactively, including in a standalone VR headset? \hfill (\cref{sec:eval-vr})
+  \item[RQ5] Do people judge the results as matching what they asked for? \hfill (\cref{sec:eval-user})
+\end{description}
+
+\section{Contributions}
+\label{sec:intro-contributions}
+\plan{List four or five concrete contributions as bullets, each with the chapter that delivers it. Be precise about what is new: the measurable instruction task, the model-based learner with planning, the evaluation protocol, the end-to-end system including VR.}
+
+\begin{itemize}
+  \item A measurable formulation of instruction-driven transfer-function editing: per-organ visibility, goals, attainment and reachability (\cref{ch:task}).
+  \item A model-based RL method that learns a renderer model and trains the policy through it, refined at use time by planning through the learned model (\cref{ch:method}).
+  \item An evaluation on held-out patients against model-free RL and search baselines, with paired significance tests over seeds (\cref{ch:evaluation}).
+  \item An end-to-end system -- speech, instruction parser, policy, desktop and standalone-VR rendering (\cref{ch:system}).
+\end{itemize}
+
+\section{Thesis Outline}
+\label{sec:intro-outline}
+\plan{One sentence per chapter. Keep it short; the reader uses it as a map.}
+
+% =========================================================================
+\chapter{Volume Rendering and Reinforcement Learning}
+\label{ch:foundations}
+
+\section{Direct Volume Rendering of CT Data}
+\label{sec:found-dvr}
+\plan{CT intensities in Hounsfield units, ray casting and front-to-back compositing with the emission--absorption model. Introduce the compositing equation here, because ``visibility'' in \cref{sec:task-visibility} is defined on it.}
+
+\begin{equation}
+  C = \sum_{i} c_i\,\alpha_i \prod_{j<i} (1-\alpha_j)
+  \label{eq:compositing}
+\end{equation}
+
+\section{Transfer Functions}
+\label{sec:found-tf}
+\plan{1D transfer functions over HU, label-scoped (per-organ) transfer functions using segmentation masks, and the parameterisation used in this thesis (peaks per class: centre, width, height, colour). Show one transfer function next to its rendering.}
+
+\begin{figure}[ht]
+  \centering
+  % docs/thesis/scripts/make_tf_and_visibility.py (ts_s0477, the task's start TF)
+  \maybegraphic[width=\linewidth]{figures/tf_start.png}
+  \caption[A label-scoped transfer function]{A label-scoped transfer function and its rendering: one Gaussian opacity peak per class in the class's colour, each applied only to voxels with that label; unlabelled voxels see the skeleton and soft-tissue peaks at 0.2 opacity. Task start transfer function on patient ts\_s0477.}
+  \label{fig:found-tf}
+\end{figure}
+
+\section{Reinforcement Learning}
+\label{sec:found-rl}
+\plan{MDP, policy, return, and the one-step (contextual-bandit) case that the one-shot editing task reduces to. Introduce Soft Actor-Critic briefly, because it is the model-free baseline.}
+
+\section{Model-Based Reinforcement Learning}
+\label{sec:found-mbrl}
+\plan{Learned dynamics models, ensembles for uncertainty, Dyna-style data collection, and policy optimisation by backpropagating through a differentiable model. Mention model exploitation (the policy finds the model's errors), which \cref{sec:method-planning} has to deal with.}
+
+\section{Natural-Language Commands for Visualisation}
+\label{sec:found-nl}
+\plan{How a free-text command becomes structured intent: rule grammars versus LLM parsing, and speech recognition as an input source. Keep this short; the parser is a component, not the contribution.}
+
+% =========================================================================
+\chapter{Related Work}
+\label{ch:related}
+
+\section{Transfer-Function Design}
+\label{sec:rel-tf}
+\plan{Manual and semi-automatic design: histogram-based widgets, size and visibility-driven transfer functions, and segmentation-based (label) transfer functions. Visibility-driven work is the closest relative of this thesis's objective, so cover it carefully.}
+
+\section{Learning and Optimisation for Transfer Functions}
+\label{sec:rel-learning}
+\plan{Optimisation and search over transfer functions, neural approaches that predict transfer functions or rendering parameters, and reinforcement learning in visualisation. State that none of them is conditioned on a free-form instruction about organs.}
+
+\section{Language Interfaces for Visualisation}
+\label{sec:rel-language}
+\plan{Natural-language interfaces for charts and for volume rendering, and recent LLM-driven visualisation agents. Contrast their direct ``LLM writes the parameters'' approach with a learned policy that measures what the image shows.}
+
+\section{Volume Rendering in Virtual Reality}
+\label{sec:rel-vr}
+\plan{Medical volume rendering on head-mounted displays, performance techniques (empty-space skipping, adaptive sampling, foveated rendering), and interaction without mouse and keyboard. This motivates both the voice interface and the renderer work in \cref{sec:sys-vr}.}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Comparison with related approaches]{Positioning of this thesis. Fill one row per closest related work.}
+  \label{tab:rel-comparison}
+  \begin{tabular}{lccccc}
+    \toprule
+    Approach & Instruction input & Organ-aware & Learned & Measures image & VR \\
+    \midrule
+    Manual TF editors        & -- & (\checkmark) & -- & -- & -- \\
+    Visibility-driven TFs    & -- & \checkmark & -- & \checkmark & -- \\
+    LLM visualisation agents & \checkmark & ? & -- & -- & -- \\
+    \textit{\dots}           &  &  &  &  &  \\
+    \midrule
+    \textbf{This thesis}     & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% =========================================================================
+\chapter{Measuring Instruction Success in Volume Renderings}
+\label{ch:task}
+
+\section{Data}
+\label{sec:task-data}
+\plan{TotalSegmentator CT volumes with organ labels, merged into eight classes plus an unlabelled ``other''. Splits by patient, so that validation and test patients are never seen in training; mention the extra training patients for the model-based learner.}
+
+\begin{table}[ht]
+  \centering
+  \caption[Dataset and splits]{Data used in this thesis (TotalSegmentator, CC-BY-4.0). Splits are by patient.}
+  \label{tab:task-data}
+  \begin{tabular}{lrl}
+    \toprule
+    Split & Patients & Use \\
+    \midrule
+    train        & 20 & model-free training, search baselines \\
+    train\_extra & 70 & additional training data for the model-based learner \\
+    val          &  4 & model selection, ablations \\
+    test         &  6 & final numbers, evaluated once per method \\
+    \midrule
+    val\_extra   & 32 & larger held-out set, evaluated once (frozen model) \\
+    test\_extra  & 60 & larger held-out set, evaluated once (frozen model) \\
+    \bottomrule
+  \end{tabular}
+
+  \medskip
+  \small Classes: skeleton, lungs, heart, vessels, liver, kidneys, spleen, soft tissue; unlabelled voxels form ``other''. val\_extra and test\_extra come from the full TotalSegmentator v2 (1228 CTs) with the same region filter and no overlap with the other 100 patients; 10 episodes per patient.
+\end{table}
+
+\section{Transfer-Function Parameterisation and Action Space}
+\label{sec:task-action}
+\plan{One peak per class (centre, width, height, colour) as the editable state, and the residual action: a bounded change to the current parameters. Justify residual over absolute actions (edits should be local and reversible).}
+
+\section{Instruction Space}
+\label{sec:task-instructions}
+\plan{The five instruction kinds, with examples and their share of the training mix. Explain how the parser output (target, attribute, direction, strength) maps onto a goal.}
+
+\begin{table}[ht]
+  \centering
+  \caption[Instruction kinds]{Instruction kinds with an example each.}
+  \label{tab:task-kinds}
+  \begin{tabular}{ll}
+    \toprule
+    Kind & Example \\
+    \midrule
+    relative   & ``a bit more liver'' \\
+    absolute   & ``high opacity for the vessels'' \\
+    compound   & ``more bone, less lungs'' \\
+    show only  & ``show only the bone and the spleen'' \\
+    brightness & ``darken the heart'' \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Measuring What the Image Shows}
+\label{sec:task-visibility}
+\plan{Per-class visibility: the share of the image each class contributes, measured by compositing with label tags (\cref{eq:compositing}), plus per-class brightness. Explain why it is measured on a fixed low-resolution grid (speed, determinism) and show that it agrees with the rendering.}
+
+\begin{figure}[ht]
+  \centering
+  % docs/thesis/scripts/make_tf_and_visibility.py
+  \maybegraphic[width=\linewidth]{figures/visibility.png}
+  \caption[Per-class visibility]{The rendered image and the visibility vector the learner sees. Left: rendering from the visibility estimate's frontal view. Middle: the class contributing most to each of that view's $80\times80$ rays in the compositing estimate (faded where the ray stays nearly transparent). Right: each class's share of the image over all six views. Task start transfer function, patient ts\_s0477.}
+  \label{fig:task-visibility}
+\end{figure}
+
+\section{Goals, Distance and Attainment}
+\label{sec:task-attainment}
+\plan{Define the goal as a target visibility per mentioned class, the distance in log-visibility with a keep term for unmentioned classes, and attainment as the fraction of the start distance closed. Give the equation, and argue why log scale, why a tolerance on the keep term, and why attainment is reported as a median.}
+
+\begin{equation}
+  \att = 1 - \frac{d(\vis_{\text{final}}, g)}{d(\vis_{\text{start}}, g)}
+  \label{eq:attainment}
+\end{equation}
+
+\section{Reachability and Class Ceilings}
+\label{sec:task-reachability}
+\plan{A goal must be physically reachable: each class has a ceiling (its maximum visibility over peak heights), absolute levels are fractions of it, and relative goals are clipped to it. Describe how occluding classes are allowed to fade, and present the soft-tissue ceiling bug as the worked example of why the ceiling must be probed over several peak heights.}
+
+\begin{table}[ht]
+  \centering
+  \caption[Ceiling probe]{Visibility (\% of the image) of a class shown alone, by its peak height, on patient ts\_s0477. Soft tissue peaks at a low height; the original probe used height 1.0 only.}
+  \label{tab:task-ceiling}
+  \begin{tabular}{lccccccc}
+    \toprule
+    Peak height & 0.02 & 0.05 & 0.1 & 0.2 & 0.4 & 0.7 & 1.0 \\
+    \midrule
+    soft tissue & 10.3 & \textbf{13.6} & 13.0 & 9.8 & 5.5 & 2.7 & 1.5 \\
+    lungs       & 6.5 & 9.7 & \textbf{10.7} & 10.5 & 9.5 & 8.2 & 7.3 \\
+    skeleton    & 1.9 & 4.2 & 7.0 & 10.6 & 14.0 & 16.1 & \textbf{17.0} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      width=0.8\linewidth, height=5.2cm, xmode=log, log basis x=10,
+      xlabel={Peak height (log scale)}, ylabel={Shown alone (\% of image)},
+      xmin=0.015, xmax=1.3, ymin=0, ymax=19,
+      xtick={0.02,0.05,0.1,0.2,0.4,0.7,1.0}, xticklabels={0.02,0.05,0.1,0.2,0.4,0.7,1.0},
+      legend pos=north west, legend style={font=\small, draw=none}, grid=major,
+      grid style={gray!25}, every axis plot/.append style={thick},
+    ]
+      \addplot+[color=red!65!black, mark=*] coordinates {(0.02,10.3) (0.05,13.6) (0.1,13.0) (0.2,9.8) (0.4,5.5) (0.7,2.7) (1.0,1.5)};
+      \addplot+[color=blue!60!black, mark=square*] coordinates {(0.02,6.5) (0.05,9.7) (0.1,10.7) (0.2,10.5) (0.4,9.5) (0.7,8.2) (1.0,7.3)};
+      \addplot+[color=gray!70!black, mark=diamond*] coordinates {(0.02,1.9) (0.05,4.2) (0.1,7.0) (0.2,10.6) (0.4,14.0) (0.7,16.1) (1.0,17.0)};
+      \legend{soft tissue, lungs, skeleton}
+    \end{axis}
+  \end{tikzpicture}
+  \caption[Ceiling probe as a plot]{Data of \cref{tab:task-ceiling}: only the skeleton is most visible at full peak height; probing at height 1.0 alone put the soft-tissue ceiling at 1.5\,\% instead of 13.6\,\%.}
+  \label{fig:task-ceiling}
+\end{figure}
+
+\section{Task Iterations}
+\label{sec:task-versions}
+\plan{Present v1, v2 and v3 as successive corrections of the task, each motivated by a measured failure (unreachable goals; an unlabelled shell covering half the image; an invisible organ asked to brighten). Stress that results on different task versions are reported side by side, never as one number improving on another.}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Task versions]{What each task version changed and the measured reason.}
+  \label{tab:task-versions}
+  \begin{tabular}{lp{5.2cm}p{5.2cm}}
+    \toprule
+    Version & Change & Measured reason \\
+    \midrule
+    v1 & first formulation & -- \\
+    v2 & visible-organ start, reachable targets, occluders may fade &
+         a 500-evaluation search reached only 0.49 on v1 (0.82 on v2) \\
+    v3 & unlabelled tissue at 0.2 opacity; brightness only for visible classes; show-only hides fully &
+         ``other'' covered 49\,\% of the image at the start (v3: 27\,\% val, 25\,\% test; medians) \\
+    v3 (fixed ceiling) & ceiling probed at 6 peak heights &
+         soft-tissue ceiling 0.2--2.3\,\% instead of 4--22\,\% \\
+    v3 (shell, 2026-11-15) & unlabelled shell without the lungs peak (skeleton and soft only) &
+         ``show only lungs'' drew the air around the body as a box; ``other'' at the start 19\,\% $\to$ 16\,\% (ts\_s0477); no significant change in attainment (val\_extra, 120 paired episodes) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \maybegraphic[width=0.9\linewidth]{figures/v2_vs_v3_render.png}
+  \caption[Effect of the task version]{The same instruction answered on task v2 and v3 (start, v2 policy + search, v3 policy + search). Re-render with the final checkpoint.}
+  \label{fig:task-v2-v3}
+\end{figure}
+
+% =========================================================================
+\chapter{Model-Based Reinforcement Learning for Transfer-Function Editing}
+\label{ch:method}
+
+\section{Overview}
+\label{sec:method-overview}
+\plan{One figure and one paragraph: instruction and current state go in, the policy proposes a residual edit, planning refines it through the learned model, an optional search refines it with real renders. Name each component and the section that explains it.}
+
+\begin{figure}[ht]
+  \centering
+  % docs/thesis/scripts/make_pipeline_diagram.py (also figures/pipeline.drawio)
+  \maybegraphic[width=\linewidth]{figures/pipeline.png}
+  \caption[Method overview]{Overview of the learned editing pipeline. Training (top): real renders of transfer-function variants train an ensemble surrogate of the renderer; the policy is trained by gradients through it, and Dyna rounds collect more real data where the ensemble disagrees. Use (bottom): per instruction, the policy's one-shot proposal is refined by planning through the model and by a search with real renders. Numbers: median test attainment (6 patients, 300 episodes), median over three seeds.}
+  \label{fig:method-overview}
+\end{figure}
+
+\section{Model-Free Baseline: Soft Actor-Critic}
+\label{sec:method-sac}
+\plan{The one-shot environment, the reward (attainment with a drift charge), and the extensions tried: hindsight relabelling, class balancing, search-distilled pretraining, show-only reward weighting. Keep the detail needed to make the negative result in \cref{sec:eval-modelfree} credible -- this baseline must look like an honest effort.}
+
+\section{A Learned Model of the Renderer}
+\label{sec:method-dynamics}
+\plan{An ensemble of five MLPs predicts the change in per-class visibility and brightness from a context (intensity histogram, class ceilings, controllable parameters, start visibility) and the residual action, plus a ``useless edit'' logit. Explain the ensemble's role: its disagreement estimates where the model is unreliable.}
+
+\section{Training the Policy Through the Model}
+\label{sec:method-policy}
+\plan{The policy is trained by backpropagating the exact goal distance (\cref{eq:attainment}) through the frozen ensemble -- no reward signal has to be estimated. Describe the loss, the disagreement penalty against model exploitation, and how instructions are sampled.}
+
+\section{Dyna Rounds and Closed-Loop Fine-Tuning}
+\label{sec:method-dyna}
+\plan{The model is only accurate where it has seen data, so each round renders the current policy's own proposals and refits the model there. A final closed-loop fine-tune trains through two-step rollouts with every instruction kind drawn equally often.}
+
+\begin{algorithm}[ht]
+  \caption{Model-based training with Dyna rounds}
+  \label{alg:dyna}
+  \begin{algorithmic}[1]
+    \State $\mathcal{D} \gets$ render $N_0$ random edits on training patients
+    \For{round $r = 0, \dots, R$}
+      \State fit ensemble $f_{1..5}$ on $\mathcal{D}$
+      \State train $\pi$ by minimising $\mathbb{E}_{g}\big[d(\hat v(\pi), g) + \beta\,\mathrm{disagree}\big]$ through $f$
+      \If{$r \geq 1$} \State closed-loop fine-tune $\pi$ (balanced instruction kinds) \EndIf
+      \State $\mathcal{D} \gets \mathcal{D} \cup$ render $N_r$ edits proposed by $\pi$
+    \EndFor
+  \end{algorithmic}
+\end{algorithm}
+
+\section{Planning Through the Learned Model at Use Time}
+\label{sec:method-planning}
+\plan{For one concrete instruction, refine the policy's action by gradient descent on the same loss through the ensemble: several restarts around the proposal, keep the lowest loss. It needs no renders and takes about 0.2\,s; explain why starting from the policy and limiting the steps matters (more steps exploit model errors -- see \cref{tab:eval-planning-ablation}).}
+
+\begin{algorithm}[ht]
+  \caption{Planning a residual action through the dynamics ensemble}
+  \label{alg:plan}
+  \begin{algorithmic}[1]
+    \Require proposal $a_0 = \pi(o, g)$, ensemble $f$, steps $K$, restarts $M$
+    \For{$m = 1, \dots, M$}
+      \State $a \gets a_0 + \epsilon_m$, \quad $\epsilon_m \sim \mathcal{N}(0, \sigma_m^2)$
+      \For{$k = 1, \dots, K$}
+        \State $a \gets \mathrm{Adam}\big(a, \nabla_a [\,d(\hat v_f(a), g) + \beta\,\mathrm{disagree}_f(a) + \sigma(\mathrm{useless}_f(a))\,]\big)$
+      \EndFor
+    \EndFor
+    \State \Return the restart with the lowest loss
+  \end{algorithmic}
+\end{algorithm}
+
+\section{Combining the Policy with Search}
+\label{sec:method-search}
+\plan{Hill climbing over transfer-function parameters with real renders, either from the start (baseline) or warm-started from the (planned) proposal. This is what the viewer runs: the learned part gives a strong start, a small search budget polishes it.}
+
+\section{Implementation Details}
+\label{sec:method-impl}
+\plan{Hyperparameters in one table, training cost on the hardware used, and where the code lives. Everything needed to reproduce the main result.}
+
+\begin{table}[ht]
+  \centering
+  \caption[Hyperparameters]{Main hyperparameters. Fill the remaining values from \texttt{rl/model\_based.py} and the pipeline script.}
+  \label{tab:method-hparams}
+  \begin{tabular}{ll}
+    \toprule
+    Parameter & Value \\
+    \midrule
+    Ensemble size & 5 MLPs \\
+    Data & 3000 random starts + 3 Dyna rounds $\times$ 1500 \\
+    Dyna rounds & 3, then balanced closed-loop fine-tuning \\
+    Planning & 100 Adam steps, 16 restarts, lr 0.05, $\beta = 1$, noise 0--0.3 \\
+    Search warm start & initial step 0.1 (0.2 from the start) \\
+    Seeds & 3 \\
+    Training time & 4\,h\,08 per pipeline on an Apple M1 (CPU, v3c); \\
+                  & 8\,h\,10 for the retrain on the Leipzig PC (CPU, 4 collection workers, v3d) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% =========================================================================
+\chapter{A Voice-Driven Viewer for Desktop and Virtual Reality}
+\label{ch:system}
+
+\section{Architecture}
+\label{sec:sys-architecture}
+\plan{Browser front end (vtk.js and a custom WebGL2 ray marcher), Python server (parser, policy, planning, search, visibility measurement), and the data path from a spoken command to an updated transfer function. One architecture diagram.}
+
+\begin{figure}[ht]
+  \centering
+  \figplaceholder{Architecture diagram: browser (UI, speech capture, vtk.js flat view, WebXR + custom ray marcher) $\leftrightarrow$ server (speech-to-text, rule/LLM parser, policy + planning + search, visibility, session history). Start from \texttt{docs/screenshots/architecture-highlevel-dark.png} and redraw in TikZ in the thesis style.}
+  \caption[System architecture]{System architecture.}
+  \label{fig:sys-architecture}
+\end{figure}
+
+\section{From Speech to Command}
+\label{sec:sys-parser}
+\plan{Speech recognition, the rule grammar and the local LLM parser with fallback, and how refusals and noise are handled. Report the parser evaluation here, with its caveat that the held-out phrases were written by the same author.}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Parser accuracy]{Instruction parsers on 107 phrases (dev: 57 incl.\ 36 real logged commands; held-out: 50). ``Intent'' ignores strength. ``Before/after'': the parser work of 2026-10-18; ``current'': the code of 2026-11-26 (voice lexicon, later fixes; LLM through llama-server with speculative decoding, answers identical to plain decoding). Hybrid: the rule grammar when it covers every word, else the LLM.}
+  \label{tab:sys-parser}
+  \begin{tabular}{lcccc}
+    \toprule
+    Parser & dev exact & dev intent & held-out exact & held-out intent \\
+    \midrule
+    Rule grammar, before & 40\,\% & 40\,\% & 18\,\% & 26\,\% \\
+    Rule grammar, after  & 100\,\% & 100\,\% & 100\,\% & 100\,\% \\
+    LLM (qwen2.5:7b), before & 81\,\% & 88\,\% & 66\,\% & 74\,\% \\
+    LLM (qwen2.5:7b), after  & 96\,\% & 98\,\% & 88\,\% & 94\,\% \\
+    \midrule
+    Rule grammar, current & 100\,\% & 100\,\% & 100\,\% & 100\,\% \\
+    LLM (qwen2.5:7b), current & 95\,\% & 96\,\% & 92\,\% & 92\,\% \\
+    \textbf{Hybrid, current (viewer)} & \textbf{96\,\%} & \textbf{98\,\%} & \textbf{100\,\%} & \textbf{100\,\%} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Parser accuracy on realistic phrasings]{The realistic phrase set (78 phrases: dev 42 incl.\ logged voice commands, held-out 36), code of 2026-11-26. Written by the developer, so optimistic until tested on other people's phrasings.}
+  \label{tab:sys-parser-realistic}
+  \begin{tabular}{lcccc}
+    \toprule
+    Parser & dev exact & dev intent & held-out exact & held-out intent \\
+    \midrule
+    Rule grammar & 88\,\% & 88\,\% & 100\,\% & 100\,\% \\
+    LLM (qwen2.5:7b) & 81\,\% & 81\,\% & 97\,\% & 97\,\% \\
+    \textbf{Hybrid (viewer)} & \textbf{98\,\%} & \textbf{98\,\%} & \textbf{97\,\%} & \textbf{97\,\%} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Applying a Command}
+\label{sec:sys-apply}
+\plan{What happens per command: policy proposal, planning, warm-started search with a fixed render budget, history and undo, and the latency of each stage. A small latency table belongs here.}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Command latency]{Latency per stage of one voice command, warm medians on a desktop with an RTX~5080 and a Ryzen~9 9950X3D (2026-11-26). Before: speech recognition and visibility on the CPU, LLM through Ollama. After: both on the GPU, LLM with n-gram speculative decoding, no repeated label-file reads, the browser's transfer function set in one call. The two-stage answer shows the fast answer first; the refine search replaces it.}
+  \label{tab:sys-latency}
+  \begin{tabular}{lrr}
+    \toprule
+    Stage & Before & After \\
+    \midrule
+    Speech to text (Whisper small) & 480--590\,ms & 45--110\,ms \\
+    Parsing, rule grammar & $<1$\,ms & $<1$\,ms \\
+    Parsing, LLM (when used; median) & 185\,ms & 103\,ms \\
+    Goal incl.\ occluder search & 121\,ms & 9\,ms \\
+    Policy proposal & 0.2\,ms & 0.2\,ms \\
+    Planning through the model & 91\,ms & 89\,ms \\
+    Keep repair + colour guard & 45\,ms & 4\,ms \\
+    Server render + readout & 102\,ms & 49\,ms \\
+    Search (200 renders, refine) & 1262\,ms & 115\,ms \\
+    Transfer-function update in the viewer, per image & 1130\,ms & \\
+    \midrule
+    End of speech to refined image (rule parser) & 1.1--2.6\,s & $\approx$0.4\,s \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  % docs/thesis/scripts/make_latency.py
+  \maybegraphic[width=0.9\linewidth]{figures/latency.png}
+  \caption[Latency per stage]{Data of \cref{tab:sys-latency} on a log scale. The viewer's transfer-function update was measured at 1.13\,s per image before the fix and has not been re-measured after it.}
+  \label{fig:sys-latency}
+\end{figure}
+
+\section{Volume Rendering in a Standalone Headset}
+\label{sec:sys-vr}
+\plan{Why the off-the-shelf renderer failed in WebXR on a standalone headset (resolution pinned by auto-adjust, missing eye, clipping wedges) and the custom WebGL2 ray marcher that replaced it: separate HU and label textures, empty-space skipping, jittered sampling. Then the performance techniques -- foveated step size, striding through transparent samples, coarser steps while the volume turns -- each with the reason it works (cost tracks the number of voxels read, not pixels).}
+
+\begin{figure}[ht]
+  \centering
+  \figplaceholder{Headset photo or both-eye screenshot (\texttt{adb exec-out screencap}) of the volume in VR with the HUD, plus a sketch of the foveated step size over the eye's view.}
+  \caption[Volume rendering in VR]{The viewer in a standalone VR headset.}
+  \label{fig:sys-vr}
+\end{figure}
+
+\section{Interaction in VR}
+\label{sec:sys-vr-interaction}
+\plan{Voice as the only text input, thumbstick rotation, recentering in front of the user, and the in-headset HUD that shows the command history and measurements. Mention what was tried and dropped (grip-to-grab).}
+
+% =========================================================================
+\chapter{Evaluation}
+\label{ch:evaluation}
+
+\section{Experimental Protocol}
+\label{sec:eval-protocol}
+\plan{Fixed sets of 300 episodes per split, identical for every method; three training seeds; median attainment as the headline and median visible change (percentage points of the image moved toward the goal) as the second number. Paired Wilcoxon signed-rank tests over episodes; test split evaluated once per method after all choices were made on val.}
+
+\section{Model-Free Reinforcement Learning}
+\label{sec:eval-modelfree}
+\plan{RQ2, first half: SAC with every extension stays near zero, and only doubling training moves it slightly. Present this as a result, not a failure: it motivates the model-based formulation, and the diagnosis (sparse, expensive signal; a third of instructions not improvable under v1) is part of the contribution.}
+
+\begin{table}[ht]
+  \centering
+  \caption[Model-free vs.\ model-based on task v1]{Task v1, validation, median attainment (3 seeds).}
+  \label{tab:eval-modelfree}
+  \begin{tabular}{lc}
+    \toprule
+    Method & Median attainment \\
+    \midrule
+    SAC, best configuration (E3) & 0.00 \\
+    SAC, all one-change variants (E6--E8) & $\approx$ 0.00 \\
+    SAC, 2$\times$ training (E9) & 0.09 \\
+    Model-based, one Dyna round & 0.19 \\
+    Model-based + closed loop & 0.24 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Main Result: Editing from Instructions on Unseen Patients}
+\label{sec:eval-main}
+\plan{RQ1: the headline table on the final task, val and test, with every method. Point out that the policy generalises (val and test agree), that planning adds a significant gain without renders, and what the viewer's configuration achieves.}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Main results]{Task v3 with fixed ceilings, 300 episodes per split, median attainment per seed (0\,/\,1\,/\,2). Search from the start is deterministic (one run).}
+  \label{tab:eval-main}
+  \begin{tabular}{lccc}
+    \toprule
+    Method & Renders & Validation & Test \\
+    \midrule
+    Policy alone & 0 & 0.50 / 0.49 / 0.49 & 0.48 / 0.47 / 0.47 \\
+    Policy + planning & 0 & 0.62 / 0.63 / 0.63 & 0.62 / 0.65 / 0.64 \\
+    Policy + search & 30 & 0.67 / 0.66 / 0.67 & 0.67 / 0.67 / 0.66 \\
+    Policy + planning + search & 30 & 0.75 / 0.77 / 0.75 & 0.77 / 0.78 / 0.77 \\
+    Policy + search & 200 & 0.89 / 0.90 / 0.89 & 0.89 / 0.88 / 0.88 \\
+    \textbf{Policy + planning + search} (viewer) & 200 & \textbf{0.89 / 0.90 / 0.90} & \textbf{0.91 / 0.92 / 0.90} \\
+    Search from the start & 200 & 0.75 & 0.70 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Significance tests]{Paired Wilcoxon signed-rank tests over the 300 episodes; range over seeds and both splits.}
+  \label{tab:eval-tests}
+  \begin{tabular}{llc}
+    \toprule
+    Comparison & Result & $p$ \\
+    \midrule
+    planning vs.\ policy alone & better & $\le 2\cdot10^{-7}$ \\
+    planning + 30 vs.\ policy + 30 & better & $\le 3\cdot10^{-5}$ \\
+    planning + 200 vs.\ policy + 200 & mostly level & 0.009--0.87 \\
+    planning + 30 vs.\ search from start, 200 & \textbf{level} & 0.14--0.9 \\
+    planning alone vs.\ search from start, 200 & worse & $\le 7\cdot10^{-5}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      ybar, width=\linewidth, height=6cm, bar width=7pt,
+      ylabel={Median attainment (test)}, ymin=0, ymax=1,
+      symbolic x coords={policy, plan, plan+30, plan+200, search200},
+      xticklabels={policy, + planning, + planning + 30, + planning + 200, search 200},
+      xtick=data, x tick label style={font=\small},
+      legend style={at={(0.02,0.98)}, anchor=north west, font=\small},
+      nodes near coords, every node near coord/.append style={font=\tiny, rotate=90, anchor=west},
+    ]
+      \addplot coordinates {(policy,0.48) (plan,0.62) (plan+30,0.77) (plan+200,0.91) (search200,0.70)};
+      \addplot coordinates {(policy,0.47) (plan,0.65) (plan+30,0.78) (plan+200,0.92) (search200,0.70)};
+      \addplot coordinates {(policy,0.47) (plan,0.64) (plan+30,0.77) (plan+200,0.90) (search200,0.70)};
+      \legend{seed 0, seed 1, seed 2}
+    \end{axis}
+  \end{tikzpicture}
+  \caption[Main result on the test split]{Median test attainment per method and seed (data of \cref{tab:eval-main}).}
+  \label{fig:eval-main}
+\end{figure}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Results on 92 further held-out patients]{The larger held-out splits (val\_extra: 32 patients, 320 episodes; test\_extra: 60 patients, 600 episodes), each evaluated once. Median over patients of the per-patient median attainment; the viewer's frozen model (v3c seed 1) and a fresh three-seed retrain on other hardware (v3d, seeds 0\,/\,1\,/\,2). 95\,\% bootstrap CIs over patients: $\pm$0.04--0.08 (val\_extra), $\pm$0.03--0.06 (test\_extra).}
+  \label{tab:eval-extra}
+  \begin{tabular}{lcccc}
+    \toprule
+    & \multicolumn{2}{c}{val\_extra (32)} & \multicolumn{2}{c}{test\_extra (60)} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+    Method & v3c s1 & v3d & v3c s1 & v3d \\
+    \midrule
+    Policy alone & 0.48 & 0.45 / 0.47 / 0.47 & 0.50 & 0.48 / 0.48 / 0.47 \\
+    Policy + planning (0 renders) & 0.61 & 0.65 / 0.61 / 0.61 & 0.63 & 0.62 / 0.61 / 0.63 \\
+    Policy + search, 30 & 0.64 & 0.64 / 0.63 / 0.64 & 0.66 & 0.65 / 0.65 / 0.65 \\
+    Policy + planning + search, 30 & 0.74 & 0.75 / 0.77 / 0.76 & 0.77 & 0.73 / 0.73 / 0.75 \\
+    Policy + search, 200 & 0.89 & 0.86 / 0.87 / 0.86 & 0.90 & 0.90 / 0.90 / 0.89 \\
+    \textbf{Policy + planning + search, 200} (viewer) & \textbf{0.93} & \textbf{0.93 / 0.92 / 0.92} & \textbf{0.91} & \textbf{0.91 / 0.92 / 0.91} \\
+    Search from the start, 200 & 0.74 & (same) & 0.75 & (same) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Significance tests on the larger splits]{Paired Wilcoxon signed-rank tests over patients (per-patient medians), all four models; in brackets the number of patients where the first method is higher.}
+  \label{tab:eval-extra-tests}
+  \begin{tabular}{lll}
+    \toprule
+    Comparison & val\_extra (32) & test\_extra (60) \\
+    \midrule
+    planning $>$ policy alone & $p \le 1.2\cdot10^{-5}$ (27--29) & $p \le 5.9\cdot10^{-7}$ (49--52) \\
+    planning + 30 $>$ policy + 30 & $p \le 2.6\cdot10^{-4}$ (26--27) & $p \le 1.1\cdot10^{-6}$ (47--50) \\
+    planning + 30 vs.\ search 200 & \textbf{level}, $p = 0.23$--$0.8$ (16--20) & \textbf{level}, $p = 0.19$--$0.7$ (25--32) \\
+    planning + 200 $>$ search 200 & $p \le 1.6\cdot10^{-6}$ (30--31) & $p \le 1.9\cdot10^{-10}$ (54--56) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Policy and Search}
+\label{sec:eval-search}
+\plan{RQ3: attainment over the render budget for search from scratch versus search warm-started from the (planned) policy. The learned proposal is worth roughly 170 renders: with 30 it is level with 200 from scratch. Re-run the full budget curve (10/30/100/200) on the final task; the plot below holds the task-v2 numbers as a template.}
+
+\begin{figure}[ht]
+  \centering
+  % docs/thesis/scripts/make_budget.py -- the documented 0/30/200 points; the
+  % full 10/30/100/200 curve (docs/thesis/scripts/budget_eval.py) is still to run.
+  \maybegraphic[width=0.75\linewidth]{figures/budget_curve.png}
+  \caption[Attainment over the render budget]{Attainment over the render budget, task v3 with fixed ceilings, test split, median over the three seeds of each seed's median. The search from the start was evaluated at 200 renders on this split.}
+  \label{fig:eval-budget}
+\end{figure}
+
+\section{Results by Instruction Kind}
+\label{sec:eval-kinds}
+\plan{Where the method is strong (absolute, relative, brightness) and where it is weak (show only, compound). Connect each weakness to the task or the learner, not just report it.}
+
+% Source of these values not found in docs/experiments/ (2026-11-26) -- verify
+% against the v3c seed-1 test result file before submission.
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Results by instruction kind]{Median attainment by instruction kind, test split, seed 1.}
+  \label{tab:eval-kinds}
+  \begin{tabular}{lccccc}
+    \toprule
+    Kind & Policy & + planning & + planning + 30 & + planning + 200 & Search 200 \\
+    \midrule
+    relative   & 0.44 & 0.70 & 0.82 & 0.97 & 0.80 \\
+    compound   & 0.44 & 0.58 & 0.73 & 0.84 & 0.65 \\
+    show only  & 0.40 & 0.46 & 0.50 & 0.64 & 0.49 \\
+    absolute   & 0.56 & 0.81 & 0.89 & 0.98 & 0.81 \\
+    brightness & 0.89 & 0.94 & 0.95 & 0.96 & 1.00 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Ablations}
+\label{sec:eval-ablations}
+\plan{RQ2, second half: which parts of the method matter. Dyna rounds, closed-loop fine-tuning and balanced kinds, planning settings, and the task versions. Each row one change, three seeds, the same episodes.}
+
+% "64 restarts" is not in docs/experiments/2026-10-19-task-v3.md -- verify.
+\begin{table}[ht]
+  \centering
+  \caption[Planning ablation]{Planning settings, one seed, validation, task v3 \emph{before} the ceiling fix (median attainment). Re-run on the final task.}
+  \label{tab:eval-planning-ablation}
+  \begin{tabular}{lc}
+    \toprule
+    Variant & Median \\
+    \midrule
+    Policy alone & 0.51 \\
+    \textbf{Planning} (100 steps, 16 restarts, $\beta=1$) & \textbf{0.66} \\
+    Better of policy and planning (one real evaluation each) & 0.70 \\
+    Planning from a no-op instead of the policy & 0.60 \\
+    300 / 50 steps & 0.61 / 0.61 \\
+    $\beta = 0.3$ / $\beta = 3$ & 0.59 / 0.64 \\
+    64 restarts & 0.62 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption[Training-pipeline ablation]{Policy alone after each training stage (val, 3 seeds). Fill from the pipeline logs (\texttt{out/rl\_mb\_v3c/*.log}).}
+  \label{tab:eval-pipeline-ablation}
+  \begin{tabular}{lc}
+    \toprule
+    Stage & Median attainment \\
+    \midrule
+    Round 0 (random data only) & \\
+    Round 1 + closed loop & \\
+    Round 2 + closed loop & \\
+    Round 3 + balanced closed loop (final) & 0.49--0.50 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Qualitative Results and Failure Cases}
+\label{sec:eval-qualitative}
+\plan{Rendered episodes, picked by a stated rule (e.g.\ random, plus the worst per kind), each with instruction, attainment and visible change. Discuss the failure modes honestly: weak strong-increase instructions, overshooting ``a bit'', invisible brightness on small organs, occluders fading as a side effect.}
+
+\begin{figure}[ht]
+  \centering
+  \maybegraphic[height=0.8\textheight]{figures/episodes_v3c.png}
+  \caption[Rendered episodes]{Validation episodes (start | policy | policy + 200 renders), seed 1. Re-render with planning on test patients for the final version, and split into two figures (successes, failures).}
+  \label{fig:eval-episodes}
+\end{figure}
+
+\section{Interactive Performance in VR}
+\label{sec:eval-vr}
+\plan{RQ4: frame rate on the standalone headset, measured in-session from the runtime log, for each performance technique of \cref{sec:sys-vr}. Repeat the measurement scripted on 2--3 patients and two transfer functions, report median and range, and note headset temperature and the fact that frame cost depends strongly on the transfer function.}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[VR frame rate]{Frame rate on a Vive Focus 3 (Adreno 650), whole-body scan (523 slices), volume 0.9\,m in front of the viewer, rendered at half volume resolution, framebuffer scale 0.8. One sitting; repeat scripted across patients.}
+  \label{tab:eval-vr}
+  \begin{tabular}{lcc}
+    \toprule
+    Configuration & Head-on & While rotating \\
+    \midrule
+    vtk.js (off-the-shelf) & $\approx$ 21\,fps & -- \\
+    Custom ray marcher, foveated steps & 21--22\,fps & -- \\
+    + double stride after transparent samples, adaptive brick skipping & 57--58\,fps & low \\
+    + 3$\times$ step while the volume turns & 57--58\,fps & 84--88\,fps \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Renderer ablation]{Offscreen benchmark on the headset GPU, ms per frame (1152$\times$576, two interleaved rounds).}
+  \label{tab:eval-vr-ablation}
+  \begin{tabular}{lcc}
+    \toprule
+    Variant & ms / frame & Change \\
+    \midrule
+    Baseline (half resolution, foveated steps) & 26.0--26.8 & -- \\
+    Double stride after transparent samples & 22.3--22.7 & $-15$\,\% \\
+    Skip lighting on faint samples & 23.8--24.0 & $-9$\,\% (visibly flatter, rejected) \\
+    Earlier ray termination (0.95) & 25.7--26.3 & $\approx 0$ \\
+    Precomputed normals & equal & $\approx 0$ \\
+    Lighting off (reference) & 21.5--22.0 & $-18$\,\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \maybegraphic[width=0.7\linewidth]{figures/vr_shading_ablation.png}
+  \caption[Shading ablation]{Full lighting (left) and lighting skipped on faint samples (right): faster, but the soft tissue goes flat -- rejected.}
+  \label{fig:eval-vr-shading}
+\end{figure}
+
+\section{User Study}
+\label{sec:eval-user}
+\plan{RQ5, and the test of the objective itself: participants give instructions or rate before/after renderings, and their judgements are compared with attainment. Report the design (participants, tasks, conditions: policy vs.\ search vs.\ rule executor), the agreement between raters, and the correlation between rated success and attainment. This is the section that turns a self-defined metric into a validated one.}
+
+\begin{table}[ht]
+  \centering
+  \caption[User study results]{User study (to be run). Ratings of ``did the image change as asked?'' on a 1--5 scale.}
+  \label{tab:eval-user}
+  \begin{tabular}{lccc}
+    \toprule
+    Condition & Mean rating & Median attainment & Correlation \\
+    \midrule
+    Policy + planning + search & & & \\
+    Search from the start & & & \\
+    Rule executor & & & \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% =========================================================================
+\chapter{Discussion and Conclusion}
+\label{ch:discussion}
+
+\section{Answers to the Research Questions}
+\label{sec:disc-answers}
+\plan{One paragraph per research question, each starting with the direct answer and pointing to the table or figure that supports it. No new results here.}
+
+\section{What the Objective Captures -- and What It Does Not}
+\label{sec:disc-objective}
+\plan{Separate the two claims: the learner optimises the designed objective (measured), and the objective matches what users mean (validated only by the user study). Use the soft-tissue ceiling bug as the example of how a correct learner amplifies a wrong objective, and how rendering every result exposed it.}
+
+\section{Limitations}
+\label{sec:disc-limitations}
+\plan{Be specific and quantitative: four validation and six test patients; CT only; eight merged classes; a fixed camera for measurement; the task revised several times on the same validation patients; a parser test set written by the author; VR numbers from one headset and few scans. For each, say what effect it could have on the conclusions.}
+
+\section{Threats to Validity}
+\label{sec:disc-validity}
+\plan{Internal (selection on validation, metric design by the same person who evaluates), external (other modalities, scanners, organs, users) and construct validity (attainment versus perceived success). Mention what was done against each: held-out test split evaluated once, three seeds, paired tests, renders inspected.}
+
+\section{Future Work}
+\label{sec:disc-future}
+\plan{The two or three most valuable next steps, not a wish list: learning from human preferences on top of the visibility objective, multi-step dialogue (``a bit more'' after seeing the result), and transfer to other modalities or to clinical users.}
+
+\section{Conclusion}
+\label{sec:conclusion}
+\plan{Half a page: the problem, the approach, the main number with its test, and the system that shows it working in VR. End with the one-sentence takeaway an examiner should remember.}
+
+
+% =========================================================================
+% BACK MATTER
+% =========================================================================
+\IfFileExists{references.bib}{%
+  \cleardoublepage
+  \addcontentsline{toc}{chapter}{References}
+  \bibliography{references}}{}
+
+\appendix
+
+\chapter{Additional Results}
+\label{app:results}
+
+\section{Results on Earlier Task Versions}
+\label{app:task-versions}
+\plan{The full v1 and v2 result tables, so that the main text can stay on the final task while the history remains checkable. Same layout as \cref{tab:eval-main}.}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \caption[Results on task v2]{Task v2, 300 episodes per split, median attainment per seed.}
+  \label{tab:app-v2}
+  \begin{tabular}{lccc}
+    \toprule
+    Method & Renders & Validation & Test \\
+    \midrule
+    Policy + search & 200 & 0.89 / 0.89 / 0.89 & 0.90 / 0.91 / 0.90 \\
+    Policy + search & 100 & 0.85 / 0.87 / 0.85 & 0.86 / 0.86 / 0.85 \\
+    Policy + search & 30  & 0.70 / 0.72 / 0.71 & 0.71 / 0.70 / 0.70 \\
+    Policy alone & 0 & 0.50 / 0.54 / 0.50 & 0.49 / 0.51 / 0.50 \\
+    Search from the start & 200 & 0.66 & 0.65 \\
+    Search from the start & 100 & 0.48 & 0.49 \\
+    Search from the start & 30 & 0.13 & 0.14 \\
+    Search from the start & 10 & 0.04 & 0.05 \\
+    Rule executor & 0 & 0.03 & 0.01 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      width=0.85\linewidth, height=6cm, xmode=log, log basis x=10,
+      xlabel={Renders (search budget)}, ylabel={Median attainment (test)},
+      xmin=8, xmax=250, ymin=0, ymax=1, xtick={10,30,100,200}, xticklabels={10,30,100,200},
+      legend pos=south east, grid=major,
+    ]
+      \addplot+[mark=*] coordinates {(10,0.05) (30,0.14) (100,0.49) (200,0.65)};
+      \addplot+[mark=square*] coordinates {(10,0.61) (30,0.70) (100,0.86) (200,0.90)};
+      \legend{search from the start, search from the policy}
+    \end{axis}
+  \end{tikzpicture}
+  \caption[Attainment over the render budget, task v2]{Attainment over the render budget, task v2 (test, mean of 3 seeds).}
+  \label{fig:app-budget-v2}
+\end{figure}
+
+\section{Per-Patient Results}
+\label{app:per-patient}
+\plan{Attainment per test patient and instruction kind, to show that no single patient carries the result (the pelvis-only scan was the outlier before the ceiling fix).}
+
+\section{More Rendered Episodes}
+\label{app:episodes}
+\plan{A larger, randomly drawn set of rendered episodes per instruction kind, with the selection rule stated.}
+
+\chapter{Implementation}
+\label{app:implementation}
+
+\section{Instruction Grammar}
+\label{app:grammar}
+\plan{The rule grammar's vocabulary (classes and synonyms, attributes, strengths) and the LLM prompt, so the parser results can be reproduced.}
+
+\section{Reproducing the Results}
+\label{app:reproduce}
+\plan{Commands for data preparation, training, evaluation and the VR benchmark, and the repository revision they refer to.}
+
+% =========================================================================
+\chapter*{Selbstständigkeitserklärung}
+\begin{otherlanguage}{ngerman}
+Hiermit erkläre ich, dass ich die vorliegende Arbeit selbstständig und nur unter
+Verwendung der angegebenen Quellen und Hilfsmittel angefertigt habe. Alle Stellen,
+die wörtlich oder sinngemäß aus anderen Werken übernommen wurden, sind als solche
+kenntlich gemacht. Die Arbeit wurde in gleicher oder ähnlicher Form noch keiner
+anderen Prüfungsbehörde vorgelegt.
+\plan{Exakten Wortlaut mit der aktuellen Prüfungsordnung der Fakultät abgleichen.}
+
+\vspace{2cm}
+\noindent Leipzig, \thesisDate \hfill \rule{6cm}{0.4pt}\\
+\hspace*{\fill}\thesisAuthor
+\end{otherlanguage}
+
+\end{document}

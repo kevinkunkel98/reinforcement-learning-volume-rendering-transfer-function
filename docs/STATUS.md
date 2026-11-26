@@ -220,6 +220,14 @@ on another.
      budget, labels from 200-eval search, same eval protocol. The only BC
      evidence is from the SAC era on v1 (negative even as MSE fell -- several
      valid answers averaged); this makes it a current ablation.
+   - **Budget curve on the test split, all budgets** (~45 min on the RTX
+     5080 box, 12 processes, CPU visibility): `docs/thesis/scripts/
+     budget_eval.py` runs the official `rl.evaluate.evaluate_episode` with
+     warm searches at 10/30/100/200 plus the search from the start at the
+     same budgets (v3c seed 1). Started and stopped 2026-11-26; the thesis
+     figure (`docs/thesis/scripts/make_budget.py`) shows only the documented
+     0/30/200 points and cold 200 until it has run. Check: 30/200 must
+     reproduce the seed-1 test row (0.67 / 0.78 / 0.88 / 0.92, cold 0.70).
    Also: report wall-clock time next to render counts (planning costs ~0.2 s,
    about 8 renders), and cite differentiable volume rendering (DiffDVR, Weiss
    & Westermann 2021) in related work as the per-query gradient alternative.

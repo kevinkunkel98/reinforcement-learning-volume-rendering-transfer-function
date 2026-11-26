@@ -91,3 +91,17 @@ def test_visibility_on_the_gpu_matches_the_cpu(model, monkeypatch):
             assert gpu[key] == pytest.approx(cpu[key], rel=1e-5, abs=1e-9)
         assert gpu["coverage"] == pytest.approx(cpu["coverage"], abs=1e-6)
         assert gpu_vis == pytest.approx(cpu_vis, rel=1e-5, abs=1e-9)
+
+
+def test_visibility_falls_back_to_the_cpu_when_cuda_cannot_run(monkeypatch):
+    """A GPU torch has no kernels for reports CUDA available but fails at the
+    first launch; "auto" must then stay on the CPU, "cuda" must say why."""
+    import visibility
+    monkeypatch.setattr(visibility, "DEVICE", "cpu")
+    monkeypatch.setattr(visibility, "_cuda_problem", lambda: "no kernel image is available")
+    assert visibility.use_device("auto") == "cpu" and visibility.DEVICE == "cpu"
+    with pytest.raises(ValueError, match="no kernel image"):
+        visibility.use_device("cuda")
+    monkeypatch.setattr(visibility, "_cuda_problem", lambda: None)
+    assert visibility.use_device("auto") == "cuda"
+    assert visibility.use_device("cpu") == "cpu"
