@@ -8,12 +8,17 @@ cd "$(dirname "$0")/../../.."
 PY=.venv/bin/python
 SAC=docs/experiments/2026-11-18-scripts/sac_v3.py
 O=out/sac_v3
-export CUDA_VISIBLE_DEVICES=""
+# Visibility on the GPU when it works (`visibility.use_device`): ~17x faster per
+# process, per-episode results within 7e-7 of the CPU's (checked 2026-11-27 on
+# 6 test episodes, the same search trajectories). VISIBILITY_DEVICE=cpu for the
+# CPU path; then 20 processes instead of 4.
+export VISIBILITY_DEVICE=$($PY -c "import visibility; print(visibility.use_device('${VISIBILITY_DEVICE:-auto}'))" | tail -n1)
+[ "$VISIBILITY_DEVICE" = cpu ] && { export CUDA_VISIBLE_DEVICES=""; JOBS=20; } || JOBS=4
 mkdir -p $O
 step() { echo "[overnight $(date +%H:%M:%S)] $*"; }
 
 # 1. The episode pool: 7500 starts x 8 instructions, as the model-based data.
-[ -f $O/pool.pkl ] || { step pool; nice -n 10 $PY -u $SAC pool --workers 10 --out $O/pool.pkl > $O/pool.log 2>&1; tail -n1 $O/pool.log; }
+[ -f $O/pool.pkl ] || { step "pool (visibility on $VISIBILITY_DEVICE)"; nice -n 10 $PY -u $SAC pool --workers 10 --out $O/pool.pkl > $O/pool.log 2>&1; tail -n1 $O/pool.log; }
 
 # 2. SAC, three seeds in parallel, 300k steps (checkpoint at 150k = the model-based budget).
 for s in 0 1 2; do
@@ -26,9 +31,9 @@ wait
 step "training done"; tail -n2 $O/seed*.log
 
 # 3. Evaluation: the SAC answer and a warm search of 30 / 200 from it, on the
-#    fixed test (300) and test_extra (600) episodes, 20 shards each.
+#    fixed test (300) and test_extra (600) episodes, one shard per job.
 evaluate() {   # checkpoint tag split episodes
-  local ck=$1 tag=$2 split=$3 n=$4 jobs=20
+  local ck=$1 tag=$2 split=$3 n=$4 jobs=$JOBS
   # done only when every episode is there ("test_[0-9]" so test does not match test_extra)
   local have=$($PY -c "import glob, json; print(sum(len(json.load(open(f))) for f in glob.glob('$O/eval/${tag}_${split}_[0-9]*.json')))")
   ((have == n)) && return
@@ -71,7 +76,7 @@ for pair in "test 300" "val_extra 320" "test_extra 600"; do
   ls $R/s1_$1_*.json >/dev/null 2>&1 && grep -q "paired Wilcoxon" $R/s1_$1.log 2>/dev/null && continue
   step "new-shell eval $1"
   mkdir -p $R
-  JOBS=12 O=$R EPISODES=$2 bash docs/experiments/2026-11-12-scripts/eval_extra.sh \
+  JOBS=$JOBS O=$R EPISODES=$2 bash docs/experiments/2026-11-12-scripts/eval_extra.sh \
     models/v3c_seed1/checkpoint.pt s1 $1 --cold > $R/s1_$1.log 2>&1
   tail -n 12 $R/s1_$1.log
 done

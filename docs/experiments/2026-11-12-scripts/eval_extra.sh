@@ -19,7 +19,9 @@ if ((avail_gb > 0)); then
   fi
 fi
 ((JOBS < 1)) && { echo "[eval_extra] not enough free memory"; exit 1; }
-export CUDA_VISIBLE_DEVICES=""   # CPU only: torch would open a CUDA context next to Ollama
+# CPU only (torch would open a CUDA context next to Ollama), unless the caller
+# asks for visibility on the GPU (VISIBILITY_DEVICE=cuda)
+[ "${VISIBILITY_DEVICE:-cpu}" = cpu ] && export CUDA_VISIBLE_DEVICES=""
 per=$(( (EPISODES + JOBS - 1) / JOBS ))
 started=$(date +%s)
 for ((k = 0; k < JOBS; k++)); do
