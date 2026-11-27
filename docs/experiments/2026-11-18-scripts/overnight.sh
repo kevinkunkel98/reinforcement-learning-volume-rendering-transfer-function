@@ -26,10 +26,13 @@ wait
 step "training done"; tail -n2 $O/seed*.log
 
 # 3. Evaluation: the SAC answer and a warm search of 30 / 200 from it, on the
-#    fixed test (300) and test_extra (600) episodes, 10 shards each.
+#    fixed test (300) and test_extra (600) episodes, 20 shards each.
 evaluate() {   # checkpoint tag split episodes
-  local ck=$1 tag=$2 split=$3 n=$4 jobs=10
-  ls $O/eval/${tag}_${split}_*.json >/dev/null 2>&1 && return
+  local ck=$1 tag=$2 split=$3 n=$4 jobs=20
+  # done only when every episode is there ("test_[0-9]" so test does not match test_extra)
+  local have=$($PY -c "import glob, json; print(sum(len(json.load(open(f))) for f in glob.glob('$O/eval/${tag}_${split}_[0-9]*.json')))")
+  ((have == n)) && return
+  rm -f $O/eval/${tag}_${split}_[0-9]*
   mkdir -p $O/eval
   local per=$(( (n + jobs - 1) / jobs ))
   for ((k = 0; k < jobs; k++)); do
@@ -54,7 +57,7 @@ for split in ("test", "test_extra"):
     for steps in (150000, 300000):
         meds = {k: [] for k in ("policy", "warm30", "warm200")}
         for s in (0, 1, 2):
-            rows = [r for f in glob.glob(f"out/sac_v3/eval/s{s}_{steps}_{split}_*.json") for r in json.load(open(f))]
+            rows = [r for f in glob.glob(f"out/sac_v3/eval/s{s}_{steps}_{split}_[0-9]*.json") for r in json.load(open(f))]
             for k in meds:
                 meds[k].append(float(np.median([r[k] for r in rows])) if rows else float("nan"))
         print(f"[sac] {split} {steps // 1000}k steps:", "  ".join(
